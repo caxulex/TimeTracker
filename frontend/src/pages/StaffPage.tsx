@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
-import { usersApi, teamsApi, payRatesApi, timeEntriesApi, projectsApi } from '../api/client';
+import { usersApi, teamsApi, payRatesApi, timeEntriesApi, projectsApi, reportsApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import type { User, UserCreate, Team, TeamMember, PayRate, TimeEntry, Project } from '../types';
 
@@ -18,6 +18,7 @@ export function StaffPage() {
   const [showTeamsModal, setShowTeamsModal] = useState(false);
   const [showPayrollModal, setShowPayrollModal] = useState(false);
   const [showTimeModal, setShowTimeModal] = useState(false);
+  const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
   const [selectedStaff, setSelectedStaff] = useState<User | null>(null);
   const [formStep, setFormStep] = useState(1); // Multi-step form
   
@@ -374,6 +375,23 @@ export function StaffPage() {
                             strokeLinejoin="round"
                             strokeWidth={2}
                             d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                          />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedStaff(staff);
+                          setShowAnalyticsModal(true);
+                        }}
+                        className="text-amber-600 hover:text-amber-900"
+                        title="View Analytics"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
                           />
                         </svg>
                       </button>
@@ -890,6 +908,17 @@ export function StaffPage() {
           staff={selectedStaff}
           onClose={() => {
             setShowTimeModal(false);
+            setSelectedStaff(null);
+          }}
+        />
+      )}
+
+      {/* Analytics Modal */}
+      {showAnalyticsModal && selectedStaff && (
+        <AnalyticsModal
+          staff={selectedStaff}
+          onClose={() => {
+            setShowAnalyticsModal(false);
             setSelectedStaff(null);
           }}
         />
@@ -1667,6 +1696,627 @@ function TimeTrackingModal({ staff, onClose }: { staff: User; onClose: () => voi
           )}
 
           <div className="flex justify-end pt-4 border-t">
+            <Button variant="secondary" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// Analytics Modal Component
+function AnalyticsModal({ staff, onClose }: { staff: User; onClose: () => void }) {
+  const [dateRange, setDateRange] = useState<'week' | 'month' | 'year'>('month');
+  const [activeTab, setActiveTab] = useState<'overview' | 'performance' | 'export'>('overview');
+
+  // Calculate date range
+  const getDateRange = () => {
+    const endDate = new Date();
+    const startDate = new Date();
+    
+    if (dateRange === 'week') {
+      startDate.setDate(endDate.getDate() - 7);
+    } else if (dateRange === 'month') {
+      startDate.setDate(endDate.getDate() - 30);
+    } else {
+      startDate.setDate(endDate.getDate() - 365);
+    }
+    
+    return {
+      start: startDate.toISOString().split('T')[0],
+      end: endDate.toISOString().split('T')[0],
+    };
+  };
+
+  const { start, end } = getDateRange();
+
+  // Fetch time entries for analytics
+  const { data: timeEntries, isLoading: loadingTime } = useQuery({
+    queryKey: ['analytics-time', staff.id, start, end],
+    queryFn: () => timeEntriesApi.getAll({
+      user_id: staff.id,
+      start_date: start,
+      end_date: end,
+      page: 1,
+      size: 1000,
+    }),
+  });
+
+  // Fetch current pay rate
+  const { data: currentRate } = useQuery({
+    queryKey: ['analytics-rate', staff.id],
+    queryFn: () => payRatesApi.getUserCurrentRate(staff.id),
+  });
+
+  // Calculate analytics
+  const analytics = {
+    totalHours: timeEntries?.items.reduce((sum: number, entry: any) => sum + (entry.duration_minutes / 60), 0) || 0,
+    totalEntries: timeEntries?.items.length || 0,
+    expectedHours: (staff.expected_hours_per_week || 40) * (dateRange === 'week' ? 1 : dateRange === 'month' ? 4 : 52),
+    avgHoursPerEntry: timeEntries?.items.length ? 
+      ((timeEntries.items.reduce((sum: number, entry: any) => sum + (entry.duration_minutes / 60), 0) || 0) / timeEntries.items.length) : 0,
+    projectCount: new Set(timeEntries?.items.map((e: any) => e.project_id).filter(Boolean)).size,
+    daysWorked: new Set(timeEntries?.items.map((e: any) => e.start_time?.split('T')[0]).filter(Boolean)).size,
+  };
+
+  // Calculate productivity score (0-100)
+  const productivityScore = analytics.expectedHours > 0 
+    ? Math.min(100, Math.round((analytics.totalHours / analytics.expectedHours) * 100))
+    : 0;
+
+  // Calculate estimated earnings
+  const estimatedEarnings = currentRate 
+    ? currentRate.rate_type === 'hourly'
+      ? analytics.totalHours * currentRate.base_rate
+      : currentRate.rate_type === 'monthly'
+      ? currentRate.base_rate * (dateRange === 'month' ? 1 : dateRange === 'week' ? 0.25 : 12)
+      : 0
+    : 0;
+
+  // Group by project
+  const projectBreakdown = timeEntries?.items.reduce((acc: any, entry: any) => {
+    const projectName = entry.project?.name || 'No Project';
+    if (!acc[projectName]) {
+      acc[projectName] = { hours: 0, entries: 0 };
+    }
+    acc[projectName].hours += entry.duration_minutes / 60;
+    acc[projectName].entries += 1;
+    return acc;
+  }, {}) || {};
+
+  // Export data
+  const handleExport = (format: 'csv' | 'json') => {
+    const data = {
+      staff: {
+        name: staff.name,
+        email: staff.email,
+        job_title: staff.job_title,
+        department: staff.department,
+      },
+      period: {
+        start,
+        end,
+        range: dateRange,
+      },
+      metrics: analytics,
+      productivity_score: productivityScore,
+      estimated_earnings: estimatedEarnings,
+      project_breakdown: projectBreakdown,
+      time_entries: timeEntries?.items.map((entry: any) => ({
+        date: entry.start_time,
+        project: entry.project?.name,
+        task: entry.task?.name,
+        duration_hours: (entry.duration_minutes / 60).toFixed(2),
+        description: entry.description,
+      })),
+    };
+
+    if (format === 'json') {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${staff.name.replace(/\s+/g, '_')}_analytics_${start}_to_${end}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      // CSV format
+      const csvRows = [
+        ['Staff Analytics Report'],
+        ['Name', staff.name],
+        ['Email', staff.email],
+        ['Job Title', staff.job_title || 'N/A'],
+        ['Department', staff.department || 'N/A'],
+        ['Period', `${start} to ${end}`],
+        [''],
+        ['Metrics'],
+        ['Total Hours', analytics.totalHours.toFixed(2)],
+        ['Total Entries', analytics.totalEntries.toString()],
+        ['Expected Hours', analytics.expectedHours.toFixed(2)],
+        ['Productivity Score', `${productivityScore}%`],
+        ['Estimated Earnings', `$${estimatedEarnings.toFixed(2)}`],
+        ['Projects Worked On', analytics.projectCount.toString()],
+        ['Days Worked', analytics.daysWorked.toString()],
+        [''],
+        ['Project Breakdown'],
+        ['Project', 'Hours', 'Entries'],
+        ...Object.entries(projectBreakdown).map(([project, data]: [string, any]) => 
+          [project, data.hours.toFixed(2), data.entries.toString()]
+        ),
+      ];
+      
+      const csvContent = csvRows.map(row => row.join(',')).join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${staff.name.replace(/\s+/g, '_')}_analytics_${start}_to_${end}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currentRate?.currency || 'USD',
+    }).format(amount);
+  };
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <Card className="max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+        <CardHeader title={`Analytics Dashboard - ${staff.name}`} />
+        
+        {/* Date Range Selector */}
+        <div className="border-b border-gray-200 px-6 py-3 bg-gray-50">
+          <div className="flex items-center justify-between">
+            <div className="flex gap-2">
+              <button
+                onClick={() => setDateRange('week')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  dateRange === 'week'
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
+                }`}
+              >
+                Last Week
+              </button>
+              <button
+                onClick={() => setDateRange('month')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  dateRange === 'month'
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
+                }`}
+              >
+                Last Month
+              </button>
+              <button
+                onClick={() => setDateRange('year')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  dateRange === 'year'
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
+                }`}
+              >
+                Last Year
+              </button>
+            </div>
+            <div className="text-sm text-gray-600">
+              {start} to {end}
+            </div>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="border-b border-gray-200 px-6">
+          <div className="flex space-x-8">
+            <button
+              onClick={() => setActiveTab('overview')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'overview'
+                  ? 'border-amber-500 text-amber-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              📊 Overview
+            </button>
+            <button
+              onClick={() => setActiveTab('performance')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'performance'
+                  ? 'border-amber-500 text-amber-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              🎯 Performance
+            </button>
+            <button
+              onClick={() => setActiveTab('export')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'export'
+                  ? 'border-amber-500 text-amber-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              💾 Export
+            </button>
+          </div>
+        </div>
+
+        {/* Tab Content */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {loadingTime ? (
+            <div className="text-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-600 mx-auto"></div>
+              <p className="text-gray-600 mt-4">Loading analytics...</p>
+            </div>
+          ) : (
+            <>
+              {/* Overview Tab */}
+              {activeTab === 'overview' && (
+                <div className="space-y-6">
+                  {/* Key Metrics Cards */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-lg p-5">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-blue-900">Total Hours</span>
+                        <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                      <div className="text-3xl font-bold text-blue-900">{analytics.totalHours.toFixed(1)}</div>
+                      <div className="text-xs text-blue-700 mt-1">
+                        {analytics.daysWorked} days • {analytics.totalEntries} entries
+                      </div>
+                    </div>
+
+                    <div className="bg-gradient-to-br from-green-50 to-green-100 border border-green-200 rounded-lg p-5">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-green-900">Productivity</span>
+                        <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                        </svg>
+                      </div>
+                      <div className="text-3xl font-bold text-green-900">{productivityScore}%</div>
+                      <div className="text-xs text-green-700 mt-1">
+                        {analytics.totalHours.toFixed(1)} / {analytics.expectedHours.toFixed(1)} hours
+                      </div>
+                    </div>
+
+                    <div className="bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200 rounded-lg p-5">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-purple-900">Projects</span>
+                        <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                        </svg>
+                      </div>
+                      <div className="text-3xl font-bold text-purple-900">{analytics.projectCount}</div>
+                      <div className="text-xs text-purple-700 mt-1">
+                        {analytics.avgHoursPerEntry.toFixed(1)} avg hours/entry
+                      </div>
+                    </div>
+
+                    <div className="bg-gradient-to-br from-amber-50 to-amber-100 border border-amber-200 rounded-lg p-5">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-amber-900">Estimated Earnings</span>
+                        <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                      <div className="text-3xl font-bold text-amber-900">
+                        {formatCurrency(estimatedEarnings)}
+                      </div>
+                      <div className="text-xs text-amber-700 mt-1">
+                        {currentRate?.rate_type === 'hourly' ? `${formatCurrency(currentRate.base_rate)}/hr` : 
+                         currentRate?.rate_type === 'monthly' ? `${formatCurrency(currentRate.base_rate)}/mo` : 'No rate set'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Project Breakdown */}
+                  <div className="bg-white border border-gray-200 rounded-lg p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                      <svg className="w-5 h-5 mr-2 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                      </svg>
+                      Project Time Distribution
+                    </h3>
+                    {Object.keys(projectBreakdown).length > 0 ? (
+                      <div className="space-y-3">
+                        {Object.entries(projectBreakdown)
+                          .sort(([, a]: [string, any], [, b]: [string, any]) => b.hours - a.hours)
+                          .map(([project, data]: [string, any]) => {
+                            const percentage = (data.hours / analytics.totalHours) * 100;
+                            return (
+                              <div key={project}>
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-sm font-medium text-gray-700">{project}</span>
+                                  <span className="text-sm text-gray-600">
+                                    {data.hours.toFixed(1)}h ({percentage.toFixed(1)}%)
+                                  </span>
+                                </div>
+                                <div className="w-full bg-gray-200 rounded-full h-2">
+                                  <div
+                                    className="bg-gradient-to-r from-amber-500 to-orange-500 h-2 rounded-full transition-all"
+                                    style={{ width: `${percentage}%` }}
+                                  />
+                                </div>
+                                <div className="text-xs text-gray-500 mt-1">
+                                  {data.entries} {data.entries === 1 ? 'entry' : 'entries'}
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-gray-500">
+                        <p>No project data available</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Performance Tab */}
+              {activeTab === 'performance' && (
+                <div className="space-y-6">
+                  {/* Performance Score */}
+                  <div className="bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-200 rounded-lg p-8 text-center">
+                    <h3 className="text-2xl font-bold text-gray-900 mb-2">Overall Performance Score</h3>
+                    <div className="text-7xl font-bold text-amber-600 my-6">{productivityScore}%</div>
+                    <div className="flex justify-center gap-8 text-sm">
+                      <div>
+                        <div className="text-gray-600">Actual Hours</div>
+                        <div className="text-2xl font-semibold text-gray-900">{analytics.totalHours.toFixed(1)}</div>
+                      </div>
+                      <div className="border-l border-gray-300"></div>
+                      <div>
+                        <div className="text-gray-600">Expected Hours</div>
+                        <div className="text-2xl font-semibold text-gray-900">{analytics.expectedHours.toFixed(1)}</div>
+                      </div>
+                      <div className="border-l border-gray-300"></div>
+                      <div>
+                        <div className="text-gray-600">Variance</div>
+                        <div className={`text-2xl font-semibold ${
+                          analytics.totalHours >= analytics.expectedHours ? 'text-green-600' : 'text-red-600'
+                        }`}>
+                          {analytics.totalHours >= analytics.expectedHours ? '+' : ''}
+                          {(analytics.totalHours - analytics.expectedHours).toFixed(1)}h
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Performance Metrics */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="border border-gray-200 rounded-lg p-6">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="font-semibold text-gray-900">Consistency</h4>
+                        <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                      </div>
+                      <div className="text-3xl font-bold text-blue-600">{analytics.daysWorked}</div>
+                      <div className="text-sm text-gray-600 mt-1">
+                        days worked in {dateRange}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-2">
+                        {analytics.totalEntries > 0 ? 
+                          `${(analytics.totalEntries / analytics.daysWorked).toFixed(1)} avg entries/day` : 
+                          'No entries yet'}
+                      </div>
+                    </div>
+
+                    <div className="border border-gray-200 rounded-lg p-6">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="font-semibold text-gray-900">Diversity</h4>
+                        <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                        </svg>
+                      </div>
+                      <div className="text-3xl font-bold text-purple-600">{analytics.projectCount}</div>
+                      <div className="text-sm text-gray-600 mt-1">
+                        {analytics.projectCount === 1 ? 'project' : 'projects'} contributed to
+                      </div>
+                      <div className="text-xs text-gray-500 mt-2">
+                        {analytics.projectCount > 0 ? 
+                          `${(analytics.totalHours / analytics.projectCount).toFixed(1)} avg hours/project` : 
+                          'No projects yet'}
+                      </div>
+                    </div>
+
+                    <div className="border border-gray-200 rounded-lg p-6">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="font-semibold text-gray-900">Efficiency</h4>
+                        <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                      </div>
+                      <div className="text-3xl font-bold text-green-600">
+                        {analytics.avgHoursPerEntry.toFixed(1)}h
+                      </div>
+                      <div className="text-sm text-gray-600 mt-1">
+                        average per time entry
+                      </div>
+                      <div className="text-xs text-gray-500 mt-2">
+                        {analytics.totalEntries > 0 ? 
+                          `Based on ${analytics.totalEntries} entries` : 
+                          'No entries yet'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Employment Details */}
+                  <div className="border border-gray-200 rounded-lg p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Employment Information</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <div className="text-sm text-gray-600">Job Title</div>
+                        <div className="font-semibold text-gray-900">{staff.job_title || '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-gray-600">Department</div>
+                        <div className="font-semibold text-gray-900">{staff.department || '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-gray-600">Employment Type</div>
+                        <div className="font-semibold text-gray-900">
+                          {staff.employment_type === 'full_time' ? 'Full-time' : 
+                           staff.employment_type === 'part_time' ? 'Part-time' : 
+                           staff.employment_type === 'contractor' ? 'Contractor' : '—'}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-gray-600">Expected Hours/Week</div>
+                        <div className="font-semibold text-gray-900">{staff.expected_hours_per_week || 40} hours</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-gray-600">Start Date</div>
+                        <div className="font-semibold text-gray-900">
+                          {staff.start_date ? new Date(staff.start_date).toLocaleDateString() : '—'}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-gray-600">Status</div>
+                        <div>
+                          <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                            staff.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          }`}>
+                            {staff.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Export Tab */}
+              {activeTab === 'export' && (
+                <div className="space-y-6">
+                  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-8 text-center">
+                    <svg className="w-16 h-16 mx-auto text-blue-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    <h3 className="text-2xl font-bold text-gray-900 mb-2">Export Analytics Data</h3>
+                    <p className="text-gray-600 mb-6">
+                      Download complete analytics report for {staff.name}
+                      <br />
+                      <span className="text-sm">Period: {start} to {end}</span>
+                    </p>
+                    <div className="flex justify-center gap-4">
+                      <button
+                        onClick={() => handleExport('csv')}
+                        className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold flex items-center gap-2"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        Export as CSV
+                      </button>
+                      <button
+                        onClick={() => handleExport('json')}
+                        className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold flex items-center gap-2"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                        </svg>
+                        Export as JSON
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Export Preview */}
+                  <div className="border border-gray-200 rounded-lg p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Export Contents</h3>
+                    <div className="space-y-3 text-sm">
+                      <div className="flex items-start gap-2">
+                        <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <div>
+                          <div className="font-semibold text-gray-900">Staff Information</div>
+                          <div className="text-gray-600">Name, email, job title, department</div>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <div>
+                          <div className="font-semibold text-gray-900">Performance Metrics</div>
+                          <div className="text-gray-600">Total hours, productivity score, earnings estimate</div>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <div>
+                          <div className="font-semibold text-gray-900">Project Breakdown</div>
+                          <div className="text-gray-600">Hours and entries per project</div>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <div>
+                          <div className="font-semibold text-gray-900">Time Entries</div>
+                          <div className="text-gray-600">Complete list of all time entries with details</div>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <div>
+                          <div className="font-semibold text-gray-900">Date Range</div>
+                          <div className="text-gray-600">Period and range selection ({dateRange})</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Data Summary */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="border border-gray-200 rounded-lg p-4">
+                      <div className="text-sm text-gray-600 mb-1">Records to Export</div>
+                      <div className="text-2xl font-bold text-gray-900">{analytics.totalEntries}</div>
+                      <div className="text-xs text-gray-500 mt-1">Time entries</div>
+                    </div>
+                    <div className="border border-gray-200 rounded-lg p-4">
+                      <div className="text-sm text-gray-600 mb-1">Projects Included</div>
+                      <div className="text-2xl font-bold text-gray-900">{analytics.projectCount}</div>
+                      <div className="text-xs text-gray-500 mt-1">Unique projects</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-gray-200 p-6 bg-gray-50">
+          <div className="flex justify-between items-center">
+            <div className="text-sm text-gray-600">
+              📊 {analytics.totalHours.toFixed(1)}h tracked • 
+              🎯 {productivityScore}% productivity • 
+              📁 {analytics.projectCount} projects
+            </div>
             <Button variant="secondary" onClick={onClose}>
               Close
             </Button>
