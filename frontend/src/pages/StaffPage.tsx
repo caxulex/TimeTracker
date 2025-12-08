@@ -8,6 +8,9 @@ import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
 import { usersApi, teamsApi, payRatesApi, timeEntriesApi, projectsApi, reportsApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import { useStaffNotifications } from '../hooks/useStaffNotifications';
+import { usePermissions } from '../hooks/usePermissions';
+import { useStaffFormValidation } from '../hooks/useStaffFormValidation';
+import { rateLimiter } from '../utils/security';
 import type { User, UserCreate, Team, TeamMember, PayRate, TimeEntry, Project } from '../types';
 
 export function StaffPage() {
@@ -15,6 +18,8 @@ export function StaffPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const notifications = useStaffNotifications();
+  const permissions = usePermissions();
+  const formValidation = useStaffFormValidation();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -172,7 +177,26 @@ export function StaffPage() {
 
   const handleCreateStaff = (e: React.FormEvent) => {
     e.preventDefault();
-    createStaffMutation.mutate(createForm);
+    
+    // Rate limiting check
+    if (!rateLimiter.isAllowed('create_staff', 5, 60000)) {
+      notifications.notifyWarning(
+        'Too Many Attempts',
+        'Please wait before creating another staff member.'
+      );
+      return;
+    }
+    
+    // Validate and secure form data
+    const { valid, securedData } = formValidation.secureAndValidate(createForm, false);
+    
+    if (!valid) {
+      const firstError = formValidation.errors[0];
+      notifications.notifyValidationError(firstError.field, firstError.message);
+      return;
+    }
+    
+    createStaffMutation.mutate(securedData as any);
   };
 
   const handleEditStaff = (staff: User) => {
@@ -187,15 +211,32 @@ export function StaffPage() {
   const handleUpdateStaff = (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedStaff) {
-      updateStaffMutation.mutate({ id: selectedStaff.id, data: editForm });
+      // Permission check
+      if (!permissions.canModifyStaff(selectedStaff)) {
+        notifications.notifyInsufficientPermissions();
+        return;
+      }
+      
+      // Validate form data
+      const { valid, securedData } = formValidation.secureAndValidate(editForm, true);
+      
+      if (!valid) {
+        const firstError = formValidation.errors[0];
+        notifications.notifyValidationError(firstError.field, firstError.message);
+        return;
+      }
+      
+      updateStaffMutation.mutate({ id: selectedStaff.id, data: securedData });
     }
   };
 
   const handleToggleActive = (staff: User) => {
-    if (staff.id === currentUser?.id) {
+    // Permission check
+    if (!permissions.canDeactivateStaff(staff)) {
       notifications.notifyWarning("Can't Deactivate Yourself", "You cannot deactivate your own account.");
       return;
     }
+    
     const action = staff.is_active ? 'deactivate' : 'activate';
     if (confirm(`Are you sure you want to ${action} ${staff.name}?`)) {
       toggleActiveMutation.mutate({ id: staff.id, isActive: staff.is_active, staff });
@@ -538,9 +579,16 @@ export function StaffPage() {
                       required
                       value={createForm.name}
                       onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                      className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 ${
+                        formValidation.hasFieldError('name') 
+                          ? 'border-red-500 bg-red-50' 
+                          : 'border-gray-300'
+                      }`}
                       placeholder="John Doe"
                     />
+                    {formValidation.hasFieldError('name') && (
+                      <p className="text-xs text-red-600 mt-1">{formValidation.getFieldError('name')}</p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -551,9 +599,16 @@ export function StaffPage() {
                       required
                       value={createForm.email}
                       onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                      className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 ${
+                        formValidation.hasFieldError('email') 
+                          ? 'border-red-500 bg-red-50' 
+                          : 'border-gray-300'
+                      }`}
                       placeholder="john.doe@company.com"
                     />
+                    {formValidation.hasFieldError('email') && (
+                      <p className="text-xs text-red-600 mt-1">{formValidation.getFieldError('email')}</p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -565,9 +620,16 @@ export function StaffPage() {
                       minLength={8}
                       value={createForm.password}
                       onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                      className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 ${
+                        formValidation.hasFieldError('password') 
+                          ? 'border-red-500 bg-red-50' 
+                          : 'border-gray-300'
+                      }`}
                       placeholder="Minimum 8 characters"
                     />
+                    {formValidation.hasFieldError('password') && (
+                      <p className="text-xs text-red-600 mt-1">{formValidation.getFieldError('password')}</p>
+                    )}
                     <p className="text-xs text-gray-500 mt-1">
                       User can change this after first login
                     </p>
@@ -883,8 +945,15 @@ export function StaffPage() {
                   required
                   value={editForm.name}
                   onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 ${
+                    formValidation.hasFieldError('name') 
+                      ? 'border-red-500 bg-red-50' 
+                      : 'border-gray-300'
+                  }`}
                 />
+                {formValidation.hasFieldError('name') && (
+                  <p className="text-xs text-red-600 mt-1">{formValidation.getFieldError('name')}</p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
@@ -893,8 +962,15 @@ export function StaffPage() {
                   required
                   value={editForm.email}
                   onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 ${
+                    formValidation.hasFieldError('email') 
+                      ? 'border-red-500 bg-red-50' 
+                      : 'border-gray-300'
+                  }`}
                 />
+                {formValidation.hasFieldError('email') && (
+                  <p className="text-xs text-red-600 mt-1">{formValidation.getFieldError('email')}</p>
+                )}
               </div>
               <div className="flex gap-2 justify-end pt-4">
                 <Button
@@ -903,6 +979,7 @@ export function StaffPage() {
                   onClick={() => {
                     setShowEditModal(false);
                     setSelectedStaff(null);
+                    formValidation.clearErrors();
                   }}
                 >
                   Cancel

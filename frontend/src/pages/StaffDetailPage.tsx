@@ -8,6 +8,8 @@ import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
 import { usersApi, teamsApi, payRatesApi, timeEntriesApi, projectsApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import { useStaffNotifications } from '../hooks/useStaffNotifications';
+import { usePermissions } from '../hooks/usePermissions';
+import { useStaffFormValidation } from '../hooks/useStaffFormValidation';
 import type { User, TeamMember, PayRate, TimeEntry, Project } from '../types';
 
 export function StaffDetailPage() {
@@ -16,6 +18,8 @@ export function StaffDetailPage() {
   const { user: currentUser } = useAuthStore();
   const queryClient = useQueryClient();
   const notifications = useStaffNotifications();
+  const permissions = usePermissions();
+  const formValidation = useStaffFormValidation();
   const [activeTab, setActiveTab] = useState<'overview' | 'payroll' | 'time' | 'teams' | 'projects' | 'settings'>('overview');
   const [dateRange, setDateRange] = useState<'week' | 'month' | 'year'>('month');
   const [editMode, setEditMode] = useState(false);
@@ -131,14 +135,35 @@ export function StaffDetailPage() {
 
   // Update staff mutation
   const updateStaffMutation = useMutation({
-    mutationFn: (data: Partial<User>) => usersApi.update(staffId, data),
+    mutationFn: async (data: Partial<User>) => {
+      // Check permissions
+      if (!permissions.canModifyStaff(staff!)) {
+        throw new Error('You do not have permission to modify this staff member');
+      }
+
+      // Validate and sanitize the data
+      const validationResult = formValidation.secureAndValidate(data, true);
+      if (!validationResult.isValid) {
+        throw new Error(validationResult.errors[0] || 'Validation failed');
+      }
+
+      return usersApi.update(staffId, validationResult.data);
+    },
     onSuccess: (updatedStaff) => {
       queryClient.invalidateQueries({ queryKey: ['staff', staffId] });
       notifications.notifyStaffUpdated(updatedStaff);
       setEditMode(false);
+      formValidation.clearErrors();
     },
     onError: (error: any) => {
-      notifications.notifyStaffUpdateFailed(error?.response?.data?.detail || error.message);
+      const errorMessage = error?.response?.data?.detail || error.message;
+      if (errorMessage.includes('permission')) {
+        notifications.notifyError('Permission Denied', errorMessage);
+      } else if (errorMessage.includes('Validation')) {
+        notifications.notifyValidationError(errorMessage);
+      } else {
+        notifications.notifyStaffUpdateFailed(errorMessage);
+      }
     },
   });
 
@@ -212,10 +237,13 @@ export function StaffDetailPage() {
 
   const handleToggleActive = () => {
     if (!staff) return;
-    if (staff.id === currentUser?.id) {
+    
+    // Use permission hook for deactivation check
+    if (!permissions.canDeactivateStaff(staff)) {
       notifications.notifyWarning("Can't Deactivate Yourself", "You cannot deactivate your own account.");
       return;
     }
+    
     const action = staff.is_active ? 'deactivate' : 'activate';
     if (confirm(`Are you sure you want to ${action} ${staff.name}?`)) {
       toggleActiveMutation.mutate(staff.is_active);
@@ -808,8 +836,15 @@ export function StaffDetailPage() {
                         required
                         value={editForm.name}
                         onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                        className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 ${
+                          formValidation.hasFieldError('name') 
+                            ? 'border-red-500 bg-red-50' 
+                            : 'border-gray-300'
+                        }`}
                       />
+                      {formValidation.hasFieldError('name') && (
+                        <p className="text-xs text-red-600 mt-1">{formValidation.getFieldError('name')}</p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
@@ -818,8 +853,15 @@ export function StaffDetailPage() {
                         required
                         value={editForm.email}
                         onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                        className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 ${
+                          formValidation.hasFieldError('email') 
+                            ? 'border-red-500 bg-red-50' 
+                            : 'border-gray-300'
+                        }`}
                       />
+                      {formValidation.hasFieldError('email') && (
+                        <p className="text-xs text-red-600 mt-1">{formValidation.getFieldError('email')}</p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Job Title</label>
@@ -827,8 +869,15 @@ export function StaffDetailPage() {
                         type="text"
                         value={editForm.job_title}
                         onChange={(e) => setEditForm({ ...editForm, job_title: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                        className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 ${
+                          formValidation.hasFieldError('job_title') 
+                            ? 'border-red-500 bg-red-50' 
+                            : 'border-gray-300'
+                        }`}
                       />
+                      {formValidation.hasFieldError('job_title') && (
+                        <p className="text-xs text-red-600 mt-1">{formValidation.getFieldError('job_title')}</p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
@@ -836,8 +885,15 @@ export function StaffDetailPage() {
                         type="text"
                         value={editForm.department}
                         onChange={(e) => setEditForm({ ...editForm, department: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                        className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 ${
+                          formValidation.hasFieldError('department') 
+                            ? 'border-red-500 bg-red-50' 
+                            : 'border-gray-300'
+                        }`}
                       />
+                      {formValidation.hasFieldError('department') && (
+                        <p className="text-xs text-red-600 mt-1">{formValidation.getFieldError('department')}</p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
@@ -845,8 +901,15 @@ export function StaffDetailPage() {
                         type="tel"
                         value={editForm.phone}
                         onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                        className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 ${
+                          formValidation.hasFieldError('phone') 
+                            ? 'border-red-500 bg-red-50' 
+                            : 'border-gray-300'
+                        }`}
                       />
+                      {formValidation.hasFieldError('phone') && (
+                        <p className="text-xs text-red-600 mt-1">{formValidation.getFieldError('phone')}</p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
@@ -854,8 +917,15 @@ export function StaffDetailPage() {
                         type="text"
                         value={editForm.address}
                         onChange={(e) => setEditForm({ ...editForm, address: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                        className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 ${
+                          formValidation.hasFieldError('address') 
+                            ? 'border-red-500 bg-red-50' 
+                            : 'border-gray-300'
+                        }`}
                       />
+                      {formValidation.hasFieldError('address') && (
+                        <p className="text-xs text-red-600 mt-1">{formValidation.getFieldError('address')}</p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Emergency Contact Name</label>
@@ -863,8 +933,15 @@ export function StaffDetailPage() {
                         type="text"
                         value={editForm.emergency_contact_name}
                         onChange={(e) => setEditForm({ ...editForm, emergency_contact_name: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                        className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 ${
+                          formValidation.hasFieldError('emergency_contact_name') 
+                            ? 'border-red-500 bg-red-50' 
+                            : 'border-gray-300'
+                        }`}
                       />
+                      {formValidation.hasFieldError('emergency_contact_name') && (
+                        <p className="text-xs text-red-600 mt-1">{formValidation.getFieldError('emergency_contact_name')}</p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Emergency Contact Phone</label>
@@ -872,15 +949,25 @@ export function StaffDetailPage() {
                         type="tel"
                         value={editForm.emergency_contact_phone}
                         onChange={(e) => setEditForm({ ...editForm, emergency_contact_phone: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                        className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 ${
+                          formValidation.hasFieldError('emergency_contact_phone') 
+                            ? 'border-red-500 bg-red-50' 
+                            : 'border-gray-300'
+                        }`}
                       />
+                      {formValidation.hasFieldError('emergency_contact_phone') && (
+                        <p className="text-xs text-red-600 mt-1">{formValidation.getFieldError('emergency_contact_phone')}</p>
+                      )}
                     </div>
                   </div>
                   <div className="flex gap-2 justify-end pt-4">
                     <Button
                       type="button"
                       variant="secondary"
-                      onClick={() => setEditMode(false)}
+                      onClick={() => {
+                        setEditMode(false);
+                        formValidation.clearErrors();
+                      }}
                     >
                       Cancel
                     </Button>
