@@ -1,7 +1,7 @@
 // ============================================
 // TIME TRACKER - STAFF MANAGEMENT PAGE
 // ============================================
-import { useState } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
@@ -10,6 +10,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useStaffNotifications } from '../hooks/useStaffNotifications';
 import { usePermissions } from '../hooks/usePermissions';
 import { useStaffFormValidation } from '../hooks/useStaffFormValidation';
+import { useDebounce } from '../hooks/useDebounce';
 import { rateLimiter } from '../utils/security';
 import type { User, UserCreate, Team, TeamMember, PayRate, TimeEntry, Project } from '../types';
 
@@ -22,6 +23,7 @@ export function StaffPage() {
   const formValidation = useStaffFormValidation();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 300); // Debounce search to reduce API calls
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showTeamsModal, setShowTeamsModal] = useState(false);
@@ -69,10 +71,10 @@ export function StaffPage() {
 
   const isAdmin = currentUser?.role === 'super_admin';
 
-  // Fetch staff members
+  // Fetch staff members with debounced search
   const { data: usersData, isLoading } = useQuery({
-    queryKey: ['staff', page, search],
-    queryFn: () => usersApi.getAll(page, 20, search),
+    queryKey: ['staff', page, debouncedSearch],
+    queryFn: () => usersApi.getAll(page, 20, debouncedSearch),
     enabled: isAdmin,
   });
 
@@ -158,13 +160,70 @@ export function StaffPage() {
     },
   });
 
+  // Memoized handlers to prevent unnecessary re-renders (must be before any returns)
+  const handleEditStaff = useCallback((staff: User) => {
+    setSelectedStaff(staff);
+    setEditForm({
+      name: staff.name,
+      email: staff.email,
+    });
+    setShowEditModal(true);
+  }, []);
+
+  const handleUpdateStaff = useCallback((e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedStaff) {
+      // Permission check
+      if (!permissions.canModifyStaff(selectedStaff)) {
+        notifications.notifyInsufficientPermissions();
+        return;
+      }
+      
+      // Validate form data
+      const { valid, securedData } = formValidation.secureAndValidate(editForm, true);
+      
+      if (!valid) {
+        const firstError = formValidation.errors[0];
+        notifications.notifyValidationError(firstError.field, firstError.message);
+        return;
+      }
+      
+      updateStaffMutation.mutate({ id: selectedStaff.id, data: securedData });
+    }
+  }, [selectedStaff, editForm, permissions, notifications, formValidation, updateStaffMutation]);
+
+  const handleToggleActive = useCallback((staff: User) => {
+    // Permission check
+    if (!permissions.canDeactivateStaff(staff)) {
+      notifications.notifyWarning("Can't Deactivate Yourself", "You cannot deactivate your own account.");
+      return;
+    }
+    
+    const action = staff.is_active ? 'deactivate' : 'activate';
+    if (confirm(`Are you sure you want to ${action} ${staff.name}?`)) {
+      toggleActiveMutation.mutate({ id: staff.id, isActive: staff.is_active, staff });
+    }
+  }, [permissions, notifications, toggleActiveMutation]);
+
+  const handleManageTeams = useCallback((staff: User) => {
+    setSelectedStaff(staff);
+    setShowTeamsModal(true);
+  }, []);
+
+  // Memoized computed values for stats
+  const staffStats = useMemo(() => ({
+    total: usersData?.total || 0,
+    active: usersData?.items.filter((u: User) => u.is_active).length || 0,
+    teams: teamsData?.total || 0,
+  }), [usersData, teamsData]);
+
   if (!isAdmin) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className=\"flex items-center justify-center h-full\">
         <Card>
-          <div className="text-center p-8">
-            <h2 className="text-xl font-bold text-gray-900 mb-2">Access Denied</h2>
-            <p className="text-gray-500">Admin privileges required.</p>
+          <div className=\"text-center p-8\">
+            <h2 className=\"text-xl font-bold text-gray-900 mb-2\">Access Denied</h2>
+            <p className=\"text-gray-500\">Admin privileges required.</p>
           </div>
         </Card>
       </div>
@@ -172,7 +231,7 @@ export function StaffPage() {
   }
 
   if (isLoading) {
-    return <LoadingOverlay message="Loading staff..." />;
+    return <LoadingOverlay message=\"Loading staff...\" />;
   }
 
   const handleCreateStaff = (e: React.FormEvent) => {
@@ -197,55 +256,6 @@ export function StaffPage() {
     }
     
     createStaffMutation.mutate(securedData as any);
-  };
-
-  const handleEditStaff = (staff: User) => {
-    setSelectedStaff(staff);
-    setEditForm({
-      name: staff.name,
-      email: staff.email,
-    });
-    setShowEditModal(true);
-  };
-
-  const handleUpdateStaff = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (selectedStaff) {
-      // Permission check
-      if (!permissions.canModifyStaff(selectedStaff)) {
-        notifications.notifyInsufficientPermissions();
-        return;
-      }
-      
-      // Validate form data
-      const { valid, securedData } = formValidation.secureAndValidate(editForm, true);
-      
-      if (!valid) {
-        const firstError = formValidation.errors[0];
-        notifications.notifyValidationError(firstError.field, firstError.message);
-        return;
-      }
-      
-      updateStaffMutation.mutate({ id: selectedStaff.id, data: securedData });
-    }
-  };
-
-  const handleToggleActive = (staff: User) => {
-    // Permission check
-    if (!permissions.canDeactivateStaff(staff)) {
-      notifications.notifyWarning("Can't Deactivate Yourself", "You cannot deactivate your own account.");
-      return;
-    }
-    
-    const action = staff.is_active ? 'deactivate' : 'activate';
-    if (confirm(`Are you sure you want to ${action} ${staff.name}?`)) {
-      toggleActiveMutation.mutate({ id: staff.id, isActive: staff.is_active, staff });
-    }
-  };
-
-  const handleManageTeams = (staff: User) => {
-    setSelectedStaff(staff);
-    setShowTeamsModal(true);
   };
 
   return (
@@ -280,14 +290,14 @@ export function StaffPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <div className="text-center p-4">
-            <div className="text-3xl font-bold text-blue-600">{usersData?.total || 0}</div>
+            <div className="text-3xl font-bold text-blue-600">{staffStats.total}</div>
             <div className="text-sm text-gray-500">Total Staff</div>
           </div>
         </Card>
         <Card>
           <div className="text-center p-4">
             <div className="text-3xl font-bold text-green-600">
-              {usersData?.items.filter((u: User) => u.is_active).length || 0}
+              {staffStats.active}
             </div>
             <div className="text-sm text-gray-500">Active</div>
           </div>
@@ -295,7 +305,7 @@ export function StaffPage() {
         <Card>
           <div className="text-center p-4">
             <div className="text-3xl font-bold text-gray-600">
-              {teamsData?.total || 0}
+              {staffStats.teams}
             </div>
             <div className="text-sm text-gray-500">Teams</div>
           </div>

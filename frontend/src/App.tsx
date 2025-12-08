@@ -30,8 +30,16 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: 1,
-      staleTime: 5 * 60 * 1000, // 5 minutes
+      staleTime: 5 * 60 * 1000, // 5 minutes - data stays fresh for 5 min
+      cacheTime: 10 * 60 * 1000, // 10 minutes - cache persists for 10 min
       refetchOnWindowFocus: false,
+      refetchOnMount: false, // Don't refetch if data is fresh
+      refetchOnReconnect: true, // Refetch on network reconnect
+      // Performance: prefetch on hover for common queries
+      structuralSharing: true, // Prevent unnecessary re-renders
+    },
+    mutations: {
+      retry: 0, // Don't retry mutations by default
     },
   },
 });
