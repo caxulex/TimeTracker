@@ -1,0 +1,14 @@
+// ============================================
+// TIME TRACKER - useNotifications HOOK
+// Extracted for Fast Refresh compliance
+// ============================================
+import { useContext } from 'react';
+import { NotificationContext, NotificationContextType } from '../contexts/NotificationContext';
+
+export function useNotifications(): NotificationContextType {
+  const context = useContext(NotificationContext);
+  if (!context) {
+    throw new Error('useNotifications must be used within a NotificationProvider');
+  }
+  return context;
+}

@@ -1,0 +1,543 @@
+/* Mobile Responsiveness Styles - TASK-035 */
+/* Responsive navigation, tables, and charts */
+
+/* ==========================================
+   MOBILE NAVIGATION
+   ========================================== */
+
+/* Hamburger menu for mobile */
+@media (max-width: 768px) {
+  .nav-desktop {
+    display: none !important;
+  }
+  
+  .nav-mobile {
+    display: block !important;
+  }
+  
+  .hamburger-menu {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-around;
+    width: 24px;
+    height: 20px;
+    cursor: pointer;
+  }
+  
+  .hamburger-menu span {
+    width: 100%;
+    height: 3px;
+    background-color: var(--text-primary, #333);
+    border-radius: 2px;
+    transition: all 0.3s ease;
+  }
+  
+  .hamburger-menu.open span:nth-child(1) {
+    transform: rotate(45deg) translate(5px, 5px);
+  }
+  
+  .hamburger-menu.open span:nth-child(2) {
+    opacity: 0;
+  }
+  
+  .hamburger-menu.open span:nth-child(3) {
+    transform: rotate(-45deg) translate(5px, -5px);
+  }
+  
+  /* Mobile navigation drawer */
+  .mobile-nav-drawer {
+    position: fixed;
+    top: 0;
+    left: -100%;
+    width: 80%;
+    max-width: 300px;
+    height: 100vh;
+    background: var(--bg-primary, white);
+    z-index: 1000;
+    transition: left 0.3s ease;
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.2);
+    padding: 1rem;
+  }
+  
+  .mobile-nav-drawer.open {
+    left: 0;
+  }
+  
+  .mobile-nav-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 999;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+  }
+  
+  .mobile-nav-overlay.visible {
+    opacity: 1;
+    visibility: visible;
+  }
+  
+  /* Mobile nav links */
+  .mobile-nav-drawer a {
+    display: block;
+    padding: 0.75rem 1rem;
+    color: var(--text-primary, #333);
+    text-decoration: none;
+    border-bottom: 1px solid var(--border-color, #eee);
+  }
+  
+  .mobile-nav-drawer a:hover,
+  .mobile-nav-drawer a.active {
+    background: var(--bg-hover, #f5f5f5);
+    color: var(--primary-color, #3b82f6);
+  }
+}
+
+/* Desktop nav visible */
+@media (min-width: 769px) {
+  .nav-mobile,
+  .hamburger-menu,
+  .mobile-nav-drawer,
+  .mobile-nav-overlay {
+    display: none !important;
+  }
+  
+  .nav-desktop {
+    display: flex !important;
+  }
+}
+
+
+/* ==========================================
+   RESPONSIVE TABLES
+   ========================================== */
+
+/* Mobile table cards */
+@media (max-width: 768px) {
+  .table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  /* Convert table to cards on mobile */
+  .table-mobile-cards {
+    display: block;
+  }
+  
+  .table-mobile-cards thead {
+    display: none;
+  }
+  
+  .table-mobile-cards tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  
+  .table-mobile-cards tr {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-card, white);
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 8px;
+    padding: 1rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+  
+  .table-mobile-cards td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border-color, #f3f4f6);
+  }
+  
+  .table-mobile-cards td:last-child {
+    border-bottom: none;
+  }
+  
+  .table-mobile-cards td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: var(--text-secondary, #6b7280);
+    margin-right: 1rem;
+  }
+  
+  /* Action buttons stack vertically */
+  .table-mobile-cards .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: flex-end;
+  }
+  
+  .table-mobile-cards .actions button {
+    flex: 1;
+    min-width: 80px;
+  }
+}
+
+
+/* ==========================================
+   RESPONSIVE CHARTS
+   ========================================== */
+
+@media (max-width: 768px) {
+  .chart-container {
+    width: 100% !important;
+    min-height: 250px;
+    padding: 0.5rem;
+  }
+  
+  /* Stack chart and legend vertically */
+  .chart-wrapper {
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    font-size: 0.875rem;
+  }
+  
+  .chart-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  
+  .chart-legend-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+  }
+  
+  /* Adjust tooltip for mobile */
+  .chart-tooltip {
+    max-width: 200px;
+    font-size: 0.75rem;
+    padding: 0.5rem;
+  }
+}
+
+
+/* ==========================================
+   RESPONSIVE FORMS
+   ========================================== */
+
+@media (max-width: 768px) {
+  /* Stack form fields */
+  .form-row {
+    flex-direction: column !important;
+    gap: 1rem;
+  }
+  
+  .form-group {
+    width: 100% !important;
+  }
+  
+  /* Full width inputs */
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="date"],
+  input[type="time"],
+  select,
+  textarea {
+    width: 100%;
+    min-height: 44px; /* Touch target size */
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+  
+  /* Full width buttons */
+  .btn-group-mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  
+  .btn-group-mobile button {
+    width: 100%;
+  }
+}
+
+
+/* ==========================================
+   RESPONSIVE MODALS
+   ========================================== */
+
+@media (max-width: 768px) {
+  .modal-overlay {
+    padding: 0;
+  }
+  
+  .modal {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100vh;
+    max-height: 100vh;
+    margin: 0;
+    border-radius: 0;
+  }
+  
+  .modal-content {
+    height: calc(100vh - 120px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .modal-header,
+  .modal-footer {
+    position: sticky;
+    background: var(--bg-card, white);
+    z-index: 10;
+  }
+  
+  .modal-header {
+    top: 0;
+    border-bottom: 1px solid var(--border-color, #e5e7eb);
+  }
+  
+  .modal-footer {
+    bottom: 0;
+    border-top: 1px solid var(--border-color, #e5e7eb);
+    padding: 1rem;
+  }
+  
+  .modal-footer .btn-group {
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 0.5rem;
+  }
+  
+  .modal-footer button {
+    width: 100%;
+  }
+}
+
+
+/* ==========================================
+   RESPONSIVE CARDS & GRIDS
+   ========================================== */
+
+@media (max-width: 768px) {
+  .grid {
+    grid-template-columns: 1fr !important;
+  }
+  
+  .card {
+    padding: 1rem;
+  }
+  
+  /* Stats cards */
+  .stats-grid {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 0.75rem;
+  }
+  
+  .stat-card {
+    padding: 0.75rem;
+  }
+  
+  .stat-value {
+    font-size: 1.25rem;
+  }
+  
+  .stat-label {
+    font-size: 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .stats-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+
+/* ==========================================
+   RESPONSIVE TYPOGRAPHY
+   ========================================== */
+
+@media (max-width: 768px) {
+  h1 {
+    font-size: 1.5rem;
+  }
+  
+  h2 {
+    font-size: 1.25rem;
+  }
+  
+  h3 {
+    font-size: 1.125rem;
+  }
+  
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+  
+  .page-header-actions {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  
+  .page-header-actions button {
+    flex: 1;
+    min-width: 100px;
+  }
+}
+
+
+/* ==========================================
+   RESPONSIVE TIMER WIDGET
+   ========================================== */
+
+@media (max-width: 768px) {
+  .timer-widget {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 1rem;
+    background: var(--bg-card, white);
+    border-top: 1px solid var(--border-color, #e5e7eb);
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+    z-index: 100;
+  }
+  
+  .timer-display {
+    font-size: 1.5rem;
+  }
+  
+  .timer-controls {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+  
+  .timer-controls button {
+    flex: 1;
+    min-height: 44px;
+  }
+  
+  /* Add padding to body to account for fixed timer */
+  body.timer-active {
+    padding-bottom: 100px;
+  }
+}
+
+
+/* ==========================================
+   RESPONSIVE SIDEBAR
+   ========================================== */
+
+@media (max-width: 1024px) {
+  .sidebar {
+    position: fixed;
+    left: -280px;
+    width: 280px;
+    height: 100vh;
+    z-index: 1000;
+    transition: left 0.3s ease;
+    background: var(--bg-sidebar, #1f2937);
+  }
+  
+  .sidebar.open {
+    left: 0;
+  }
+  
+  .main-content {
+    margin-left: 0 !important;
+    width: 100% !important;
+  }
+  
+  .sidebar-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 999;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+  }
+  
+  .sidebar-overlay.visible {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+
+
+/* ==========================================
+   TOUCH FRIENDLY TARGETS
+   ========================================== */
+
+@media (pointer: coarse) {
+  /* Larger click/touch targets for touch devices */
+  button,
+  .btn,
+  a.nav-link,
+  .clickable {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Increase spacing between interactive elements */
+  .nav-links {
+    gap: 0.5rem;
+  }
+  
+  .button-group {
+    gap: 0.5rem;
+  }
+  
+  /* Disable hover effects on touch devices */
+  .hover-effect:hover {
+    background: inherit;
+  }
+}
+
+
+/* ==========================================
+   PRINT STYLES
+   ========================================== */
+
+@media print {
+  .no-print,
+  .sidebar,
+  .nav-mobile,
+  .hamburger-menu,
+  .timer-widget,
+  .modal-overlay {
+    display: none !important;
+  }
+  
+  .main-content {
+    margin: 0 !important;
+    width: 100% !important;
+  }
+  
+  .page {
+    page-break-after: always;
+  }
+  
+  table {
+    font-size: 10pt;
+  }
+}

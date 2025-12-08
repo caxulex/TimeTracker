@@ -1,0 +1,181 @@
+# Time Tracker
+
+A comprehensive, Everhour-inspired time tracking application for teams and individuals. Built with modern technologies for performance, scalability, and user experience.
+
+## ✨ Features
+
+### Core Functionality
+- **⏱️ Real-time Time Tracking** - Start/stop timers with one click
+- **📊 Project Management** - Organize work by teams, projects, and tasks
+- **👥 Team Collaboration** - Share projects, assign tasks, track team activity
+- **📈 Reports & Analytics** - Weekly summaries, project breakdowns, exportable data
+- **🔄 WebSocket Integration** - See who's working now in real-time
+
+### User Experience
+- **🎨 Modern UI** - Clean, responsive interface built with React and TailwindCSS
+- **📱 Mobile Responsive** - Works on all devices
+- **⚡ Fast & Reliable** - Optimized for performance
+
+## 🛠️ Technology Stack
+
+### Backend
+- **FastAPI** - Modern async Python web framework
+- **PostgreSQL** - Robust relational database
+- **Redis** - Caching and session management
+- **SQLAlchemy 2.0** - Async ORM with type hints
+- **Pydantic 2** - Data validation and serialization
+
+### Frontend
+- **React 18** - Component-based UI library
+- **TypeScript** - Type-safe JavaScript
+- **Vite** - Lightning-fast build tool
+- **TailwindCSS** - Utility-first CSS framework
+- **Zustand** - Lightweight state management
+- **React Query** - Server state management
+
+### Infrastructure
+- **Docker** - Containerization
+- **Docker Compose** - Multi-container orchestration
+- **Nginx** - Production web server
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Docker and Docker Compose
+- Node.js 18+ (for development)
+- Python 3.11+ (for development)
+
+### Development Setup
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/your-org/time-tracker.git
+   cd time-tracker
+   ```
+
+2. **Start the database and cache**
+   ```bash
+   docker-compose up -d postgres redis
+   ```
+
+3. **Backend Setup**
+   ```bash
+   cd backend
+   python -m venv .venv
+   .venv\Scripts\activate  # Windows
+   source .venv/bin/activate  # Linux/Mac
+   pip install -r requirements.txt
+   alembic upgrade head
+   uvicorn app.main:app --reload --port 8080
+   ```
+
+4. **Frontend Setup** (new terminal)
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
+
+5. **Access the application**
+   - Frontend: http://localhost:5173
+   - API Docs: http://localhost:8080/docs
+   - Default Admin: admin@timetracker.com / admin123
+
+### Production Deployment
+
+1. **Configure environment**
+   ```bash
+   cp .env.production.example .env
+   # Edit .env with your production values
+   ```
+
+2. **Build and run**
+   ```bash
+   docker-compose -f docker-compose.prod.yml up -d --build
+   ```
+
+3. **Access at** http://localhost (or your domain)
+
+## 📁 Project Structure
+
+```
+time-tracker/
+├── backend/                 # FastAPI backend
+│   ├── app/
+│   │   ├── routers/        # API endpoints
+│   │   ├── models/         # SQLAlchemy models
+│   │   ├── schemas/        # Pydantic schemas
+│   │   ├── services/       # Business logic
+│   │   └── main.py         # Application entry
+│   ├── tests/              # Pytest test suite
+│   ├── alembic/            # Database migrations
+│   └── requirements.txt
+├── frontend/               # React frontend
+│   ├── src/
+│   │   ├── components/     # React components
+│   │   ├── pages/          # Page components
+│   │   ├── hooks/          # Custom hooks
+│   │   ├── stores/         # Zustand stores
+│   │   └── services/       # API services
+│   └── package.json
+├── docker-compose.yml      # Development containers
+├── docker-compose.prod.yml # Production containers
+└── README.md
+```
+
+## 🧪 Testing
+
+### Backend Tests
+```bash
+cd backend
+pytest tests/ -v
+```
+
+**Test Coverage:**
+- ✅ Authentication (register, login, tokens)
+- ✅ Projects (CRUD, permissions)
+- ✅ Time Entries (create, start/stop, update)
+- ✅ Teams (CRUD, membership)
+- ✅ Reports (dashboard, weekly, export)
+
+## 📚 API Documentation
+
+Interactive API documentation is available at:
+- **Swagger UI**: http://localhost:8080/docs
+- **ReDoc**: http://localhost:8080/redoc
+
+### Key Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | /api/auth/register | Register new user |
+| POST | /api/auth/login | Login and get tokens |
+| GET | /api/projects | List user's projects |
+| POST | /api/time/start | Start timer |
+| POST | /api/time/stop | Stop running timer |
+| GET | /api/reports/dashboard | Get dashboard stats |
+
+## 🔒 Security
+
+- JWT-based authentication with access/refresh tokens
+- Password hashing with bcrypt
+- CORS protection
+- SQL injection prevention via SQLAlchemy ORM
+- Input validation with Pydantic
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- Inspired by [Everhour](https://everhour.com/)
+- Built with ❤️ for productive teams everywhere

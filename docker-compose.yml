@@ -1,0 +1,104 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: time-tracker-postgres
+    environment:
+      POSTGRES_DB: time_tracker
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - time-tracker-network
+
+  # PostgreSQL Test Database
+  postgres_test:
+    image: postgres:15-alpine
+    container_name: time-tracker-postgres-test
+    environment:
+      POSTGRES_DB: time_tracker_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - time-tracker-network
+    profiles:
+      - test
+
+  # Redis Cache & Message Broker
+  redis:
+    image: redis:7-alpine
+    container_name: time-tracker-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - time-tracker-network
+
+  # pgAdmin (Database Management - Optional)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: time-tracker-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@timetracker.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - time-tracker-network
+    profiles:
+      - dev-tools
+
+  # Redis Commander (Redis Management - Optional)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: time-tracker-redis-commander
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    networks:
+      - time-tracker-network
+    profiles:
+      - dev-tools
+
+volumes:
+  postgres_data:
+  postgres_test_data:
+  redis_data:
+  pgadmin_data:
+
+networks:
+  time-tracker-network:
+    driver: bridge

@@ -1,0 +1,231 @@
+/* ============================================
+   TIME TRACKER - GLOBAL STYLES
+   ============================================ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a1a1a1;
+}
+
+/* Custom utilities */
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  
+  .animate-fade-in {
+    animation: fadeIn 0.2s ease-in-out;
+  }
+  
+  .animate-slide-in {
+    animation: slideIn 0.3s ease-out;
+  }
+  
+  .animate-pulse-slow {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Focus ring styles */
+@layer base {
+  *:focus-visible {
+    @apply outline-none ring-2 ring-blue-500 ring-offset-2;
+  }
+  
+  input:focus,
+  select:focus,
+  textarea:focus {
+    @apply outline-none ring-2 ring-blue-500 ring-offset-0;
+  }
+}
+
+/* Form input styles */
+@layer components {
+  .form-input {
+    @apply block w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-500 shadow-sm;
+    @apply focus:border-blue-500 focus:ring-blue-500;
+    @apply disabled:bg-gray-100 disabled:cursor-not-allowed;
+  }
+  
+  .form-select {
+    @apply block w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 shadow-sm;
+    @apply focus:border-blue-500 focus:ring-blue-500;
+    @apply disabled:bg-gray-100 disabled:cursor-not-allowed;
+  }
+  
+  .btn-primary {
+    @apply inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg;
+    @apply hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2;
+    @apply disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply transition-colors duration-200;
+  }
+  
+  .btn-secondary {
+    @apply inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg;
+    @apply hover:bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2;
+    @apply disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply transition-colors duration-200;
+  }
+}
+
+/* Card hover effects */
+.card-hover {
+  @apply transition-shadow duration-200 hover:shadow-lg;
+}
+
+/* Timer display styles */
+.timer-display {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+}
+
+/* Sidebar active state */
+.sidebar-link {
+  @apply flex items-center gap-3 px-3 py-2 rounded-lg text-gray-700 transition-colors duration-200;
+}
+
+.sidebar-link:hover {
+  @apply bg-gray-100 text-gray-900;
+}
+
+.sidebar-link.active {
+  @apply bg-blue-50 text-blue-700 font-medium;
+}
+
+/* Status badge colors */
+.status-badge {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+}
+
+.status-badge.pending {
+  @apply bg-yellow-100 text-yellow-800;
+}
+
+.status-badge.in-progress {
+  @apply bg-blue-100 text-blue-800;
+}
+
+.status-badge.completed {
+  @apply bg-green-100 text-green-800;
+}
+
+.status-badge.cancelled {
+  @apply bg-gray-100 text-gray-800;
+}
+
+/* Priority colors */
+.priority-low {
+  @apply text-gray-500;
+}
+
+.priority-medium {
+  @apply text-yellow-600;
+}
+
+.priority-high {
+  @apply text-orange-600;
+}
+
+.priority-urgent {
+  @apply text-red-600;
+}
+
+/* Loading skeleton */
+.skeleton {
+  @apply bg-gray-200 animate-pulse rounded;
+}
+
+/* Table styles */
+.table-container {
+  @apply overflow-x-auto rounded-lg border border-gray-200;
+}
+
+.table-container table {
+  @apply min-w-full divide-y divide-gray-200;
+}
+
+.table-container th {
+  @apply px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50;
+}
+
+.table-container td {
+  @apply px-6 py-4 whitespace-nowrap text-sm text-gray-900;
+}
+
+.table-container tbody tr {
+  @apply hover:bg-gray-50 transition-colors;
+}
+
+/* Empty state */
+.empty-state {
+  @apply flex flex-col items-center justify-center py-12 text-center;
+}
+
+.empty-state svg {
+  @apply w-12 h-12 text-gray-400 mb-4;
+}
+
+.empty-state h3 {
+  @apply text-lg font-medium text-gray-900 mb-2;
+}
+
+.empty-state p {
+  @apply text-gray-500;
+}
+
+/* Chart container */
+.chart-container {
+  @apply w-full h-64 sm:h-80;
+}
+
+/* Responsive utilities */
+@media (max-width: 640px) {
+  .hide-mobile {
+    display: none;
+  }
+}
+
+@media (min-width: 641px) {
+  .hide-desktop {
+    display: none;
+  }
+}

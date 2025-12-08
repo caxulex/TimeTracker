@@ -1,0 +1,37 @@
+{
+  "apps": [
+    {
+      "name": "timetracker-backend",
+      "cwd": "./backend",
+      "script": "venv/Scripts/python.exe",
+      "args": "-m uvicorn app.main:app --host 0.0.0.0 --port 8080",
+      "interpreter": "none",
+      "env": {
+        "PYTHONPATH": "."
+      },
+      "instances": 1,
+      "autorestart": true,
+      "watch": false,
+      "max_memory_restart": "500M",
+      "error_file": "./logs/backend-error.log",
+      "out_file": "./logs/backend-out.log",
+      "merge_logs": true,
+      "time": true
+    },
+    {
+      "name": "timetracker-frontend",
+      "cwd": "./frontend",
+      "script": "npm",
+      "args": "run dev -- --host 0.0.0.0",
+      "interpreter": "none",
+      "instances": 1,
+      "autorestart": true,
+      "watch": false,
+      "max_memory_restart": "300M",
+      "error_file": "./logs/frontend-error.log",
+      "out_file": "./logs/frontend-out.log",
+      "merge_logs": true,
+      "time": true
+    }
+  ]
+}
