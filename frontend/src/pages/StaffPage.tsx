@@ -246,7 +246,13 @@ export function StaffPage() {
                   Name
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Email
+                  Job Title
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Department
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Employment
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Role
@@ -269,11 +275,33 @@ export function StaffPage() {
                       </div>
                       <div className="ml-4">
                         <div className="text-sm font-medium text-gray-900">{staff.name}</div>
+                        <div className="text-xs text-gray-500">{staff.email}</div>
                       </div>
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{staff.email}</div>
+                    <div className="text-sm text-gray-900">{staff.job_title || '—'}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">{staff.department || '—'}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {staff.employment_type ? (
+                      <span
+                        className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                          staff.employment_type === 'full_time'
+                            ? 'bg-blue-100 text-blue-800'
+                            : staff.employment_type === 'part_time'
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : 'bg-purple-100 text-purple-800'
+                        }`}
+                      >
+                        {staff.employment_type === 'full_time' ? 'Full-time' : 
+                         staff.employment_type === 'part_time' ? 'Part-time' : 'Contractor'}
+                      </span>
+                    ) : (
+                      <span className="text-sm text-gray-400">—</span>
+                    )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span
@@ -364,61 +392,388 @@ export function StaffPage() {
         </div>
       </Card>
 
-      {/* Create Staff Modal */}
+      {/* Create Staff Modal - Multi-Step Wizard */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <Card className="max-w-md w-full">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <Card className="max-w-2xl w-full my-8">
             <CardHeader title="Add New Staff Member" />
-            <form onSubmit={handleCreateStaff} className="space-y-4 p-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                <input
-                  type="text"
-                  required
-                  value={createForm.name}
-                  onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
-                />
+            
+            {/* Progress Indicator */}
+            <div className="px-6 pt-4">
+              <div className="flex items-center justify-between mb-8">
+                {[1, 2, 3, 4].map((step) => (
+                  <div key={step} className="flex items-center flex-1">
+                    <div className="flex flex-col items-center flex-1">
+                      <div
+                        className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold ${
+                          formStep === step
+                            ? 'bg-blue-600 text-white'
+                            : formStep > step
+                            ? 'bg-green-500 text-white'
+                            : 'bg-gray-200 text-gray-500'
+                        }`}
+                      >
+                        {formStep > step ? '✓' : step}
+                      </div>
+                      <div className="text-xs mt-2 text-center font-medium">
+                        {step === 1 && 'Basic Info'}
+                        {step === 2 && 'Employment'}
+                        {step === 3 && 'Contact'}
+                        {step === 4 && 'Payroll & Teams'}
+                      </div>
+                    </div>
+                    {step < 4 && (
+                      <div
+                        className={`h-1 flex-1 ${
+                          formStep > step ? 'bg-green-500' : 'bg-gray-200'
+                        }`}
+                      />
+                    )}
+                  </div>
+                ))}
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                <input
-                  type="email"
-                  required
-                  value={createForm.email}
-                  onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                <input
-                  type="password"
-                  required
-                  minLength={8}
-                  value={createForm.password}
-                  onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                <select
-                  value={createForm.role}
-                  onChange={(e) => setCreateForm({ ...createForm, role: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="regular_user">Worker</option>
-                  <option value="super_admin">Admin</option>
-                </select>
-              </div>
-              <div className="flex gap-2 justify-end pt-4">
-                <Button type="button" variant="secondary" onClick={() => setShowCreateModal(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" loading={createStaffMutation.isPending}>
-                  Create Staff
-                </Button>
+            </div>
+
+            <form onSubmit={handleCreateStaff} className="space-y-4 px-6 pb-6">
+              {/* Step 1: Basic Information */}
+              {formStep === 1 && (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Basic Information</h3>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Full Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={createForm.name}
+                      onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                      placeholder="John Doe"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Email Address <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={createForm.email}
+                      onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                      placeholder="john.doe@company.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Password <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      minLength={8}
+                      value={createForm.password}
+                      onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                      placeholder="Minimum 8 characters"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      User can change this after first login
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Role <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={createForm.role}
+                      onChange={(e) => setCreateForm({ ...createForm, role: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="regular_user">Worker</option>
+                      <option value="super_admin">Admin</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 2: Employment Details */}
+              {formStep === 2 && (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Employment Details</h3>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Job Title</label>
+                    <input
+                      type="text"
+                      value={createForm.job_title}
+                      onChange={(e) => setCreateForm({ ...createForm, job_title: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g., Software Engineer, Project Manager"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
+                    <input
+                      type="text"
+                      value={createForm.department}
+                      onChange={(e) => setCreateForm({ ...createForm, department: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g., Engineering, Sales, Operations"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Employment Type <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={createForm.employment_type}
+                      onChange={(e) => setCreateForm({ ...createForm, employment_type: e.target.value as any })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="full_time">Full-time</option>
+                      <option value="part_time">Part-time</option>
+                      <option value="contractor">Contractor</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                    <input
+                      type="date"
+                      value={createForm.start_date}
+                      onChange={(e) => setCreateForm({ ...createForm, start_date: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Expected Hours per Week
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="168"
+                      value={createForm.expected_hours_per_week}
+                      onChange={(e) => setCreateForm({ ...createForm, expected_hours_per_week: parseInt(e.target.value) || 40 })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Used for time tracking and payroll calculations
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Manager</label>
+                    <select
+                      value={createForm.manager_id || ''}
+                      onChange={(e) => setCreateForm({ ...createForm, manager_id: e.target.value ? parseInt(e.target.value) : null })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">None</option>
+                      {usersData?.items.filter((u: User) => u.role === 'super_admin').map((user: User) => (
+                        <option key={user.id} value={user.id}>
+                          {user.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 3: Contact Information */}
+              {formStep === 3 && (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Contact Information</h3>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+                    <input
+                      type="tel"
+                      value={createForm.phone}
+                      onChange={(e) => setCreateForm({ ...createForm, phone: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                      placeholder="+1 (555) 123-4567"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                    <textarea
+                      value={createForm.address}
+                      onChange={(e) => setCreateForm({ ...createForm, address: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                      rows={3}
+                      placeholder="Street address, City, State, ZIP"
+                    />
+                  </div>
+                  <div className="border-t pt-4">
+                    <h4 className="font-medium text-gray-900 mb-3">Emergency Contact</h4>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Contact Name
+                        </label>
+                        <input
+                          type="text"
+                          value={createForm.emergency_contact_name}
+                          onChange={(e) => setCreateForm({ ...createForm, emergency_contact_name: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                          placeholder="Emergency contact full name"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Contact Phone
+                        </label>
+                        <input
+                          type="tel"
+                          value={createForm.emergency_contact_phone}
+                          onChange={(e) => setCreateForm({ ...createForm, emergency_contact_phone: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                          placeholder="+1 (555) 987-6543"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 4: Payroll & Teams */}
+              {formStep === 4 && (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Payroll & Team Assignment</h3>
+                  <div className="border-b pb-4">
+                    <h4 className="font-medium text-gray-900 mb-3">Payroll Information</h4>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Pay Rate</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={createForm.pay_rate}
+                          onChange={(e) => setCreateForm({ ...createForm, pay_rate: parseFloat(e.target.value) || 0 })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Rate Type</label>
+                        <select
+                          value={createForm.pay_rate_type}
+                          onChange={(e) => setCreateForm({ ...createForm, pay_rate_type: e.target.value as any })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="hourly">Hourly</option>
+                          <option value="daily">Daily</option>
+                          <option value="monthly">Monthly</option>
+                          <option value="project_based">Project-based</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Overtime Multiplier
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="1"
+                          max="3"
+                          value={createForm.overtime_multiplier}
+                          onChange={(e) => setCreateForm({ ...createForm, overtime_multiplier: parseFloat(e.target.value) || 1.5 })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">1.5 = time and a half</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
+                        <select
+                          value={createForm.currency}
+                          onChange={(e) => setCreateForm({ ...createForm, currency: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="USD">USD</option>
+                          <option value="EUR">EUR</option>
+                          <option value="GBP">GBP</option>
+                          <option value="MXN">MXN</option>
+                        </select>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">
+                      💡 PayRate will be automatically created if pay rate is greater than 0
+                    </p>
+                  </div>
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-3">Team Assignment</h4>
+                    <div className="space-y-2 max-h-48 overflow-y-auto border rounded-md p-3">
+                      {teamsData?.items.length === 0 ? (
+                        <p className="text-sm text-gray-500 text-center py-4">
+                          No teams available. Create teams first.
+                        </p>
+                      ) : (
+                        teamsData?.items.map((team: Team) => (
+                          <label key={team.id} className="flex items-center space-x-3 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={createForm.team_ids.includes(team.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setCreateForm({ ...createForm, team_ids: [...createForm.team_ids, team.id] });
+                                } else {
+                                  setCreateForm({ ...createForm, team_ids: createForm.team_ids.filter(id => id !== team.id) });
+                                }
+                              }}
+                              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                            />
+                            <div className="flex-1">
+                              <div className="text-sm font-medium text-gray-900">{team.name}</div>
+                              <div className="text-xs text-gray-500">{team.member_count} members</div>
+                            </div>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Selected teams: {createForm.team_ids.length}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Navigation Buttons */}
+              <div className="flex gap-2 justify-between pt-6 border-t">
+                <div>
+                  {formStep > 1 && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => setFormStep(formStep - 1)}
+                    >
+                      ← Previous
+                    </Button>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      setShowCreateModal(false);
+                      setFormStep(1);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  {formStep < 4 ? (
+                    <Button
+                      type="button"
+                      onClick={() => setFormStep(formStep + 1)}
+                    >
+                      Next →
+                    </Button>
+                  ) : (
+                    <Button type="submit" loading={createStaffMutation.isPending}>
+                      Create Staff Member
+                    </Button>
+                  )}
+                </div>
               </div>
             </form>
           </Card>

@@ -10,6 +10,20 @@ export interface User {
   role: 'super_admin' | 'admin' | 'regular_user' | 'member';
   is_active: boolean;
   created_at: string;
+  
+  // Contact Information
+  phone?: string;
+  address?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  
+  // Employment Details
+  job_title?: string;
+  department?: string;
+  employment_type?: 'full_time' | 'part_time' | 'contractor';
+  start_date?: string;
+  expected_hours_per_week?: number;
+  manager_id?: number;
 }
 
 export interface UserLogin {
