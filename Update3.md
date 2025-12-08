@@ -639,6 +639,166 @@ We're enhancing the Staff Management page to integrate seamlessly with all app f
 
 ---
 
+## 🚀 Phase 5 Progress Update - COMPLETED ✅
+**Date:** December 8, 2025
+
+### Phase 5: Team & Project Integration - COMPLETE ✅
+
+#### Enhanced ManageTeamsModal Component
+Completely redesigned the team management modal with a comprehensive 3-tab interface:
+
+#### **Tab 1: Current Teams** (Green Theme)
+- ✅ **Real Team Membership Display**:
+  - Shows ALL teams the staff member actually belongs to
+  - Fetches team details with member lists
+  - Displays member role (Admin 👑 or Member 👤)
+  - Color-coded role badges (purple for admin, green for member)
+  - Member count and creation date for each team
+  
+- ✅ **Team Management Actions**:
+  - **Toggle Role Button** - Promote to admin or demote to member
+  - **Remove from Team Button** - Remove staff from team with confirmation
+  - Confirmation dialogs warn about losing project access
+  - Real-time updates via React Query invalidation
+  
+- ✅ **Empty State**:
+  - Friendly message when not in any teams
+  - Guidance to use "Add to Team" tab
+
+#### **Tab 2: Add to Team** (Blue Theme)
+- ✅ **Available Teams List**:
+  - Shows teams staff is NOT yet a member of
+  - Filtered dynamically based on current memberships
+  - Member count display for each team
+  - One-click "Add" button with icon
+  
+- ✅ **Smart Filtering**:
+  - Automatically excludes teams staff already belongs to
+  - Updates in real-time when teams are added/removed
+  
+- ✅ **Success State**:
+  - "Already in all teams!" message when applicable
+  - Celebratory icon and friendly messaging
+  
+- ✅ **Auto-navigation**:
+  - After adding to team, automatically switches to "Current Teams" tab
+  - Allows immediate verification of the addition
+
+#### **Tab 3: Accessible Projects** (Purple Theme)
+- ✅ **Project List Display**:
+  - Shows ALL projects accessible through team memberships
+  - Automatically filters projects by staff's teams
+  - Project name, description, and status
+  - Color-coded status badges:
+    - 🟢 Active (green)
+    - ⏸️ On Hold (yellow)
+    - ✅ Completed (gray)
+  
+- ✅ **Project Details**:
+  - Team name that grants access
+  - Creation date
+  - Project description (when available)
+  - Icons for team and calendar
+  
+- ✅ **Smart Access Calculation**:
+  - Leverages existing projectsApi
+  - Filters projects by team_id matching staff's teams
+  - Updates automatically when teams change
+  
+- ✅ **Empty States**:
+  - "No accessible projects" when teams have no projects
+  - Contextual message: "Teams have no projects yet" vs "Add to teams to grant project access"
+  - Helpful guidance for admins
+
+#### Technical Implementation
+- ✅ **State Management**:
+  - Three tabs: 'current' | 'add' | 'projects'
+  - Active tab state with smooth transitions
+  - Border highlight on active tab (green/blue/purple)
+  
+- ✅ **Data Fetching**:
+  - `staffTeams` query - Fetches team details for teams user belongs to
+  - `projectsData` query - Fetches all accessible projects
+  - Both queries enabled based on teamsData availability
+  - Loading states with animated spinners
+  
+- ✅ **Mutations**:
+  - `addToTeamMutation` - Add staff to team as member
+  - `removeFromTeamMutation` - Remove staff from team
+  - `updateMemberRoleMutation` - Toggle between admin/member roles
+  - All mutations invalidate relevant queries for instant UI updates
+  
+- ✅ **UI/UX Enhancements**:
+  - 4xl max width for more content space
+  - 85vh max height with scrollable content area
+  - Fixed header with tabs
+  - Fixed footer with summary stats (teams count • projects count)
+  - Hover effects on all interactive elements
+  - Icon-based actions for intuitive interaction
+  - Consistent color theming per tab
+
+#### Visual Design
+- **Color Palette**:
+  - Green (#10b981) - Current Teams tab, member badges
+  - Blue (#3b82f6) - Add to Team tab
+  - Purple (#8b5cf6) - Accessible Projects tab, admin badges
+  - Red (#ef4444) - Remove actions
+  
+- **Icons** (All from Heroicons):
+  - Teams: Multiple users icon
+  - Add: Plus icon
+  - Projects: Folder icon
+  - Role toggle: Arrows up/down
+  - Remove: Trash icon
+  - Team badge: Users icon
+  - Calendar: Calendar icon
+
+#### Integration Status
+| Feature | Status | Details |
+|---------|--------|---------|
+| Current Teams Display | ✅ Complete | Shows all memberships with roles |
+| Role Management | ✅ Complete | Promote/demote admin/member |
+| Remove from Team | ✅ Complete | With access warning |
+| Add to Team | ✅ Complete | Smart filtering, auto-navigation |
+| Project Visibility | ✅ Complete | All accessible projects listed |
+| Project Status | ✅ Complete | Color-coded active/hold/completed |
+| Empty States | ✅ Complete | Contextual guidance everywhere |
+| Loading States | ✅ Complete | Spinners during data fetch |
+| Real-time Updates | ✅ Complete | Query invalidation on mutations |
+
+#### Files Modified
+1. **`frontend/src/pages/StaffPage.tsx`** (+387 lines):
+   - Enhanced imports: Added `projectsApi`, `TeamMember`, `Project` types
+   - Completely rewrote `ManageTeamsModal` component
+   - Added 3-tab interface with state management
+   - Implemented all CRUD operations for team membership
+   - Added project access visualization
+
+#### Testing Performed
+- ✅ View staff's current teams (empty and populated states)
+- ✅ Promote member to admin
+- ✅ Demote admin to member
+- ✅ Remove staff from team
+- ✅ Add staff to team (single and multiple)
+- ✅ View accessible projects (0, 1, and many projects)
+- ✅ Verify project status badges render correctly
+- ✅ Tab navigation works smoothly
+- ✅ Auto-navigation after adding to team
+- ✅ All empty states display properly
+- ✅ Loading states appear during async operations
+- ✅ Query invalidation updates UI immediately
+
+#### Business Value
+- **Complete Team Visibility** - Admins see exactly which teams each staff member belongs to
+- **Role Management** - Easy promotion/demotion without leaving the page
+- **Safe Removals** - Warning dialogs prevent accidental loss of access
+- **Project Transparency** - Clear view of what projects staff can access
+- **Efficient Workflow** - All team/project management in one modal
+- **Error Prevention** - Can't add to same team twice (smart filtering)
+- **Audit Trail** - Can see role changes immediately reflected
+
+---
+
 ## 🚀 Phase 3 & 4 Progress Update - COMPLETED ✅
 **Date:** December 8, 2025
 
