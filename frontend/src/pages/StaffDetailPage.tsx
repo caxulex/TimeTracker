@@ -298,9 +298,9 @@ export function StaffDetailPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6 p-2 md:p-4 lg:p-6">
       {/* Header with Back Button */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-2 md:gap-4">
         <button
           onClick={() => navigate('/staff')}
           className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
@@ -310,23 +310,32 @@ export function StaffDetailPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </button>
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold text-gray-900">Staff Details</h1>
-          <p className="text-gray-500">View and manage {staff.name}'s information</p>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-xl md:text-2xl font-bold text-gray-900 truncate">Staff Details</h1>
+          <p className="text-sm md:text-base text-gray-500 truncate">View and manage {staff.name}'s information</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-shrink-0">
           {!editMode && (
-            <Button onClick={startEdit}>
+            <Button onClick={startEdit} className="hidden md:flex">
               <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
               </svg>
               Edit Info
             </Button>
           )}
+          {!editMode && (
+            <Button onClick={startEdit} size="sm" className="md:hidden">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </Button>
+          )}
           <Button
             variant="secondary"
+            size="sm"
             onClick={handleToggleActive}
             disabled={staff.id === currentUser?.id}
+            className="hidden md:flex"
           >
             {staff.is_active ? 'Deactivate' : 'Activate'}
           </Button>
@@ -335,16 +344,16 @@ export function StaffDetailPage() {
 
       {/* Staff Profile Card */}
       <Card>
-        <div className="p-6">
-          <div className="flex items-start gap-6">
-            <div className="h-24 w-24 flex-shrink-0 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white text-4xl font-bold shadow-lg">
+        <div className="p-4 md:p-6">
+          <div className="flex flex-col sm:flex-row items-start gap-4 md:gap-6">
+            <div className="h-20 w-20 md:h-24 md:w-24 flex-shrink-0 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white text-3xl md:text-4xl font-bold shadow-lg mx-auto sm:mx-0">
               {staff.name.charAt(0).toUpperCase()}
             </div>
-            <div className="flex-1">
-              <div className="flex items-center gap-3 mb-2">
-                <h2 className="text-2xl font-bold text-gray-900">{staff.name}</h2>
+            <div className="flex-1 w-full text-center sm:text-left">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 md:gap-3 mb-2">
+                <h2 className="text-xl md:text-2xl font-bold text-gray-900">{staff.name}</h2>
                 <span
-                  className={`px-3 py-1 text-sm font-semibold rounded-full ${
+                  className={`px-3 py-1 text-xs md:text-sm font-semibold rounded-full inline-block ${
                     staff.is_active
                       ? 'bg-green-100 text-green-800'
                       : 'bg-red-100 text-red-800'
@@ -433,41 +442,44 @@ export function StaffDetailPage() {
       </div>
 
       {/* Tabs Navigation */}
-      <div className="border-b border-gray-200">
-        <div className="flex space-x-8">
+      <div className="border-b border-gray-200 overflow-x-auto">
+        <div className="flex space-x-4 md:space-x-8 min-w-max px-2 md:px-0">
           <button
             onClick={() => setActiveTab('overview')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+            className={`py-3 md:py-4 px-2 md:px-1 border-b-2 font-medium text-xs md:text-sm transition-colors whitespace-nowrap ${
               activeTab === 'overview'
                 ? 'border-blue-500 text-blue-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             }`}
           >
-            📋 Overview
+            <span className="hidden sm:inline">📋 Overview</span>
+            <span className="sm:hidden">📋</span>
           </button>
           <button
             onClick={() => setActiveTab('payroll')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+            className={`py-3 md:py-4 px-2 md:px-1 border-b-2 font-medium text-xs md:text-sm transition-colors whitespace-nowrap ${
               activeTab === 'payroll'
                 ? 'border-emerald-500 text-emerald-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             }`}
           >
-            💰 Payroll
+            <span className="hidden sm:inline">💰 Payroll</span>
+            <span className="sm:hidden">💰</span>
           </button>
           <button
             onClick={() => setActiveTab('time')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+            className={`py-3 md:py-4 px-2 md:px-1 border-b-2 font-medium text-xs md:text-sm transition-colors whitespace-nowrap ${
               activeTab === 'time'
                 ? 'border-indigo-500 text-indigo-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             }`}
           >
-            ⏱️ Time Tracking
+            <span className="hidden sm:inline">⏱️ Time Tracking</span>
+            <span className="sm:hidden">⏱️</span>
           </button>
           <button
             onClick={() => setActiveTab('teams')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+            className={`py-3 md:py-4 px-2 md:px-1 border-b-2 font-medium text-xs md:text-sm transition-colors whitespace-nowrap ${
               activeTab === 'teams'
                 ? 'border-green-500 text-green-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'

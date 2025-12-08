@@ -249,18 +249,19 @@ export function StaffPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6 p-4 md:p-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 md:gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Staff Management</h1>
-          <p className="text-gray-500">Create and manage workers, assign teams</p>
+          <h1 className="text-xl md:text-2xl font-bold text-gray-900">Staff Management</h1>
+          <p className="text-sm md:text-base text-gray-500">Create and manage workers, assign teams</p>
         </div>
-        <Button onClick={() => setShowCreateModal(true)}>
+        <Button onClick={() => setShowCreateModal(true)} className="w-full sm:w-auto">
           <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          Add Staff Member
+          <span className="hidden sm:inline">Add Staff Member</span>
+          <span className="sm:hidden">Add Staff</span>
         </Button>
       </div>
 
@@ -304,7 +305,133 @@ export function StaffPage() {
       {/* Staff List */}
       <Card>
         <CardHeader title="Staff Members" />
-        <div className="overflow-x-auto">
+        
+        {/* Mobile Card View */}
+        <div className="md:hidden divide-y divide-gray-200">
+          {usersData?.items.map((staff: User) => (
+            <div key={staff.id} className="p-4 hover:bg-gray-50">
+              {/* Staff Header */}
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center gap-3 flex-1">
+                  <div className="h-12 w-12 flex-shrink-0 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold text-lg">
+                    {staff.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-gray-900 truncate">{staff.name}</div>
+                    <div className="text-xs text-gray-500 truncate">{staff.email}</div>
+                    {staff.job_title && (
+                      <div className="text-xs text-gray-600 truncate mt-0.5">{staff.job_title}</div>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => navigate(`/staff/${staff.id}`)}
+                  className="text-blue-600 hover:text-blue-900 p-2"
+                  title="View Profile"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+              
+              {/* Staff Info */}
+              <div className="grid grid-cols-2 gap-2 mb-3 text-xs">
+                {staff.department && (
+                  <div>
+                    <span className="text-gray-500">Department:</span>
+                    <div className="text-gray-900 font-medium">{staff.department}</div>
+                  </div>
+                )}
+                {staff.employment_type && (
+                  <div>
+                    <span className="text-gray-500">Type:</span>
+                    <div className="mt-1">
+                      <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
+                        staff.employment_type === 'full_time' ? 'bg-blue-100 text-blue-800' :
+                        staff.employment_type === 'part_time' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-purple-100 text-purple-800'
+                      }`}>
+                        {staff.employment_type === 'full_time' ? 'Full-time' :
+                         staff.employment_type === 'part_time' ? 'Part-time' : 'Contractor'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {/* Badges */}
+              <div className="flex gap-2 mb-3">
+                <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                  staff.role === 'super_admin' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800'
+                }`}>
+                  {staff.role === 'super_admin' ? 'Admin' : 'Worker'}
+                </span>
+                <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                  staff.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                }`}>
+                  {staff.is_active ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+              
+              {/* Action Buttons */}
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => handleEditStaff(staff)}
+                  className="flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium text-blue-700 bg-blue-50 rounded-md hover:bg-blue-100"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                  Edit
+                </button>
+                <button
+                  onClick={() => { setSelectedStaff(staff); setShowPayrollModal(true); }}
+                  className="flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium text-emerald-700 bg-emerald-50 rounded-md hover:bg-emerald-100"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Pay
+                </button>
+                <button
+                  onClick={() => handleManageTeams(staff)}
+                  className="flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium text-green-700 bg-green-50 rounded-md hover:bg-green-100"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                  Teams
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                <button
+                  onClick={() => { setSelectedStaff(staff); setShowTimeModal(true); }}
+                  className="flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 rounded-md hover:bg-indigo-100"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Time
+                </button>
+                <button
+                  onClick={() => handleToggleActive(staff)}
+                  disabled={staff.id === currentUser?.id}
+                  className={`flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium rounded-md ${
+                    staff.is_active
+                      ? 'text-red-700 bg-red-50 hover:bg-red-100'
+                      : 'text-green-700 bg-green-50 hover:bg-green-100'
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  {staff.is_active ? 'Deactivate' : 'Activate'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        
+        {/* Desktop Table View */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -525,18 +652,18 @@ export function StaffPage() {
 
       {/* Create Staff Modal - Multi-Step Wizard */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <Card className="max-w-2xl w-full my-8">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-2 md:p-4 z-50 overflow-y-auto">
+          <Card className="w-full max-w-2xl my-4 md:my-8 mx-2 md:mx-auto">
             <CardHeader title="Add New Staff Member" />
             
             {/* Progress Indicator */}
-            <div className="px-6 pt-4">
-              <div className="flex items-center justify-between mb-8">
+            <div className="px-3 md:px-6 pt-4">
+              <div className="flex items-center justify-between mb-6 md:mb-8">
                 {[1, 2, 3, 4].map((step) => (
                   <div key={step} className="flex items-center flex-1">
                     <div className="flex flex-col items-center flex-1">
                       <div
-                        className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold ${
+                        className={`w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center text-sm md:text-base font-semibold ${
                           formStep === step
                             ? 'bg-blue-600 text-white'
                             : formStep > step
@@ -546,7 +673,7 @@ export function StaffPage() {
                       >
                         {formStep > step ? '✓' : step}
                       </div>
-                      <div className="text-xs mt-2 text-center font-medium">
+                      <div className="text-[10px] md:text-xs mt-1 md:mt-2 text-center font-medium hidden sm:block">
                         {step === 1 && 'Basic Info'}
                         {step === 2 && 'Employment'}
                         {step === 3 && 'Contact'}
@@ -934,8 +1061,8 @@ export function StaffPage() {
 
       {/* Edit Staff Modal */}
       {showEditModal && selectedStaff && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <Card className="max-w-md w-full">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-2 md:p-4 z-50 overflow-y-auto">
+          <Card className="w-full max-w-md my-auto">
             <CardHeader title="Edit Staff Member" />
             <form onSubmit={handleUpdateStaff} className="space-y-4 p-6">
               <div>
