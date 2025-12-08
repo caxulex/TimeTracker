@@ -142,12 +142,12 @@ export function StaffDetailPage() {
       }
 
       // Validate and sanitize the data
-      const validationResult = formValidation.secureAndValidate(data, true);
-      if (!validationResult.isValid) {
-        throw new Error(validationResult.errors[0] || 'Validation failed');
+      const validationResult = formValidation.secureAndValidate(data as any, true);
+      if (!validationResult.valid) {
+        throw new Error('Validation failed');
       }
 
-      return usersApi.update(staffId, validationResult.data);
+      return usersApi.update(staffId, validationResult.securedData as any);
     },
     onSuccess: (updatedStaff) => {
       queryClient.invalidateQueries({ queryKey: ['staff', staffId] });
@@ -160,7 +160,7 @@ export function StaffDetailPage() {
       if (errorMessage.includes('permission')) {
         notifications.notifyError('Permission Denied', errorMessage);
       } else if (errorMessage.includes('Validation')) {
-        notifications.notifyValidationError(errorMessage);
+        notifications.notifyValidationError('Form', errorMessage);
       } else {
         notifications.notifyStaffUpdateFailed(errorMessage);
       }
@@ -801,15 +801,11 @@ export function StaffDetailPage() {
                             <div className="flex items-center gap-3 mb-2">
                               <h4 className="font-semibold text-gray-900">{project.name}</h4>
                               <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                                project.status === 'active'
-                                  ? 'bg-green-100 text-green-800'
-                                  : project.status === 'on_hold'
-                                  ? 'bg-yellow-100 text-yellow-800'
-                                  : 'bg-gray-100 text-gray-800'
+                                project.is_archived
+                                  ? 'bg-gray-100 text-gray-800'
+                                  : 'bg-green-100 text-green-800'
                               }`}>
-                                {project.status === 'active' && '🟢 Active'}
-                                {project.status === 'on_hold' && '⏸️ On Hold'}
-                                {project.status === 'completed' && '✅ Completed'}
+                                {project.is_archived ? '📦 Archived' : '🟢 Active'}
                               </span>
                             </div>
                             {project.description && (

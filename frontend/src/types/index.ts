@@ -224,6 +224,7 @@ export interface ValidationError {
 
 // Filter Types
 export interface TimeEntryFilters {
+  user_id?: number;
   project_id?: number;
   task_id?: number;
   start_date?: string;

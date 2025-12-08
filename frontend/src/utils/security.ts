@@ -203,7 +203,7 @@ export function redactSensitiveData<T extends Record<string, any>>(
 
   sensitiveFields.forEach((field) => {
     if (field in redacted) {
-      redacted[field] = '***REDACTED***';
+      (redacted as any)[field] = '***REDACTED***';
     }
   });
 
@@ -278,7 +278,7 @@ export function secureFormData<T extends Record<string, any>>(data: T): T {
   // Sanitize string fields
   Object.keys(secured).forEach((key) => {
     if (typeof secured[key] === 'string') {
-      secured[key] = sanitizeString(secured[key]);
+      (secured as any)[key] = sanitizeString(secured[key]);
     }
   });
 

@@ -71,12 +71,26 @@ export function StaffPage() {
 
   const isAdmin = currentUser?.role === 'super_admin';
 
-  // Fetch staff members with debounced search
+  // Fetch staff members
   const { data: usersData, isLoading } = useQuery({
-    queryKey: ['staff', page, debouncedSearch],
-    queryFn: () => usersApi.getAll(page, 20, debouncedSearch),
+    queryKey: ['staff', page],
+    queryFn: () => usersApi.getAll(page, 20),
     enabled: isAdmin,
   });
+
+  // Filter users based on debounced search
+  const filteredUsers = useMemo(() => {
+    if (!usersData?.items) return [];
+    if (!debouncedSearch) return usersData.items;
+    
+    const searchLower = debouncedSearch.toLowerCase();
+    return usersData.items.filter(user => 
+      user.name.toLowerCase().includes(searchLower) ||
+      user.email.toLowerCase().includes(searchLower) ||
+      (user.job_title && user.job_title.toLowerCase().includes(searchLower)) ||
+      (user.department && user.department.toLowerCase().includes(searchLower))
+    );
+  }, [usersData, debouncedSearch]);
 
   // Fetch all teams
   const { data: teamsData } = useQuery({
@@ -188,7 +202,7 @@ export function StaffPage() {
         return;
       }
       
-      updateStaffMutation.mutate({ id: selectedStaff.id, data: securedData });
+      updateStaffMutation.mutate({ id: selectedStaff.id, data: securedData as any });
     }
   }, [selectedStaff, editForm, permissions, notifications, formValidation, updateStaffMutation]);
 
@@ -219,11 +233,11 @@ export function StaffPage() {
 
   if (!isAdmin) {
     return (
-      <div className=\"flex items-center justify-center h-full\">
+      <div className="flex items-center justify-center h-full">
         <Card>
-          <div className=\"text-center p-8\">
-            <h2 className=\"text-xl font-bold text-gray-900 mb-2\">Access Denied</h2>
-            <p className=\"text-gray-500\">Admin privileges required.</p>
+          <div className="text-center p-8">
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Access Denied</h2>
+            <p className="text-gray-500">Admin privileges required.</p>
           </div>
         </Card>
       </div>
@@ -231,7 +245,7 @@ export function StaffPage() {
   }
 
   if (isLoading) {
-    return <LoadingOverlay message=\"Loading staff...\" />;
+    return <LoadingOverlay message="Loading staff..." />;
   }
 
   const handleCreateStaff = (e: React.FormEvent) => {
@@ -318,7 +332,7 @@ export function StaffPage() {
         
         {/* Mobile Card View */}
         <div className="md:hidden divide-y divide-gray-200">
-          {usersData?.items.map((staff: User) => (
+          {filteredUsers.map((staff: User) => (
             <div key={staff.id} className="p-4 hover:bg-gray-50">
               {/* Staff Header */}
               <div className="flex items-start justify-between mb-3">
@@ -469,7 +483,7 @@ export function StaffPage() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {usersData?.items.map((staff: User) => (
+              {filteredUsers.map((staff: User) => (
                 <tr key={staff.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
@@ -1058,7 +1072,7 @@ export function StaffPage() {
                       Next →
                     </Button>
                   ) : (
-                    <Button type="submit" loading={createStaffMutation.isPending}>
+                    <Button type="submit" isLoading={createStaffMutation.isPending}>
                       Create Staff Member
                     </Button>
                   )}
@@ -1121,7 +1135,7 @@ export function StaffPage() {
                 >
                   Cancel
                 </Button>
-                <Button type="submit" loading={updateStaffMutation.isPending}>
+                <Button type="submit" isLoading={updateStaffMutation.isPending}>
                   Save Changes
                 </Button>
               </div>
@@ -1180,6 +1194,7 @@ export function StaffPage() {
 // Manage Teams & Projects Modal Component
 function ManageTeamsModal({ staff, onClose }: { staff: User; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const notifications = useStaffNotifications();
   const [activeTab, setActiveTab] = useState<'current' | 'add' | 'projects'>('current');
 
   // Fetch all teams
@@ -1435,7 +1450,7 @@ function ManageTeamsModal({ staff, onClose }: { staff: User; onClose: () => void
                       <Button
                         size="sm"
                         onClick={() => handleAddToTeam(team.id, team.name)}
-                        loading={addToTeamMutation.isPending}
+                        isLoading={addToTeamMutation.isPending}
                       >
                         <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -1479,16 +1494,12 @@ function ManageTeamsModal({ staff, onClose }: { staff: User; onClose: () => void
                               <h4 className="font-semibold text-gray-900">{project.name}</h4>
                               <span
                                 className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                                  project.status === 'active'
-                                    ? 'bg-green-100 text-green-800'
-                                    : project.status === 'on_hold'
-                                    ? 'bg-yellow-100 text-yellow-800'
-                                    : 'bg-gray-100 text-gray-800'
+                                  project.is_archived
+                                    ? 'bg-gray-100 text-gray-800'
+                                    : 'bg-green-100 text-green-800'
                                 }`}
                               >
-                                {project.status === 'active' && '🟢 Active'}
-                                {project.status === 'on_hold' && '⏸️ On Hold'}
-                                {project.status === 'completed' && '✅ Completed'}
+                                {project.is_archived ? '📦 Archived' : '🟢 Active'}
                               </span>
                             </div>
                             {project.description && (
@@ -1790,10 +1801,12 @@ function TimeTrackingModal({ staff, onClose }: { staff: User; onClose: () => voi
     queryKey: ['timeEntries', staff.id, dateRange],
     queryFn: () => {
       const dates = getDateRange();
-      return timeEntriesApi.getAll(1, 100, {
+      return timeEntriesApi.getAll({
         user_id: staff.id,
         start_date: dates.start_date,
         end_date: dates.end_date,
+        page: 1,
+        size: 100,
       });
     },
   });
@@ -1967,6 +1980,7 @@ function TimeTrackingModal({ staff, onClose }: { staff: User; onClose: () => voi
 
 // Analytics Modal Component
 function AnalyticsModal({ staff, onClose }: { staff: User; onClose: () => void }) {
+  const notifications = useStaffNotifications();
   const [dateRange, setDateRange] = useState<'week' | 'month' | 'year'>('month');
   const [activeTab, setActiveTab] = useState<'overview' | 'performance' | 'export'>('overview');
 
