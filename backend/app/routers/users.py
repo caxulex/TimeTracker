@@ -18,10 +18,34 @@ router = APIRouter()
 
 
 class UserCreate(BaseModel):
+    # Basic Info
     email: EmailStr
     password: str = Field(..., min_length=8)
     name: str = Field(..., min_length=1, max_length=255)
     role: str = Field(default="regular_user")
+    
+    # Contact Information
+    phone: Optional[str] = Field(None, max_length=50)
+    address: Optional[str] = None
+    emergency_contact_name: Optional[str] = Field(None, max_length=255)
+    emergency_contact_phone: Optional[str] = Field(None, max_length=50)
+    
+    # Employment Details
+    job_title: Optional[str] = Field(None, max_length=255)
+    department: Optional[str] = Field(None, max_length=255)
+    employment_type: Optional[str] = Field(None, pattern="^(full_time|part_time|contractor)$")
+    start_date: Optional[str] = None  # date as YYYY-MM-DD string
+    expected_hours_per_week: Optional[float] = Field(None, ge=0, le=168)
+    manager_id: Optional[int] = None
+    
+    # Payroll Information (optional during creation, will create PayRate)
+    pay_rate: Optional[float] = Field(None, ge=0, description="Hourly/daily/monthly rate")
+    pay_rate_type: Optional[str] = Field("hourly", pattern="^(hourly|daily|monthly|project_based)$")
+    overtime_multiplier: Optional[float] = Field(1.5, ge=1.0, le=3.0)
+    currency: Optional[str] = Field("USD", max_length=3)
+    
+    # Team Assignment (optional, can assign to teams immediately)
+    team_ids: Optional[List[int]] = Field(default=[], description="List of team IDs to add user to")
 
 
 class UserAdminUpdate(BaseModel):
@@ -105,21 +129,94 @@ async def create_user(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    """Create a new user (admin only)"""
+    """
+    Create a new user with comprehensive staff information (admin only)
+    
+    This endpoint creates a user and optionally:
+    - Creates a pay rate if payroll info is provided
+    - Assigns user to teams if team_ids are provided
+    - Sets employment and contact details
+    """
+    from datetime import date as dt_date
+    from app.models import PayRate, Team, TeamMember
+    from app.schemas.payroll import RateTypeEnum
+    
     # Check if email exists
     result = await db.execute(select(User).where(User.email == user_data.email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
     
+    # Parse start_date if provided
+    parsed_start_date = None
+    if user_data.start_date:
+        try:
+            from datetime import datetime
+            parsed_start_date = datetime.strptime(user_data.start_date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid start_date format. Use YYYY-MM-DD")
+    
+    # Create user with all fields
     new_user = User(
+        # Basic Info
         email=user_data.email,
         password_hash=auth_service.hash_password(user_data.password),
         name=user_data.name,
         role=user_data.role,
         is_active=True,
+        
+        # Contact Information
+        phone=user_data.phone,
+        address=user_data.address,
+        emergency_contact_name=user_data.emergency_contact_name,
+        emergency_contact_phone=user_data.emergency_contact_phone,
+        
+        # Employment Details
+        job_title=user_data.job_title,
+        department=user_data.department,
+        employment_type=user_data.employment_type,
+        start_date=parsed_start_date,
+        expected_hours_per_week=user_data.expected_hours_per_week,
+        manager_id=user_data.manager_id,
     )
     
     db.add(new_user)
+    await db.flush()  # Flush to get user ID without committing
+    
+    # Create pay rate if payroll info provided
+    if user_data.pay_rate is not None and user_data.pay_rate > 0:
+        from decimal import Decimal
+        pay_rate = PayRate(
+            user_id=new_user.id,
+            rate_type=user_data.pay_rate_type or "hourly",
+            base_rate=Decimal(str(user_data.pay_rate)),
+            currency=user_data.currency or "USD",
+            overtime_multiplier=Decimal(str(user_data.overtime_multiplier or 1.5)),
+            effective_from=parsed_start_date or dt_date.today(),
+            is_active=True,
+            created_by=current_user.id,
+        )
+        db.add(pay_rate)
+    
+    # Assign to teams if team_ids provided
+    if user_data.team_ids:
+        for team_id in user_data.team_ids:
+            # Verify team exists
+            team_result = await db.execute(select(Team).where(Team.id == team_id))
+            team = team_result.scalar_one_or_none()
+            if not team:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Team with ID {team_id} not found"
+                )
+            
+            # Add user to team
+            team_member = TeamMember(
+                team_id=team_id,
+                user_id=new_user.id,
+                role="member"
+            )
+            db.add(team_member)
+    
     await db.commit()
     await db.refresh(new_user)
     

@@ -72,6 +72,20 @@ class UserResponse(BaseModel):
     name: str
     role: str
     is_active: bool
+    
+    # Contact Information
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    
+    # Employment Details
+    job_title: Optional[str] = None
+    department: Optional[str] = None
+    employment_type: Optional[str] = None  # full_time, part_time, contractor
+    start_date: Optional[str] = None  # date as string
+    expected_hours_per_week: Optional[float] = None
+    manager_id: Optional[int] = None
 
     class Config:
         from_attributes = True

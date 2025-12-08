@@ -17,12 +17,39 @@ export function StaffPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showTeamsModal, setShowTeamsModal] = useState(false);
   const [selectedStaff, setSelectedStaff] = useState<User | null>(null);
-  const [createForm, setCreateForm] = useState<UserCreate>({
+  const [formStep, setFormStep] = useState(1); // Multi-step form
+  
+  const [createForm, setCreateForm] = useState({
+    // Basic Info
     email: '',
     password: '',
     name: '',
     role: 'regular_user',
+    
+    // Contact Information
+    phone: '',
+    address: '',
+    emergency_contact_name: '',
+    emergency_contact_phone: '',
+    
+    // Employment Details
+    job_title: '',
+    department: '',
+    employment_type: 'full_time' as 'full_time' | 'part_time' | 'contractor',
+    start_date: new Date().toISOString().split('T')[0],
+    expected_hours_per_week: 40,
+    manager_id: null as number | null,
+    
+    // Payroll Information
+    pay_rate: 0,
+    pay_rate_type: 'hourly' as 'hourly' | 'daily' | 'monthly' | 'project_based',
+    overtime_multiplier: 1.5,
+    currency: 'USD',
+    
+    // Team Assignment
+    team_ids: [] as number[],
   });
+  
   const [editForm, setEditForm] = useState({
     name: '',
     email: '',
@@ -46,11 +73,33 @@ export function StaffPage() {
 
   // Create staff mutation
   const createStaffMutation = useMutation({
-    mutationFn: (data: UserCreate) => usersApi.create(data),
+    mutationFn: (data: typeof createForm) => usersApi.create(data as any),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['staff'] });
       setShowCreateModal(false);
-      setCreateForm({ email: '', password: '', name: '', role: 'regular_user' });
+      setFormStep(1);
+      // Reset form
+      setCreateForm({
+        email: '',
+        password: '',
+        name: '',
+        role: 'regular_user',
+        phone: '',
+        address: '',
+        emergency_contact_name: '',
+        emergency_contact_phone: '',
+        job_title: '',
+        department: '',
+        employment_type: 'full_time',
+        start_date: new Date().toISOString().split('T')[0],
+        expected_hours_per_week: 40,
+        manager_id: null,
+        pay_rate: 0,
+        pay_rate_type: 'hourly',
+        overtime_multiplier: 1.5,
+        currency: 'USD',
+        team_ids: [],
+      });
     },
   });
 

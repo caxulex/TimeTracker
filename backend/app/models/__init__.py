@@ -66,15 +66,32 @@ class AdjustmentType(str, enum.Enum):
 # ============================================
 
 class User(Base):
-    """User model"""
+    """User model with comprehensive staff information"""
     __tablename__ = "users"
 
+    # Basic Identity
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(50), nullable=False, default="regular_user")  # super_admin, regular_user
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    
+    # Contact Information
+    phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    emergency_contact_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    emergency_contact_phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    
+    # Employment Details
+    job_title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    department: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    employment_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)  # full_time, part_time, contractor
+    start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    expected_hours_per_week: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
+    manager_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    
+    # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -83,6 +100,7 @@ class User(Base):
     time_entries: Mapped[list["TimeEntry"]] = relationship("TimeEntry", back_populates="user")
     pay_rates: Mapped[list["PayRate"]] = relationship("PayRate", back_populates="user", foreign_keys="PayRate.user_id")
     payroll_entries: Mapped[list["PayrollEntry"]] = relationship("PayrollEntry", back_populates="user")
+    manager: Mapped[Optional["User"]] = relationship("User", remote_side=[id], foreign_keys=[manager_id])
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, email={self.email}, role={self.role})>"
