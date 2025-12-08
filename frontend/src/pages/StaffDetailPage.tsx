@@ -7,6 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
 import { usersApi, teamsApi, payRatesApi, timeEntriesApi, projectsApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
+import { useStaffNotifications } from '../hooks/useStaffNotifications';
 import type { User, TeamMember, PayRate, TimeEntry, Project } from '../types';
 
 export function StaffDetailPage() {
@@ -14,6 +15,7 @@ export function StaffDetailPage() {
   const navigate = useNavigate();
   const { user: currentUser } = useAuthStore();
   const queryClient = useQueryClient();
+  const notifications = useStaffNotifications();
   const [activeTab, setActiveTab] = useState<'overview' | 'payroll' | 'time' | 'teams' | 'projects' | 'settings'>('overview');
   const [dateRange, setDateRange] = useState<'week' | 'month' | 'year'>('month');
   const [editMode, setEditMode] = useState(false);
@@ -130,10 +132,13 @@ export function StaffDetailPage() {
   // Update staff mutation
   const updateStaffMutation = useMutation({
     mutationFn: (data: Partial<User>) => usersApi.update(staffId, data),
-    onSuccess: () => {
+    onSuccess: (updatedStaff) => {
       queryClient.invalidateQueries({ queryKey: ['staff', staffId] });
+      notifications.notifyStaffUpdated(updatedStaff);
       setEditMode(false);
-      alert('Staff information updated successfully!');
+    },
+    onError: (error: any) => {
+      notifications.notifyStaffUpdateFailed(error?.response?.data?.detail || error.message);
     },
   });
 
@@ -141,13 +146,23 @@ export function StaffDetailPage() {
   const toggleActiveMutation = useMutation({
     mutationFn: async (isActive: boolean) => {
       if (!isActive) {
-        return usersApi.delete(staffId);
+        await usersApi.delete(staffId);
+        return { ...staff!, is_active: false };
       } else {
-        return usersApi.update(staffId, { is_active: true });
+        const updated = await usersApi.update(staffId, { is_active: true });
+        return updated;
       }
     },
-    onSuccess: () => {
+    onSuccess: (updatedStaff) => {
       queryClient.invalidateQueries({ queryKey: ['staff', staffId] });
+      if (updatedStaff.is_active) {
+        notifications.notifyStaffActivated(updatedStaff);
+      } else {
+        notifications.notifyStaffDeactivated(updatedStaff);
+      }
+    },
+    onError: (error: any) => {
+      notifications.notifyError('Status Change Failed', error?.response?.data?.detail || error.message);
     },
   });
 
@@ -198,7 +213,7 @@ export function StaffDetailPage() {
   const handleToggleActive = () => {
     if (!staff) return;
     if (staff.id === currentUser?.id) {
-      alert("You can't deactivate yourself!");
+      notifications.notifyWarning("Can't Deactivate Yourself", "You cannot deactivate your own account.");
       return;
     }
     const action = staff.is_active ? 'deactivate' : 'activate';

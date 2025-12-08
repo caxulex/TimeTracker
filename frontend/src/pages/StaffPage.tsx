@@ -7,12 +7,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
 import { usersApi, teamsApi, payRatesApi, timeEntriesApi, projectsApi, reportsApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
+import { useStaffNotifications } from '../hooks/useStaffNotifications';
 import type { User, UserCreate, Team, TeamMember, PayRate, TimeEntry, Project } from '../types';
 
 export function StaffPage() {
   const { user: currentUser } = useAuthStore();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const notifications = useStaffNotifications();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -79,8 +81,9 @@ export function StaffPage() {
   // Create staff mutation
   const createStaffMutation = useMutation({
     mutationFn: (data: typeof createForm) => usersApi.create(data as any),
-    onSuccess: () => {
+    onSuccess: (newStaff) => {
       queryClient.invalidateQueries({ queryKey: ['staff'] });
+      notifications.notifyStaffCreated(newStaff);
       setShowCreateModal(false);
       setFormStep(1);
       // Reset form
@@ -106,30 +109,47 @@ export function StaffPage() {
         team_ids: [],
       });
     },
+    onError: (error: any) => {
+      notifications.notifyStaffCreationFailed(error?.response?.data?.detail || error.message);
+    },
   });
 
   // Update staff mutation
   const updateStaffMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: Partial<User> }) =>
       usersApi.update(id, data),
-    onSuccess: () => {
+    onSuccess: (updatedStaff) => {
       queryClient.invalidateQueries({ queryKey: ['staff'] });
+      notifications.notifyStaffUpdated(updatedStaff);
       setShowEditModal(false);
       setSelectedStaff(null);
+    },
+    onError: (error: any) => {
+      notifications.notifyStaffUpdateFailed(error?.response?.data?.detail || error.message);
     },
   });
 
   // Toggle active mutation
   const toggleActiveMutation = useMutation({
-    mutationFn: async ({ id, isActive }: { id: number; isActive: boolean }) => {
+    mutationFn: async ({ id, isActive, staff }: { id: number; isActive: boolean; staff: User }) => {
       if (!isActive) {
-        return usersApi.delete(id);
+        await usersApi.delete(id);
+        return { ...staff, is_active: false };
       } else {
-        return usersApi.update(id, { is_active: true });
+        const updated = await usersApi.update(id, { is_active: true });
+        return updated;
       }
     },
-    onSuccess: () => {
+    onSuccess: (updatedStaff) => {
       queryClient.invalidateQueries({ queryKey: ['staff'] });
+      if (updatedStaff.is_active) {
+        notifications.notifyStaffActivated(updatedStaff);
+      } else {
+        notifications.notifyStaffDeactivated(updatedStaff);
+      }
+    },
+    onError: (error: any) => {
+      notifications.notifyError('Status Change Failed', error?.response?.data?.detail || error.message);
     },
   });
 
@@ -173,12 +193,12 @@ export function StaffPage() {
 
   const handleToggleActive = (staff: User) => {
     if (staff.id === currentUser?.id) {
-      alert("You can't deactivate yourself!");
+      notifications.notifyWarning("Can't Deactivate Yourself", "You cannot deactivate your own account.");
       return;
     }
     const action = staff.is_active ? 'deactivate' : 'activate';
     if (confirm(`Are you sure you want to ${action} ${staff.name}?`)) {
-      toggleActiveMutation.mutate({ id: staff.id, isActive: staff.is_active });
+      toggleActiveMutation.mutate({ id: staff.id, isActive: staff.is_active, staff });
     }
   };
 
@@ -987,25 +1007,31 @@ function ManageTeamsModal({ staff, onClose }: { staff: User; onClose: () => void
   });
 
   const addToTeamMutation = useMutation({
-    mutationFn: ({ teamId, userId, role }: { teamId: number; userId: number; role: string }) =>
+    mutationFn: ({ teamId, userId, role, teamName }: { teamId: number; userId: number; role: string; teamName: string }) =>
       teamsApi.addMember(teamId, userId, role),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
       queryClient.invalidateQueries({ queryKey: ['staff-teams', staff.id] });
       queryClient.invalidateQueries({ queryKey: ['staff-projects', staff.id] });
-      alert('Staff member added to team successfully!');
+      notifications.notifyAddedToTeam(staff.name, variables.teamName);
       setActiveTab('current');
+    },
+    onError: (error: any) => {
+      notifications.notifyTeamOperationFailed(error?.response?.data?.detail || error.message);
     },
   });
 
   const removeFromTeamMutation = useMutation({
-    mutationFn: ({ teamId, userId }: { teamId: number; userId: number }) =>
+    mutationFn: ({ teamId, userId, teamName }: { teamId: number; userId: number; teamName: string }) =>
       teamsApi.removeMember(teamId, userId),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
       queryClient.invalidateQueries({ queryKey: ['staff-teams', staff.id] });
       queryClient.invalidateQueries({ queryKey: ['staff-projects', staff.id] });
-      alert('Staff member removed from team successfully!');
+      notifications.notifyRemovedFromTeam(staff.name, variables.teamName);
+    },
+    onError: (error: any) => {
+      notifications.notifyTeamOperationFailed(error?.response?.data?.detail || error.message);
     },
   });
 
@@ -1015,19 +1041,22 @@ function ManageTeamsModal({ staff, onClose }: { staff: User; onClose: () => void
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
       queryClient.invalidateQueries({ queryKey: ['staff-teams', staff.id] });
-      alert('Member role updated successfully!');
+      notifications.notifySuccess('Role Updated', 'Member role updated successfully!');
+    },
+    onError: (error: any) => {
+      notifications.notifyError('Role Update Failed', error?.response?.data?.detail || error.message);
     },
   });
 
-  const handleAddToTeam = (teamId: number) => {
-    if (confirm(`Add ${staff.name} to this team?`)) {
-      addToTeamMutation.mutate({ teamId, userId: staff.id, role: 'member' });
+  const handleAddToTeam = (teamId: number, teamName: string) => {
+    if (confirm(`Add ${staff.name} to ${teamName}?`)) {
+      addToTeamMutation.mutate({ teamId, userId: staff.id, role: 'member', teamName });
     }
   };
 
   const handleRemoveFromTeam = (teamId: number, teamName: string) => {
     if (confirm(`Remove ${staff.name} from "${teamName}"? They will lose access to all projects in this team.`)) {
-      removeFromTeamMutation.mutate({ teamId, userId: staff.id });
+      removeFromTeamMutation.mutate({ teamId, userId: staff.id, teamName });
     }
   };
 
@@ -1191,7 +1220,7 @@ function ManageTeamsModal({ staff, onClose }: { staff: User; onClose: () => void
                       </div>
                       <Button
                         size="sm"
-                        onClick={() => handleAddToTeam(team.id)}
+                        onClick={() => handleAddToTeam(team.id, team.name)}
                         loading={addToTeamMutation.isPending}
                       >
                         <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1804,73 +1833,85 @@ function AnalyticsModal({ staff, onClose }: { staff: User; onClose: () => void }
 
   // Export data
   const handleExport = (format: 'csv' | 'json') => {
-    const data = {
-      staff: {
-        name: staff.name,
-        email: staff.email,
-        job_title: staff.job_title,
-        department: staff.department,
-      },
-      period: {
-        start,
-        end,
-        range: dateRange,
-      },
-      metrics: analytics,
-      productivity_score: productivityScore,
-      estimated_earnings: estimatedEarnings,
-      project_breakdown: projectBreakdown,
-      time_entries: timeEntries?.items.map((entry: any) => ({
-        date: entry.start_time,
-        project: entry.project?.name,
-        task: entry.task?.name,
-        duration_hours: (entry.duration_minutes / 60).toFixed(2),
-        description: entry.description,
-      })),
-    };
-
-    if (format === 'json') {
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${staff.name.replace(/\s+/g, '_')}_analytics_${start}_to_${end}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } else {
-      // CSV format
-      const csvRows = [
-        ['Staff Analytics Report'],
-        ['Name', staff.name],
-        ['Email', staff.email],
-        ['Job Title', staff.job_title || 'N/A'],
-        ['Department', staff.department || 'N/A'],
-        ['Period', `${start} to ${end}`],
-        [''],
-        ['Metrics'],
-        ['Total Hours', analytics.totalHours.toFixed(2)],
-        ['Total Entries', analytics.totalEntries.toString()],
-        ['Expected Hours', analytics.expectedHours.toFixed(2)],
-        ['Productivity Score', `${productivityScore}%`],
-        ['Estimated Earnings', `$${estimatedEarnings.toFixed(2)}`],
-        ['Projects Worked On', analytics.projectCount.toString()],
-        ['Days Worked', analytics.daysWorked.toString()],
-        [''],
-        ['Project Breakdown'],
-        ['Project', 'Hours', 'Entries'],
-        ...Object.entries(projectBreakdown).map(([project, data]: [string, any]) => 
-          [project, data.hours.toFixed(2), data.entries.toString()]
-        ),
-      ];
+    try {
+      notifications.notifyExportStarted(format);
       
-      const csvContent = csvRows.map(row => row.join(',')).join('\n');
-      const blob = new Blob([csvContent], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${staff.name.replace(/\s+/g, '_')}_analytics_${start}_to_${end}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const data = {
+        staff: {
+          name: staff.name,
+          email: staff.email,
+          job_title: staff.job_title,
+          department: staff.department,
+        },
+        period: {
+          start,
+          end,
+          range: dateRange,
+        },
+        metrics: analytics,
+        productivity_score: productivityScore,
+        estimated_earnings: estimatedEarnings,
+        project_breakdown: projectBreakdown,
+        time_entries: timeEntries?.items.map((entry: any) => ({
+          date: entry.start_time,
+          project: entry.project?.name,
+          task: entry.task?.name,
+          duration_hours: (entry.duration_minutes / 60).toFixed(2),
+          description: entry.description,
+        })),
+      };
+
+      let filename = '';
+
+      if (format === 'json') {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        filename = `${staff.name.replace(/\s+/g, '_')}_analytics_${start}_to_${end}.json`;
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        // CSV format
+        const csvRows = [
+          ['Staff Analytics Report'],
+          ['Name', staff.name],
+          ['Email', staff.email],
+          ['Job Title', staff.job_title || 'N/A'],
+          ['Department', staff.department || 'N/A'],
+          ['Period', `${start} to ${end}`],
+          [''],
+          ['Metrics'],
+          ['Total Hours', analytics.totalHours.toFixed(2)],
+          ['Total Entries', analytics.totalEntries.toString()],
+          ['Expected Hours', analytics.expectedHours.toFixed(2)],
+          ['Productivity Score', `${productivityScore}%`],
+          ['Estimated Earnings', `$${estimatedEarnings.toFixed(2)}`],
+          ['Projects Worked On', analytics.projectCount.toString()],
+          ['Days Worked', analytics.daysWorked.toString()],
+          [''],
+          ['Project Breakdown'],
+          ['Project', 'Hours', 'Entries'],
+          ...Object.entries(projectBreakdown).map(([project, data]: [string, any]) => 
+            [project, data.hours.toFixed(2), data.entries.toString()]
+          ),
+        ];
+        
+        const csvContent = csvRows.map(row => row.join(',')).join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        filename = `${staff.name.replace(/\s+/g, '_')}_analytics_${start}_to_${end}.csv`;
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      notifications.notifyExportComplete(format, filename);
+    } catch (error: any) {
+      notifications.notifyExportFailed(error.message || 'An error occurred during export');
     }
   };
 
