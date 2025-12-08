@@ -2,11 +2,11 @@
 // TIME TRACKER - STAFF MANAGEMENT PAGE
 // ============================================
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
-import { usersApi, teamsApi } from '../api/client';
+import { useQuery, useMutation, useQueryClient } from '@tantml:function_calls>
+<invoke name="Card">, CardHeader, LoadingOverlay, Button } from '../components/common';
+import { usersApi, teamsApi, payRatesApi, timeEntriesApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
-import type { User, UserCreate, Team } from '../types';
+import type { User, UserCreate, Team, PayRate, TimeEntry } from '../types';
 
 export function StaffPage() {
   const { user: currentUser } = useAuthStore();
@@ -16,6 +16,8 @@ export function StaffPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showTeamsModal, setShowTeamsModal] = useState(false);
+  const [showPayrollModal, setShowPayrollModal] = useState(false);
+  const [showTimeModal, setShowTimeModal] = useState(false);
   const [selectedStaff, setSelectedStaff] = useState<User | null>(null);
   const [formStep, setFormStep] = useState(1); // Multi-step form
   
@@ -330,7 +332,7 @@ export function StaffPage() {
                       <button
                         onClick={() => handleEditStaff(staff)}
                         className="text-blue-600 hover:text-blue-900"
-                        title="Edit"
+                        title="Edit Staff"
                       >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path
@@ -338,6 +340,40 @@ export function StaffPage() {
                             strokeLinejoin="round"
                             strokeWidth={2}
                             d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                          />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedStaff(staff);
+                          setShowPayrollModal(true);
+                        }}
+                        className="text-emerald-600 hover:text-emerald-900"
+                        title="View Payroll"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                          />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedStaff(staff);
+                          setShowTimeModal(true);
+                        }}
+                        className="text-indigo-600 hover:text-indigo-900"
+                        title="View Time Tracking"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
                           />
                         </svg>
                       </button>
@@ -836,6 +872,28 @@ export function StaffPage() {
           }}
         />
       )}
+
+      {/* Payroll Modal */}
+      {showPayrollModal && selectedStaff && (
+        <PayrollModal
+          staff={selectedStaff}
+          onClose={() => {
+            setShowPayrollModal(false);
+            setSelectedStaff(null);
+          }}
+        />
+      )}
+
+      {/* Time Tracking Modal */}
+      {showTimeModal && selectedStaff && (
+        <TimeTrackingModal
+          staff={selectedStaff}
+          onClose={() => {
+            setShowTimeModal(false);
+            setSelectedStaff(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -891,6 +949,423 @@ function ManageTeamsModal({ staff, onClose }: { staff: User; onClose: () => void
             ))}
           </div>
           <div className="flex justify-end pt-4">
+            <Button variant="secondary" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// Payroll Modal Component
+function PayrollModal({ staff, onClose }: { staff: User; onClose: () => void }) {
+  const { data: currentRate, isLoading: loadingCurrent } = useQuery({
+    queryKey: ['payRate', 'current', staff.id],
+    queryFn: () => payRatesApi.getUserCurrentRate(staff.id),
+  });
+
+  const { data: payRates, isLoading: loadingHistory } = useQuery({
+    queryKey: ['payRates', staff.id],
+    queryFn: () => payRatesApi.getUserPayRates(staff.id, true),
+  });
+
+  const formatCurrency = (amount: number, currency: string) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency || 'USD',
+    }).format(amount);
+  };
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <Card className="max-w-3xl w-full max-h-[80vh] overflow-auto">
+        <CardHeader title={`Payroll Information - ${staff.name}`} />
+        <div className="p-6 space-y-6">
+          {/* Current Pay Rate */}
+          <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-lg p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+              <svg className="w-5 h-5 mr-2 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Current Pay Rate
+            </h3>
+            {loadingCurrent ? (
+              <div className="text-center py-4">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600 mx-auto"></div>
+              </div>
+            ) : currentRate ? (
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="text-sm text-gray-600">Base Rate</div>
+                  <div className="text-2xl font-bold text-emerald-700">
+                    {formatCurrency(currentRate.base_rate, currentRate.currency)}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    {currentRate.rate_type === 'hourly' && 'per hour'}
+                    {currentRate.rate_type === 'daily' && 'per day'}
+                    {currentRate.rate_type === 'monthly' && 'per month'}
+                    {currentRate.rate_type === 'project_based' && 'per project'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-600">Overtime Multiplier</div>
+                  <div className="text-2xl font-bold text-gray-900">
+                    {currentRate.overtime_multiplier}x
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    {formatCurrency(currentRate.base_rate * currentRate.overtime_multiplier, currentRate.currency)} overtime rate
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-600">Effective From</div>
+                  <div className="text-lg font-semibold text-gray-900">
+                    {formatDate(currentRate.effective_from)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-600">Status</div>
+                  <div>
+                    <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                      Active
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <svg className="w-16 h-16 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-gray-500 font-medium">No active pay rate</p>
+                <p className="text-sm text-gray-400 mt-1">Create a pay rate to get started</p>
+              </div>
+            )}
+          </div>
+
+          {/* Pay Rate History */}
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+              <svg className="w-5 h-5 mr-2 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Pay Rate History
+            </h3>
+            {loadingHistory ? (
+              <div className="text-center py-4">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-600 mx-auto"></div>
+              </div>
+            ) : payRates && payRates.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rate</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Overtime</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Effective From</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Effective To</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {payRates.map((rate: any) => (
+                      <tr key={rate.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">
+                          {formatCurrency(rate.base_rate, rate.currency)}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600 capitalize">
+                          {rate.rate_type.replace('_', ' ')}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                          {rate.overtime_multiplier}x
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                          {formatDate(rate.effective_from)}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                          {rate.effective_to ? formatDate(rate.effective_to) : '—'}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span
+                            className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                              rate.is_active
+                                ? 'bg-green-100 text-green-800'
+                                : 'bg-gray-100 text-gray-600'
+                            }`}
+                          >
+                            {rate.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="text-center py-8 bg-gray-50 rounded-lg">
+                <p className="text-gray-500">No pay rate history available</p>
+              </div>
+            )}
+          </div>
+
+          {/* Employment Details */}
+          {(staff.job_title || staff.department || staff.employment_type || staff.start_date) && (
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                <svg className="w-5 h-5 mr-2 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                Employment Details
+              </h3>
+              <div className="grid grid-cols-2 gap-4 bg-gray-50 rounded-lg p-4">
+                {staff.job_title && (
+                  <div>
+                    <div className="text-xs text-gray-500">Job Title</div>
+                    <div className="text-sm font-medium text-gray-900">{staff.job_title}</div>
+                  </div>
+                )}
+                {staff.department && (
+                  <div>
+                    <div className="text-xs text-gray-500">Department</div>
+                    <div className="text-sm font-medium text-gray-900">{staff.department}</div>
+                  </div>
+                )}
+                {staff.employment_type && (
+                  <div>
+                    <div className="text-xs text-gray-500">Employment Type</div>
+                    <div className="text-sm font-medium text-gray-900 capitalize">
+                      {staff.employment_type.replace('_', '-')}
+                    </div>
+                  </div>
+                )}
+                {staff.start_date && (
+                  <div>
+                    <div className="text-xs text-gray-500">Start Date</div>
+                    <div className="text-sm font-medium text-gray-900">{formatDate(staff.start_date)}</div>
+                  </div>
+                )}
+                {staff.expected_hours_per_week && (
+                  <div>
+                    <div className="text-xs text-gray-500">Expected Hours/Week</div>
+                    <div className="text-sm font-medium text-gray-900">{staff.expected_hours_per_week} hours</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end pt-4 border-t">
+            <Button variant="secondary" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// Time Tracking Modal Component
+function TimeTrackingModal({ staff, onClose }: { staff: User; onClose: () => void }) {
+  const [dateRange, setDateRange] = useState<'week' | 'month' | 'all'>('week');
+  
+  const getDateRange = () => {
+    const end = new Date();
+    const start = new Date();
+    
+    if (dateRange === 'week') {
+      start.setDate(end.getDate() - 7);
+    } else if (dateRange === 'month') {
+      start.setMonth(end.getMonth() - 1);
+    } else {
+      start.setFullYear(end.getFullYear() - 1);
+    }
+    
+    return {
+      start_date: start.toISOString().split('T')[0],
+      end_date: end.toISOString().split('T')[0],
+    };
+  };
+
+  const { data: timeEntries, isLoading } = useQuery({
+    queryKey: ['timeEntries', staff.id, dateRange],
+    queryFn: () => {
+      const dates = getDateRange();
+      return timeEntriesApi.getAll(1, 100, {
+        user_id: staff.id,
+        start_date: dates.start_date,
+        end_date: dates.end_date,
+      });
+    },
+  });
+
+  const formatDuration = (minutes: number) => {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${hours}h ${mins}m`;
+  };
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  };
+
+  const totalMinutes = timeEntries?.items.reduce((sum: number, entry: any) => {
+    return sum + (entry.duration_minutes || 0);
+  }, 0) || 0;
+
+  const totalHours = (totalMinutes / 60).toFixed(1);
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <Card className="max-w-4xl w-full max-h-[80vh] overflow-auto">
+        <CardHeader title={`Time Tracking - ${staff.name}`} />
+        <div className="p-6 space-y-6">
+          {/* Summary Cards */}
+          <div className="grid grid-cols-3 gap-4">
+            <div className="bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-200 rounded-lg p-4">
+              <div className="flex items-center">
+                <svg className="w-8 h-8 text-indigo-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div>
+                  <div className="text-2xl font-bold text-indigo-700">{totalHours}h</div>
+                  <div className="text-xs text-gray-600">Total Hours</div>
+                </div>
+              </div>
+            </div>
+            <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-4">
+              <div className="flex items-center">
+                <svg className="w-8 h-8 text-purple-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+                <div>
+                  <div className="text-2xl font-bold text-purple-700">{timeEntries?.total || 0}</div>
+                  <div className="text-xs text-gray-600">Entries</div>
+                </div>
+              </div>
+            </div>
+            <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg p-4">
+              <div className="flex items-center">
+                <svg className="w-8 h-8 text-green-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                </svg>
+                <div>
+                  <div className="text-2xl font-bold text-green-700">
+                    {staff.expected_hours_per_week || '—'}
+                  </div>
+                  <div className="text-xs text-gray-600">Expected/Week</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Date Range Selector */}
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+              <svg className="w-5 h-5 mr-2 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Recent Time Entries
+            </h3>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setDateRange('week')}
+                className={`px-3 py-1 text-sm rounded-md ${
+                  dateRange === 'week'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                Last Week
+              </button>
+              <button
+                onClick={() => setDateRange('month')}
+                className={`px-3 py-1 text-sm rounded-md ${
+                  dateRange === 'month'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                Last Month
+              </button>
+              <button
+                onClick={() => setDateRange('all')}
+                className={`px-3 py-1 text-sm rounded-md ${
+                  dateRange === 'all'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                Last Year
+              </button>
+            </div>
+          </div>
+
+          {/* Time Entries Table */}
+          {isLoading ? (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
+            </div>
+          ) : timeEntries && timeEntries.items.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Task</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {timeEntries.items.map((entry: any) => (
+                    <tr key={entry.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                        {formatDate(entry.start_time)}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                        {entry.project?.name || '—'}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                        {entry.task?.name || '—'}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-indigo-600">
+                        {formatDuration(entry.duration_minutes)}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">
+                        {entry.description || '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="text-center py-12 bg-gray-50 rounded-lg">
+              <svg className="w-16 h-16 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <p className="text-gray-500 font-medium">No time entries found</p>
+              <p className="text-sm text-gray-400 mt-1">This staff member hasn't logged any time yet</p>
+            </div>
+          )}
+
+          <div className="flex justify-end pt-4 border-t">
             <Button variant="secondary" onClick={onClose}>
               Close
             </Button>

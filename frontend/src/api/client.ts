@@ -440,6 +440,49 @@ export const exportApi = {
 };
 
 // ============================================
+// PAY RATES API
+// ============================================
+export const payRatesApi = {
+  getUserCurrentRate: async (userId: number) => {
+    const response = await api.get(`/api/pay-rates/user/${userId}/current`);
+    return response.data;
+  },
+
+  getUserPayRates: async (userId: number, includeInactive = false) => {
+    const response = await api.get(`/api/pay-rates/user/${userId}`, {
+      params: { include_inactive: includeInactive },
+    });
+    return response.data;
+  },
+
+  getAll: async (page = 1, limit = 100, activeOnly = true) => {
+    const response = await api.get('/api/pay-rates', {
+      params: { skip: (page - 1) * limit, limit, active_only: activeOnly },
+    });
+    return response.data;
+  },
+
+  create: async (data: any) => {
+    const response = await api.post('/api/pay-rates', data);
+    return response.data;
+  },
+
+  update: async (id: number, data: any) => {
+    const response = await api.put(`/api/pay-rates/${id}`, data);
+    return response.data;
+  },
+
+  delete: async (id: number) => {
+    await api.delete(`/api/pay-rates/${id}`);
+  },
+
+  getHistory: async (payRateId: number) => {
+    const response = await api.get(`/api/pay-rates/${payRateId}/history`);
+    return response.data;
+  },
+};
+
+// ============================================
 // ADMIN API (TASK-009, TASK-010, TASK-022)
 // ============================================
 export const adminApi = {
