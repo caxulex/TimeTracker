@@ -2,11 +2,11 @@
 // TIME TRACKER - STAFF MANAGEMENT PAGE
 // ============================================
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tantml:function_calls>
-<invoke name="Card">, CardHeader, LoadingOverlay, Button } from '../components/common';
-import { usersApi, teamsApi, payRatesApi, timeEntriesApi } from '../api/client';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
+import { usersApi, teamsApi, payRatesApi, timeEntriesApi, projectsApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
-import type { User, UserCreate, Team, PayRate, TimeEntry } from '../types';
+import type { User, UserCreate, Team, TeamMember, PayRate, TimeEntry, Project } from '../types';
 
 export function StaffPage() {
   const { user: currentUser } = useAuthStore();
@@ -898,57 +898,358 @@ export function StaffPage() {
   );
 }
 
-// Manage Teams Modal Component
+// Manage Teams & Projects Modal Component
 function ManageTeamsModal({ staff, onClose }: { staff: User; onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [selectedTeams, setSelectedTeams] = useState<number[]>([]);
+  const [activeTab, setActiveTab] = useState<'current' | 'add' | 'projects'>('current');
 
+  // Fetch all teams
   const { data: teamsData } = useQuery({
     queryKey: ['teams'],
     queryFn: () => teamsApi.getAll(1, 100),
   });
 
+  // Fetch staff's current teams with details
+  const { data: staffTeams, isLoading: loadingStaffTeams } = useQuery({
+    queryKey: ['staff-teams', staff.id],
+    queryFn: async () => {
+      if (!teamsData?.items) return [];
+      const teams = [];
+      for (const team of teamsData.items) {
+        try {
+          const teamDetail = await teamsApi.getById(team.id);
+          const member = teamDetail.members?.find((m: TeamMember) => m.user_id === staff.id);
+          if (member) {
+            teams.push({
+              ...team,
+              memberRole: member.role,
+              members: teamDetail.members,
+            });
+          }
+        } catch (error) {
+          // User doesn't have access to this team or team doesn't exist
+        }
+      }
+      return teams;
+    },
+    enabled: !!teamsData,
+  });
+
+  // Fetch projects accessible through teams
+  const { data: projectsData, isLoading: loadingProjects } = useQuery({
+    queryKey: ['staff-projects', staff.id],
+    queryFn: () => projectsApi.getAll({ page: 1, size: 100 }),
+  });
+
   const addToTeamMutation = useMutation({
-    mutationFn: ({ teamId, userId }: { teamId: number; userId: number }) =>
-      teamsApi.addMember(teamId, { user_id: userId, role: 'member' }),
+    mutationFn: ({ teamId, userId, role }: { teamId: number; userId: number; role: string }) =>
+      teamsApi.addMember(teamId, userId, role),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
+      queryClient.invalidateQueries({ queryKey: ['staff-teams', staff.id] });
+      queryClient.invalidateQueries({ queryKey: ['staff-projects', staff.id] });
       alert('Staff member added to team successfully!');
+      setActiveTab('current');
+    },
+  });
+
+  const removeFromTeamMutation = useMutation({
+    mutationFn: ({ teamId, userId }: { teamId: number; userId: number }) =>
+      teamsApi.removeMember(teamId, userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['teams'] });
+      queryClient.invalidateQueries({ queryKey: ['staff-teams', staff.id] });
+      queryClient.invalidateQueries({ queryKey: ['staff-projects', staff.id] });
+      alert('Staff member removed from team successfully!');
+    },
+  });
+
+  const updateMemberRoleMutation = useMutation({
+    mutationFn: ({ teamId, userId, role }: { teamId: number; userId: number; role: string }) =>
+      teamsApi.updateMember(teamId, userId, role),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['teams'] });
+      queryClient.invalidateQueries({ queryKey: ['staff-teams', staff.id] });
+      alert('Member role updated successfully!');
     },
   });
 
   const handleAddToTeam = (teamId: number) => {
     if (confirm(`Add ${staff.name} to this team?`)) {
-      addToTeamMutation.mutate({ teamId, userId: staff.id });
+      addToTeamMutation.mutate({ teamId, userId: staff.id, role: 'member' });
     }
   };
 
+  const handleRemoveFromTeam = (teamId: number, teamName: string) => {
+    if (confirm(`Remove ${staff.name} from "${teamName}"? They will lose access to all projects in this team.`)) {
+      removeFromTeamMutation.mutate({ teamId, userId: staff.id });
+    }
+  };
+
+  const handleToggleRole = (teamId: number, currentRole: string) => {
+    const newRole = currentRole === 'admin' ? 'member' : 'admin';
+    if (confirm(`Change role to ${newRole}?`)) {
+      updateMemberRoleMutation.mutate({ teamId, userId: staff.id, role: newRole });
+    }
+  };
+
+  const availableTeams = teamsData?.items.filter(
+    (team: Team) => !staffTeams?.some((st: any) => st.id === team.id)
+  ) || [];
+
+  // Filter projects that belong to staff's teams
+  const staffProjects = projectsData?.items.filter((project: Project) =>
+    staffTeams?.some((team: any) => team.id === project.team_id)
+  ) || [];
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <Card className="max-w-2xl w-full max-h-[80vh] overflow-auto">
-        <CardHeader title={`Manage Teams for ${staff.name}`} />
-        <div className="p-6 space-y-4">
-          <p className="text-sm text-gray-600">
-            Add this staff member to teams. They will immediately see all projects from those teams.
-          </p>
-          <div className="space-y-2">
-            {teamsData?.items.map((team: Team) => (
-              <div key={team.id} className="flex items-center justify-between p-3 border rounded-lg">
-                <div>
-                  <div className="font-medium">{team.name}</div>
-                  <div className="text-sm text-gray-500">{team.member_count} members</div>
-                </div>
-                <Button
-                  size="sm"
-                  onClick={() => handleAddToTeam(team.id)}
-                  loading={addToTeamMutation.isPending}
-                >
-                  Add to Team
-                </Button>
+      <Card className="max-w-4xl w-full max-h-[85vh] overflow-hidden flex flex-col">
+        <CardHeader title={`Teams & Projects - ${staff.name}`} />
+        
+        {/* Tabs */}
+        <div className="border-b border-gray-200 px-6">
+          <div className="flex space-x-8">
+            <button
+              onClick={() => setActiveTab('current')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'current'
+                  ? 'border-green-500 text-green-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center">
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+                Current Teams ({staffTeams?.length || 0})
               </div>
-            ))}
+            </button>
+            <button
+              onClick={() => setActiveTab('add')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'add'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center">
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Add to Team ({availableTeams.length})
+              </div>
+            </button>
+            <button
+              onClick={() => setActiveTab('projects')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'projects'
+                  ? 'border-purple-500 text-purple-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center">
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                </svg>
+                Accessible Projects ({staffProjects.length})
+              </div>
+            </button>
           </div>
-          <div className="flex justify-end pt-4">
+        </div>
+
+        {/* Tab Content */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {/* Current Teams Tab */}
+          {activeTab === 'current' && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Teams this staff member belongs to with their roles and permissions.
+              </p>
+              {loadingStaffTeams ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto"></div>
+                </div>
+              ) : staffTeams && staffTeams.length > 0 ? (
+                <div className="space-y-3">
+                  {staffTeams.map((team: any) => (
+                    <div key={team.id} className="border border-gray-200 rounded-lg p-4 hover:border-green-300 transition-colors">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <h4 className="font-semibold text-gray-900">{team.name}</h4>
+                            <span
+                              className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                team.memberRole === 'admin'
+                                  ? 'bg-purple-100 text-purple-800'
+                                  : 'bg-green-100 text-green-800'
+                              }`}
+                            >
+                              {team.memberRole === 'admin' ? '👑 Admin' : '👤 Member'}
+                            </span>
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            {team.members?.length || 0} members • Created {new Date(team.created_at).toLocaleDateString()}
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleToggleRole(team.id, team.memberRole)}
+                            disabled={updateMemberRoleMutation.isPending}
+                            className="px-3 py-1.5 text-sm font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-md transition-colors disabled:opacity-50"
+                            title={team.memberRole === 'admin' ? 'Demote to member' : 'Promote to admin'}
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={() => handleRemoveFromTeam(team.id, team.name)}
+                            disabled={removeFromTeamMutation.isPending}
+                            className="px-3 py-1.5 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50"
+                            title="Remove from team"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 bg-gray-50 rounded-lg">
+                  <svg className="w-16 h-16 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                  <p className="text-gray-500 font-medium">Not a member of any teams</p>
+                  <p className="text-sm text-gray-400 mt-1">Add them to teams using the "Add to Team" tab</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Add to Team Tab */}
+          {activeTab === 'add' && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Add this staff member to teams. They will immediately see all projects from those teams.
+              </p>
+              {availableTeams.length > 0 ? (
+                <div className="space-y-2">
+                  {availableTeams.map((team: Team) => (
+                    <div key={team.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors">
+                      <div>
+                        <div className="font-medium text-gray-900">{team.name}</div>
+                        <div className="text-sm text-gray-500">{team.member_count} members</div>
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={() => handleAddToTeam(team.id)}
+                        loading={addToTeamMutation.isPending}
+                      >
+                        <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                        Add
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 bg-gray-50 rounded-lg">
+                  <svg className="w-16 h-16 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-gray-500 font-medium">Already in all teams!</p>
+                  <p className="text-sm text-gray-400 mt-1">This staff member is part of every team</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Projects Tab */}
+          {activeTab === 'projects' && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Projects accessible through team memberships. Access is automatically granted based on team assignment.
+              </p>
+              {loadingProjects ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto"></div>
+                </div>
+              ) : staffProjects.length > 0 ? (
+                <div className="space-y-3">
+                  {staffProjects.map((project: Project) => {
+                    const team = staffTeams?.find((t: any) => t.id === project.team_id);
+                    return (
+                      <div key={project.id} className="border border-gray-200 rounded-lg p-4 hover:border-purple-300 transition-colors">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <h4 className="font-semibold text-gray-900">{project.name}</h4>
+                              <span
+                                className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                  project.status === 'active'
+                                    ? 'bg-green-100 text-green-800'
+                                    : project.status === 'on_hold'
+                                    ? 'bg-yellow-100 text-yellow-800'
+                                    : 'bg-gray-100 text-gray-800'
+                                }`}
+                              >
+                                {project.status === 'active' && '🟢 Active'}
+                                {project.status === 'on_hold' && '⏸️ On Hold'}
+                                {project.status === 'completed' && '✅ Completed'}
+                              </span>
+                            </div>
+                            {project.description && (
+                              <p className="text-sm text-gray-600 mb-2">{project.description}</p>
+                            )}
+                            <div className="flex items-center gap-4 text-xs text-gray-500">
+                              <span className="flex items-center">
+                                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                                </svg>
+                                {team?.name || 'Unknown Team'}
+                              </span>
+                              <span className="flex items-center">
+                                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                Created {new Date(project.created_at).toLocaleDateString()}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-12 bg-gray-50 rounded-lg">
+                  <svg className="w-16 h-16 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                  <p className="text-gray-500 font-medium">No accessible projects</p>
+                  <p className="text-sm text-gray-400 mt-1">
+                    {staffTeams && staffTeams.length > 0
+                      ? 'Teams have no projects yet'
+                      : 'Add to teams to grant project access'}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-gray-200 p-6 bg-gray-50">
+          <div className="flex justify-between items-center">
+            <div className="text-sm text-gray-600">
+              <span className="font-semibold">{staffTeams?.length || 0}</span> teams • 
+              <span className="font-semibold ml-1">{staffProjects.length}</span> projects
+            </div>
             <Button variant="secondary" onClick={onClose}>
               Close
             </Button>
