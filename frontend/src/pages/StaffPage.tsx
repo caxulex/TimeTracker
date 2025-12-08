@@ -2,6 +2,7 @@
 // TIME TRACKER - STAFF MANAGEMENT PAGE
 // ============================================
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
 import { usersApi, teamsApi, payRatesApi, timeEntriesApi, projectsApi, reportsApi } from '../api/client';
@@ -10,6 +11,7 @@ import type { User, UserCreate, Team, TeamMember, PayRate, TimeEntry, Project } 
 
 export function StaffPage() {
   const { user: currentUser } = useAuthStore();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -330,6 +332,20 @@ export function StaffPage() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     <div className="flex justify-end gap-2">
+                      <button
+                        onClick={() => navigate(`/staff/${staff.id}`)}
+                        className="text-gray-600 hover:text-gray-900"
+                        title="View Full Profile"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                          />
+                        </svg>
+                      </button>
                       <button
                         onClick={() => handleEditStaff(staff)}
                         className="text-blue-600 hover:text-blue-900"

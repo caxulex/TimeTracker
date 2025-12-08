@@ -22,6 +22,7 @@ import {
   UsersPage,
   StaffPage,
 } from './pages';
+import { StaffDetailPage } from './pages/StaffDetailPage';
 import { useAuthStore } from './stores/authStore';
 import './App.css';
 
@@ -204,6 +205,14 @@ function App() {
               element={
                 <AdminRoute>
                   <StaffPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/staff/:id"
+              element={
+                <AdminRoute>
+                  <StaffDetailPage />
                 </AdminRoute>
               }
             />
