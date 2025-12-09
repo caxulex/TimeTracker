@@ -149,9 +149,9 @@ export function LoginPage() {
           </Button>
 
           <p className="mt-2 text-center text-sm text-gray-600">
-            Don't have an account?{' '}
-            <Link to="/register" className="font-medium text-blue-600 hover:text-blue-500">
-              Sign up
+            Need an account?{' '}
+            <Link to="/request-account" className="font-medium text-blue-600 hover:text-blue-500">
+              Request Access
             </Link>
           </p>
         </form>

@@ -58,7 +58,7 @@ async def get_user_time_entries(
     )
 
     # Apply user filter based on role
-    if user.role != "super_admin":
+    if user.role not in ["super_admin", "admin"]:
         if user_id and user_id != user.id:
             raise HTTPException(status_code=403, detail="Access denied")
         query = query.where(TimeEntry.user_id == user.id)

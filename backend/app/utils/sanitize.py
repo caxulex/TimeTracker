@@ -204,3 +204,54 @@ def create_safe_like_pattern(
         return f"%{sanitized}"
     else:  # exact
         return sanitized
+
+
+def sanitize_string(text: str, max_length: int = 500) -> str:
+    """
+    General purpose string sanitization for user inputs.
+    Removes control characters, trims, and limits length.
+    
+    Args:
+        text: Raw text input
+        max_length: Maximum allowed length
+    
+    Returns:
+        Sanitized text
+    """
+    if not text:
+        return ""
+    
+    # Remove null bytes
+    text = text.replace('\x00', '')
+    
+    # Remove control characters (except newline and tab)
+    text = ''.join(char for char in text if ord(char) >= 32 or char in '\t\n')
+    
+    # Strip whitespace
+    text = text.strip()
+    
+    # Truncate to max length
+    return text[:max_length]
+
+
+def get_client_ip(request) -> str:
+    """
+    Extract client IP address from request.
+    Handles proxy headers.
+    
+    Args:
+        request: FastAPI Request object
+    
+    Returns:
+        Client IP address
+    """
+    # Check for forwarded headers (behind proxy)
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip
+    
+    return request.client.host if request.client else "unknown"

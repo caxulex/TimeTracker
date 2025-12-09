@@ -12,6 +12,8 @@ from app.models import User
 from app.schemas.auth import UserResponse, Message
 from app.services.auth_service import auth_service
 from app.dependencies import get_current_admin_user
+from app.utils.password_validator import validate_password_strength
+from app.services.audit_logger import AuditLogger, AuditAction
 from pydantic import BaseModel, EmailStr, Field
 
 router = APIRouter()
@@ -141,6 +143,14 @@ async def create_user(
     from app.models import PayRate, Team, TeamMember
     from app.schemas.payroll import RateTypeEnum
     
+    # SEC-003: Validate password strength
+    is_valid, password_errors = validate_password_strength(user_data.password)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "Password does not meet security requirements", "errors": password_errors}
+        )
+    
     # Check if email exists
     result = await db.execute(select(User).where(User.email == user_data.email))
     if result.scalar_one_or_none():
@@ -220,6 +230,25 @@ async def create_user(
     await db.commit()
     await db.refresh(new_user)
     
+    # Audit log
+    await AuditLogger.log(
+        db=db,
+        action=AuditAction.CREATE,
+        resource_type="user",
+        resource_id=new_user.id,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        new_values={
+            "email": new_user.email,
+            "name": new_user.name,
+            "role": new_user.role,
+            "job_title": new_user.job_title,
+            "department": new_user.department
+        },
+        details=f"Created user {new_user.email} with role {new_user.role}"
+    )
+    await db.commit()
+    
     return new_user
 
 
@@ -237,6 +266,13 @@ async def update_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     
+    # Track old values for audit
+    old_values = {
+        "email": user.email,
+        "name": user.name,
+        "is_active": user.is_active
+    }
+    
     if user_data.email and user_data.email != user.email:
         email_check = await db.execute(select(User).where(User.email == user_data.email))
         if email_check.scalar_one_or_none():
@@ -248,6 +284,24 @@ async def update_user(
     
     if user_data.is_active is not None:
         user.is_active = user_data.is_active
+    
+    # Audit log
+    new_values = {
+        "email": user.email,
+        "name": user.name,
+        "is_active": user.is_active
+    }
+    await AuditLogger.log(
+        db=db,
+        action=AuditAction.UPDATE,
+        resource_type="user",
+        resource_id=user.id,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        old_values=old_values,
+        new_values=new_values,
+        details=f"Updated user {user.email}"
+    )
     
     await db.commit()
     await db.refresh(user)
@@ -272,6 +326,20 @@ async def deactivate_user(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     
     user.is_active = False
+    
+    # Audit log
+    await AuditLogger.log(
+        db=db,
+        action=AuditAction.DELETE,
+        resource_type="user",
+        resource_id=user.id,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        old_values={"is_active": True},
+        new_values={"is_active": False},
+        details=f"Deactivated user {user.email}"
+    )
+    
     await db.commit()
     
     return {"message": "User deactivated successfully"}
@@ -294,7 +362,22 @@ async def change_user_role(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     
+    old_role = user.role
     user.role = role_data.role
+    
+    # Audit log
+    await AuditLogger.log(
+        db=db,
+        action=AuditAction.ROLE_CHANGE,
+        resource_type="user",
+        resource_id=user.id,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        old_values={"role": old_role},
+        new_values={"role": user.role},
+        details=f"Changed role for {user.email} from {old_role} to {user.role}"
+    )
+    
     await db.commit()
     await db.refresh(user)
     

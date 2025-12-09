@@ -83,7 +83,7 @@ async def check_project_access(db: AsyncSession, project_id: int, user: User) ->
     if not project:
         return None
 
-    if user.role == "super_admin":
+    if user.role in ["super_admin", "admin"]:
         return project
 
     # Check team membership for project access
@@ -169,6 +169,48 @@ async def get_timer_status(
         current_entry=make_entry_response(running_entry, project_name, task_name, current_user.name),
         elapsed_seconds=elapsed
     )
+
+
+@router.get("/active", response_model=list[dict])
+async def get_active_timers(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get all currently active timers (for admin/team view)"""
+    # Query all active time entries with user, project, and task info
+    result = await db.execute(
+        select(TimeEntry, User, Project, Task)
+        .join(User, TimeEntry.user_id == User.id)
+        .join(Project, TimeEntry.project_id == Project.id)
+        .outerjoin(Task, TimeEntry.task_id == Task.id)
+        .where(TimeEntry.end_time == None)
+        .order_by(TimeEntry.start_time.desc())
+    )
+    
+    rows = result.all()
+    active_timers = []
+    
+    for entry, user, project, task in rows:
+        # Calculate elapsed seconds
+        start = entry.start_time
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        elapsed = int((now - start).total_seconds())
+        
+        active_timers.append({
+            "user_id": user.id,
+            "user_name": user.name,
+            "project_id": project.id,
+            "project_name": project.name,
+            "task_id": task.id if task else None,
+            "task_name": task.name if task else None,
+            "description": entry.description,
+            "start_time": entry.start_time.isoformat(),
+            "elapsed_seconds": elapsed
+        })
+    
+    return active_timers
 
 
 @router.post("/start", response_model=TimeEntryResponse, status_code=status.HTTP_201_CREATED)
@@ -335,7 +377,7 @@ async def list_time_entries(
     sum_query = select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0))
     
     # Filter by user (regular users see only their entries, admin sees all)
-    if current_user.role != "super_admin":
+    if current_user.role not in ["super_admin", "admin"]:
         if user_id and user_id != current_user.id:
             # Can only see team members' entries
             user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
@@ -449,7 +491,7 @@ async def get_time_entry(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time entry not found")
     
     # Check access
-    if current_user.role != "super_admin" and entry.user_id != current_user.id:
+    if current_user.role not in ["super_admin", "admin"] and entry.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     
     # Get names

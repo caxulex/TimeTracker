@@ -39,6 +39,28 @@ export interface UserRegister {
 
 export interface UserCreate extends UserRegister {
   role?: string;
+  // Contact Information
+  phone?: string;
+  address?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  
+  // Employment Details
+  job_title?: string;
+  department?: string;
+  employment_type?: 'full_time' | 'part_time' | 'contractor';
+  start_date?: string;
+  expected_hours_per_week?: number;
+  manager_id?: number;
+  
+  // Payroll
+  pay_rate?: number;
+  pay_rate_type?: 'hourly' | 'daily' | 'monthly' | 'project_based';
+  overtime_multiplier?: number;
+  currency?: string;
+  
+  // Team assignment
+  team_ids?: number[];
 }
 
 // Auth Types

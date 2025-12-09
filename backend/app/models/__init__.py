@@ -2,7 +2,7 @@
 SQLAlchemy models for Time Tracker
 """
 
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from decimal import Decimal
 from typing import Optional
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Index, Date, Numeric, Enum as SQLEnum
@@ -50,6 +50,13 @@ class EntryStatus(str, enum.Enum):
     PENDING = "pending"
     APPROVED = "approved"
     PAID = "paid"
+
+
+class AccountRequestStatus(str, enum.Enum):
+    """Account request status enumeration"""
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
 
 
 class AdjustmentType(str, enum.Enum):
@@ -118,8 +125,8 @@ class Team(Base):
 
     # Relationships
     owner: Mapped[User] = relationship("User")
-    members: Mapped[list["TeamMember"]] = relationship("TeamMember", back_populates="team")
-    projects: Mapped[list["Project"]] = relationship("Project", back_populates="team")
+    members: Mapped[list["TeamMember"]] = relationship("TeamMember", back_populates="team", cascade="all, delete-orphan")
+    projects: Mapped[list["Project"]] = relationship("Project", back_populates="team", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Team(id={self.id}, name={self.name})>"
@@ -157,8 +164,8 @@ class Project(Base):
 
     # Relationships
     team: Mapped[Team] = relationship("Team", back_populates="projects")
-    tasks: Mapped[list["Task"]] = relationship("Task", back_populates="project")
-    time_entries: Mapped[list["TimeEntry"]] = relationship("TimeEntry", back_populates="project")
+    tasks: Mapped[list["Task"]] = relationship("Task", back_populates="project", cascade="all, delete-orphan")
+    time_entries: Mapped[list["TimeEntry"]] = relationship("TimeEntry", back_populates="project", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Project(id={self.id}, name={self.name}, team_id={self.team_id})>"
@@ -178,7 +185,7 @@ class Task(Base):
 
     # Relationships
     project: Mapped[Project] = relationship("Project", back_populates="tasks")
-    time_entries: Mapped[list["TimeEntry"]] = relationship("TimeEntry", back_populates="task")
+    time_entries: Mapped[list["TimeEntry"]] = relationship("TimeEntry", back_populates="task", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Task(id={self.id}, name={self.name}, status={self.status})>"
@@ -331,6 +338,67 @@ class PayrollAdjustment(Base):
 
     def __repr__(self) -> str:
         return f"<PayrollAdjustment(id={self.id}, type={self.adjustment_type}, amount={self.amount})>"
+
+
+# ============================================
+# ACCOUNT REQUESTS MODEL
+# ============================================
+
+class AccountRequest(Base):
+    """Account request model for user self-service registration"""
+    __tablename__ = "account_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    
+    # Submitted Information
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    job_title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    department: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Request Metadata
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", index=True)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    reviewed_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    admin_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Audit Trail
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Relationships
+    reviewer: Mapped[Optional["User"]] = relationship("User", foreign_keys=[reviewed_by])
+    
+    def __repr__(self) -> str:
+        return f"<AccountRequest(id={self.id}, email={self.email}, status={self.status})>"
+
+
+# ============================================
+# AUDIT LOG MODEL
+# ============================================
+
+class AuditLog(Base):
+    """Audit log model for tracking all system changes"""
+    __tablename__ = "audit_logs"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True, default=lambda: datetime.now(timezone.utc))
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    user_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    action: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    resource_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    resource_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    old_values: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    new_values: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<AuditLog(id={self.id}, action={self.action}, resource_type={self.resource_type})>"
 
 
 # ============================================

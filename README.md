@@ -1,6 +1,6 @@
 # Time Tracker
 
-A comprehensive, Everhour-inspired time tracking application for teams and individuals. Built with modern technologies for performance, scalability, and user experience.
+A comprehensive, Time tracking application for teams and individuals. Built with modern technologies for performance, scalability, and user experience.
 
 ## ✨ Features
 
@@ -15,6 +15,13 @@ A comprehensive, Everhour-inspired time tracking application for teams and indiv
 - **🎨 Modern UI** - Clean, responsive interface built with React and TailwindCSS
 - **📱 Mobile Responsive** - Works on all devices
 - **⚡ Fast & Reliable** - Optimized for performance
+
+### Administrative Features
+- **👤 Staff Management** - Comprehensive employee management with multi-step wizard
+- **💰 Payroll Integration** - Pay rates, periods, and automated reporting
+- **📋 Account Requests** - Self-service access request system for prospective staff
+- **🔐 Role-Based Access** - Fine-grained permissions (Worker, Admin, Super Admin)
+- **📊 Admin Dashboard** - Real-time monitoring and analytics
 
 ## 🛠️ Technology Stack
 
@@ -154,6 +161,12 @@ Interactive API documentation is available at:
 | POST | /api/time/start | Start timer |
 | POST | /api/time/stop | Stop running timer |
 | GET | /api/reports/dashboard | Get dashboard stats |
+| POST | /api/account-requests | Submit account request (public) |
+| GET | /api/account-requests | List account requests (admin) |
+
+For complete API documentation, see:
+- **Phase 13 - Account Requests**: [PHASE13_ACCOUNT_REQUESTS.md](PHASE13_ACCOUNT_REQUESTS.md)
+- **Phase 2 - Staff Management**: [Update3.md](Update3.md)
 
 ## 🔒 Security
 
@@ -162,6 +175,16 @@ Interactive API documentation is available at:
 - CORS protection
 - SQL injection prevention via SQLAlchemy ORM
 - Input validation with Pydantic
+- Rate limiting on sensitive endpoints (3 requests/hour for account requests)
+- XSS prevention via input sanitization
+- Audit logging for all account operations
+
+## 📖 Documentation
+
+- **[PHASE13_ACCOUNT_REQUESTS.md](PHASE13_ACCOUNT_REQUESTS.md)** - Account request system (Phase 13)
+- **[Update3.md](Update3.md)** - Staff management & payroll features (Phase 2)
+- **[DOCUMENTATION.md](DOCUMENTATION.md)** - General system documentation
+- **[SECURITY_ASSESSMENT.md](SECURITY_ASSESSMENT.md)** - Security audit and findings
 
 ## 🤝 Contributing
 
@@ -177,5 +200,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- Inspired by [Everhour](https://everhour.com/)
 - Built with ❤️ for productive teams everywhere

@@ -1,7 +1,7 @@
 """Add audit logs table and database constraints
 
 Revision ID: add_audit_constraints
-Revises: 
+Revises: 003_staff_fields
 Create Date: 2025-12-06
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 # revision identifiers
 revision = "add_audit_constraints"
-down_revision = None
+down_revision = "003_staff_fields"
 branch_labels = None
 depends_on = None
 

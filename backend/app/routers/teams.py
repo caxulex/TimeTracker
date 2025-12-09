@@ -15,6 +15,7 @@ from app.models import User, Team, TeamMember
 from app.dependencies import get_current_active_user
 from app.schemas.auth import Message
 from app.routers.websocket import manager as ws_manager
+from app.services.audit_logger import AuditLogger, AuditAction
 
 router = APIRouter()
 
@@ -36,13 +37,23 @@ class MemberUpdate(BaseModel):
     role: str = Field(..., pattern="^(owner|admin|member)$")
 
 
+class UserBasicInfo(BaseModel):
+    """Basic user info for team member display"""
+    id: int
+    name: str
+    email: str
+    role: str
+    
+    class Config:
+        from_attributes = True
+
+
 class MemberResponse(BaseModel):
     user_id: int
     team_id: int
     role: str
     joined_at: datetime
-    user_name: Optional[str] = None
-    user_email: Optional[str] = None
+    user: Optional[UserBasicInfo] = None
 
     class Config:
         from_attributes = True
@@ -175,8 +186,12 @@ async def get_team(
             team_id=member.team_id,
             role=member.role,
             joined_at=member.joined_at,
-            user_name=user.name,
-            user_email=user.email
+            user=UserBasicInfo(
+                id=user.id,
+                name=user.name,
+                email=user.email,
+                role=user.role
+            )
         ))
 
     return TeamDetailResponse(
@@ -213,6 +228,19 @@ async def create_team(
         role="owner"
     )
     db.add(member)
+    await db.commit()
+    
+    # Audit log
+    await AuditLogger.log(
+        db=db,
+        action=AuditAction.CREATE,
+        resource_type="team",
+        resource_id=team.id,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        new_values={"name": team.name, "owner_id": team.owner_id},
+        details=f"Created team '{team.name}'"
+    )
     await db.commit()
 
     return TeamResponse(
@@ -251,9 +279,26 @@ async def update_team(
         if not member.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
+    # Track old values
+    old_name = team.name
+    
     # Update fields
     if team_data.name:
         team.name = team_data.name
+    
+    # Audit log if name changed
+    if team_data.name and team_data.name != old_name:
+        await AuditLogger.log(
+            db=db,
+            action=AuditAction.UPDATE,
+            resource_type="team",
+            resource_id=team.id,
+            user_id=current_user.id,
+            user_email=current_user.email,
+            old_values={"name": old_name},
+            new_values={"name": team.name},
+            details=f"Updated team name from '{old_name}' to '{team.name}'"
+        )
 
     await db.commit()
     await db.refresh(team)
@@ -298,6 +343,18 @@ async def delete_team(
         )
         if not member.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only team owner can delete")
+    
+    # Audit log before deletion
+    await AuditLogger.log(
+        db=db,
+        action=AuditAction.DELETE,
+        resource_type="team",
+        resource_id=team.id,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        old_values={"name": team.name, "owner_id": team.owner_id},
+        details=f"Deleted team '{team.name}'"
+    )
 
     await db.delete(team)
     await db.commit()
@@ -466,7 +523,7 @@ async def remove_member(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
 
     # Self-removal allowed, otherwise need admin
-    if user_id != current_user.id and current_user.role != "super_admin":
+    if user_id != current_user.id and current_user.role not in ["super_admin", "admin"]:
         admin_check = await db.execute(
             select(TeamMember).where(
                 TeamMember.team_id == team_id,

@@ -55,7 +55,7 @@ class PaginatedTasks(BaseModel):
 
 async def check_project_access(db: AsyncSession, project_id: int, user: User) -> bool:
     """Check if user has access to project"""
-    if user.role == "super_admin":
+    if user.role in ["super_admin", "admin"]:
         return True
     
     result = await db.execute(

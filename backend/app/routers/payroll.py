@@ -309,7 +309,7 @@ async def get_user_payroll_entries(
     Get all payroll entries for a user.
     Users can view their own entries, admins can view anyone's.
     """
-    if current_user.role != "super_admin" and current_user.id != user_id:
+    if current_user.role not in ["super_admin", "admin"] and current_user.id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Can only view your own payroll entries"

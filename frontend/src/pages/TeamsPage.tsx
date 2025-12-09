@@ -8,13 +8,15 @@ import { teamsApi, usersApi } from '../api/client';
 import { formatDate, getInitials, cn } from '../utils/helpers';
 import { useAuthStore } from '../stores/authStore';
 import { useAuth } from '../hooks/useAuth';
+import { useStaffNotifications } from '../hooks/useStaffNotifications';
 import type { Team, TeamMember, User } from '../types';
 
 export function TeamsPage() {
   const queryClient = useQueryClient();
   const { user: currentUser } = useAuthStore();
   const { user } = useAuth();
-  const isAdmin = user?.role === 'super_admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const notifications = useStaffNotifications();
   
   const [showModal, setShowModal] = useState(false);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
@@ -22,13 +24,13 @@ export function TeamsPage() {
   const [showMemberModal, setShowMemberModal] = useState(false);
 
   // Fetch teams
-  const { data: teamsData, isLoading } = useQuery({
+  const { data: teamsData, isLoading, error: teamsError } = useQuery({
     queryKey: ['teams'],
     queryFn: () => teamsApi.getAll(),
   });
 
   // Fetch selected team details
-  const { data: teamDetails } = useQuery({
+  const { data: teamDetails, error: teamDetailsError, isLoading: isLoadingDetails } = useQuery({
     queryKey: ['team', selectedTeam],
     queryFn: () => teamsApi.getById(selectedTeam!),
     enabled: !!selectedTeam,
@@ -47,9 +49,14 @@ export function TeamsPage() {
   // Create team mutation (admin only)
   const createMutation = useMutation({
     mutationFn: (name: string) => teamsApi.create({ name }),
-    onSuccess: () => {
+    onSuccess: (team) => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
       setShowModal(false);
+      notifications.notifySuccess('Team Created', `Team "${team.name}" has been created successfully.`);
+    },
+    onError: (error: any) => {
+      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to create team';
+      notifications.notifyError('Create Failed', errorMessage);
     },
   });
 
@@ -57,11 +64,20 @@ export function TeamsPage() {
   const updateMutation = useMutation({
     mutationFn: ({ id, name }: { id: number; name: string }) =>
       teamsApi.update(id, { name }),
-    onSuccess: () => {
+    onSuccess: (team) => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
       queryClient.invalidateQueries({ queryKey: ['team', selectedTeam] });
       setShowModal(false);
       setEditingTeam(null);
+      notifications.notifySuccess('Team Updated', `Team "${team.name}" has been updated successfully.`);
+    },
+    onError: (error: any) => {
+      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to update team';
+      if (error?.response?.status === 403) {
+        notifications.notifyError('Permission Denied', 'Only team owners and super admins can update teams.');
+      } else {
+        notifications.notifyError('Update Failed', errorMessage);
+      }
     },
   });
 
@@ -71,6 +87,15 @@ export function TeamsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
       setSelectedTeam(null);
+      notifications.notifySuccess('Team Deleted', 'Team has been successfully deleted.');
+    },
+    onError: (error: any) => {
+      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to delete team';
+      if (error?.response?.status === 403) {
+        notifications.notifyError('Permission Denied', 'Only team owners and super admins can delete teams.');
+      } else {
+        notifications.notifyError('Delete Failed', errorMessage);
+      }
     },
   });
 
@@ -78,9 +103,21 @@ export function TeamsPage() {
   const addMemberMutation = useMutation({
     mutationFn: ({ teamId, userId, role }: { teamId: number; userId: number; role: string }) =>
       teamsApi.addMember(teamId, userId, role),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['team', selectedTeam] });
       setShowMemberModal(false);
+      const user = users.find(u => u.id === variables.userId);
+      notifications.notifySuccess('Member Added', `${user?.name || 'User'} has been added to the team.`);
+    },
+    onError: (error: any) => {
+      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to add member';
+      if (error?.response?.status === 403) {
+        notifications.notifyError('Permission Denied', 'Only team owners and admins can add members.');
+      } else if (error?.response?.status === 400) {
+        notifications.notifyError('Invalid Request', errorMessage);
+      } else {
+        notifications.notifyError('Add Member Failed', errorMessage);
+      }
     },
   });
 
@@ -88,8 +125,18 @@ export function TeamsPage() {
   const removeMemberMutation = useMutation({
     mutationFn: ({ teamId, userId }: { teamId: number; userId: number }) =>
       teamsApi.removeMember(teamId, userId),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['team', selectedTeam] });
+      const teamMember = teamDetails?.members?.find((m: TeamMember) => m.user_id === variables.userId);
+      notifications.notifySuccess('Member Removed', `${teamMember?.user?.name || 'User'} has been removed from the team.`);
+    },
+    onError: (error: any) => {
+      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to remove member';
+      if (error?.response?.status === 403) {
+        notifications.notifyError('Permission Denied', 'Only team owners and admins can remove members.');
+      } else {
+        notifications.notifyError('Remove Member Failed', errorMessage);
+      }
     },
   });
 
@@ -169,7 +216,35 @@ export function TeamsPage() {
 
         {/* Team details */}
         <div className="lg:col-span-2">
-          {selectedTeam && teamDetails ? (
+          {selectedTeam && isLoadingDetails ? (
+            <Card>
+              <div className="flex items-center justify-center py-12">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                  <p className="mt-4 text-gray-500">Loading team details...</p>
+                </div>
+              </div>
+            </Card>
+          ) : selectedTeam && teamDetailsError ? (
+            <Card>
+              <div className="text-center py-12">
+                <svg className="mx-auto w-12 h-12 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <h3 className="mt-4 text-lg font-medium text-gray-900">Error loading team</h3>
+                <p className="mt-2 text-red-600">
+                  {teamDetailsError instanceof Error ? teamDetailsError.message : 'Failed to load team details'}
+                </p>
+                <Button
+                  variant="secondary"
+                  className="mt-4"
+                  onClick={() => setSelectedTeam(null)}
+                >
+                  Back to teams
+                </Button>
+              </div>
+            </Card>
+          ) : selectedTeam && teamDetails ? (
             <Card>
               <div className="flex items-center justify-between mb-6">
                 <div>

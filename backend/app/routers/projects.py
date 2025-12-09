@@ -14,6 +14,7 @@ from app.models import User, Team, TeamMember, Project, Task
 from app.dependencies import get_current_active_user
 from app.schemas.auth import Message
 from app.routers.websocket import manager as ws_manager
+from app.services.audit_logger import AuditLogger, AuditAction
 
 router = APIRouter()
 
@@ -58,7 +59,7 @@ class PaginatedProjects(BaseModel):
 
 async def check_team_access(db: AsyncSession, team_id: int, user: User, require_admin: bool = False) -> bool:
     """Check if user has access to team"""
-    if user.role == "super_admin":
+    if user.role in ["super_admin", "admin"]:
         return True
     
     result = await db.execute(
@@ -223,6 +224,19 @@ async def create_project(
     await db.commit()
     await db.refresh(project)
     
+    # Audit log
+    await AuditLogger.log(
+        db=db,
+        action=AuditAction.CREATE,
+        resource_type="project",
+        resource_id=project.id,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        new_values={"name": project.name, "team_id": project.team_id, "color": project.color},
+        details=f"Created project '{project.name}' in team {project.team_id}"
+    )
+    await db.commit()
+    
     # Get team name
     team_result = await db.execute(select(Team.name).where(Team.id == project.team_id))
     team_name = team_result.scalar()
@@ -276,11 +290,29 @@ async def update_project(
     if not has_access:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     
+    # Track old values
+    old_values = {"name": project.name, "color": project.color, "is_archived": project.is_archived}
+    
     # Update fields
     update_data = project_data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(project, key, value)
     
+    # Audit log
+    new_values = {"name": project.name, "color": project.color, "is_archived": project.is_archived}
+    if old_values != new_values:
+        await AuditLogger.log(
+            db=db,
+            action=AuditAction.UPDATE,
+            resource_type="project",
+            resource_id=project.id,
+            user_id=current_user.id,
+            user_email=current_user.email,
+            old_values=old_values,
+            new_values=new_values,
+            details=f"Updated project '{project.name}'"
+        )
+
     await db.commit()
     await db.refresh(project)
     
@@ -328,6 +360,20 @@ async def delete_project(
     
     # Archive instead of hard delete
     project.is_archived = True
+    
+    # Audit log
+    await AuditLogger.log(
+        db=db,
+        action=AuditAction.DELETE,
+        resource_type="project",
+        resource_id=project.id,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        old_values={"is_archived": False},
+        new_values={"is_archived": True},
+        details=f"Archived project '{project.name}'"
+    )
+    
     await db.commit()
     
     return Message(message="Project archived successfully")

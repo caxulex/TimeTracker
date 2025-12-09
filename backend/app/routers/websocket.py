@@ -119,6 +119,59 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+async def load_active_timers_from_db():
+    """Load all active timers from the database into the connection manager"""
+    from app.database import get_db
+    from app.models import TimeEntry, User, Project, Task
+    from sqlalchemy import select
+    from datetime import timezone, datetime as dt
+    
+    # Get a database session
+    async for db in get_db():
+        try:
+            # Query all active time entries
+            result = await db.execute(
+                select(TimeEntry, User, Project, Task)
+                .join(User, TimeEntry.user_id == User.id)
+                .join(Project, TimeEntry.project_id == Project.id)
+                .outerjoin(Task, TimeEntry.task_id == Task.id)
+                .where(TimeEntry.end_time == None)
+            )
+            
+            rows = result.all()
+            
+            # Update the manager's active_timers dictionary
+            for entry, user, project, task in rows:
+                # Calculate elapsed seconds
+                start = entry.start_time
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=timezone.utc)
+                now = dt.now(timezone.utc)
+                elapsed = int((now - start).total_seconds())
+                
+                timer_info = {
+                    "user_id": user.id,
+                    "user_name": user.name,
+                    "project_id": project.id,
+                    "project_name": project.name,
+                    "task_id": task.id if task else None,
+                    "task_name": task.name if task else None,
+                    "description": entry.description,
+                    "start_time": entry.start_time.isoformat(),
+                    "elapsed_seconds": elapsed
+                }
+                
+                manager.active_timers[user.id] = timer_info
+                
+            logger.info(f"Loaded {len(rows)} active timers from database")
+            
+        except Exception as e:
+            logger.error(f"Error loading active timers: {e}")
+        finally:
+            await db.close()
+        break  # Only need one iteration of the async generator
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
@@ -149,6 +202,9 @@ async def websocket_endpoint(
         team_ids = []  # Could be populated from user's teams
         
         await manager.connect(websocket, user.id, team_ids)
+        
+        # Load active timers from database and populate the manager
+        await load_active_timers_from_db()
         
         # Send initial state
         await websocket.send_json({

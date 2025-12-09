@@ -37,7 +37,7 @@ interface AdminAlertsPanelProps {
 
 export function AdminAlertsPanel({ className = '' }: AdminAlertsPanelProps) {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'super_admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
 
   const { data, isLoading, refetch } = useQuery<AlertsResponse>({
     queryKey: ['admin-alerts'],

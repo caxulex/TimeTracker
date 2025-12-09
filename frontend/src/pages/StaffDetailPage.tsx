@@ -35,7 +35,7 @@ export function StaffDetailPage() {
     emergency_contact_phone: '',
   });
 
-  const isAdmin = currentUser?.role === 'super_admin';
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
   const staffId = parseInt(id || '0', 10);
 
   // Fetch staff details
@@ -141,13 +141,13 @@ export function StaffDetailPage() {
         throw new Error('You do not have permission to modify this staff member');
       }
 
-      // Validate and sanitize the data
-      const validationResult = formValidation.secureAndValidate(data as any, true);
+      // Validate and sanitize the data - cast to Partial<User> for API compatibility
+      const validationResult = formValidation.secureAndValidate(data, true);
       if (!validationResult.valid) {
         throw new Error('Validation failed');
       }
 
-      return usersApi.update(staffId, validationResult.securedData as any);
+      return usersApi.update(staffId, validationResult.securedData as Partial<User>);
     },
     onSuccess: (updatedStaff) => {
       queryClient.invalidateQueries({ queryKey: ['staff', staffId] });
@@ -155,8 +155,9 @@ export function StaffDetailPage() {
       setEditMode(false);
       formValidation.clearErrors();
     },
-    onError: (error: any) => {
-      const errorMessage = error?.response?.data?.detail || error.message;
+    onError: (error: unknown) => {
+      const err = error as { response?: { data?: { detail?: string } }; message?: string };
+      const errorMessage = err?.response?.data?.detail || err?.message || 'Unknown error';
       if (errorMessage.includes('permission')) {
         notifications.notifyError('Permission Denied', errorMessage);
       } else if (errorMessage.includes('Validation')) {
@@ -186,18 +187,19 @@ export function StaffDetailPage() {
         notifications.notifyStaffDeactivated(updatedStaff);
       }
     },
-    onError: (error: any) => {
-      notifications.notifyError('Status Change Failed', error?.response?.data?.detail || error.message);
+    onError: (error: unknown) => {
+      const err = error as { response?: { data?: { detail?: string } }; message?: string };
+      notifications.notifyError('Status Change Failed', err?.response?.data?.detail || err?.message || 'Failed to change status');
     },
   });
 
   // Calculate analytics
   const analytics = {
-    totalHours: timeEntries?.items.reduce((sum: number, entry: any) => sum + (entry.duration_minutes / 60), 0) || 0,
+    totalHours: timeEntries?.items.reduce((sum: number, entry: TimeEntry) => sum + (entry.duration_seconds / 3600), 0) || 0,
     totalEntries: timeEntries?.items.length || 0,
     expectedHours: (staff?.expected_hours_per_week || 40) * (dateRange === 'week' ? 1 : dateRange === 'month' ? 4 : 52),
-    projectCount: new Set(timeEntries?.items.map((e: any) => e.project_id).filter(Boolean)).size,
-    daysWorked: new Set(timeEntries?.items.map((e: any) => e.start_time?.split('T')[0]).filter(Boolean)).size,
+    projectCount: new Set(timeEntries?.items.map((e: TimeEntry) => e.project_id).filter(Boolean)).size,
+    daysWorked: new Set(timeEntries?.items.map((e: TimeEntry) => e.start_time?.split('T')[0]).filter(Boolean)).size,
   };
 
   const productivityScore = analytics.expectedHours > 0 
@@ -720,7 +722,7 @@ export function StaffDetailPage() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {timeEntries.items.slice(0, 20).map((entry: any) => (
+                      {timeEntries.items.slice(0, 20).map((entry: TimeEntry) => (
                         <tr key={entry.id} className="hover:bg-gray-50">
                           <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                             {formatDate(entry.start_time)}
@@ -732,7 +734,7 @@ export function StaffDetailPage() {
                             {entry.task?.name || '—'}
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-indigo-600">
-                            {formatDuration(entry.duration_minutes)}
+                            {formatDuration(entry.duration_seconds)}
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">
                             {entry.description || '—'}

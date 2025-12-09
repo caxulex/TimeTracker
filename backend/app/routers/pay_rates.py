@@ -89,7 +89,7 @@ async def get_user_pay_rates(
     Get all pay rates for a specific user.
     Users can view their own rates, admins can view anyone's.
     """
-    if current_user.role != "super_admin" and current_user.id != user_id:
+    if current_user.role not in ["super_admin", "admin"] and current_user.id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Can only view your own pay rates"
@@ -109,7 +109,7 @@ async def get_user_current_rate(
     """
     Get the current active pay rate for a user.
     """
-    if current_user.role != "super_admin" and current_user.id != user_id:
+    if current_user.role not in ["super_admin", "admin"] and current_user.id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Can only view your own pay rates"
@@ -138,7 +138,7 @@ async def get_pay_rate(
             detail="Pay rate not found"
         )
     
-    if current_user.role != "super_admin" and current_user.id != pay_rate.user_id:
+    if current_user.role not in ["super_admin", "admin"] and current_user.id != pay_rate.user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Can only view your own pay rates"

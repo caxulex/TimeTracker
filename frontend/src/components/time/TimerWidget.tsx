@@ -48,9 +48,21 @@ export function TimerWidget() {
   const projects = projectsData?.items || [];
   const tasks = tasksData?.items || [];
 
-  // Fetch timer status on mount
+  // Fetch timer status on mount AND when component becomes visible
   useEffect(() => {
+    console.log('[TimerWidget] Component mounted, fetching timer...');
     fetchTimer();
+    
+    // Also fetch on window focus (in case user has multiple tabs)
+    const handleFocus = () => {
+      console.log('[TimerWidget] Window focused, refreshing timer...');
+      fetchTimer();
+    };
+    window.addEventListener('focus', handleFocus);
+    
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
   }, [fetchTimer]);
 
   // Update elapsed time every second when timer is running

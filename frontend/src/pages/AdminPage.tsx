@@ -25,7 +25,7 @@ export function AdminPage() {
   });
 
   // Check if current user is admin
-  const isAdmin = currentUser?.role === 'super_admin';
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
 
   // Fetch users
   const { data: usersData, isLoading } = useQuery({

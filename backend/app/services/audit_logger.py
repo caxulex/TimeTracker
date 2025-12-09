@@ -8,10 +8,10 @@ from enum import Enum
 import json
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import Column, Integer, String, DateTime, Text, select, func
-from sqlalchemy.orm import declarative_base
+from sqlalchemy import select, func
 
-from app.database import Base
+# Import AuditLog model from models
+from app.models import AuditLog
 
 
 class AuditAction(str, Enum):
@@ -24,24 +24,6 @@ class AuditAction(str, Enum):
     ROLE_CHANGE = "ROLE_CHANGE"
     TIMER_START = "TIMER_START"
     TIMER_STOP = "TIMER_STOP"
-
-
-class AuditLog(Base):
-    """Audit log model for database storage"""
-    __tablename__ = "audit_logs"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
-    user_id = Column(Integer, nullable=True)
-    user_email = Column(String(255), nullable=True)
-    action = Column(String(50), nullable=False)
-    resource_type = Column(String(100), nullable=False)
-    resource_id = Column(Integer, nullable=True)
-    ip_address = Column(String(50), nullable=True)
-    user_agent = Column(String(500), nullable=True)
-    old_values = Column(Text, nullable=True)
-    new_values = Column(Text, nullable=True)
-    details = Column(Text, nullable=True)
 
 
 class AuditLogResponse(BaseModel):

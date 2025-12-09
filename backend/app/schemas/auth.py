@@ -5,6 +5,7 @@ SEC-003: Enhanced with password strength validation hints
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
+from datetime import date
 import re
 
 
@@ -86,6 +87,14 @@ class UserResponse(BaseModel):
     start_date: Optional[str] = None  # date as string
     expected_hours_per_week: Optional[float] = None
     manager_id: Optional[int] = None
+
+    @field_validator('start_date', mode='before')
+    @classmethod
+    def convert_date_to_string(cls, v):
+        """Convert date object to ISO format string"""
+        if isinstance(v, date):
+            return v.isoformat()
+        return v
 
     class Config:
         from_attributes = True

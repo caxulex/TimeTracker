@@ -1,8 +1,8 @@
 // ============================================
 // TIME TRACKER - STAFF MANAGEMENT PAGE
 // ============================================
-import { useState, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
 import { usersApi, teamsApi, payRatesApi, timeEntriesApi, projectsApi, reportsApi } from '../api/client';
@@ -17,6 +17,7 @@ import type { User, UserCreate, Team, TeamMember, PayRate, TimeEntry, Project } 
 export function StaffPage() {
   const { user: currentUser } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const notifications = useStaffNotifications();
   const permissions = usePermissions();
@@ -64,12 +65,43 @@ export function StaffPage() {
     team_ids: [] as number[],
   });
   
+  // Handle pre-filled data from account requests
+  useEffect(() => {
+    if (location.state?.fromAccountRequest && location.state?.initialData) {
+      const initialData = location.state.initialData;
+      setCreateForm(prev => ({
+        ...prev,
+        name: initialData.name || prev.name,
+        email: initialData.email || prev.email,
+        phone: initialData.phone || prev.phone,
+        job_title: initialData.job_title || prev.job_title,
+        department: initialData.department || prev.department,
+        role: initialData.role || prev.role,
+      }));
+      setShowCreateModal(true);
+      // Clear the location state to prevent re-filling on re-render
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, navigate, location.pathname]);
+  
   const [editForm, setEditForm] = useState({
     name: '',
     email: '',
+    phone: '',
+    address: '',
+    emergency_contact_name: '',
+    emergency_contact_phone: '',
+    job_title: '',
+    department: '',
+    employment_type: 'full_time' as 'full_time' | 'part_time' | 'contractor',
+    start_date: '',
+    expected_hours_per_week: 40,
+    pay_rate: 0,
+    pay_rate_type: 'hourly' as 'hourly' | 'daily' | 'monthly' | 'project_based',
+    overtime_multiplier: 1.5,
   });
 
-  const isAdmin = currentUser?.role === 'super_admin';
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
 
   // Fetch staff members
   const { data: usersData, isLoading } = useQuery({
@@ -101,7 +133,7 @@ export function StaffPage() {
 
   // Create staff mutation
   const createStaffMutation = useMutation({
-    mutationFn: (data: typeof createForm) => usersApi.create(data as any),
+    mutationFn: (data: Record<string, unknown>) => usersApi.create(data as unknown as UserCreate),
     onSuccess: (newStaff) => {
       queryClient.invalidateQueries({ queryKey: ['staff'] });
       notifications.notifyStaffCreated(newStaff);
@@ -130,23 +162,105 @@ export function StaffPage() {
         team_ids: [],
       });
     },
-    onError: (error: any) => {
-      notifications.notifyStaffCreationFailed(error?.response?.data?.detail || error.message);
+    onError: (error: unknown) => {
+      const err = error as { response?: { data?: { detail?: string | { message: string; errors: string[] } } }; message?: string };
+      let errorMessage = 'Failed to create staff';
+      
+      if (err?.response?.data?.detail) {
+        const detail = err.response.data.detail;
+        if (typeof detail === 'string') {
+          errorMessage = detail;
+        } else if (detail && typeof detail === 'object' && 'message' in detail) {
+          errorMessage = detail.message;
+          if ('errors' in detail && Array.isArray(detail.errors)) {
+            errorMessage += ':\n' + detail.errors.join('\n');
+          }
+        }
+      } else if (err?.message) {
+        errorMessage = err.message;
+      }
+      
+      notifications.notifyStaffCreationFailed(errorMessage);
+      
+      // Go back to step 1 if password validation failed
+      if (errorMessage.toLowerCase().includes('password')) {
+        setFormStep(1);
+      }
+      // Go back to step 2 if employment/job related error
+      else if (errorMessage.toLowerCase().includes('job') || errorMessage.toLowerCase().includes('employment')) {
+        setFormStep(2);
+      }
+      // Go back to step 3 if payroll related error
+      else if (errorMessage.toLowerCase().includes('pay') || errorMessage.toLowerCase().includes('rate')) {
+        setFormStep(3);
+      }
+      // Modal stays open so user can navigate and fix the issue
     },
   });
 
   // Update staff mutation
   const updateStaffMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<User> }) =>
-      usersApi.update(id, data),
+    mutationFn: async ({ id, data, payRateData }: { id: number; data: Partial<User>; payRateData?: any }) => {
+      // Update user profile
+      const updatedUser = await usersApi.update(id, data);
+      
+      // Update or create pay rate if provided
+      if (payRateData && payRateData.pay_rate > 0) {
+        let currentPayRate = null;
+        try {
+          // Try to get current pay rate
+          currentPayRate = await payRatesApi.getUserCurrentRate(id);
+        } catch (error: any) {
+          // 404 is expected if no pay rate exists yet
+          if (error?.response?.status !== 404) {
+            console.error('Error fetching current pay rate:', error);
+          }
+        }
+        
+        try {
+          if (currentPayRate) {
+            // Update existing pay rate
+            console.log('Updating existing pay rate:', currentPayRate.id, payRateData);
+            await payRatesApi.update(currentPayRate.id, {
+              base_rate: payRateData.pay_rate,
+              rate_type: payRateData.pay_rate_type,
+              overtime_multiplier: payRateData.overtime_multiplier,
+              currency: payRateData.currency || 'USD',
+              is_active: true,
+            });
+          } else {
+            // Create new pay rate
+            console.log('Creating new pay rate for user:', id, payRateData);
+            await payRatesApi.create({
+              user_id: id,
+              base_rate: payRateData.pay_rate,
+              rate_type: payRateData.pay_rate_type,
+              overtime_multiplier: payRateData.overtime_multiplier,
+              currency: payRateData.currency || 'USD',
+              effective_from: new Date().toISOString().split('T')[0],
+              is_active: true,
+            });
+          }
+        } catch (error) {
+          console.error('Failed to save pay rate:', error);
+          // Throw error so user knows the pay rate wasn't saved
+          throw new Error('Failed to update pay rate: ' + (error as any)?.response?.data?.detail || (error as any)?.message);
+        }
+      }
+      
+      return updatedUser;
+    },
     onSuccess: (updatedStaff) => {
       queryClient.invalidateQueries({ queryKey: ['staff'] });
+      queryClient.invalidateQueries({ queryKey: ['payRates'] });
+      queryClient.invalidateQueries({ queryKey: ['payRate'] });
       notifications.notifyStaffUpdated(updatedStaff);
       setShowEditModal(false);
       setSelectedStaff(null);
     },
-    onError: (error: any) => {
-      notifications.notifyStaffUpdateFailed(error?.response?.data?.detail || error.message);
+    onError: (error: unknown) => {
+      const err = error as { response?: { data?: { detail?: string } }; message?: string };
+      notifications.notifyStaffUpdateFailed(err?.response?.data?.detail || err?.message || 'Failed to update staff');
     },
   });
 
@@ -169,17 +283,39 @@ export function StaffPage() {
         notifications.notifyStaffDeactivated(updatedStaff);
       }
     },
-    onError: (error: any) => {
-      notifications.notifyError('Status Change Failed', error?.response?.data?.detail || error.message);
+    onError: (error: unknown) => {
+      const err = error as { response?: { data?: { detail?: string } }; message?: string };
+      notifications.notifyError('Status Change Failed', err?.response?.data?.detail || err?.message || 'Failed to change status');
     },
   });
 
   // Memoized handlers to prevent unnecessary re-renders (must be before any returns)
-  const handleEditStaff = useCallback((staff: User) => {
+  const handleEditStaff = useCallback(async (staff: User) => {
     setSelectedStaff(staff);
+    
+    // Load current pay rate
+    let currentPayRate = null;
+    try {
+      currentPayRate = await payRatesApi.getUserCurrentRate(staff.id);
+    } catch (error) {
+      console.error('Failed to load pay rate:', error);
+    }
+    
     setEditForm({
       name: staff.name,
       email: staff.email,
+      phone: staff.phone || '',
+      address: staff.address || '',
+      emergency_contact_name: staff.emergency_contact_name || '',
+      emergency_contact_phone: staff.emergency_contact_phone || '',
+      job_title: staff.job_title || '',
+      department: staff.department || '',
+      employment_type: staff.employment_type || 'full_time',
+      start_date: staff.start_date || '',
+      expected_hours_per_week: staff.expected_hours_per_week || 40,
+      pay_rate: currentPayRate?.base_rate ? Number(currentPayRate.base_rate) : 0,
+      pay_rate_type: currentPayRate?.rate_type || 'hourly',
+      overtime_multiplier: currentPayRate?.overtime_multiplier ? Number(currentPayRate.overtime_multiplier) : 1.5,
     });
     setShowEditModal(true);
   }, []);
@@ -202,7 +338,15 @@ export function StaffPage() {
         return;
       }
       
-      updateStaffMutation.mutate({ id: selectedStaff.id, data: securedData as any });
+      // Extract pay rate data from secured data
+      const { pay_rate, pay_rate_type, overtime_multiplier, currency, ...userUpdateData } = securedData as any;
+      
+      // Update user profile first
+      updateStaffMutation.mutate({ 
+        id: selectedStaff.id, 
+        data: userUpdateData,
+        payRateData: pay_rate > 0 ? { pay_rate, pay_rate_type, overtime_multiplier, currency: currency || 'USD' } : null
+      });
     }
   }, [selectedStaff, editForm, permissions, notifications, formValidation, updateStaffMutation]);
 
@@ -264,12 +408,18 @@ export function StaffPage() {
     const { valid, securedData } = formValidation.secureAndValidate(createForm, false);
     
     if (!valid) {
-      const firstError = formValidation.errors[0];
-      notifications.notifyValidationError(firstError.field, firstError.message);
+      const errors = formValidation.errors || [];
+      if (errors.length > 0 && errors[0]) {
+        const firstError = errors[0];
+        notifications.notifyValidationError(firstError.field, firstError.message);
+      } else {
+        notifications.notifyError('Validation Failed', 'Please check your form data.');
+      }
+      // Don't close modal or advance - let user fix the error
       return;
     }
     
-    createStaffMutation.mutate(securedData as any);
+    createStaffMutation.mutate(securedData);
   };
 
   return (
@@ -831,7 +981,7 @@ export function StaffPage() {
                     </label>
                     <select
                       value={createForm.employment_type}
-                      onChange={(e) => setCreateForm({ ...createForm, employment_type: e.target.value as any })}
+                      onChange={(e) => setCreateForm({ ...createForm, employment_type: e.target.value as 'full_time' | 'part_time' | 'contractor' })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
                     >
                       <option value="full_time">Full-time</option>
@@ -951,8 +1101,15 @@ export function StaffPage() {
                           type="number"
                           step="0.01"
                           min="0"
-                          value={createForm.pay_rate}
-                          onChange={(e) => setCreateForm({ ...createForm, pay_rate: parseFloat(e.target.value) || 0 })}
+                          value={createForm.pay_rate === 0 ? '' : createForm.pay_rate}
+                          onChange={(e) => setCreateForm({ ...createForm, pay_rate: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
+                          onBlur={(e) => {
+                            // Ensure valid number on blur
+                            const value = parseFloat(e.target.value);
+                            if (isNaN(value) || value < 0) {
+                              setCreateForm({ ...createForm, pay_rate: 0 });
+                            }
+                          }}
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
                           placeholder="0.00"
                         />
@@ -961,7 +1118,7 @@ export function StaffPage() {
                         <label className="block text-sm font-medium text-gray-700 mb-1">Rate Type</label>
                         <select
                           value={createForm.pay_rate_type}
-                          onChange={(e) => setCreateForm({ ...createForm, pay_rate_type: e.target.value as any })}
+                          onChange={(e) => setCreateForm({ ...createForm, pay_rate_type: e.target.value as 'hourly' | 'daily' | 'monthly' | 'project_based' })}
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
                         >
                           <option value="hourly">Hourly</option>
@@ -1086,44 +1243,203 @@ export function StaffPage() {
       {/* Edit Staff Modal */}
       {showEditModal && selectedStaff && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-2 md:p-4 z-50 overflow-y-auto">
-          <Card className="w-full max-w-md my-auto">
+          <Card className="w-full max-w-2xl my-8">
             <CardHeader title="Edit Staff Member" />
-            <form onSubmit={handleUpdateStaff} className="space-y-4 p-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                <input
-                  type="text"
-                  required
-                  value={editForm.name}
-                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                  className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 ${
-                    formValidation.hasFieldError('name') 
-                      ? 'border-red-500 bg-red-50' 
-                      : 'border-gray-300'
-                  }`}
-                />
-                {formValidation.hasFieldError('name') && (
-                  <p className="text-xs text-red-600 mt-1">{formValidation.getFieldError('name')}</p>
-                )}
+            <form onSubmit={handleUpdateStaff} className="space-y-6 p-6 max-h-[calc(100vh-8rem)] overflow-y-auto">
+              {/* Basic Information */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900">Basic Information</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                    <input
+                      type="text"
+                      required
+                      value={editForm.name}
+                      onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                      className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 ${
+                        formValidation.hasFieldError('name') 
+                          ? 'border-red-500 bg-red-50' 
+                          : 'border-gray-300'
+                      }`}
+                    />
+                    {formValidation.hasFieldError('name') && (
+                      <p className="text-xs text-red-600 mt-1">{formValidation.getFieldError('name')}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+                    <input
+                      type="email"
+                      required
+                      value={editForm.email}
+                      onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                      className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 ${
+                        formValidation.hasFieldError('email') 
+                          ? 'border-red-500 bg-red-50' 
+                          : 'border-gray-300'
+                      }`}
+                    />
+                    {formValidation.hasFieldError('email') && (
+                      <p className="text-xs text-red-600 mt-1">{formValidation.getFieldError('email')}</p>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                <input
-                  type="email"
-                  required
-                  value={editForm.email}
-                  onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                  className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 ${
-                    formValidation.hasFieldError('email') 
-                      ? 'border-red-500 bg-red-50' 
-                      : 'border-gray-300'
-                  }`}
-                />
-                {formValidation.hasFieldError('email') && (
-                  <p className="text-xs text-red-600 mt-1">{formValidation.getFieldError('email')}</p>
-                )}
+
+              {/* Contact Information */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900">Contact Information</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                    <input
+                      type="tel"
+                      value={editForm.phone}
+                      onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                      placeholder="+1 (555) 123-4567"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                    <input
+                      type="text"
+                      value={editForm.address}
+                      onChange={(e) => setEditForm({ ...editForm, address: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Emergency Contact Name</label>
+                    <input
+                      type="text"
+                      value={editForm.emergency_contact_name}
+                      onChange={(e) => setEditForm({ ...editForm, emergency_contact_name: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Emergency Contact Phone</label>
+                    <input
+                      type="tel"
+                      value={editForm.emergency_contact_phone}
+                      onChange={(e) => setEditForm({ ...editForm, emergency_contact_phone: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                      placeholder="+1 (555) 987-6543"
+                    />
+                  </div>
+                </div>
               </div>
-              <div className="flex gap-2 justify-end pt-4">
+
+              {/* Employment Details */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900">Employment Details</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Job Title</label>
+                    <input
+                      type="text"
+                      value={editForm.job_title}
+                      onChange={(e) => setEditForm({ ...editForm, job_title: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
+                    <input
+                      type="text"
+                      value={editForm.department}
+                      onChange={(e) => setEditForm({ ...editForm, department: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Employment Type</label>
+                    <select
+                      value={editForm.employment_type}
+                      onChange={(e) => setEditForm({ ...editForm, employment_type: e.target.value as any })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="full_time">Full Time</option>
+                      <option value="part_time">Part Time</option>
+                      <option value="contractor">Contractor</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                    <input
+                      type="date"
+                      value={editForm.start_date}
+                      onChange={(e) => setEditForm({ ...editForm, start_date: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Expected Hours/Week</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="168"
+                      value={editForm.expected_hours_per_week}
+                      onChange={(e) => setEditForm({ ...editForm, expected_hours_per_week: parseInt(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Payroll Information */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900">Payroll Information</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Pay Rate Type</label>
+                    <select
+                      value={editForm.pay_rate_type}
+                      onChange={(e) => setEditForm({ ...editForm, pay_rate_type: e.target.value as any })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="hourly">Hourly</option>
+                      <option value="daily">Daily</option>
+                      <option value="monthly">Monthly</option>
+                      <option value="project_based">Project Based</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Pay Rate ($)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={editForm.pay_rate === 0 ? '' : editForm.pay_rate}
+                      onChange={(e) => setEditForm({ ...editForm, pay_rate: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
+                      onBlur={(e) => {
+                        const value = parseFloat(e.target.value);
+                        if (isNaN(value) || value < 0) {
+                          setEditForm({ ...editForm, pay_rate: 0 });
+                        }
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Overtime Multiplier</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="1"
+                      max="5"
+                      value={editForm.overtime_multiplier}
+                      onChange={(e) => setEditForm({ ...editForm, overtime_multiplier: parseFloat(e.target.value) || 1.5 })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-2 justify-end pt-4 border-t">
                 <Button
                   type="button"
                   variant="secondary"
@@ -1245,8 +1561,9 @@ function ManageTeamsModal({ staff, onClose }: { staff: User; onClose: () => void
       notifications.notifyAddedToTeam(staff.name, variables.teamName);
       setActiveTab('current');
     },
-    onError: (error: any) => {
-      notifications.notifyTeamOperationFailed(error?.response?.data?.detail || error.message);
+    onError: (error: unknown) => {
+      const err = error as { response?: { data?: { detail?: string } }; message?: string };
+      notifications.notifyTeamOperationFailed(err?.response?.data?.detail || err?.message || 'Failed to add to team');
     },
   });
 
@@ -1259,8 +1576,9 @@ function ManageTeamsModal({ staff, onClose }: { staff: User; onClose: () => void
       queryClient.invalidateQueries({ queryKey: ['staff-projects', staff.id] });
       notifications.notifyRemovedFromTeam(staff.name, variables.teamName);
     },
-    onError: (error: any) => {
-      notifications.notifyTeamOperationFailed(error?.response?.data?.detail || error.message);
+    onError: (error: unknown) => {
+      const err = error as { response?: { data?: { detail?: string } }; message?: string };
+      notifications.notifyTeamOperationFailed(err?.response?.data?.detail || err?.message || 'Failed to remove from team');
     },
   });
 
@@ -1272,8 +1590,9 @@ function ManageTeamsModal({ staff, onClose }: { staff: User; onClose: () => void
       queryClient.invalidateQueries({ queryKey: ['staff-teams', staff.id] });
       notifications.notifySuccess('Role Updated', 'Member role updated successfully!');
     },
-    onError: (error: any) => {
-      notifications.notifyError('Role Update Failed', error?.response?.data?.detail || error.message);
+    onError: (error: unknown) => {
+      const err = error as { response?: { data?: { detail?: string } }; message?: string };
+      notifications.notifyError('Role Update Failed', err?.response?.data?.detail || err?.message || 'Failed to update role');
     },
   });
 
@@ -2138,8 +2457,9 @@ function AnalyticsModal({ staff, onClose }: { staff: User; onClose: () => void }
       }
 
       notifications.notifyExportComplete(format, filename);
-    } catch (error: any) {
-      notifications.notifyExportFailed(error.message || 'An error occurred during export');
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      notifications.notifyExportFailed(err?.message || 'An error occurred during export');
     }
   };
 

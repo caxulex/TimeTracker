@@ -94,7 +94,7 @@ async def get_current_admin_user(
     current_user: User = Depends(get_current_user)
 ) -> User:
     """Get current user and verify they are an admin"""
-    if current_user.role != "super_admin":
+    if current_user.role not in ["super_admin", "admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"

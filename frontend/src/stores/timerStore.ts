@@ -45,16 +45,19 @@ export const useTimerStore = create<TimerState>()(
         set({ isLoading: true, error: null });
         try {
           const status = await timeEntriesApi.getTimer();
-          if (status.is_running && status.entry) {
-            const elapsed = calculateElapsed(status.entry.start_time);
+          console.log('[TimerStore] Fetched timer status:', status);
+          if (status.is_running && status.current_entry) {
+            const elapsed = calculateElapsed(status.current_entry.start_time);
+            console.log('[TimerStore] Setting running timer, elapsed:', elapsed);
             set({
-              currentEntry: status.entry,
+              currentEntry: status.current_entry,
               isRunning: true,
               elapsedSeconds: elapsed,
               isLoading: false,
               lastSyncTime: Date.now(),
             });
           } else {
+            console.log('[TimerStore] No running timer, resetting state');
             set({ 
               currentEntry: null, 
               isRunning: false, 
@@ -64,6 +67,7 @@ export const useTimerStore = create<TimerState>()(
             });
           }
         } catch (error: any) {
+          console.error('[TimerStore] Error fetching timer:', error);
           set({ error: error.message, isLoading: false });
         }
       },
@@ -129,10 +133,10 @@ export const useTimerStore = create<TimerState>()(
             const status = await timeEntriesApi.getTimer();
             
             // Backend has a running timer
-            if (status.is_running && status.entry) {
-              const elapsed = calculateElapsed(status.entry.start_time);
+            if (status.is_running && status.current_entry) {
+              const elapsed = calculateElapsed(status.current_entry.start_time);
               set({
-                currentEntry: status.entry,
+                currentEntry: status.current_entry,
                 isRunning: true,
                 elapsedSeconds: elapsed,
                 lastSyncTime: Date.now(),
@@ -161,13 +165,19 @@ export const useTimerStore = create<TimerState>()(
         isRunning: state.isRunning,
         lastSyncTime: state.lastSyncTime,
       }),
-      // On rehydrate, recalculate elapsed from stored start time
+      // On rehydrate, immediately sync with backend to get fresh state
       onRehydrateStorage: () => (state) => {
+        console.log('[TimerStore] Rehydrating state from localStorage:', state);
         if (state?.isRunning && state?.currentEntry) {
           const elapsed = calculateElapsed(state.currentEntry.start_time);
           state.elapsedSeconds = elapsed;
-          // Trigger a sync with backend on page load
-          setTimeout(() => state.syncWithBackend(), 1000);
+          console.log('[TimerStore] Rehydrated with running timer, elapsed:', elapsed);
+        }
+        // Always fetch fresh state from backend immediately on page load
+        console.log('[TimerStore] Triggering immediate backend sync...');
+        if (state) {
+          // Use setTimeout to avoid calling async during rehydration
+          setTimeout(() => state.fetchTimer(), 0);
         }
       },
     }

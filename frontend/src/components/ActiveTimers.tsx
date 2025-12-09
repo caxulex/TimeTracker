@@ -3,8 +3,10 @@
 // "Who's Working Now" Real-time Display
 // ============================================
 import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Card } from './common';
 import { useWebSocket, type ActiveTimer } from '../hooks/useWebSocket';
+import { timeEntriesApi } from '../api/client';
 
 interface ActiveTimersProps {
   teamId?: number;
@@ -12,8 +14,22 @@ interface ActiveTimersProps {
 }
 
 export function ActiveTimers({ teamId, className = '' }: ActiveTimersProps) {
-  const { isConnected, activeTimers, requestActiveTimers } = useWebSocket();
+  const { isConnected, activeTimers: wsActiveTimers, requestActiveTimers } = useWebSocket();
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  // Fallback: Query active timers from API if WebSocket is not connected
+  const { data: apiActiveTimers, refetch } = useQuery({
+    queryKey: ['active-timers'],
+    queryFn: async () => {
+      const response = await timeEntriesApi.getActiveTimers();
+      return response as ActiveTimer[];
+    },
+    enabled: !isConnected, // Only query if WebSocket is disconnected
+    refetchInterval: isConnected ? false : 5000, // Poll every 5 seconds when not connected
+  });
+
+  // Use WebSocket data if connected, otherwise use API data
+  const activeTimers = isConnected ? wsActiveTimers : (apiActiveTimers || []);
 
   // Refresh timer display every second
   useEffect(() => {
@@ -23,12 +39,19 @@ export function ActiveTimers({ teamId, className = '' }: ActiveTimersProps) {
     return () => clearInterval(interval);
   }, []);
 
-  // Request active timers when teamId changes
+  // Request active timers when teamId changes (WebSocket only)
   useEffect(() => {
     if (isConnected) {
       requestActiveTimers(teamId);
     }
   }, [isConnected, teamId, requestActiveTimers]);
+
+  // Refetch from API when not connected
+  useEffect(() => {
+    if (!isConnected) {
+      refetch();
+    }
+  }, [isConnected, refetch]);
 
   const formatElapsed = (startTime: string): string => {
     const start = new Date(startTime);

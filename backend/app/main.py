@@ -18,6 +18,7 @@ from app.routers import auth, users, teams, projects, tasks, time_entries, repor
 from app.routers import pay_rates, payroll, payroll_reports, monitoring
 from app.routers import admin, export, sessions, invitations, approvals, report_templates
 from app.routers import ip_security as ip_security_router
+from app.routers import account_requests
 from app.middleware import RateLimitMiddleware, rate_limiter, SecurityHeadersMiddleware, RequestValidationMiddleware
 from app.exceptions import AppException
 
@@ -169,6 +170,9 @@ app.include_router(ip_security_router.router, prefix="/api/security/ip", tags=["
 
 # Report Templates routes
 app.include_router(report_templates.router, prefix="/api/reports", tags=["Report Templates"])
+
+# Account Request routes (public + admin)
+app.include_router(account_requests.router, prefix="/api/account-requests", tags=["Account Requests"])
 
 
 # SEC-010: Custom exception handler for AppException

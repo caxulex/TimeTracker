@@ -128,7 +128,6 @@ class TestTeamUpdate:
 class TestTeamDelete:
     """Test team deletion endpoint."""
     
-    @pytest.mark.skip(reason="Delete requires cascade configuration - API bug to fix later")
     @pytest.mark.asyncio
     async def test_delete_team(
         self, client: AsyncClient, auth_headers: dict

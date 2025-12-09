@@ -59,8 +59,11 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     const token = getToken();
     if (!token) return null;
     
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
+    // Get API URL from environment variable
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    const url = new URL(apiUrl);
+    const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = url.host;
     return protocol + '//' + host + '/api/ws/ws?token=' + token;
   }, [getToken]);
 
@@ -78,6 +81,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     if (!wsUrl) return;
 
     try {
+      console.log('Connecting to WebSocket:', wsUrl);
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 

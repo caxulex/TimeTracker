@@ -18,30 +18,37 @@ function useNotificationsInternal() {
 // Notification Provider
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [toastNotifications, setToastNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
   const addNotification = useCallback((notification: Omit<Notification, 'id'>) => {
     const id = Math.random().toString(36).substr(2, 9);
     const newNotification = { ...notification, id };
     
+    // Add to persistent notifications list (for bell dropdown)
     setNotifications(prev => [newNotification, ...prev]);
     setUnreadCount(prev => prev + 1);
 
-    // Auto remove after duration (default 5 seconds)
+    // Add to toast notifications (for bottom-right toasts)
+    setToastNotifications(prev => [newNotification, ...prev]);
+
+    // Auto remove toast after duration (default 5 seconds)
     const duration = notification.duration ?? 5000;
     if (duration > 0) {
       setTimeout(() => {
-        setNotifications(prev => prev.filter(n => n.id !== id));
+        setToastNotifications(prev => prev.filter(n => n.id !== id));
       }, duration);
     }
   }, []);
 
   const removeNotification = useCallback((id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
+    setToastNotifications(prev => prev.filter(n => n.id !== id));
   }, []);
 
   const clearAll = useCallback(() => {
     setNotifications([]);
+    setToastNotifications([]);
     setUnreadCount(0);
   }, []);
 
@@ -59,18 +66,18 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       markAllRead,
     }}>
       {children}
-      <NotificationContainer />
+      <NotificationContainer toastNotifications={toastNotifications} />
     </NotificationContext.Provider>
   );
 }
 
 // Toast notification container
-function NotificationContainer() {
-  const { notifications, removeNotification } = useNotificationsInternal();
+function NotificationContainer({ toastNotifications }: { toastNotifications: Notification[] }) {
+  const { removeNotification } = useNotificationsInternal();
 
   return (
     <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm">
-      {notifications.slice(0, 5).map((notification) => (
+      {toastNotifications.slice(0, 5).map((notification) => (
         <Toast
           key={notification.id}
           notification={notification}

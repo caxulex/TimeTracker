@@ -14,7 +14,7 @@ export function ProjectsPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const { addNotification } = useNotifications();
-  const isAdmin = user?.role === 'super_admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
 
   const [showModal, setShowModal] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);

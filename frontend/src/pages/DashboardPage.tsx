@@ -50,7 +50,7 @@ interface AdminDashboardStats {
 export function DashboardPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const isAdmin = user?.role === 'super_admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
 
   // Auto-refresh when WebSocket events are received
   useWebSocket({

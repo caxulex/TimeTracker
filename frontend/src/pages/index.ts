@@ -3,6 +3,7 @@
 // ============================================
 export { LoginPage } from './LoginPage';
 export { RegisterPage } from './RegisterPage';
+export { AccountRequestPage } from './AccountRequestPage';
 export { DashboardPage } from './DashboardPage';
 export { ProjectsPage } from './ProjectsPage';
 export { TasksPage } from './TasksPage';
@@ -13,6 +14,7 @@ export { SettingsPage } from './SettingsPage';
 export { AdminPage } from './AdminPage';
 export { UsersPage } from './UsersPage';
 export { StaffPage } from './StaffPage';
+export { AccountRequestsPage } from './AccountRequestsPage';
 
 // Payroll Pages
 export { PayRatesPage } from './PayRatesPage';

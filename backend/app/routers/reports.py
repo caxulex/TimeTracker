@@ -2,18 +2,20 @@
 Reports and analytics router
 """
 
+import logging
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from pydantic import BaseModel
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone, time
 
 from app.database import get_db
 from app.models import User, Team, TeamMember, Project, Task, TimeEntry
 from app.dependencies import get_current_active_user
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class ProjectSummary(BaseModel):
@@ -229,7 +231,7 @@ async def get_time_by_project(
     end_datetime = datetime.combine(end_date, datetime.max.time())
     
     # Get accessible projects for user
-    if current_user.role == "super_admin":
+    if current_user.role in ["super_admin", "admin"]:
         project_ids_query = select(Project.id)
     else:
         user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
@@ -345,7 +347,7 @@ async def get_team_report(
 ):
     """Get team time report (team admin/owner only)"""
     # Check team access
-    if current_user.role != "super_admin":
+    if current_user.role not in ["super_admin", "admin"]:
         member_check = await db.execute(
             select(TeamMember).where(
                 TeamMember.team_id == team_id,
@@ -597,44 +599,83 @@ class AdminDashboardStats(BaseModel):
     running_timers: int
     by_user: List[UserSummary]
 
-
 @router.get("/admin/dashboard", response_model=AdminDashboardStats)
 async def get_admin_dashboard(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    '''Get admin dashboard with all team members time (super_admin only)'''
-    if current_user.role != "super_admin":
+    '''Get admin dashboard with all team members time (admin and super_admin)'''
+    if current_user.role not in ["super_admin", "admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
         )
     
-    now = datetime.now()
-    today_start = datetime.combine(now.date(), datetime.min.time())
-    week_start = today_start - timedelta(days=now.weekday())
+    now = datetime.now(timezone.utc)
+    today_start = datetime.combine(now.date(), time.min).replace(tzinfo=timezone.utc)
+    week_start = (today_start - timedelta(days=now.weekday()))
     month_start = today_start.replace(day=1)
 
-    # Total time today (all users)
-    today_result = await db.execute(
-        select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0))
+    # Total time today (all users) - including active timers
+    today_entries_result = await db.execute(
+        select(TimeEntry)
         .where(TimeEntry.start_time >= today_start)
     )
-    total_today = today_result.scalar() or 0
+    today_entries = today_entries_result.scalars().all()
+    
+    logger.info(f"Found {len(today_entries)} time entries for today")
+    
+    total_today = 0
+    for entry in today_entries:
+        logger.info(f"Entry {entry.id}: start={entry.start_time}, end={entry.end_time}, duration={entry.duration_seconds}")
+        if entry.end_time is None:
+            # Active timer - calculate elapsed
+            start = entry.start_time
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            elapsed = int((now - start).total_seconds())
+            logger.info(f"Active timer ID {entry.id} - elapsed: {elapsed} seconds")
+            total_today += elapsed
+        else:
+            total_today += (entry.duration_seconds or 0)
+    
+    logger.info(f"FINAL total_today={total_today}")
 
-    # Total time this week (all users)
-    week_result = await db.execute(
-        select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0))
+    # Total time this week (all users) - including active timers
+    week_entries_result = await db.execute(
+        select(TimeEntry)
         .where(TimeEntry.start_time >= week_start)
     )
-    total_week = week_result.scalar() or 0
+    week_entries = week_entries_result.scalars().all()
+    
+    total_week = 0
+    for entry in week_entries:
+        if entry.end_time is None:
+            # Active timer - calculate elapsed
+            start = entry.start_time
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            total_week += int((now - start).total_seconds())
+        else:
+            total_week += (entry.duration_seconds or 0)
 
-    # Total time this month (all users)
-    month_result = await db.execute(
-        select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0))
+    # Total time this month (all users) - including active timers
+    month_entries_result = await db.execute(
+        select(TimeEntry)
         .where(TimeEntry.start_time >= month_start)
     )
-    total_month = month_result.scalar() or 0
+    month_entries = month_entries_result.scalars().all()
+    
+    total_month = 0
+    for entry in month_entries:
+        if entry.end_time is None:
+            # Active timer - calculate elapsed
+            start = entry.start_time
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            total_month += int((now - start).total_seconds())
+        else:
+            total_month += (entry.duration_seconds or 0)
 
     # Active users today
     active_users_result = await db.execute(
@@ -657,28 +698,56 @@ async def get_admin_dashboard(
     )
     running_timers = running_result.scalar() or 0
 
-    # Time by user today
+    # Time by user today (including active timers)
     user_result = await db.execute(
         select(
             TimeEntry.user_id,
             User.name,
-            func.coalesce(func.sum(TimeEntry.duration_seconds), 0).label("total_seconds"),
-            func.count(TimeEntry.id).label("entry_count")
+            TimeEntry.duration_seconds,
+            TimeEntry.start_time,
+            TimeEntry.end_time,
+            TimeEntry.id
         )
         .join(User, TimeEntry.user_id == User.id)
         .where(TimeEntry.start_time >= today_start)
-        .group_by(TimeEntry.user_id, User.name)
-        .order_by(func.sum(TimeEntry.duration_seconds).desc())
+        .order_by(User.name)
     )
 
-    by_user = []
+    # Aggregate by user, calculating elapsed time for active timers
+    user_totals = {}
     for row in user_result.all():
+        user_id = row.user_id
+        user_name = row.name
+        
+        if user_id not in user_totals:
+            user_totals[user_id] = {
+                "user_name": user_name,
+                "total_seconds": 0,
+                "entry_count": 0
+            }
+        
+        # Calculate duration (for active timers, use elapsed time)
+        if row.end_time is None:
+            # Active timer - calculate elapsed time
+            start = row.start_time
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            elapsed = int((now - start).total_seconds())
+            user_totals[user_id]["total_seconds"] += elapsed
+        else:
+            # Completed entry - use stored duration
+            user_totals[user_id]["total_seconds"] += (row.duration_seconds or 0)
+        
+        user_totals[user_id]["entry_count"] += 1
+
+    by_user = []
+    for user_id, data in sorted(user_totals.items(), key=lambda x: x[1]["total_seconds"], reverse=True):
         by_user.append(UserSummary(
-            user_id=row.user_id,
-            user_name=row.name,
-            total_seconds=row.total_seconds or 0,
-            total_hours=round((row.total_seconds or 0) / 3600, 2),
-            entry_count=row.entry_count
+            user_id=user_id,
+            user_name=data["user_name"],
+            total_seconds=data["total_seconds"],
+            total_hours=round(data["total_seconds"] / 3600, 2),
+            entry_count=data["entry_count"]
         ))
 
     return AdminDashboardStats(

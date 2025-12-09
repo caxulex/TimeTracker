@@ -19,7 +19,7 @@ export function isValidEmail(email: string): boolean {
  * Validate phone number (flexible format)
  */
 export function isValidPhone(phone: string): boolean {
-  const phoneRegex = /^[\d\s\-\+\(\)]+$/;
+  const phoneRegex = /^[\d\s+()-]+$/;
   return phone.length >= 10 && phoneRegex.test(phone);
 }
 
@@ -80,7 +80,7 @@ export function validateStaffName(name: string): {
   if (sanitized.length > 100) {
     return { valid: false, error: 'Name must not exceed 100 characters' };
   }
-  if (!/^[a-zA-Z\s\-\.]+$/.test(sanitized)) {
+  if (!/^[a-zA-Z\s-.]+$/.test(sanitized)) {
     return { valid: false, error: 'Name can only contain letters, spaces, hyphens, and periods' };
   }
 
@@ -195,7 +195,7 @@ export function hasPermission(
 /**
  * Redact sensitive information from objects for logging
  */
-export function redactSensitiveData<T extends Record<string, any>>(
+export function redactSensitiveData<T extends Record<string, unknown>>(
   data: T,
   sensitiveFields: string[] = ['password', 'token', 'secret', 'ssn']
 ): T {
@@ -203,7 +203,7 @@ export function redactSensitiveData<T extends Record<string, any>>(
 
   sensitiveFields.forEach((field) => {
     if (field in redacted) {
-      (redacted as any)[field] = '***REDACTED***';
+      (redacted as Record<string, unknown>)[field] = '***REDACTED***';
     }
   });
 
@@ -272,13 +272,13 @@ export const rateLimiter = new RateLimiter();
 /**
  * Secure form data before submission
  */
-export function secureFormData<T extends Record<string, any>>(data: T): T {
+export function secureFormData<T extends Record<string, unknown>>(data: T): T {
   const secured = { ...data };
 
   // Sanitize string fields
   Object.keys(secured).forEach((key) => {
     if (typeof secured[key] === 'string') {
-      (secured as any)[key] = sanitizeString(secured[key]);
+      (secured as Record<string, unknown>)[key] = sanitizeString(secured[key] as string);
     }
   });
 

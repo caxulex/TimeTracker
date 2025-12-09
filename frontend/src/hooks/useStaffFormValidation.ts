@@ -119,9 +119,16 @@ export function useStaffFormValidation() {
 
     // Pay rate validation
     if (data.pay_rate !== undefined && data.pay_rate_type) {
-      const rateValidation = validatePayRate(data.pay_rate, data.pay_rate_type);
-      if (!rateValidation.valid) {
-        newErrors.push({ field: 'pay_rate', message: rateValidation.error! });
+      if (data.pay_rate === 0) {
+        // Only show error on final submission (when isUpdate is explicitly false)
+        if (isUpdate === false) {
+          newErrors.push({ field: 'pay_rate', message: 'Pay rate is required' });
+        }
+      } else {
+        const rateValidation = validatePayRate(data.pay_rate, data.pay_rate_type);
+        if (!rateValidation.valid) {
+          newErrors.push({ field: 'pay_rate', message: rateValidation.error! });
+        }
       }
     }
 
@@ -222,12 +229,12 @@ export function useStaffFormValidation() {
   /**
    * Secure and validate form data before submission
    */
-  const secureAndValidate = useCallback((data: StaffFormData, isUpdate: boolean = false): {
+  const secureAndValidate = useCallback((data: StaffFormData | Record<string, unknown>, isUpdate: boolean = false): {
     valid: boolean;
-    securedData: StaffFormData;
+    securedData: Record<string, unknown>;
   } => {
-    const valid = validateStaffForm(data, isUpdate);
-    const securedData = secureFormData(data);
+    const valid = validateStaffForm(data as StaffFormData, isUpdate);
+    const securedData = secureFormData(data as Record<string, unknown>);
 
     return { valid, securedData };
   }, [validateStaffForm]);

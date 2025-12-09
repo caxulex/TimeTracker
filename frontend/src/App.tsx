@@ -8,6 +8,7 @@ import { NotificationProvider } from './components/Notifications';
 import {
   LoginPage,
   RegisterPage,
+  AccountRequestPage,
   DashboardPage,
   ProjectsPage,
   TasksPage,
@@ -21,6 +22,7 @@ import {
   PayrollReportsPage,
   UsersPage,
   StaffPage,
+  AccountRequestsPage,
 } from './pages';
 import { StaffDetailPage } from './pages/StaffDetailPage';
 import { useAuthStore } from './stores/authStore';
@@ -216,6 +218,16 @@ function App() {
                 </AdminRoute>
               }
             />
+            
+            {/* Account Requests (Admin only) */}
+            <Route
+              path="/account-requests"
+              element={
+                <AdminRoute>
+                  <AccountRequestsPage />
+                </AdminRoute>
+              }
+            />
             <Route
               path="/staff/:id"
               element={
@@ -224,6 +236,9 @@ function App() {
                 </AdminRoute>
               }
             />
+
+            {/* Public Account Request */}
+            <Route path="/request-account" element={<AccountRequestPage />} />
 
             {/* Default redirect */}
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
