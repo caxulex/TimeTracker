@@ -10,7 +10,7 @@ import { ActiveTimers } from '../components/ActiveTimers';
 import { AdminAlertsPanel } from '../components/AdminAlertsPanel';
 import { reportsApi } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
-import { useWebSocket } from '../hooks/useWebSocket';
+import { useWebSocketContext } from '../contexts/WebSocketContext';
 import { formatDuration } from '../utils/helpers';
 import type { DashboardStats, WeeklySummary } from '../types';
 import {
@@ -52,19 +52,8 @@ export function DashboardPage() {
   const queryClient = useQueryClient();
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
 
-  // Auto-refresh when WebSocket events are received
-  useWebSocket({
-    onMessage: (message) => {
-      if (['team_added', 'member_added', 'project_created', 'task_created'].includes(message.type)) {
-        // Invalidate relevant queries to refetch data
-        queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-        queryClient.invalidateQueries({ queryKey: ['admin-dashboard'] });
-        queryClient.invalidateQueries({ queryKey: ['weekly-summary'] });
-        queryClient.invalidateQueries({ queryKey: ['project-report-dashboard'] });
-        queryClient.invalidateQueries({ queryKey: ['projects'] });
-      }
-    }
-  });
+  // Get WebSocket context - connection is managed by WebSocketProvider
+  const { isConnected } = useWebSocketContext();
 
   // User's personal dashboard
   const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({

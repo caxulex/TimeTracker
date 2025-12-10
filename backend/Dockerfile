@@ -26,8 +26,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create non-root user for security
-RUN adduser --disabled-password --gecos '' appuser && \
+# Create non-root user for security (or use existing)
+RUN if ! id -u appuser > /dev/null 2>&1; then \
+        useradd -m -u 1001 -s /bin/bash appuser; \
+    fi && \
     chown -R appuser:appuser /app
 USER appuser
 

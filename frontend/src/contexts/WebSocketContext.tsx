@@ -69,4 +69,7 @@ export function useWebSocketContext(): WebSocketContextValue {
   return context;
 }
 
+// Re-export types for convenience
+export type { WebSocketMessage, ActiveTimer } from '../hooks/useWebSocket';
+
 export type { WebSocketContextValue };

@@ -29,13 +29,12 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 # Copy built application from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Create non-root user
-RUN adduser -D -H -u 1001 -s /sbin/nologin www-data && \
-    chown -R www-data:www-data /usr/share/nginx/html && \
-    chown -R www-data:www-data /var/cache/nginx && \
-    chown -R www-data:www-data /var/log/nginx && \
+# Create non-root user (use nginx user that already exists)
+RUN chown -R nginx:nginx /usr/share/nginx/html && \
+    chown -R nginx:nginx /var/cache/nginx && \
+    chown -R nginx:nginx /var/log/nginx && \
     touch /var/run/nginx.pid && \
-    chown -R www-data:www-data /var/run/nginx.pid
+    chown -R nginx:nginx /var/run/nginx.pid
 
 # Expose port
 EXPOSE 80

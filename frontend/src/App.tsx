@@ -5,6 +5,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from './components/layout/Layout';
 import { NotificationProvider } from './components/Notifications';
+import { WebSocketProvider } from './contexts/WebSocketContext';
 import {
   LoginPage,
   RegisterPage,
@@ -87,7 +88,8 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <NotificationProvider>
-        <BrowserRouter>
+        <WebSocketProvider>
+          <BrowserRouter>
           <Routes>
             {/* Public routes */}
             <Route
@@ -245,6 +247,7 @@ function App() {
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </BrowserRouter>
+        </WebSocketProvider>
       </NotificationProvider>
     </QueryClientProvider>
   );

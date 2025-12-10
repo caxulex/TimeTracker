@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card } from './common';
-import { useWebSocket, type ActiveTimer } from '../hooks/useWebSocket';
+import { useWebSocketContext, type ActiveTimer } from '../contexts/WebSocketContext';
 import { timeEntriesApi } from '../api/client';
 
 interface ActiveTimersProps {
@@ -14,7 +14,7 @@ interface ActiveTimersProps {
 }
 
 export function ActiveTimers({ teamId, className = '' }: ActiveTimersProps) {
-  const { isConnected, activeTimers: wsActiveTimers, requestActiveTimers } = useWebSocket();
+  const { isConnected, activeTimers: wsActiveTimers, requestActiveTimers } = useWebSocketContext();
   const [currentTime, setCurrentTime] = useState(new Date());
 
   // Fallback: Query active timers from API if WebSocket is not connected

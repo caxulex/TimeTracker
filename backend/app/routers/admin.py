@@ -263,7 +263,7 @@ async def get_activity_alerts(
         select(TimeEntry, User.name)
         .join(User, TimeEntry.user_id == User.id)
         .where(
-            TimeEntry.end_time == None,
+            TimeEntry.is_running == True,
             TimeEntry.start_time <= now - timedelta(hours=8)
         )
     )
@@ -319,7 +319,7 @@ async def get_activity_alerts(
         select(TimeEntry, User.name, Project.name)
         .join(User, TimeEntry.user_id == User.id)
         .join(Project, TimeEntry.project_id == Project.id)
-        .where(TimeEntry.end_time == None)
+        .where(TimeEntry.is_running == True)
     )
     running_count = 0
     for row in running_timers_result.all():

@@ -14,7 +14,7 @@ import platform
 import psutil
 
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, get_current_admin_user
 from app.models import User
 
 router = APIRouter(prefix="/monitoring", tags=["monitoring"])
@@ -69,16 +69,13 @@ async def readiness_probe(db: AsyncSession = Depends(get_db)) -> Dict[str, str]:
 
 @router.get("/metrics")
 async def get_metrics(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
     Get system metrics (admin only).
     Returns CPU, memory, disk usage, and application stats.
     """
-    if current_user.role not in ["admin", "super_admin"]:
-        raise HTTPException(status_code=403, detail="Admin access required")
-    
     # System metrics
     cpu_percent = psutil.cpu_percent(interval=0.1)
     memory = psutil.virtual_memory()
@@ -156,15 +153,12 @@ async def get_info() -> Dict[str, Any]:
 
 @router.get("/stats/activity")
 async def get_activity_stats(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
     Get activity statistics for monitoring dashboards.
     """
-    if current_user.role not in ["admin", "super_admin"]:
-        raise HTTPException(status_code=403, detail="Admin access required")
-    
     now = datetime.utcnow()
     one_hour_ago = now - timedelta(hours=1)
     one_day_ago = now - timedelta(days=1)

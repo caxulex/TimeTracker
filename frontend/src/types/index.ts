@@ -191,7 +191,8 @@ export interface TimerStart {
 export interface TimerStatus {
   is_running: boolean;
   is_manual?: boolean;
-  entry?: TimeEntry;
+  current_entry?: TimeEntry;
+  elapsed_seconds?: number;
 }
 
 // Dashboard Types

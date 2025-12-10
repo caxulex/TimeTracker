@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 from app.models import Base, User, Team, TeamMember, Project, Task, TimeEntry
 from app.config import settings
 
-# Use sync URL for seeding
-SYNC_DATABASE_URL = settings.DATABASE_URL.replace("+asyncpg", "+psycopg")
+# Use sync URL for seeding - replace asyncpg with psycopg2
+SYNC_DATABASE_URL = settings.DATABASE_URL.replace("+asyncpg", "").replace("postgresql://", "postgresql+psycopg2://")
 
 
 def hash_password(password: str) -> str:
