@@ -52,7 +52,7 @@ git commit -m "feat: Configurar auto-deploy desde GitHub Actions a AWS Lightsail
 
 # Git push
 Write-Host "Subiendo a GitHub..." -ForegroundColor Gray
-git push origin main
+git push origin master
 
 Write-Host ""
 Write-Host "✅ Cambios subidos a GitHub exitosamente!" -ForegroundColor Green

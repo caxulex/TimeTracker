@@ -65,7 +65,7 @@ echo "# Auto-deploy test" >> README.md
 # Commit y push
 git add .
 git commit -m "test: Probando auto-deploy"
-git push origin main
+git push origin master
 ```
 
 ### Opción B: Trigger manual desde GitHub
@@ -73,7 +73,7 @@ git push origin main
 1. Ve a la pestaña **Actions** en GitHub
 2. Selecciona el workflow **CI/CD Pipeline**
 3. Click en **Run workflow**
-4. Selecciona la branch `main`
+4. Selecciona la branch `master` (o `main` si la renombraste)
 5. Click en **Run workflow**
 
 ## 📊 Paso 4: Monitorear el Deployment
@@ -94,24 +94,24 @@ git push origin main
 
 ## 🎯 ¿Cómo funciona el Auto-Deploy?
 
-Cuando hagas `git push origin main`, automáticamente:
+Cuando hagas `git push origin master`, automáticamente:
 
-1. **GitHub Actions se activa** → Detecta el push a main
+1. **GitHub Actions se activa** → Detecta el push a master
 2. **Ejecuta Tests** → Backend y Frontend tests
 3. **Valida Docker Build** → Verifica que las imágenes se construyan correctamente
 4. **Se conecta por SSH** → Al servidor AWS usando los secrets
-5. **Actualiza el código** → `git pull origin main`
+5. **Actualiza el código** → `git pull origin master`
 6. **Reconstruye imágenes** → Docker build backend y frontend
 7. **Reinicia contenedores** → Sin downtime (rolling restart)
 8. **Verifica salud** → Confirma que todo esté funcionando
 
 ## 📝 Configuración Actual
 
-### Trigger: Push a `main`
+### Trigger: Push a `master` o `main`
 ```yaml
 on:
   push:
-    branches: [main]
+    branches: [master, main, develop]
 ```
 
 ### Jobs ejecutados:
@@ -138,7 +138,7 @@ on:
 **Solución**: Verifica que la carpeta `~/timetracker` exista en el servidor
 
 ### El workflow no se ejecuta
-**Solución**: Verifica que hayas hecho push a la branch `main` (no `master`)
+**Solución**: Verifica que hayas hecho push a la branch `master` o `main`
 
 ## 🎨 Personalización
 
@@ -188,4 +188,4 @@ Si tienes problemas:
 
 ---
 
-**✅ Una vez configurado, cada push a `main` desplegará automáticamente tu aplicación!**
+**✅ Una vez configurado, cada push a `master` desplegará automáticamente tu aplicación!**
