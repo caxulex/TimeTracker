@@ -20,9 +20,13 @@ from app.models import User
 from app.services.auth_service import AuthService
 
 # Use the real database (running in Docker)
+# Try DATABASE_URL first (used in CI), then TEST_DATABASE_URL (local), then default
 TEST_DATABASE_URL = os.getenv(
-    "TEST_DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5434/time_tracker"
+    "DATABASE_URL",
+    os.getenv(
+        "TEST_DATABASE_URL",
+        "postgresql+asyncpg://postgres:postgres@localhost:5434/time_tracker"
+    )
 )
 
 
