@@ -95,28 +95,34 @@ async def get_dashboard_stats(
     week_start = today_start - timedelta(days=now.weekday())
     month_start = today_start.replace(day=1)
     
-    # Base filter for user's entries
-    user_filter = TimeEntry.user_id == current_user.id
+    # Base filter: admins see all, regular users see team data
+    if current_user.role in ["super_admin", "admin"]:
+        user_filter = True  # No filter, see all entries
+    else:
+        # Get all team members from user's teams
+        user_teams_query = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
+        team_members = select(TeamMember.user_id).where(TeamMember.team_id.in_(user_teams_query))
+        user_filter = TimeEntry.user_id.in_(team_members)
     
     # Today's time
-    today_result = await db.execute(
-        select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0))
-        .where(user_filter, TimeEntry.start_time >= today_start)
-    )
+    today_query = select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0)).where(TimeEntry.start_time >= today_start)
+    if user_filter is not True:
+        today_query = today_query.where(user_filter)
+    today_result = await db.execute(today_query)
     today_seconds = today_result.scalar() or 0
     
     # This week's time
-    week_result = await db.execute(
-        select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0))
-        .where(user_filter, TimeEntry.start_time >= week_start)
-    )
+    week_query = select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0)).where(TimeEntry.start_time >= week_start)
+    if user_filter is not True:
+        week_query = week_query.where(user_filter)
+    week_result = await db.execute(week_query)
     week_seconds = week_result.scalar() or 0
     
     # This month's time
-    month_result = await db.execute(
-        select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0))
-        .where(user_filter, TimeEntry.start_time >= month_start)
-    )
+    month_query = select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0)).where(TimeEntry.start_time >= month_start)
+    if user_filter is not True:
+        month_query = month_query.where(user_filter)
+    month_result = await db.execute(month_query)
     month_seconds = month_result.scalar() or 0
     
     # Active projects (user has access to)
@@ -132,9 +138,10 @@ async def get_dashboard_stats(
     pending_tasks = 0  # Simplified for now
     
     # Check for running timer
-    running_result = await db.execute(
-        select(TimeEntry.id).where(user_filter, TimeEntry.end_time == None)
-    )
+    running_query = select(TimeEntry.id).where(TimeEntry.end_time == None)
+    if user_filter is not True:
+        running_query = running_query.where(user_filter)
+    running_result = await db.execute(running_query)
     running_timer = running_result.scalar_one_or_none() is not None
     
     return DashboardStats(
@@ -152,29 +159,44 @@ async def get_dashboard_stats(
 
 @router.get("/weekly", response_model=WeeklySummary)
 async def get_weekly_summary(
+    start_date: Optional[date] = None,
     week_offset: int = Query(0, ge=-52, le=0, description="Weeks ago (0 = current week)"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Get weekly time summary"""
     now = datetime.now()
-    week_start = (now - timedelta(days=now.weekday()) - timedelta(weeks=abs(week_offset))).date()
+    
+    # Use start_date if provided, otherwise calculate from week_offset
+    if start_date:
+        week_start = start_date
+    else:
+        week_start = (now - timedelta(days=now.weekday()) - timedelta(weeks=abs(week_offset))).date()
+    
     week_end = week_start + timedelta(days=6)
     
     start_datetime = datetime.combine(week_start, datetime.min.time())
     end_datetime = datetime.combine(week_end, datetime.max.time())
     
-    user_filter = TimeEntry.user_id == current_user.id
+    # Build user filter: admins see all, regular users see team data
+    if current_user.role in ["super_admin", "admin"]:
+        user_filter = True  # No filter, see all entries
+    else:
+        # Get all team members from user's teams
+        user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
+        team_members = select(TeamMember.user_id).where(TeamMember.team_id.in_(user_teams))
+        user_filter = TimeEntry.user_id.in_(team_members)
+    
     date_filter = and_(TimeEntry.start_time >= start_datetime, TimeEntry.start_time <= end_datetime)
     
     # Total for week
-    total_result = await db.execute(
-        select(
-            func.coalesce(func.sum(TimeEntry.duration_seconds), 0),
-            func.count(TimeEntry.id)
-        )
-        .where(user_filter, date_filter)
-    )
+    total_query = select(
+        func.coalesce(func.sum(TimeEntry.duration_seconds), 0),
+        func.count(TimeEntry.id)
+    ).where(date_filter)
+    if user_filter is not True:
+        total_query = total_query.where(user_filter)
+    total_result = await db.execute(total_query)
     total_row = total_result.first()
     total_seconds = total_row[0] or 0
     
@@ -185,13 +207,13 @@ async def get_weekly_summary(
         day_start = datetime.combine(day, datetime.min.time())
         day_end = datetime.combine(day, datetime.max.time())
         
-        day_result = await db.execute(
-            select(
-                func.coalesce(func.sum(TimeEntry.duration_seconds), 0),
-                func.count(TimeEntry.id)
-            )
-            .where(user_filter, TimeEntry.start_time >= day_start, TimeEntry.start_time <= day_end)
-        )
+        day_query = select(
+            func.coalesce(func.sum(TimeEntry.duration_seconds), 0),
+            func.count(TimeEntry.id)
+        ).where(TimeEntry.start_time >= day_start, TimeEntry.start_time <= day_end)
+        if user_filter is not True:
+            day_query = day_query.where(user_filter)
+        day_result = await db.execute(day_query)
         day_row = day_result.first()
         day_seconds = day_row[0] or 0
         day_count = day_row[1] or 0
@@ -230,16 +252,28 @@ async def get_time_by_project(
     start_datetime = datetime.combine(start_date, datetime.min.time())
     end_datetime = datetime.combine(end_date, datetime.max.time())
     
-    # Get accessible projects for user
+    # Get accessible projects and users for current user
     if current_user.role in ["super_admin", "admin"]:
         project_ids_query = select(Project.id)
+        user_filter = True  # No filter, see all users
     else:
         user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
         project_ids_query = select(Project.id).where(
             Project.team_id.in_(user_teams)
         )
+        # Get all team members from user's teams
+        team_members = select(TeamMember.user_id).where(TeamMember.team_id.in_(user_teams))
+        user_filter = TimeEntry.user_id.in_(team_members)
     
     # Query time by project
+    query_filters = [
+        TimeEntry.start_time >= start_datetime,
+        TimeEntry.start_time <= end_datetime,
+        TimeEntry.project_id.in_(project_ids_query)
+    ]
+    if user_filter is not True:
+        query_filters.append(user_filter)
+    
     result = await db.execute(
         select(
             TimeEntry.project_id,
@@ -251,12 +285,7 @@ async def get_time_by_project(
             func.count(TimeEntry.id).label("entry_count")
         )
         .join(Project, TimeEntry.project_id == Project.id)
-        .where(
-            TimeEntry.user_id == current_user.id,
-            TimeEntry.start_time >= start_datetime,
-            TimeEntry.start_time <= end_datetime,
-            TimeEntry.project_id.in_(project_ids_query)
-        )
+        .where(*query_filters)
         .group_by(TimeEntry.project_id, Project.name)
         .order_by(func.sum(TimeEntry.duration_seconds).desc())
     )
