@@ -1,12 +1,13 @@
 // ============================================
 // TIME TRACKER - REPORTS PAGE
 // ============================================
-import { useState } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
 import { reportsApi, exportApi } from '../api/client';
 import { formatDuration, toISODateString, getStartOfWeek, secondsToHours } from '../utils/helpers';
 import { useAuth } from '../hooks/useAuth';
+import { useWebSocketContext } from '../contexts/WebSocketContext';
 import type { WeeklySummary } from '../types';
 import {
   BarChart,
@@ -41,11 +42,32 @@ function downloadBlob(blob: Blob, filename: string) {
 export function ReportsPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const queryClient = useQueryClient();
+  const { lastMessage } = useWebSocketContext();
 
   const [datePreset, setDatePreset] = useState<DatePreset>('this-week');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
   const [showExportMenu, setShowExportMenu] = useState(false);
+  
+  // Listen for real-time time entry changes via WebSocket
+  useEffect(() => {
+    if (!lastMessage) return;
+    
+    const messageType = lastMessage.type;
+    
+    // Refresh reports when time entries are created, updated, completed, or deleted
+    if (
+      messageType === 'time_entry_created' ||
+      messageType === 'time_entry_completed' ||
+      messageType === 'time_entry_updated' ||
+      messageType === 'time_entry_deleted'
+    ) {
+      // Invalidate and refetch report queries to get updated data
+      queryClient.invalidateQueries({ queryKey: ['weekly-report'] });
+      queryClient.invalidateQueries({ queryKey: ['project-report'] });
+    }
+  }, [lastMessage, queryClient]);
 
   // Calculate date range based on preset
   const getDateRange = () => {

@@ -12,6 +12,7 @@ interface WebSocketContextValue {
   send: (message: WebSocketMessage) => boolean;
   activeTimers: ActiveTimer[];
   onlineUsers: number[];
+  lastMessage: WebSocketMessage | null;
   notifyTimerStart: (timer: {
     project_id?: number;
     project_name?: string;

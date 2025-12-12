@@ -50,6 +50,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   const [isConnected, setIsConnected] = useState(false);
   const [activeTimers, setActiveTimers] = useState<ActiveTimer[]>([]);
   const [onlineUsers, setOnlineUsers] = useState<number[]>([]);
+  const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
 
   const getToken = useCallback(() => {
     return localStorage.getItem('access_token');
@@ -98,6 +99,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       ws.onmessage = (event) => {
         try {
           const message: WebSocketMessage = JSON.parse(event.data);
+          
+          // Update lastMessage for reactive components
+          setLastMessage(message);
           
           switch (message.type) {
             case 'ping':
@@ -252,6 +256,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     send,
     activeTimers,
     onlineUsers,
+    lastMessage,
     notifyTimerStart,
     notifyTimerStop,
     notifyTimerUpdate,

@@ -13,6 +13,7 @@ from app.database import get_db
 from app.models import User, Team, TeamMember, Project, Task, TimeEntry
 from app.dependencies import get_current_active_user
 from app.schemas.auth import Message
+from app.routers.websocket import manager as ws_manager
 
 router = APIRouter()
 
@@ -296,6 +297,25 @@ async def stop_timer(
         task_result = await db.execute(select(Task.name).where(Task.id == entry.task_id))
         task_name = task_result.scalar()
     
+    # Broadcast time entry completion to all users for real-time reports update
+    await ws_manager.broadcast_to_all({
+        "type": "time_entry_completed",
+        "data": {
+            "entry_id": entry.id,
+            "user_id": current_user.id,
+            "user_name": current_user.name,
+            "project_id": entry.project_id,
+            "project_name": project_name,
+            "task_id": entry.task_id,
+            "task_name": task_name,
+            "description": entry.description,
+            "start_time": entry.start_time.isoformat(),
+            "end_time": entry.end_time.isoformat(),
+            "duration_seconds": entry.duration_seconds,
+            "is_running": False
+        }
+    })
+    
     return make_entry_response(entry, project_name, task_name, current_user.name)
 
 
@@ -355,6 +375,25 @@ async def create_manual_entry(
     db.add(entry)
     await db.commit()
     await db.refresh(entry)
+    
+    # Broadcast manual time entry creation to all users for real-time reports update
+    await ws_manager.broadcast_to_all({
+        "type": "time_entry_created",
+        "data": {
+            "entry_id": entry.id,
+            "user_id": current_user.id,
+            "user_name": current_user.name,
+            "project_id": entry.project_id,
+            "project_name": project.name,
+            "task_id": entry.task_id,
+            "task_name": task_name,
+            "description": entry.description,
+            "start_time": entry.start_time.isoformat(),
+            "end_time": entry.end_time.isoformat(),
+            "duration_seconds": entry.duration_seconds,
+            "is_running": False
+        }
+    })
     
     return make_entry_response(entry, project.name, task_name, current_user.name)
 
@@ -553,6 +592,24 @@ async def update_time_entry(
         task_result = await db.execute(select(Task.name).where(Task.id == entry.task_id))
         task_name = task_result.scalar()
     
+    # Broadcast time entry update to all users for real-time reports update
+    await ws_manager.broadcast_to_all({
+        "type": "time_entry_updated",
+        "data": {
+            "entry_id": entry.id,
+            "user_id": entry.user_id,
+            "project_id": entry.project_id,
+            "project_name": project_name,
+            "task_id": entry.task_id,
+            "task_name": task_name,
+            "description": entry.description,
+            "start_time": entry.start_time.isoformat(),
+            "end_time": entry.end_time.isoformat() if entry.end_time else None,
+            "duration_seconds": entry.duration_seconds,
+            "is_running": entry.is_running
+        }
+    })
+    
     return make_entry_response(entry, project_name, task_name, current_user.name)
 
 
@@ -573,7 +630,21 @@ async def delete_time_entry(
     if entry.user_id != current_user.id and current_user.role != "super_admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Can only delete your own entries")
     
+    # Store entry data before deletion for WebSocket broadcast
+    entry_data = {
+        "entry_id": entry.id,
+        "user_id": entry.user_id,
+        "project_id": entry.project_id,
+        "task_id": entry.task_id
+    }
+    
     await db.delete(entry)
     await db.commit()
+    
+    # Broadcast time entry deletion to all users for real-time reports update
+    await ws_manager.broadcast_to_all({
+        "type": "time_entry_deleted",
+        "data": entry_data
+    })
     
     return {"message": "Time entry deleted successfully"}
