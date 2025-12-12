@@ -6,7 +6,7 @@ TASK-064: Add basic monitoring endpoints
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any
 import os
 import sys
@@ -159,7 +159,7 @@ async def get_activity_stats(
     """
     Get activity statistics for monitoring dashboards.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     one_hour_ago = now - timedelta(hours=1)
     one_day_ago = now - timedelta(days=1)
     one_week_ago = now - timedelta(weeks=1)

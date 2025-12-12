@@ -2,7 +2,7 @@
 Export router for generating PDF and Excel reports
 """
 
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Optional, List
 from io import BytesIO
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -169,7 +169,7 @@ async def export_excel(
     wb.save(buffer)
     buffer.seek(0)
 
-    filename = f"time_entries_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"time_entries_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.xlsx"
     return StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -221,7 +221,7 @@ async def export_pdf(
         date_range = "All Time"
     
     elements.append(Paragraph(date_range, styles["Normal"]))
-    elements.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles["Normal"]))
+    elements.append(Paragraph(f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}", styles["Normal"]))
     elements.append(Spacer(1, 20))
 
     # Table data
@@ -264,7 +264,7 @@ async def export_pdf(
     doc.build(elements)
     buffer.seek(0)
 
-    filename = f"time_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    filename = f"time_report_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.pdf"
     return StreamingResponse(
         buffer,
         media_type="application/pdf",
@@ -312,7 +312,7 @@ async def export_csv(
     buffer.write(text_buffer.getvalue().encode("utf-8"))
     buffer.seek(0)
 
-    filename = f"time_entries_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    filename = f"time_entries_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
     return StreamingResponse(
         buffer,
         media_type="text/csv",

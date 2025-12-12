@@ -90,8 +90,8 @@ async def get_dashboard_stats(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get dashboard statistics for current user"""
-    now = datetime.now()
-    today_start = datetime.combine(now.date(), datetime.min.time())
+    now = datetime.now(timezone.utc)
+    today_start = datetime.combine(now.date(), datetime.min.time()).replace(tzinfo=timezone.utc)
     week_start = today_start - timedelta(days=now.weekday())
     month_start = today_start.replace(day=1)
     
@@ -138,11 +138,11 @@ async def get_dashboard_stats(
     pending_tasks = 0  # Simplified for now
     
     # Check for running timer
-    running_query = select(TimeEntry.id).where(TimeEntry.end_time == None)
+    running_query = select(func.count(TimeEntry.id)).where(TimeEntry.end_time == None)
     if user_filter is not True:
         running_query = running_query.where(user_filter)
     running_result = await db.execute(running_query)
-    running_timer = running_result.scalar_one_or_none() is not None
+    running_timer = (running_result.scalar() or 0) > 0
     
     return DashboardStats(
         today_seconds=today_seconds,
@@ -165,7 +165,7 @@ async def get_weekly_summary(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get weekly time summary"""
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     
     # Use start_date if provided, otherwise calculate from week_offset
     if start_date:
@@ -244,10 +244,10 @@ async def get_time_by_project(
     """Get time summary grouped by project"""
     # Default to current month
     if not start_date:
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         start_date = now.replace(day=1).date()
     if not end_date:
-        end_date = datetime.now().date()
+        end_date = datetime.now(timezone.utc).date()
     
     start_datetime = datetime.combine(start_date, datetime.min.time())
     end_datetime = datetime.combine(end_date, datetime.max.time())
@@ -318,10 +318,10 @@ async def get_time_by_task(
     """Get time summary grouped by task"""
     # Default to current month
     if not start_date:
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         start_date = now.replace(day=1).date()
     if not end_date:
-        end_date = datetime.now().date()
+        end_date = datetime.now(timezone.utc).date()
     
     start_datetime = datetime.combine(start_date, datetime.min.time())
     end_datetime = datetime.combine(end_date, datetime.max.time())
@@ -389,10 +389,10 @@ async def get_team_report(
     
     # Default to current month
     if not start_date:
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         start_date = now.replace(day=1).date()
     if not end_date:
-        end_date = datetime.now().date()
+        end_date = datetime.now(timezone.utc).date()
     
     start_datetime = datetime.combine(start_date, datetime.min.time())
     end_datetime = datetime.combine(end_date, datetime.max.time())
@@ -628,6 +628,45 @@ class AdminDashboardStats(BaseModel):
     running_timers: int
     by_user: List[UserSummary]
 
+
+class TeamAnalytics(BaseModel):
+    team_id: int
+    team_name: str
+    member_count: int
+    total_today_seconds: int
+    total_today_hours: float
+    total_week_seconds: int
+    total_week_hours: float
+    total_month_seconds: int
+    total_month_hours: float
+    active_members_today: int
+    running_timers: int
+    top_performers: List[UserSummary]  # Top 3 this week
+
+
+class IndividualUserMetrics(BaseModel):
+    user_id: int
+    user_name: str
+    user_email: str
+    role: str
+    teams: List[str]
+    # Time metrics
+    today_seconds: int
+    today_hours: float
+    week_seconds: int
+    week_hours: float
+    month_seconds: int
+    month_hours: float
+    # Activity metrics
+    total_entries: int
+    active_days_this_month: int
+    avg_hours_per_day: float
+    current_timer_running: bool
+    # Project breakdown
+    projects: List[ProjectSummary]
+    # Recent activity
+    last_activity: Optional[datetime] = None
+
 @router.get("/admin/dashboard", response_model=AdminDashboardStats)
 async def get_admin_dashboard(
     db: AsyncSession = Depends(get_db),
@@ -791,3 +830,492 @@ async def get_admin_dashboard(
         running_timers=running_timers,
         by_user=by_user
     )
+
+
+@router.get("/admin/teams", response_model=List[TeamAnalytics])
+async def get_team_analytics(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    '''Get analytics for all teams (admin and super_admin only)'''
+    if current_user.role not in ["super_admin", "admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    
+    now = datetime.now(timezone.utc)
+    today_start = datetime.combine(now.date(), time.min).replace(tzinfo=timezone.utc)
+    week_start = (today_start - timedelta(days=now.weekday()))
+    month_start = today_start.replace(day=1)
+
+    # Get all teams
+    teams_result = await db.execute(select(Team))
+    teams = teams_result.scalars().all()
+
+    team_analytics = []
+
+    for team in teams:
+        # Get team members
+        members_result = await db.execute(
+            select(TeamMember.user_id, User.name)
+            .join(User, TeamMember.user_id == User.id)
+            .where(TeamMember.team_id == team.id)
+        )
+        members = members_result.all()
+        member_ids = [m.user_id for m in members]
+
+        if not member_ids:
+            # Empty team, skip
+            continue
+
+        # Total time today (team members) - including active timers
+        today_entries_result = await db.execute(
+            select(TimeEntry)
+            .where(
+                and_(
+                    TimeEntry.start_time >= today_start,
+                    TimeEntry.user_id.in_(member_ids)
+                )
+            )
+        )
+        today_entries = today_entries_result.scalars().all()
+        
+        total_today = 0
+        for entry in today_entries:
+            if entry.end_time is None:
+                start = entry.start_time
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=timezone.utc)
+                total_today += int((now - start).total_seconds())
+            else:
+                total_today += (entry.duration_seconds or 0)
+
+        # Total time this week (team members)
+        week_entries_result = await db.execute(
+            select(TimeEntry)
+            .where(
+                and_(
+                    TimeEntry.start_time >= week_start,
+                    TimeEntry.user_id.in_(member_ids)
+                )
+            )
+        )
+        week_entries = week_entries_result.scalars().all()
+        
+        total_week = 0
+        for entry in week_entries:
+            if entry.end_time is None:
+                start = entry.start_time
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=timezone.utc)
+                total_week += int((now - start).total_seconds())
+            else:
+                total_week += (entry.duration_seconds or 0)
+
+        # Total time this month (team members)
+        month_entries_result = await db.execute(
+            select(TimeEntry)
+            .where(
+                and_(
+                    TimeEntry.start_time >= month_start,
+                    TimeEntry.user_id.in_(member_ids)
+                )
+            )
+        )
+        month_entries = month_entries_result.scalars().all()
+        
+        total_month = 0
+        for entry in month_entries:
+            if entry.end_time is None:
+                start = entry.start_time
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=timezone.utc)
+                total_month += int((now - start).total_seconds())
+            else:
+                total_month += (entry.duration_seconds or 0)
+
+        # Active members today
+        active_members_result = await db.execute(
+            select(func.count(func.distinct(TimeEntry.user_id)))
+            .where(
+                and_(
+                    TimeEntry.start_time >= today_start,
+                    TimeEntry.user_id.in_(member_ids)
+                )
+            )
+        )
+        active_members = active_members_result.scalar() or 0
+
+        # Running timers count
+        running_result = await db.execute(
+            select(func.count(TimeEntry.id))
+            .where(
+                and_(
+                    TimeEntry.end_time == None,
+                    TimeEntry.user_id.in_(member_ids)
+                )
+            )
+        )
+        running_timers = running_result.scalar() or 0
+
+        # Top performers this week (top 3)
+        user_result = await db.execute(
+            select(
+                TimeEntry.user_id,
+                User.name,
+                TimeEntry.duration_seconds,
+                TimeEntry.start_time,
+                TimeEntry.end_time
+            )
+            .join(User, TimeEntry.user_id == User.id)
+            .where(
+                and_(
+                    TimeEntry.start_time >= week_start,
+                    TimeEntry.user_id.in_(member_ids)
+                )
+            )
+        )
+
+        # Aggregate by user
+        user_totals = {}
+        for row in user_result.all():
+            user_id = row.user_id
+            user_name = row.name
+            
+            if user_id not in user_totals:
+                user_totals[user_id] = {
+                    "user_name": user_name,
+                    "total_seconds": 0,
+                    "entry_count": 0
+                }
+            
+            if row.end_time is None:
+                start = row.start_time
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=timezone.utc)
+                user_totals[user_id]["total_seconds"] += int((now - start).total_seconds())
+            else:
+                user_totals[user_id]["total_seconds"] += (row.duration_seconds or 0)
+            
+            user_totals[user_id]["entry_count"] += 1
+
+        # Get top 3 performers
+        top_performers = []
+        for user_id, data in sorted(user_totals.items(), key=lambda x: x[1]["total_seconds"], reverse=True)[:3]:
+            top_performers.append(UserSummary(
+                user_id=user_id,
+                user_name=data["user_name"],
+                total_seconds=data["total_seconds"],
+                total_hours=round(data["total_seconds"] / 3600, 2),
+                entry_count=data["entry_count"]
+            ))
+
+        team_analytics.append(TeamAnalytics(
+            team_id=team.id,
+            team_name=team.name,
+            member_count=len(member_ids),
+            total_today_seconds=total_today,
+            total_today_hours=round(total_today / 3600, 2),
+            total_week_seconds=total_week,
+            total_week_hours=round(total_week / 3600, 2),
+            total_month_seconds=total_month,
+            total_month_hours=round(total_month / 3600, 2),
+            active_members_today=active_members,
+            running_timers=running_timers,
+            top_performers=top_performers
+        ))
+
+    return team_analytics
+
+
+@router.get("/admin/users/{user_id}", response_model=IndividualUserMetrics)
+async def get_user_metrics(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    '''Get detailed metrics for a specific user (admin and super_admin only)'''
+    if current_user.role not in ["super_admin", "admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    
+    # Get user
+    user_result = await db.execute(
+        select(User).where(User.id == user_id)
+    )
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    now = datetime.now(timezone.utc)
+    today_start = datetime.combine(now.date(), time.min).replace(tzinfo=timezone.utc)
+    week_start = (today_start - timedelta(days=now.weekday()))
+    month_start = today_start.replace(day=1)
+
+    # Get user's teams
+    teams_result = await db.execute(
+        select(Team.name)
+        .join(TeamMember, Team.id == TeamMember.team_id)
+        .where(TeamMember.user_id == user_id)
+    )
+    teams = [t[0] for t in teams_result.all()]
+
+    # Time today
+    today_entries_result = await db.execute(
+        select(TimeEntry)
+        .where(
+            and_(
+                TimeEntry.start_time >= today_start,
+                TimeEntry.user_id == user_id
+            )
+        )
+    )
+    today_entries = today_entries_result.scalars().all()
+    
+    today_seconds = 0
+    for entry in today_entries:
+        if entry.end_time is None:
+            start = entry.start_time
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            today_seconds += int((now - start).total_seconds())
+        else:
+            today_seconds += (entry.duration_seconds or 0)
+
+    # Time this week
+    week_entries_result = await db.execute(
+        select(TimeEntry)
+        .where(
+            and_(
+                TimeEntry.start_time >= week_start,
+                TimeEntry.user_id == user_id
+            )
+        )
+    )
+    week_entries = week_entries_result.scalars().all()
+    
+    week_seconds = 0
+    for entry in week_entries:
+        if entry.end_time is None:
+            start = entry.start_time
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            week_seconds += int((now - start).total_seconds())
+        else:
+            week_seconds += (entry.duration_seconds or 0)
+
+    # Time this month
+    month_entries_result = await db.execute(
+        select(TimeEntry)
+        .where(
+            and_(
+                TimeEntry.start_time >= month_start,
+                TimeEntry.user_id == user_id
+            )
+        )
+    )
+    month_entries = month_entries_result.scalars().all()
+    
+    month_seconds = 0
+    for entry in month_entries:
+        if entry.end_time is None:
+            start = entry.start_time
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            month_seconds += int((now - start).total_seconds())
+        else:
+            month_seconds += (entry.duration_seconds or 0)
+
+    # Total entries count
+    total_entries_result = await db.execute(
+        select(func.count(TimeEntry.id))
+        .where(TimeEntry.user_id == user_id)
+    )
+    total_entries = total_entries_result.scalar() or 0
+
+    # Active days this month
+    active_days_result = await db.execute(
+        select(func.count(func.distinct(func.date(TimeEntry.start_time))))
+        .where(
+            and_(
+                TimeEntry.start_time >= month_start,
+                TimeEntry.user_id == user_id
+            )
+        )
+    )
+    active_days = active_days_result.scalar() or 0
+
+    # Average hours per day (this month)
+    avg_hours_per_day = round(month_seconds / 3600 / max(active_days, 1), 2)
+
+    # Check for running timer
+    running_result = await db.execute(
+        select(TimeEntry)
+        .where(
+            and_(
+                TimeEntry.user_id == user_id,
+                TimeEntry.end_time == None
+            )
+        )
+    )
+    current_timer_running = running_result.scalar_one_or_none() is not None
+
+    # Project breakdown (this month)
+    project_result = await db.execute(
+        select(
+            TimeEntry.project_id,
+            Project.name,
+            TimeEntry.duration_seconds,
+            TimeEntry.start_time,
+            TimeEntry.end_time
+        )
+        .join(Project, TimeEntry.project_id == Project.id)
+        .where(
+            and_(
+                TimeEntry.start_time >= month_start,
+                TimeEntry.user_id == user_id
+            )
+        )
+    )
+
+    project_totals = {}
+    for row in project_result.all():
+        project_id = row.project_id
+        project_name = row.name
+        
+        if project_id not in project_totals:
+            project_totals[project_id] = {
+                "project_name": project_name,
+                "total_seconds": 0,
+                "entry_count": 0
+            }
+        
+        if row.end_time is None:
+            start = row.start_time
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            project_totals[project_id]["total_seconds"] += int((now - start).total_seconds())
+        else:
+            project_totals[project_id]["total_seconds"] += (row.duration_seconds or 0)
+        
+        project_totals[project_id]["entry_count"] += 1
+
+    projects = []
+    for project_id, data in sorted(project_totals.items(), key=lambda x: x[1]["total_seconds"], reverse=True):
+        projects.append(ProjectSummary(
+            project_id=project_id,
+            project_name=data["project_name"],
+            total_seconds=data["total_seconds"],
+            total_hours=round(data["total_seconds"] / 3600, 2),
+            entry_count=data["entry_count"]
+        ))
+
+    # Last activity
+    last_activity_result = await db.execute(
+        select(TimeEntry.start_time)
+        .where(TimeEntry.user_id == user_id)
+        .order_by(TimeEntry.start_time.desc())
+        .limit(1)
+    )
+    last_activity_row = last_activity_result.scalar_one_or_none()
+
+    return IndividualUserMetrics(
+        user_id=user.id,
+        user_name=user.name,
+        user_email=user.email,
+        role=user.role,
+        teams=teams,
+        today_seconds=today_seconds,
+        today_hours=round(today_seconds / 3600, 2),
+        week_seconds=week_seconds,
+        week_hours=round(week_seconds / 3600, 2),
+        month_seconds=month_seconds,
+        month_hours=round(month_seconds / 3600, 2),
+        total_entries=total_entries,
+        active_days_this_month=active_days,
+        avg_hours_per_day=avg_hours_per_day,
+        current_timer_running=current_timer_running,
+        projects=projects,
+        last_activity=last_activity_row
+    )
+
+
+@router.get("/admin/users", response_model=List[UserSummary])
+async def get_all_users_summary(
+    period: str = Query("week", regex="^(today|week|month)$"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    '''Get summary of all users sorted by time tracked (admin and super_admin only)'''
+    if current_user.role not in ["super_admin", "admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    
+    now = datetime.now(timezone.utc)
+    today_start = datetime.combine(now.date(), time.min).replace(tzinfo=timezone.utc)
+    week_start = (today_start - timedelta(days=now.weekday()))
+    month_start = today_start.replace(day=1)
+
+    # Determine start time based on period
+    if period == "today":
+        start_time = today_start
+    elif period == "week":
+        start_time = week_start
+    else:  # month
+        start_time = month_start
+
+    # Get all users' time entries for the period
+    entries_result = await db.execute(
+        select(
+            TimeEntry.user_id,
+            User.name,
+            TimeEntry.duration_seconds,
+            TimeEntry.start_time,
+            TimeEntry.end_time
+        )
+        .join(User, TimeEntry.user_id == User.id)
+        .where(TimeEntry.start_time >= start_time)
+    )
+
+    user_totals = {}
+    for row in entries_result.all():
+        user_id = row.user_id
+        user_name = row.name
+        
+        if user_id not in user_totals:
+            user_totals[user_id] = {
+                "user_name": user_name,
+                "total_seconds": 0,
+                "entry_count": 0
+            }
+        
+        if row.end_time is None:
+            start = row.start_time
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            user_totals[user_id]["total_seconds"] += int((now - start).total_seconds())
+        else:
+            user_totals[user_id]["total_seconds"] += (row.duration_seconds or 0)
+        
+        user_totals[user_id]["entry_count"] += 1
+
+    # Sort by total time descending
+    users_summary = []
+    for user_id, data in sorted(user_totals.items(), key=lambda x: x[1]["total_seconds"], reverse=True):
+        users_summary.append(UserSummary(
+            user_id=user_id,
+            user_name=data["user_name"],
+            total_seconds=data["total_seconds"],
+            total_hours=round(data["total_seconds"] / 3600, 2),
+            entry_count=data["entry_count"]
+        ))
+
+    return users_summary

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from pydantic import BaseModel
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 
 from app.database import get_db
 from app.models import User, Team, TeamMember, Project, Task, TimeEntry
@@ -178,10 +178,10 @@ async def get_workers_report(
     """Get report for all workers (TASK-010)"""
     # Default to current month
     if not start_date:
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         start_date = now.replace(day=1).date()
     if not end_date:
-        end_date = datetime.now().date()
+        end_date = datetime.now(timezone.utc).date()
 
     start_datetime = datetime.combine(start_date, datetime.min.time())
     end_datetime = datetime.combine(end_date, datetime.max.time())
@@ -253,8 +253,8 @@ async def get_activity_alerts(
     current_user: User = Depends(require_admin)
 ):
     """Get activity alerts for admin (TASK-022)"""
-    now = datetime.now()
-    today_start = datetime.combine(now.date(), datetime.min.time())
+    now = datetime.now(timezone.utc)
+    today_start = datetime.combine(now.date(), datetime.min.time()).replace(tzinfo=timezone.utc)
     
     alerts = []
 
@@ -269,7 +269,10 @@ async def get_activity_alerts(
     )
     for row in long_timers_result.all():
         entry, user_name = row
-        hours = (now - entry.start_time).total_seconds() / 3600
+        start = entry.start_time
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        hours = (now - start).total_seconds() / 3600
         alerts.append({
             "type": "long_timer",
             "severity": "warning",
@@ -303,7 +306,10 @@ async def get_activity_alerts(
             last_entry = last_entry_result.scalar()
             
             if last_entry:
-                days_ago = (now - last_entry).days
+                last = last_entry
+                if last.tzinfo is None:
+                    last = last.replace(tzinfo=timezone.utc)
+                days_ago = (now - last).days
                 if days_ago > 1:
                     alerts.append({
                         "type": "no_activity",
@@ -325,7 +331,10 @@ async def get_activity_alerts(
     for row in running_timers_result.all():
         entry, user_name, project_name = row
         running_count += 1
-        hours = (now - entry.start_time).total_seconds() / 3600
+        start = entry.start_time
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        hours = (now - start).total_seconds() / 3600
         if hours < 8:  # Don't duplicate long timer alerts
             alerts.append({
                 "type": "active_timer",
