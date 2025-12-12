@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Time Tracker"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False  # SEC-009: Default to False for security
+    TESTING: bool = False  # Set to True in test environments
     ENVIRONMENT: str = "development"
 
     # Database
