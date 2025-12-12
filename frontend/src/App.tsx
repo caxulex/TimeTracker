@@ -26,6 +26,8 @@ import {
   AccountRequestsPage,
 } from './pages';
 import { StaffDetailPage } from './pages/StaffDetailPage';
+import AdminReportsPage from './pages/AdminReportsPage';
+import UserDetailPage from './pages/UserDetailPage';
 import { useAuthStore } from './stores/authStore';
 import './App.css';
 
@@ -235,6 +237,24 @@ function App() {
               element={
                 <AdminRoute>
                   <StaffDetailPage />
+                </AdminRoute>
+              }
+            />
+
+            {/* Admin Reports (Admin only) */}
+            <Route
+              path="/admin/reports"
+              element={
+                <AdminRoute>
+                  <AdminReportsPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/admin/user/:userId"
+              element={
+                <AdminRoute>
+                  <UserDetailPage />
                 </AdminRoute>
               }
             />

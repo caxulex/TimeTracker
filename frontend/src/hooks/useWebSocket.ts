@@ -61,7 +61,16 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     if (!token) return null;
     
     // Get API URL from environment variable
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    const apiUrl = import.meta.env.VITE_API_URL;
+    
+    // If no API URL specified, use current host (works with nginx proxy)
+    if (!apiUrl) {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host;
+      return `${protocol}//${host}/api/ws?token=${token}`;
+    }
+    
+    // Otherwise use the specified API URL
     const url = new URL(apiUrl);
     const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = url.host;
