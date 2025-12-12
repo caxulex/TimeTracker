@@ -91,9 +91,10 @@ app.add_middleware(
 )
 
 # SEC-009: TrustedHostMiddleware always enabled (not just non-DEBUG)
+# Allow any host in DEBUG or TESTING mode
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=settings.ALLOWED_HOSTS + ["*"] if settings.DEBUG else settings.ALLOWED_HOSTS,
+    allowed_hosts=settings.ALLOWED_HOSTS + ["*"] if (settings.DEBUG or settings.TESTING) else settings.ALLOWED_HOSTS,
 )
 
 
