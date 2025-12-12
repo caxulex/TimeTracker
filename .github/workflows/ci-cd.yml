@@ -71,8 +71,8 @@ jobs:
           TESTING: 'true'
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/time_tracker_test
           REDIS_URL: redis://localhost:6379/0
-          SECRET_KEY: test-secret-key-for-ci-only
-          JWT_SECRET: test-secret-key-for-ci-only
+          SECRET_KEY: 6jgo_uPb0b8TY4BjSU8ukNllS84ahldx1sPo5uUp47g56tmmwwxKHqBhdSF9Fe5m_BYxXFGaoEGinyGPqAR65g
+          JWT_SECRET: 6jgo_uPb0b8TY4BjSU8ukNllS84ahldx1sPo5uUp47g56tmmwwxKHqBhdSF9Fe5m_BYxXFGaoEGinyGPqAR65g
         run: |
           pytest --cov=app --cov-report=xml --cov-report=term-missing
 
