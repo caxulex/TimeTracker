@@ -52,7 +52,12 @@ services:
       JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
       JWT_ALGORITHM: HS256
       JWT_EXPIRE_MINUTES: 60
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:80}
+      # Production domain for CORS + TrustedHostMiddleware
+      # NOTE: backend reads ALLOWED_ORIGINS / ALLOWED_HOSTS from env (see backend/app/config.py).
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-["https://timetracker.shaemarcus.com"]}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-["timetracker.shaemarcus.com"]}
+      # Backwards-compat (older docs); safe to keep
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://timetracker.shaemarcus.com}
     depends_on:
       postgres:
         condition: service_healthy
