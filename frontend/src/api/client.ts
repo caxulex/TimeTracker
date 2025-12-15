@@ -31,7 +31,22 @@ import type {
   PaginatedResponse,
 } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+function normalizeApiBaseUrl(input: string): string {
+  const trimmed = (input ?? '').trim();
+  if (!trimmed) return '';
+
+  // Remove trailing slashes
+  const withoutTrailingSlash = trimmed.replace(/\/+$/g, '');
+
+  // Avoid "/api/api/*" when callers already prefix routes with "/api/..."
+  if (withoutTrailingSlash.endsWith('/api')) {
+    return withoutTrailingSlash.slice(0, -4);
+  }
+
+  return withoutTrailingSlash;
+}
+
+const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || '');
 
 // Create axios instance
 const api: AxiosInstance = axios.create({
@@ -516,5 +531,4 @@ export const adminApi = {
     return response.data;
   },
 };
-
 

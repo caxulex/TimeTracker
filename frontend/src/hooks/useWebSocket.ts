@@ -67,7 +67,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     if (!apiUrl) {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const host = window.location.host;
-      return `${protocol}//${host}/api/ws?token=${token}`;
+      return `${protocol}//${host}/api/ws/ws?token=${token}`;
     }
     
     // Otherwise use the specified API URL
