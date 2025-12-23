@@ -3,7 +3,7 @@
 // ============================================
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { Card, CardHeader, Button, Input } from '../components/common';
+import { Card, CardHeader, Button, Input, PasswordInput } from '../components/common';
 import { useAuthStore } from '../stores/authStore';
 import { authApi } from '../api/client';
 import { useNotifications } from '../hooks/useNotifications';
@@ -136,18 +136,16 @@ export function SettingsPage() {
       <Card>
         <CardHeader title="Change Password" subtitle="Update your password to keep your account secure" />
         <form onSubmit={handlePasswordSubmit(onPasswordSubmit)} className="space-y-4">
-          <Input
+          <PasswordInput
             label="Current Password"
-            type="password"
             error={passwordErrors.currentPassword?.message}
             {...registerPassword('currentPassword', {
               required: 'Current password is required',
             })}
           />
 
-          <Input
+          <PasswordInput
             label="New Password"
-            type="password"
             error={passwordErrors.newPassword?.message}
             {...registerPassword('newPassword', {
               required: 'New password is required',
@@ -155,9 +153,8 @@ export function SettingsPage() {
             })}
           />
 
-          <Input
+          <PasswordInput
             label="Confirm New Password"
-            type="password"
             error={passwordErrors.confirmPassword?.message}
             {...registerPassword('confirmPassword', {
               required: 'Please confirm your password',
