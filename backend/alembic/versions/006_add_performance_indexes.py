@@ -23,7 +23,8 @@ def upgrade():
         "ix_team_members_user_team", 
         "team_members", 
         ["user_id", "team_id"],
-        unique=False
+        unique=False,
+        if_not_exists=True
     )
     
     # Pay rates - frequently queried with user and active status
@@ -31,7 +32,8 @@ def upgrade():
         "ix_pay_rates_user_active", 
         "pay_rates", 
         ["user_id", "is_active"],
-        unique=False
+        unique=False,
+        if_not_exists=True
     )
     
     # Pay rates - frequently queried by effective date for current rate
@@ -39,7 +41,8 @@ def upgrade():
         "ix_pay_rates_effective_from", 
         "pay_rates", 
         ["effective_from", "is_active"],
-        unique=False
+        unique=False,
+        if_not_exists=True
     )
     
     # Time entries - improve user time queries by date range
@@ -47,7 +50,8 @@ def upgrade():
         "ix_time_entries_user_start_time", 
         "time_entries", 
         ["user_id", "start_time"],
-        unique=False
+        unique=False,
+        if_not_exists=True
     )
     
     # Time entries - improve project-based queries
@@ -55,7 +59,8 @@ def upgrade():
         "ix_time_entries_project_start_time", 
         "time_entries", 
         ["project_id", "start_time"],
-        unique=False
+        unique=False,
+        if_not_exists=True
     )
     
     # Payroll entries - improve user payroll queries
@@ -63,7 +68,8 @@ def upgrade():
         "ix_payroll_entries_user_period", 
         "payroll_entries", 
         ["user_id", "period_id"],
-        unique=False
+        unique=False,
+        if_not_exists=True
     )
     
     # Users - improve manager hierarchy queries
@@ -71,7 +77,8 @@ def upgrade():
         "ix_users_manager_id", 
         "users", 
         ["manager_id"],
-        unique=False
+        unique=False,
+        if_not_exists=True
     )
     
     # Users - improve employment queries
@@ -79,7 +86,8 @@ def upgrade():
         "ix_users_employment_status", 
         "users", 
         ["employment_type", "is_active"],
-        unique=False
+        unique=False,
+        if_not_exists=True
     )
     
     # Users - improve department/job title searches
@@ -87,7 +95,8 @@ def upgrade():
         "ix_users_department", 
         "users", 
         ["department"],
-        unique=False
+        unique=False,
+        if_not_exists=True
     )
     
     # Account requests - improve pending requests queries
@@ -95,7 +104,8 @@ def upgrade():
         "ix_account_requests_status_created", 
         "account_requests", 
         ["status", "created_at"],
-        unique=False
+        unique=False,
+        if_not_exists=True
     )
 
 
@@ -103,13 +113,13 @@ def downgrade():
     """Remove performance indexes"""
     
     # Drop indexes in reverse order
-    op.drop_index("ix_account_requests_status_created", table_name="account_requests")
-    op.drop_index("ix_users_department", table_name="users")
-    op.drop_index("ix_users_employment_status", table_name="users")
-    op.drop_index("ix_users_manager_id", table_name="users")
-    op.drop_index("ix_payroll_entries_user_period", table_name="payroll_entries")
-    op.drop_index("ix_time_entries_project_start_time", table_name="time_entries")
-    op.drop_index("ix_time_entries_user_start_time", table_name="time_entries")
-    op.drop_index("ix_pay_rates_effective_from", table_name="pay_rates")
-    op.drop_index("ix_pay_rates_user_active", table_name="pay_rates")
-    op.drop_index("ix_team_members_user_team", table_name="team_members")
+    op.drop_index("ix_account_requests_status_created", table_name="account_requests", if_exists=True)
+    op.drop_index("ix_users_department", table_name="users", if_exists=True)
+    op.drop_index("ix_users_employment_status", table_name="users", if_exists=True)
+    op.drop_index("ix_users_manager_id", table_name="users", if_exists=True)
+    op.drop_index("ix_payroll_entries_user_period", table_name="payroll_entries", if_exists=True)
+    op.drop_index("ix_time_entries_project_start_time", table_name="time_entries", if_exists=True)
+    op.drop_index("ix_time_entries_user_start_time", table_name="time_entries", if_exists=True)
+    op.drop_index("ix_pay_rates_effective_from", table_name="pay_rates", if_exists=True)
+    op.drop_index("ix_pay_rates_user_active", table_name="pay_rates", if_exists=True)
+    op.drop_index("ix_team_members_user_team", table_name="team_members", if_exists=True)
