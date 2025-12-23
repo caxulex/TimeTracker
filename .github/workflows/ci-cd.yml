@@ -210,56 +210,9 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ============================================
-  # Deploy to Production (AWS Lightsail)
+  # Deploy to Production - DISABLED
+  # SSH deployment disabled due to timeout issues.
+  # Use manual deployment: ~/deploy.sh on server
   # ============================================
-  deploy-production:
-    name: Deploy to AWS Lightsail
-    runs-on: ubuntu-latest
-    needs: [backend-test, frontend-test]
-    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
-    environment: production
-    
-    steps:
-      - name: Deploy to AWS Lightsail Server
-        uses: appleboy/ssh-action@v1.0.0
-        with:
-          host: ${{ secrets.AWS_HOST }}
-          username: ${{ secrets.AWS_USERNAME }}
-          key: ${{ secrets.AWS_SSH_KEY }}
-          script: |
-            cd ~/timetracker
-            echo "🔄 Pulling latest code from GitHub..."
-            git pull origin master || git pull origin main
-            
-            echo "🛑 Stopping existing containers..."
-            docker rm -f time-tracker-backend time-tracker-frontend 2>/dev/null || true
-            
-            echo "🔨 Building backend image..."
-            docker build -t timetracker-backend ./backend
-            
-            echo "🔨 Building frontend image..."
-            docker build -t timetracker-frontend ./frontend
-            
-            echo "🚀 Starting backend container..."
-            docker run -d --name time-tracker-backend \
-              --network timetracker_time-tracker-network \
-              -p 8080:8000 \
-              --env-file backend/.env \
-              --restart unless-stopped \
-              timetracker-backend
-            
-            echo "🚀 Starting frontend container..."
-            docker run -d --name time-tracker-frontend \
-              --network timetracker_time-tracker-network \
-              -p 3000:80 \
-              --restart unless-stopped \
-              timetracker-frontend
-            
-            echo "⏳ Waiting for services to be ready..."
-            sleep 15
-            
-            echo "🏥 Checking service health..."
-            docker ps | grep time-tracker
-            
-            echo "✅ Deployment completed successfully!"
-            echo "🌐 Application available at: http://44.193.3.170:3000"
+  # deploy-production:
+  #   Disabled - run ~/deploy.sh manually on Lightsail
