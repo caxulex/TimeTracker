@@ -262,7 +262,7 @@ export function AdminPage() {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-gray-500 text-sm">
-                      {new Date(user.created_at).toLocaleDateString()}
+                      {user.created_at ? new Date(user.created_at).toLocaleDateString() : 'N/A'}
                     </td>
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">

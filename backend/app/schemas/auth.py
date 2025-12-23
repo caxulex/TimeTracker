@@ -5,7 +5,7 @@ SEC-003: Enhanced with password strength validation hints
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
-from datetime import date
+from datetime import date, datetime
 import re
 
 
@@ -73,6 +73,7 @@ class UserResponse(BaseModel):
     name: str
     role: str
     is_active: bool
+    created_at: datetime
     
     # Contact Information
     phone: Optional[str] = None
