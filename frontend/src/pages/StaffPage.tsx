@@ -34,6 +34,22 @@ export function StaffPage() {
   const [selectedStaff, setSelectedStaff] = useState<User | null>(null);
   const [formStep, setFormStep] = useState(1); // Multi-step form
   const [showPassword, setShowPassword] = useState(false);
+  const [showCredentialsSummary, setShowCredentialsSummary] = useState(false);
+  const [createdUserCredentials, setCreatedUserCredentials] = useState<{
+    name: string;
+    email: string;
+    phone: string;
+    password: string;
+    job_title: string;
+    department: string;
+  } | null>(null);
+  const [copiedToClipboard, setCopiedToClipboard] = useState(false);
+
+  // Generate a suggested password for new users
+  const generateSuggestedPassword = () => {
+    const randomNum = Math.floor(1000 + Math.random() * 9000); // 4-digit random number
+    return `ChangePassword#${randomNum}`;
+  };
   
   const [createForm, setCreateForm] = useState({
     // Basic Info
@@ -70,6 +86,7 @@ export function StaffPage() {
   useEffect(() => {
     if (location.state?.fromAccountRequest && location.state?.initialData) {
       const initialData = location.state.initialData;
+      const suggestedPassword = generateSuggestedPassword();
       setCreateForm(prev => ({
         ...prev,
         name: initialData.name || prev.name,
@@ -78,6 +95,7 @@ export function StaffPage() {
         job_title: initialData.job_title || prev.job_title,
         department: initialData.department || prev.department,
         role: initialData.role || prev.role,
+        password: suggestedPassword, // Auto-fill with suggested password
       }));
       setShowCreateModal(true);
       // Clear the location state to prevent re-filling on re-render
@@ -138,6 +156,18 @@ export function StaffPage() {
     onSuccess: (newStaff) => {
       queryClient.invalidateQueries({ queryKey: ['staff'] });
       notifications.notifyStaffCreated(newStaff);
+      
+      // Save credentials for summary modal
+      setCreatedUserCredentials({
+        name: createForm.name,
+        email: createForm.email,
+        phone: createForm.phone || '',
+        password: createForm.password,
+        job_title: createForm.job_title || '',
+        department: createForm.department || '',
+      });
+      setShowCredentialsSummary(true);
+      
       setShowCreateModal(false);
       setFormStep(1);
       // Reset form
@@ -1593,6 +1623,156 @@ export function StaffPage() {
             setSelectedStaff(null);
           }}
         />
+      )}
+
+      {/* Credentials Summary Modal */}
+      {showCredentialsSummary && createdUserCredentials && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-green-500 to-emerald-600 px-6 py-4">
+              <div className="flex items-center space-x-3">
+                <div className="bg-white/20 rounded-full p-2">
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-white">Staff Member Created!</h3>
+                  <p className="text-green-100 text-sm">Share these credentials with the new user</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Credentials Content */}
+            <div className="px-6 py-5 space-y-4">
+              <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500 text-sm font-medium">Full Name</span>
+                  <span className="text-gray-900 font-semibold">{createdUserCredentials.name}</span>
+                </div>
+                <div className="border-t border-gray-200"></div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500 text-sm font-medium">Email</span>
+                  <span className="text-gray-900 font-semibold">{createdUserCredentials.email}</span>
+                </div>
+                {createdUserCredentials.phone && (
+                  <>
+                    <div className="border-t border-gray-200"></div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-500 text-sm font-medium">Phone</span>
+                      <span className="text-gray-900 font-semibold">{createdUserCredentials.phone}</span>
+                    </div>
+                  </>
+                )}
+                {createdUserCredentials.job_title && (
+                  <>
+                    <div className="border-t border-gray-200"></div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-500 text-sm font-medium">Job Title</span>
+                      <span className="text-gray-900 font-semibold">{createdUserCredentials.job_title}</span>
+                    </div>
+                  </>
+                )}
+                {createdUserCredentials.department && (
+                  <>
+                    <div className="border-t border-gray-200"></div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-500 text-sm font-medium">Department</span>
+                      <span className="text-gray-900 font-semibold">{createdUserCredentials.department}</span>
+                    </div>
+                  </>
+                )}
+                <div className="border-t border-gray-200"></div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500 text-sm font-medium">Password</span>
+                  <span className="text-blue-600 font-bold font-mono bg-blue-50 px-2 py-1 rounded">
+                    {createdUserCredentials.password}
+                  </span>
+                </div>
+              </div>
+
+              {/* Warning */}
+              <div className="flex items-start space-x-2 bg-amber-50 rounded-lg p-3">
+                <svg className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <p className="text-amber-700 text-sm">
+                  <span className="font-medium">Important:</span> Ask the user to change their password after first login.
+                </p>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="px-6 py-4 bg-gray-50 flex gap-3">
+              <button
+                onClick={() => {
+                  const text = `Welcome to TimeTracker!\n\nHere are your login credentials:\n\n` +
+                    `Full Name: ${createdUserCredentials.name}\n` +
+                    `Email: ${createdUserCredentials.email}\n` +
+                    (createdUserCredentials.phone ? `Phone: ${createdUserCredentials.phone}\n` : '') +
+                    (createdUserCredentials.job_title ? `Job Title: ${createdUserCredentials.job_title}\n` : '') +
+                    (createdUserCredentials.department ? `Department: ${createdUserCredentials.department}\n` : '') +
+                    `Password: ${createdUserCredentials.password}\n\n` +
+                    `Please change your password after your first login.\n\n` +
+                    `Login at: ${window.location.origin}`;
+                  navigator.clipboard.writeText(text);
+                  setCopiedToClipboard(true);
+                  setTimeout(() => setCopiedToClipboard(false), 2000);
+                }}
+                className="flex-1 flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-lg transition-colors"
+              >
+                {copiedToClipboard ? (
+                  <>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                    </svg>
+                    <span>Copy to Clipboard</span>
+                  </>
+                )}
+              </button>
+              <button
+                onClick={() => {
+                  setShowCredentialsSummary(false);
+                  setCreatedUserCredentials(null);
+                  setCopiedToClipboard(false);
+                  // Reset form
+                  setCreateForm({
+                    email: '',
+                    password: '',
+                    name: '',
+                    role: 'regular_user',
+                    phone: '',
+                    address: '',
+                    emergency_contact_name: '',
+                    emergency_contact_phone: '',
+                    job_title: '',
+                    department: '',
+                    employment_type: 'full_time' as 'full_time' | 'part_time' | 'contractor',
+                    start_date: new Date().toISOString().split('T')[0],
+                    expected_hours_per_week: 40,
+                    manager_id: null as number | null,
+                    pay_rate: 0,
+                    pay_rate_type: 'hourly' as 'hourly' | 'daily' | 'monthly' | 'project_based',
+                    overtime_multiplier: 1.5,
+                    currency: 'USD',
+                    team_ids: [] as number[],
+                  });
+                }}
+                className="flex items-center justify-center space-x-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-2.5 px-4 rounded-lg transition-colors"
+              >
+                <span>Close</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
