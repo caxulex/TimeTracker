@@ -289,6 +289,21 @@ export function StaffPage() {
     },
   });
 
+  // Permanent delete mutation
+  const permanentDeleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      return await usersApi.permanentDelete(id);
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['staff'] });
+      notifications.notifySuccess('User Deleted', result.message);
+    },
+    onError: (error: unknown) => {
+      const err = error as { response?: { data?: { detail?: string } }; message?: string };
+      notifications.notifyError('Delete Failed', err?.response?.data?.detail || err?.message || 'Failed to delete user');
+    },
+  });
+
   // Memoized handlers to prevent unnecessary re-renders (must be before any returns)
   const handleEditStaff = useCallback(async (staff: User) => {
     setSelectedStaff(staff);
@@ -367,6 +382,35 @@ export function StaffPage() {
     setSelectedStaff(staff);
     setShowTeamsModal(true);
   }, []);
+
+  const handlePermanentDelete = useCallback((staff: User) => {
+    // Permission check - cannot delete yourself
+    if (staff.id === currentUser?.id) {
+      notifications.notifyWarning("Can't Delete Yourself", "You cannot delete your own account.");
+      return;
+    }
+    
+    // Super admins cannot be deleted
+    if (staff.role === 'super_admin') {
+      notifications.notifyWarning("Can't Delete Super Admin", "Super admin users cannot be permanently deleted.");
+      return;
+    }
+    
+    // Require double confirmation for permanent delete
+    const firstConfirm = confirm(
+      `⚠️ PERMANENT DELETE\n\nAre you sure you want to permanently delete "${staff.name}"?\n\nThis will delete:\n• All time entries\n• All pay rates\n• All team memberships\n• All payroll data\n\nThis action CANNOT be undone!`
+    );
+    
+    if (firstConfirm) {
+      const secondConfirm = confirm(
+        `🚨 FINAL CONFIRMATION\n\nType OK to permanently delete "${staff.email}"\n\nThere is NO recovery from this action.`
+      );
+      
+      if (secondConfirm) {
+        permanentDeleteMutation.mutate(staff.id);
+      }
+    }
+  }, [currentUser, notifications, permanentDeleteMutation]);
 
   // Memoized computed values for stats
   const staffStats = useMemo(() => ({
@@ -578,7 +622,7 @@ export function StaffPage() {
                   Teams
                 </button>
               </div>
-              <div className="grid grid-cols-2 gap-2 mt-2">
+              <div className="grid grid-cols-3 gap-2 mt-2">
                 <button
                   onClick={() => { setSelectedStaff(staff); setShowTimeModal(true); }}
                   className="flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 rounded-md hover:bg-indigo-100"
@@ -598,6 +642,17 @@ export function StaffPage() {
                   } disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
                   {staff.is_active ? 'Deactivate' : 'Activate'}
+                </button>
+                <button
+                  onClick={() => handlePermanentDelete(staff)}
+                  disabled={staff.id === currentUser?.id || staff.role === 'super_admin' || permanentDeleteMutation.isPending}
+                  className="flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Permanently delete user and all data"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Delete
                 </button>
               </div>
             </div>
@@ -814,6 +869,21 @@ export function StaffPage() {
                             />
                           </svg>
                         )}
+                      </button>
+                      <button
+                        onClick={() => handlePermanentDelete(staff)}
+                        className="text-red-600 hover:text-red-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Permanently Delete"
+                        disabled={staff.id === currentUser?.id || staff.role === 'super_admin' || permanentDeleteMutation.isPending}
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                          />
+                        </svg>
                       </button>
                     </div>
                   </td>

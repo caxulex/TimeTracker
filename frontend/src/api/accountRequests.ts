@@ -10,7 +10,7 @@ import type {
   AccountRequestFilters,
 } from '../types/accountRequest';
 
-const BASE_URL = '/account-requests';
+const BASE_URL = '/api/account-requests';
 
 export const accountRequestsApi = {
   /**

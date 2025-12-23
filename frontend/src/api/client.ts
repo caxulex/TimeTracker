@@ -174,6 +174,11 @@ export const usersApi = {
     await api.delete(`/api/users/${id}`);
   },
 
+  permanentDelete: async (id: number): Promise<{ message: string }> => {
+    const response = await api.delete<{ message: string }>(`/api/users/${id}/permanent`);
+    return response.data;
+  },
+
   updateRole: async (id: number, role: string): Promise<User> => {
     const response = await api.put<User>(`/api/users/${id}/role`, { role });
     return response.data;

@@ -345,6 +345,85 @@ async def deactivate_user(
     return {"message": "User deactivated successfully"}
 
 
+@router.delete("/{user_id}/permanent", response_model=Message)
+async def permanently_delete_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """
+    Permanently delete a user and all associated data (admin only).
+    
+    WARNING: This action cannot be undone. Use with caution.
+    This will delete:
+    - The user account
+    - All time entries
+    - All pay rates
+    - Team memberships (but not the teams themselves)
+    - Payroll entries
+    """
+    from app.models import TimeEntry, PayRate, TeamMember, PayrollEntry
+    
+    if user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Cannot delete yourself"
+        )
+    
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    
+    # Prevent deletion of super_admin users (safety check)
+    if user.role == "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot permanently delete super admin users"
+        )
+    
+    user_email = user.email
+    user_name = user.name
+    
+    # Delete associated records in correct order (foreign key constraints)
+    # 1. Delete time entries
+    await db.execute(
+        select(TimeEntry).where(TimeEntry.user_id == user_id)
+    )
+    from sqlalchemy import delete
+    await db.execute(delete(TimeEntry).where(TimeEntry.user_id == user_id))
+    
+    # 2. Delete pay rates
+    await db.execute(delete(PayRate).where(PayRate.user_id == user_id))
+    
+    # 3. Delete team memberships
+    await db.execute(delete(TeamMember).where(TeamMember.user_id == user_id))
+    
+    # 4. Delete payroll entries
+    await db.execute(delete(PayrollEntry).where(PayrollEntry.user_id == user_id))
+    
+    # 5. Finally delete the user
+    await db.delete(user)
+    
+    # Audit log (before commit so we can capture it)
+    await AuditLogger.log(
+        db=db,
+        action=AuditAction.DELETE,
+        resource_type="user",
+        resource_id=user_id,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        old_values={"email": user_email, "name": user_name},
+        new_values=None,
+        details=f"Permanently deleted user {user_email} and all associated data"
+    )
+    
+    await db.commit()
+    
+    return {"message": f"User {user_email} permanently deleted"}
+
+
 @router.put("/{user_id}/role", response_model=UserResponse)
 async def change_user_role(
     user_id: int,

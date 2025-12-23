@@ -117,14 +117,10 @@ export function useStaffFormValidation() {
       }
     }
 
-    // Pay rate validation
+    // Pay rate validation - pay rate is optional, but if provided must be valid
     if (data.pay_rate !== undefined && data.pay_rate_type) {
-      if (data.pay_rate === 0) {
-        // Only show error on final submission (when isUpdate is explicitly false)
-        if (isUpdate === false) {
-          newErrors.push({ field: 'pay_rate', message: 'Pay rate is required' });
-        }
-      } else {
+      // Pay rate of 0 is now allowed (staff without payroll)
+      if (data.pay_rate > 0) {
         const rateValidation = validatePayRate(data.pay_rate, data.pay_rate_type);
         if (!rateValidation.valid) {
           newErrors.push({ field: 'pay_rate', message: rateValidation.error! });
