@@ -201,7 +201,18 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         
         if not is_allowed:
             logger.warning(f"Rate limit exceeded for {client_ip} on {path}")
-            raise RateLimitExceeded(retry_after=60)
+            # Return proper 429 response instead of raising exception
+            from starlette.responses import JSONResponse
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Rate limit exceeded. Please try again later."},
+                headers={
+                    "Retry-After": "60",
+                    "X-RateLimit-Limit": str(limit),
+                    "X-RateLimit-Remaining": "0",
+                    "X-RateLimit-Reset": str(reset),
+                }
+            )
         
         # Process request
         response = await call_next(request)
