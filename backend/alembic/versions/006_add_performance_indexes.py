@@ -67,7 +67,7 @@ def upgrade():
     op.create_index(
         "ix_payroll_entries_user_period", 
         "payroll_entries", 
-        ["user_id", "period_id"],
+        ["user_id", "payroll_period_id"],
         unique=False,
         if_not_exists=True
     )
