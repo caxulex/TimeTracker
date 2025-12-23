@@ -1020,7 +1020,7 @@ export function StaffPage() {
                       <input
                         type={showPassword ? 'text' : 'password'}
                         required
-                        minLength={8}
+                        minLength={12}
                         value={createForm.password}
                         onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
                         className={`w-full px-3 py-2 pr-10 border rounded-md focus:ring-2 focus:ring-blue-500 ${
@@ -1028,7 +1028,7 @@ export function StaffPage() {
                             ? 'border-red-500 bg-red-50' 
                             : 'border-gray-300'
                         }`}
-                        placeholder="Minimum 8 characters"
+                        placeholder="Min 12 chars: upper, lower, number, special"
                       />
                       <button
                         type="button"
