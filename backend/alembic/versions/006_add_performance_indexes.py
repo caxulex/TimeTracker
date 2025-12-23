@@ -101,9 +101,9 @@ def upgrade():
     
     # Account requests - improve pending requests queries
     op.create_index(
-        "ix_account_requests_status_created", 
+        "ix_account_requests_status_submitted", 
         "account_requests", 
-        ["status", "created_at"],
+        ["status", "submitted_at"],
         unique=False,
         if_not_exists=True
     )
@@ -113,7 +113,7 @@ def downgrade():
     """Remove performance indexes"""
     
     # Drop indexes in reverse order
-    op.drop_index("ix_account_requests_status_created", table_name="account_requests", if_exists=True)
+    op.drop_index("ix_account_requests_status_submitted", table_name="account_requests", if_exists=True)
     op.drop_index("ix_users_department", table_name="users", if_exists=True)
     op.drop_index("ix_users_employment_status", table_name="users", if_exists=True)
     op.drop_index("ix_users_manager_id", table_name="users", if_exists=True)
