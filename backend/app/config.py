@@ -3,10 +3,28 @@ Application configuration using Pydantic settings
 SEC-001, SEC-009, SEC-012: Secure Configuration with Validation
 """
 
+import json
 import secrets
-from typing import List, Optional
+from typing import List, Optional, Union
 from pydantic_settings import BaseSettings
-from pydantic import field_validator, model_validator
+from pydantic import field_validator, model_validator, BeforeValidator
+from typing_extensions import Annotated
+
+
+def parse_list_from_env(v: Union[str, List[str]]) -> List[str]:
+    """Parse a list from environment variable - handles JSON array or comma-separated"""
+    if isinstance(v, list):
+        return v
+    if isinstance(v, str):
+        v = v.strip()
+        if v.startswith('['):
+            return json.loads(v)
+        return [x.strip() for x in v.split(',') if x.strip()]
+    return []
+
+
+# Type for env-parsed lists
+EnvList = Annotated[List[str], BeforeValidator(parse_list_from_env)]
 
 
 # Known insecure default values to reject
@@ -31,6 +49,12 @@ INSECURE_PASSWORDS = {
 
 class Settings(BaseSettings):
     """Application settings with security validation"""
+    
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
 
     # Application
     APP_NAME: str = "Time Tracker"
@@ -53,8 +77,8 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # CORS - SEC-008: Explicit configuration
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:3000"]
-    ALLOWED_HOSTS: List[str] = ["localhost", "127.0.0.1"]
+    ALLOWED_ORIGINS: EnvList = ["http://localhost:5173", "http://localhost:3000"]
+    ALLOWED_HOSTS: EnvList = ["localhost", "127.0.0.1"]
 
     # Email (for future use)
     SMTP_SERVER: Optional[str] = None
