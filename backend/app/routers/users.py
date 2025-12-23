@@ -387,11 +387,10 @@ async def permanently_delete_user(
     user_name = user.name
     
     # Delete associated records in correct order (foreign key constraints)
+    from sqlalchemy import delete, update
+    from app.models import Team, TimeModification
+    
     # 1. Delete time entries
-    await db.execute(
-        select(TimeEntry).where(TimeEntry.user_id == user_id)
-    )
-    from sqlalchemy import delete
     await db.execute(delete(TimeEntry).where(TimeEntry.user_id == user_id))
     
     # 2. Delete pay rates
@@ -403,7 +402,22 @@ async def permanently_delete_user(
     # 4. Delete payroll entries
     await db.execute(delete(PayrollEntry).where(PayrollEntry.user_id == user_id))
     
-    # 5. Finally delete the user
+    # 5. Transfer ownership of teams to the admin performing deletion
+    await db.execute(
+        update(Team).where(Team.owner_id == user_id).values(owner_id=current_user.id)
+    )
+    
+    # 6. Update manager_id references to NULL for users managed by this user
+    await db.execute(
+        update(User).where(User.manager_id == user_id).values(manager_id=None)
+    )
+    
+    # 7. Update time modification history - set changed_by to current admin
+    await db.execute(
+        update(TimeModification).where(TimeModification.changed_by == user_id).values(changed_by=current_user.id)
+    )
+    
+    # 8. Finally delete the user
     await db.delete(user)
     
     # Audit log (before commit so we can capture it)
