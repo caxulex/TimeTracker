@@ -149,7 +149,7 @@ export function SettingsPage() {
             error={passwordErrors.newPassword?.message}
             {...registerPassword('newPassword', {
               required: 'New password is required',
-              minLength: { value: 8, message: 'Password must be at least 8 characters' },
+              minLength: { value: 12, message: 'Min 12 chars with upper, lower, number, special char' },
             })}
           />
 
