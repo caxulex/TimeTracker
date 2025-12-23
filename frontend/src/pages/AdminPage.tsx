@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
 import { usersApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
+import { useNotifications } from '../hooks/useNotifications';
 import type { User, UserCreate } from '../types';
 
 
@@ -13,11 +14,13 @@ import type { User, UserCreate } from '../types';
 export function AdminPage() {
   const { user: currentUser } = useAuthStore();
   const queryClient = useQueryClient();
+  const { addNotification } = useNotifications();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState<UserCreate>({
     email: '',
     password: '',
@@ -42,6 +45,32 @@ export function AdminPage() {
       queryClient.invalidateQueries({ queryKey: ['admin-users'] });
       setShowCreateModal(false);
       setCreateForm({ email: '', password: '', name: '', role: 'regular_user' });
+      setCreateError(null);
+      addNotification({
+        type: 'success',
+        title: 'User Created',
+        message: 'New user has been created successfully',
+      });
+    },
+    onError: (error: unknown) => {
+      const err = error as { response?: { data?: { detail?: string | { message: string; errors: string[] } } }; message?: string };
+      let errorMessage = 'Failed to create user';
+      
+      if (err?.response?.data?.detail) {
+        const detail = err.response.data.detail;
+        if (typeof detail === 'string') {
+          errorMessage = detail;
+        } else if (detail.message) {
+          errorMessage = detail.message + (detail.errors?.length ? ': ' + detail.errors.join(', ') : '');
+        }
+      }
+      
+      setCreateError(errorMessage);
+      addNotification({
+        type: 'error',
+        title: 'Create Failed',
+        message: errorMessage,
+      });
     },
   });
 
@@ -133,7 +162,7 @@ export function AdminPage() {
           <h1 className="text-2xl font-bold text-gray-900">User Management</h1>
           <p className="text-gray-500">Manage users, roles, and permissions</p>
         </div>
-        <Button onClick={() => setShowCreateModal(true)}>
+        <Button onClick={() => { setCreateError(null); setShowCreateModal(true); }}>
           <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
@@ -336,6 +365,12 @@ export function AdminPage() {
               </button>
             </div>
             <form onSubmit={handleCreateUser} className="p-6 space-y-4">
+              {/* Error Message */}
+              {createError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+                  {createError}
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
                 <input
@@ -364,11 +399,11 @@ export function AdminPage() {
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
-                    minLength={8}
+                    minLength={12}
                     value={createForm.password}
                     onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
                     className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Minimum 8 characters"
+                    placeholder="Min 12 chars, upper, lower, number, special"
                   />
                   <button
                     type="button"
