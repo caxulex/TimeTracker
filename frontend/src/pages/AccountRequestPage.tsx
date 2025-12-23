@@ -65,7 +65,7 @@ export function AccountRequestPage() {
               Request Submitted Successfully!
             </h2>
             <p className="text-gray-600 mb-6">
-              Thank you for your interest. An administrator will review your request and contact you soon.
+              We have received your information. Thank you for your interest in joining our team!
             </p>
 
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
@@ -74,9 +74,9 @@ export function AccountRequestPage() {
                 <br />
                 • Our team will review your request within 1-2 business days
                 <br />
-                • You'll receive an email once your account is approved
+                • Once approved, you will receive an email with your login credentials
                 <br />
-                • Your login credentials will be provided via secure email
+                • Please remember to change your password after your first login
               </p>
             </div>
 
