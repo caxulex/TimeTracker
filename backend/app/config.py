@@ -54,6 +54,7 @@ class Settings(BaseSettings):
         "env_file": ".env",
         "env_file_encoding": "utf-8",
         "extra": "ignore",
+        "case_sensitive": True,
     }
 
     # Application
@@ -169,10 +170,6 @@ class Settings(BaseSettings):
         if v > 15:
             raise ValueError('BCRYPT_ROUNDS above 15 may cause performance issues')
         return v
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
 
 
 # Create global settings instance
