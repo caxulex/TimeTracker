@@ -19,6 +19,7 @@ export function ProjectsPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{ type: 'archive' | 'restore'; project: Project } | null>(null);
 
   // Fetch projects
   const { data: projectsData, isLoading } = useQuery({
@@ -111,6 +112,16 @@ export function ProjectsPage() {
     setShowModal(true);
   };
 
+  const handleConfirmAction = () => {
+    if (!confirmAction) return;
+    if (confirmAction.type === 'archive') {
+      archiveMutation.mutate(confirmAction.project.id);
+    } else {
+      restoreMutation.mutate(confirmAction.project.id);
+    }
+    setConfirmAction(null);
+  };
+
   if (isLoading) {
     return <LoadingOverlay message="Loading projects..." />;
   }
@@ -167,12 +178,40 @@ export function ProjectsPage() {
               project={project}
               isAdmin={isAdmin}
               onEdit={() => handleEdit(project)}
-              onArchive={() => archiveMutation.mutate(project.id)}
-              onRestore={() => restoreMutation.mutate(project.id)}
+              onArchive={() => setConfirmAction({ type: 'archive', project })}
+              onRestore={() => setConfirmAction({ type: 'restore', project })}
             />
           ))}
         </div>
       )}
+
+      {/* Confirmation Modal */}
+      <Modal
+        isOpen={!!confirmAction}
+        onClose={() => setConfirmAction(null)}
+        title={confirmAction?.type === 'archive' ? 'Archive Project' : 'Restore Project'}
+      >
+        <div className="space-y-4">
+          <p className="text-gray-600">
+            {confirmAction?.type === 'archive' 
+              ? `Are you sure you want to archive "${confirmAction?.project.name}"? Archived projects won't appear in active project lists.`
+              : `Are you sure you want to restore "${confirmAction?.project.name}"? It will become active again.`
+            }
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setConfirmAction(null)}>
+              Cancel
+            </Button>
+            <Button 
+              variant={confirmAction?.type === 'archive' ? 'danger' : 'primary'}
+              onClick={handleConfirmAction}
+              isLoading={archiveMutation.isPending || restoreMutation.isPending}
+            >
+              {confirmAction?.type === 'archive' ? 'Archive' : 'Restore'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Create/Edit Modal - Admin only */}
       {isAdmin && (

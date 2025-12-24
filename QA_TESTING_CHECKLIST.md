@@ -34,59 +34,59 @@
 ## 1. Authentication & Onboarding
 
 ### 1.1 Login (Public)
-- [ ] Navigate to `/login`
-- [ ] Verify email field validation (required, valid format)
-- [ ] Verify password field validation (required only - no minLength)
-- [ ] Test login with valid credentials → redirects to `/dashboard`
-- [ ] Test login with invalid email → shows error
-- [ ] Test login with invalid password → shows error
-- [ ] Verify password visibility toggle (eye icon)
-- [ ] Verify "Welcome back" success notification appears
+- [x] Navigate to `/login` ✅
+- [x] Verify email field validation (required, valid format) ✅
+- [x] Verify password field validation (required only - no minLength) ✅
+- [x] Test login with valid credentials → redirects to `/dashboard` ✅
+- [x] Test login with invalid email → shows error ✅
+- [x] Test login with invalid password → shows error ✅
+- [x] Verify password visibility toggle (eye icon) ✅
+- [x] Verify "Welcome back" success notification appears ✅
 
 ### 1.2 Register (Public)
-- [ ] Navigate to `/register`
-- [ ] Verify all required fields validation
-- [ ] Verify password requires 12+ chars with complexity hint
-- [ ] Test successful registration
-- [ ] Test duplicate email registration → shows error
+- [x] Navigate to `/register` ✅
+- [x] Verify all required fields validation ✅
+- [x] Verify password requires 12+ chars with complexity hint ✅
+- [x] Test successful registration ✅
+- [x] Test duplicate email registration → shows error ✅
 
 ### 1.3 Request Account (Public)
-- [ ] Navigate to `/request-account`
-- [ ] Verify form fields: Name, Email, Phone, Job Title, Department
-- [ ] Submit valid request
-- [ ] Verify success message: "We have received your information"
-- [ ] Verify "What happens next?" info box displays correctly
-- [ ] Verify auto-redirect to login after 5 seconds
+- [x] Navigate to `/request-account` ✅
+- [x] Verify form fields: Name, Email, Phone, Job Title, Department ✅
+- [x] Submit valid request ✅
+- [x] Verify success message: "We have received your information" ✅
+- [x] Verify "What happens next?" info box displays correctly ✅
+- [x] Verify auto-redirect to login after 5 seconds ✅
 
 ### 1.4 Logout (Both Roles)
-- [ ] Click logout button
-- [ ] Verify session is terminated
-- [ ] Verify redirect to login page
-- [ ] Verify cannot access protected routes after logout
+- [x] Click logout button ✅
+- [x] Verify session is terminated ✅
+- [x] Verify redirect to login page ✅
+- [x] Verify cannot access protected routes after logout ✅
 
 ---
 
 ## 2. Dashboard
 
 ### 2.1 Personal Dashboard (Both Roles)
-- [ ] Navigate to `/dashboard`
-- [ ] Verify "Today" hours display
-- [ ] Verify "This Week" hours display
-- [ ] Verify daily breakdown chart renders
-- [ ] Verify project distribution pie chart renders
-- [ ] Verify Timer Widget is present and functional
+- [x] Navigate to `/dashboard` ✅
+- [x] Verify "Today" hours display ✅
+- [x] Verify "This Week" hours display ✅
+- [x] Verify daily breakdown chart renders ✅
+- [x] Verify project distribution pie chart renders ✅
+- [x] Verify Timer Widget is present and functional ✅
 
 ### 2.2 Team Overview Panel (Admin Only)
-- [ ] Verify panel visible for admin users
+- [x] Verify panel visible for admin users ✅
 - [ ] Verify panel hidden for regular users
-- [ ] Verify "Team Today" hours display
-- [ ] Verify "Team This Week" hours display
-- [ ] Verify "Active Users Today" count
-- [ ] Verify "Running Timers" count
-- [ ] Verify "Today's Activity by User" list
+- [x] Verify "Team Today" hours display ✅
+- [x] Verify "Team This Week" hours display ✅
+- [x] Verify "Active Users Today" count ✅
+- [x] Verify "Running Timers" count ✅
+- [x] Verify "Today's Activity by User" list ✅
 
 ### 2.3 Admin Alerts Panel (Admin Only)
-- [ ] Verify alerts panel visible for admin users
+- [x] Verify alerts panel visible for admin users ✅
 - [ ] Verify alerts panel hidden for regular users
 
 ---
@@ -94,44 +94,44 @@
 ## 3. Time Tracking
 
 ### 3.1 Timer Widget (Both Roles)
-- [ ] Navigate to `/time`
-- [ ] Start timer without project → verify it works
-- [ ] Start timer with project selected
-- [ ] Start timer with project and task selected
-- [ ] Verify timer counts up in real-time
-- [ ] Stop timer → verify time entry created
-- [ ] Verify entry appears in list immediately
+- [x] Navigate to `/time` ✅
+- [x] Start timer without project → ⚠️ **Requires project** (shows "Please select a project before starting the timer")
+- [x] Start timer with project selected ✅
+- [x] Start timer with project and task selected ✅
+- [x] Verify timer counts up in real-time ✅
+- [x] Stop timer → verify time entry created ✅
+- [x] Verify entry appears in list immediately ✅
 
 ### 3.2 Manual Entry Creation (Both Roles)
-- [ ] Click "Add Manual Entry" button
-- [ ] Fill in start time, end time, description
-- [ ] Select project (optional)
-- [ ] Select task (optional)
-- [ ] Submit → verify entry created
-- [ ] Verify duration calculated correctly
+- [x] Click "Add Manual Entry" button ✅
+- [x] Fill in start time, end time, description ✅
+- [x] Select project (optional) ✅
+- [x] Select task (optional) ✅
+- [x] Submit → verify entry created ✅
+- [x] Verify duration calculated correctly ✅
 
 ### 3.3 View Time Entries (Both Roles)
-- [ ] Verify entries grouped by date
-- [ ] Verify each entry shows: description, project, duration, times
-- [ ] Verify pagination works if many entries
+- [x] Verify entries grouped by date ✅
+- [x] Verify each entry shows: description, project, duration, times ✅
+- [x] Verify pagination works if many entries ✅
 
 ### 3.4 Edit Time Entry (Both Roles)
-- [ ] Click edit on an entry
-- [ ] Modify description
-- [ ] Modify project/task
-- [ ] Save changes → verify updated
-- [ ] Verify "Entry Updated" notification
+- [x] Click edit on an entry ✅
+- [x] Modify description ✅
+- [x] Modify project/task ✅
+- [x] Save changes → verify updated ✅
+- [x] Verify "Entry Updated" notification ✅
 
 ### 3.5 Delete Time Entry (Both Roles)
-- [ ] Click delete on an entry
-- [ ] Confirm deletion
-- [ ] Verify entry removed from list
-- [ ] Verify "Entry Deleted" notification
+- [x] Click delete on an entry ✅
+- [x] Confirm deletion ✅
+- [x] Verify entry removed from list ✅
+- [x] Verify "Entry Deleted" notification ✅
 
 ### 3.6 Filter by Project (Both Roles)
-- [ ] Select a project from filter dropdown
-- [ ] Verify only entries for that project shown
-- [ ] Select "All Projects" → verify all entries shown
+- [x] Select a project from filter dropdown ✅
+- [x] Verify only entries for that project shown ✅
+- [x] Select "All Projects" → verify all entries shown ✅
 
 ---
 
