@@ -24,7 +24,7 @@ export function ProjectsPage() {
   // Fetch projects
   const { data: projectsData, isLoading } = useQuery({
     queryKey: ['projects', showArchived],
-    queryFn: () => projectsApi.getAll({ is_archived: showArchived }),
+    queryFn: () => projectsApi.getAll({ include_archived: showArchived }),
   });
 
   // Fetch teams for dropdown

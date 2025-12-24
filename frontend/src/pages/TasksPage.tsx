@@ -40,7 +40,7 @@ export function TasksPage() {
   // Fetch projects for filter
   const { data: projectsData } = useQuery({
     queryKey: ['projects'],
-    queryFn: () => projectsApi.getAll({ is_archived: false }),
+    queryFn: () => projectsApi.getAll({ include_archived: false }),
   });
 
   const tasks = tasksData?.items || [];

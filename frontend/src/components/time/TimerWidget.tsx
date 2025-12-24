@@ -35,7 +35,7 @@ export function TimerWidget() {
   // Fetch projects
   const { data: projectsData } = useQuery({
     queryKey: ['projects'],
-    queryFn: () => projectsApi.getAll({ is_archived: false }),
+    queryFn: () => projectsApi.getAll({ include_archived: false }),
   });
 
   // Fetch tasks for selected project

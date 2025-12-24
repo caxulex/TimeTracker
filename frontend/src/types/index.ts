@@ -258,7 +258,8 @@ export interface TimeEntryFilters {
 
 export interface ProjectFilters {
   team_id?: number;
-  is_archived?: boolean;
+  include_archived?: boolean;
+  search?: string;
   page?: number;
   size?: number;
 }
