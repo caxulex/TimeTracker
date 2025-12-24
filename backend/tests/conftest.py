@@ -2,10 +2,8 @@
 # TIME TRACKER - TEST CONFIGURATION
 # Uses PostgreSQL test database (requires Docker containers running)
 # ============================================
-import asyncio
 import os
-from typing import AsyncGenerator, Generator
-import pytest
+from typing import AsyncGenerator
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -28,15 +26,6 @@ TEST_DATABASE_URL = os.getenv(
         "postgresql+asyncpg://postgres:postgres@localhost:5434/time_tracker"
     )
 )
-
-
-@pytest.fixture(scope="session")
-def event_loop() -> Generator:
-    """Create event loop for the session."""
-    policy = asyncio.get_event_loop_policy()
-    loop = policy.new_event_loop()
-    yield loop
-    loop.close()
 
 
 @pytest_asyncio.fixture(scope="function")

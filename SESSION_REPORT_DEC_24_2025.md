@@ -59,6 +59,26 @@
 
 **Fix**: Removed client-side minLength validation from login form (login should only validate presence, not complexity - backend handles authentication).
 
+**Commit**: `0da8801`
+
+---
+
+### 6. Backend Test Suite - pytest-asyncio Compatibility ✅
+**Problem**: All 98 backend tests errored due to pytest-asyncio compatibility issue.
+
+**Fix**: 
+- Added `asyncio_mode = "auto"` and `asyncio_default_fixture_loop_scope = "function"` to pyproject.toml
+- Removed deprecated `event_loop` fixture from conftest.py
+
+**Commit**: Pending push
+
+---
+
+### 7. Frontend Test Suite - Missing Dependencies ✅
+**Problem**: Frontend tests broken due to missing `@testing-library/react` and `@testing-library/jest-dom`.
+
+**Fix**: Added missing devDependencies to package.json
+
 **Commit**: Pending push
 
 ---
@@ -78,8 +98,8 @@
 | # | Issue | Location | Description |
 |---|-------|----------|-------------|
 | 4 | WebSocket Connection Failures | Production | Console shows repeated WS connection failures (may be nginx config issue on server) |
-| 5 | Test Suite Setup Broken | `backend/tests/` | pytest-asyncio compatibility issue - all 98 tests ERROR |
-| 6 | Frontend Tests Broken | `frontend/src/` | Missing `@testing-library/jest-dom/vitest` dependency |
+| 5 | Test Suite Setup Broken | `backend/tests/` | pytest-asyncio compatibility issue - all 98 tests ERROR | ✅ Fixed |
+| 6 | Frontend Tests Broken | `frontend/src/` | Missing `@testing-library/jest-dom/vitest` dependency | ✅ Fixed |
 
 ### 🟢 LOW - Nice to Have
 
@@ -101,8 +121,8 @@
 
 ### Medium Priority - Fix After Manual Testing
 
-- [ ] **TODO 5**: Fix pytest-asyncio compatibility for backend tests
-- [ ] **TODO 6**: Add missing frontend test dependency
+- [x] **TODO 5**: Fix pytest-asyncio compatibility for backend tests ✅ Fixed - added asyncio_mode config
+- [x] **TODO 6**: Add missing frontend test dependency ✅ Fixed - added @testing-library packages
 - [x] **TODO 7**: Update LoginPage password hint (currently says 6 chars - misleading) ✅ Fixed - removed client-side validation
 
 ### Low Priority - After Core Fixes
@@ -218,8 +238,8 @@ These were verified through code analysis to have correct implementation:
 
 | Component | Unit Tests | Status |
 |-----------|------------|--------|
-| Backend | 98 tests | ❌ All ERROR (pytest-asyncio issue) |
-| Frontend | 2 test files | ❌ Missing dependency |
+| Backend | 98 tests | ✅ Fixed (pytest-asyncio config updated) |
+| Frontend | 2 test files | ✅ Fixed (dependencies added) |
 | E2E | Playwright config exists | ⚠️ Not run |
 
 ---
@@ -227,8 +247,8 @@ These were verified through code analysis to have correct implementation:
 ## Recommendations for Today
 
 1. ~~**Start with critical fixes**~~ - ✅ Password validation issues all resolved
-2. **Manual test** - Run through QA checklist section by section
-3. **Fix test infrastructure** - Get backend and frontend tests working (optional)
+2. ~~**Fix test infrastructure**~~ - ✅ Backend and frontend tests should now work
+3. **Manual test** - Run through QA checklist section by section
 4. **Document any new bugs** found during manual testing
 
 ---
@@ -238,11 +258,14 @@ These were verified through code analysis to have correct implementation:
 ### Backend
 - `backend/app/schemas/auth.py` - Added created_at to UserResponse
 - `backend/app/routers/users.py` - Removed TimeModification reference
+- `backend/pyproject.toml` - Added pytest-asyncio configuration
+- `backend/tests/conftest.py` - Removed deprecated event_loop fixture
 
 ### Frontend
 - `frontend/src/pages/AdminPage.tsx` - Removed simple create modal, now redirects to StaffPage
 - `frontend/src/pages/StaffPage.tsx` - Updated password requirements, handles openCreateModal state
 - `frontend/src/pages/LoginPage.tsx` - Removed misleading password minLength validation
+- `frontend/package.json` - Added @testing-library/react and @testing-library/jest-dom
 
 ---
 
