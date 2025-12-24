@@ -19,12 +19,13 @@ export function ProjectsPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [showArchived, setShowArchived] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<{ type: 'archive' | 'restore'; project: Project } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{ type: 'archive' | 'restore' | 'delete'; project: Project } | null>(null);
 
   // Fetch projects
+  // Fetch projects - always include archived so we can filter client-side
   const { data: projectsData, isLoading } = useQuery({
-    queryKey: ['projects', showArchived],
-    queryFn: () => projectsApi.getAll({ include_archived: showArchived }),
+    queryKey: ['projects', 'all'],
+    queryFn: () => projectsApi.getAll({ include_archived: true }),
   });
 
   // Fetch teams for dropdown
@@ -33,7 +34,11 @@ export function ProjectsPage() {
     queryFn: () => teamsApi.getAll(),
   });
 
-  const projects = projectsData?.items || [];
+  // Filter projects based on showArchived toggle
+  const allProjects = projectsData?.items || [];
+  const projects = showArchived 
+    ? allProjects.filter(p => p.is_archived)
+    : allProjects.filter(p => !p.is_archived);
   const teams = teamsData?.items || [];
 
   // Create mutation (admin only)
@@ -106,6 +111,26 @@ export function ProjectsPage() {
     },
   });
 
+  // Delete mutation (admin only)
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => projectsApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      addNotification({
+        type: 'success',
+        title: 'Project Deleted',
+        message: 'The project has been permanently deleted',
+      });
+    },
+    onError: () => {
+      addNotification({
+        type: 'error',
+        title: 'Failed to Delete',
+        message: 'Could not delete the project. It may have time entries.',
+      });
+    },
+  });
+
   const handleEdit = (project: Project) => {
     if (!isAdmin) return;
     setEditingProject(project);
@@ -116,8 +141,10 @@ export function ProjectsPage() {
     if (!confirmAction) return;
     if (confirmAction.type === 'archive') {
       archiveMutation.mutate(confirmAction.project.id);
-    } else {
+    } else if (confirmAction.type === 'restore') {
       restoreMutation.mutate(confirmAction.project.id);
+    } else if (confirmAction.type === 'delete') {
+      deleteMutation.mutate(confirmAction.project.id);
     }
     setConfirmAction(null);
   };
@@ -180,6 +207,7 @@ export function ProjectsPage() {
               onEdit={() => handleEdit(project)}
               onArchive={() => setConfirmAction({ type: 'archive', project })}
               onRestore={() => setConfirmAction({ type: 'restore', project })}
+              onDelete={() => setConfirmAction({ type: 'delete', project })}
             />
           ))}
         </div>
@@ -189,13 +217,19 @@ export function ProjectsPage() {
       <Modal
         isOpen={!!confirmAction}
         onClose={() => setConfirmAction(null)}
-        title={confirmAction?.type === 'archive' ? 'Archive Project' : 'Restore Project'}
+        title={
+          confirmAction?.type === 'archive' ? 'Archive Project' : 
+          confirmAction?.type === 'restore' ? 'Restore Project' : 
+          'Delete Project'
+        }
       >
         <div className="space-y-4">
           <p className="text-gray-600">
             {confirmAction?.type === 'archive' 
               ? `Are you sure you want to archive "${confirmAction?.project.name}"? Archived projects won't appear in active project lists.`
-              : `Are you sure you want to restore "${confirmAction?.project.name}"? It will become active again.`
+              : confirmAction?.type === 'restore'
+              ? `Are you sure you want to restore "${confirmAction?.project.name}"? It will become active again.`
+              : `Are you sure you want to permanently delete "${confirmAction?.project.name}"? This action cannot be undone.`
             }
           </p>
           <div className="flex justify-end gap-2">
@@ -203,11 +237,11 @@ export function ProjectsPage() {
               Cancel
             </Button>
             <Button 
-              variant={confirmAction?.type === 'archive' ? 'danger' : 'primary'}
+              variant={confirmAction?.type === 'restore' ? 'primary' : 'danger'}
               onClick={handleConfirmAction}
-              isLoading={archiveMutation.isPending || restoreMutation.isPending}
+              isLoading={archiveMutation.isPending || restoreMutation.isPending || deleteMutation.isPending}
             >
-              {confirmAction?.type === 'archive' ? 'Archive' : 'Restore'}
+              {confirmAction?.type === 'archive' ? 'Archive' : confirmAction?.type === 'restore' ? 'Restore' : 'Delete'}
             </Button>
           </div>
         </div>
@@ -244,9 +278,10 @@ interface ProjectCardProps {
   onEdit: () => void;
   onArchive: () => void;
   onRestore: () => void;
+  onDelete: () => void;
 }
 
-function ProjectCard({ project, isAdmin, onEdit, onArchive, onRestore }: ProjectCardProps) {
+function ProjectCard({ project, isAdmin, onEdit, onArchive, onRestore, onDelete }: ProjectCardProps) {
   return (
     <Card className="hover:shadow-md transition-shadow">
       <div className="flex items-start justify-between">
@@ -269,6 +304,7 @@ function ProjectCard({ project, isAdmin, onEdit, onArchive, onRestore }: Project
             <button
               onClick={onEdit}
               className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+              title="Edit project"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
@@ -278,6 +314,7 @@ function ProjectCard({ project, isAdmin, onEdit, onArchive, onRestore }: Project
               <button
                 onClick={onRestore}
                 className="p-1.5 rounded-lg text-green-400 hover:text-green-600 hover:bg-green-50"
+                title="Restore project"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -286,13 +323,23 @@ function ProjectCard({ project, isAdmin, onEdit, onArchive, onRestore }: Project
             ) : (
               <button
                 onClick={onArchive}
-                className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50"
+                className="p-1.5 rounded-lg text-gray-400 hover:text-orange-600 hover:bg-orange-50"
+                title="Archive project"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
                 </svg>
               </button>
             )}
+            <button
+              onClick={onDelete}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50"
+              title="Delete project"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
           </div>
         )}
       </div>
