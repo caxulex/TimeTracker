@@ -70,7 +70,7 @@
 - Added `asyncio_mode = "auto"` and `asyncio_default_fixture_loop_scope = "function"` to pyproject.toml
 - Removed deprecated `event_loop` fixture from conftest.py
 
-**Commit**: Pending push
+**Commit**: `b5390e8`
 
 ---
 
@@ -79,7 +79,7 @@
 
 **Fix**: Added missing devDependencies to package.json
 
-**Commit**: Pending push
+**Commit**: `b5390e8`
 
 ---
 
@@ -231,6 +231,11 @@ These were verified through code analysis to have correct implementation:
 - `a239e18` - Update StaffPage password requirements to match backend
 - `b9654cf` - Fix permanent delete - remove non-existent TimeModification model reference
 - `6d1f8f7` - Unify staff creation - AdminPage now uses complete 4-step wizard from StaffPage
+- `0da8801` - Fix LoginPage misleading password validation
+- `b5390e8` - Fix test infrastructure: pytest-asyncio config + frontend test dependencies
+
+### Commits Ready to Deploy (after git pull):
+All commits pushed and ready for deployment.
 
 ---
 
