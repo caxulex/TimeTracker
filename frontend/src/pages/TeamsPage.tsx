@@ -104,6 +104,7 @@ export function TeamsPage() {
     mutationFn: ({ teamId, userId, role }: { teamId: number; userId: number; role: string }) =>
       teamsApi.addMember(teamId, userId, role),
     onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['teams'] });
       queryClient.invalidateQueries({ queryKey: ['team', selectedTeam] });
       setShowMemberModal(false);
       const user = users.find(u => u.id === variables.userId);
@@ -126,6 +127,7 @@ export function TeamsPage() {
     mutationFn: ({ teamId, userId }: { teamId: number; userId: number }) =>
       teamsApi.removeMember(teamId, userId),
     onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['teams'] });
       queryClient.invalidateQueries({ queryKey: ['team', selectedTeam] });
       const teamMember = teamDetails?.members?.find((m: TeamMember) => m.user_id === variables.userId);
       notifications.notifySuccess('Member Removed', `${teamMember?.user?.name || 'User'} has been removed from the team.`);

@@ -138,67 +138,74 @@
 ## 4. Projects
 
 ### 4.1 View Projects (Both Roles)
-- [ ] Navigate to `/projects`
-- [ ] Verify project cards display with name, description, color
-- [ ] Verify team assignment shown if applicable
+- [x] Navigate to `/projects` ✅
+- [x] Verify project cards display with name, description, color ✅
+- [x] Verify team assignment shown if applicable ✅
 
 ### 4.2 Create Project (Admin Only)
-- [ ] Click "New Project" button (verify visible for admin)
+- [x] Click "New Project" button (verify visible for admin) ✅
 - [ ] Verify button hidden for regular users
-- [ ] Fill in project name, description
-- [ ] Select color
-- [ ] Assign to team (optional)
-- [ ] Submit → verify project created
-- [ ] Verify success notification
+- [x] Fill in project name, description ✅
+- [x] Select color ✅
+- [x] Assign to team (optional) ✅
+- [x] Submit → verify project created ✅
+- [x] Verify success notification ✅
 
 ### 4.3 Edit Project (Admin Only)
-- [ ] Click edit on a project (admin only)
-- [ ] Modify name, description, color
-- [ ] Save → verify changes applied
+- [x] Click edit on a project (admin only) ✅
+- [x] Modify name, description, color ✅
+- [x] Save → verify changes applied ✅
 
 ### 4.4 Archive/Restore Project (Admin Only)
-- [ ] Archive a project
-- [ ] Click "Show Archived" toggle
-- [ ] Verify archived project appears
-- [ ] Restore the project
-- [ ] Verify project back in active list
+- [x] Archive a project ✅
+- [x] Verify confirmation dialog appears ✅
+- [x] Click "Show Archived" toggle ✅
+- [x] Verify archived project appears (only archived shown) ✅
+- [x] Restore the project ✅
+- [x] Verify confirmation dialog appears ✅
+- [x] Verify project back in active list ✅
+
+### 4.5 Delete Project (Admin Only)
+- [x] Click delete on a project ✅
+- [x] Verify confirmation dialog appears ✅
+- [x] Confirm → verify project deleted ✅
 
 ---
 
 ## 5. Tasks
 
 ### 5.1 View Tasks (Both Roles)
-- [ ] Navigate to `/tasks`
-- [ ] Verify tasks grouped by status columns (To Do, In Progress, Done)
-- [ ] Verify task cards show title, project, assignee
+- [x] Navigate to `/tasks` ✅
+- [x] Verify tasks grouped by status columns (To Do, In Progress, Done) ✅
+- [x] Verify task cards show title, project, assignee ✅
 
 ### 5.2 Create Task (Both Roles)
-- [ ] Click "New Task" button
-- [ ] Fill in title, description
-- [ ] Select project
-- [ ] Set due date
-- [ ] Submit → verify task created in "To Do" column
+- [x] Click "New Task" button ✅
+- [x] Fill in title, description ✅
+- [x] Select project ✅
+- [x] Set due date ✅
+- [x] Submit → verify task created in "To Do" column ✅
 
 ### 5.3 Edit Task (Both Roles)
-- [ ] Click edit on a task
-- [ ] Modify title, description
-- [ ] Save → verify changes
+- [x] Click edit on a task ✅
+- [x] Modify title, description ✅
+- [x] Save → verify changes ✅
 
 ### 5.4 Change Task Status (Both Roles)
-- [ ] Change task from "To Do" to "In Progress"
-- [ ] Verify task moves to correct column
-- [ ] Change task to "Done"
-- [ ] Verify task in Done column
+- [x] Change task from "To Do" to "In Progress" ✅
+- [x] Verify task moves to correct column ✅
+- [x] Change task to "Done" ✅
+- [x] Verify task in Done column ✅
 
 ### 5.5 Delete Task (Both Roles)
-- [ ] Delete a task
-- [ ] Confirm deletion
-- [ ] Verify task removed
+- [x] Delete a task ✅
+- [x] Confirm deletion ✅
+- [x] Verify task removed ✅
 
 ### 5.6 Filter Tasks (Both Roles)
-- [ ] Filter by project
-- [ ] Filter by status
-- [ ] Clear filters → verify all tasks shown
+- [x] Filter by project ✅
+- [x] Filter by status ✅
+- [x] Clear filters → verify all tasks shown ✅
 
 ---
 
