@@ -123,7 +123,7 @@ class TestAccountRequestAdminEndpoints:
         db_session.add_all([request1, request2])
         await db_session.commit()
         
-        response = await client.get("/api/account-requests", headers=admin_headers)
+        response = await client.get("/api/account-requests", headers=admin_auth_headers)
         
         assert response.status_code == 200
         result = response.json()
@@ -140,7 +140,7 @@ class TestAccountRequestAdminEndpoints:
         
         response = await client.get(
             "/api/account-requests?status=pending",
-            headers=admin_headers
+            headers=admin_auth_headers
         )
         
         assert response.status_code == 200
@@ -159,7 +159,7 @@ class TestAccountRequestAdminEndpoints:
         
         response = await client.get(
             "/api/account-requests?search=Searchable",
-            headers=admin_headers
+            headers=admin_auth_headers
         )
         
         assert response.status_code == 200
@@ -180,7 +180,7 @@ class TestAccountRequestAdminEndpoints:
         
         response = await client.get(
             f"/api/account-requests/{request.id}",
-            headers=admin_headers
+            headers=admin_auth_headers
         )
         
         assert response.status_code == 200
@@ -192,7 +192,7 @@ class TestAccountRequestAdminEndpoints:
         """Test getting a request that doesn't exist"""
         response = await client.get(
             "/api/account-requests/99999",
-            headers=admin_headers
+            headers=admin_auth_headers
         )
         
         assert response.status_code == 404
@@ -217,7 +217,7 @@ class TestAccountRequestApproval:
         
         response = await client.post(
             f"/api/account-requests/{request.id}/approve",
-            headers=admin_headers,
+            headers=admin_auth_headers,
             json={"admin_notes": "Looks good!"}
         )
         
@@ -249,7 +249,7 @@ class TestAccountRequestApproval:
         
         response = await client.post(
             f"/api/account-requests/{request.id}/approve",
-            headers=admin_headers,
+            headers=admin_auth_headers,
             json={}
         )
         
@@ -292,7 +292,7 @@ class TestAccountRequestRejection:
         
         response = await client.post(
             f"/api/account-requests/{request.id}/reject",
-            headers=admin_headers,
+            headers=admin_auth_headers,
             json={"admin_notes": "Insufficient information"}
         )
         
@@ -318,7 +318,7 @@ class TestAccountRequestRejection:
         
         response = await client.post(
             f"/api/account-requests/{request.id}/reject",
-            headers=admin_headers,
+            headers=admin_auth_headers,
             json={}
         )
         
@@ -342,7 +342,7 @@ class TestAccountRequestDeletion:
         
         response = await client.delete(
             f"/api/account-requests/{request_id}",
-            headers=admin_headers
+            headers=admin_auth_headers
         )
         
         assert response.status_code == 204
@@ -357,7 +357,7 @@ class TestAccountRequestDeletion:
         """Test deleting a request that doesn't exist"""
         response = await client.delete(
             "/api/account-requests/99999",
-            headers=admin_headers
+            headers=admin_auth_headers
         )
         
         assert response.status_code == 404
