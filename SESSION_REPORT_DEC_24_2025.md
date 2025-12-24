@@ -42,15 +42,36 @@
 
 ---
 
+### 4. Unified Staff Creation Flow ✅
+**Problem**: AdminPage had a simple 4-field user creation modal while StaffPage had a complete 4-step wizard with employment details, contact info, payroll, and team assignment.
+
+**Fix**: 
+- Removed simple modal from AdminPage
+- "Add Staff Member" button now navigates to StaffPage with `openCreateModal: true` state
+- StaffPage now handles the state and auto-opens the complete 4-step wizard
+
+**Commit**: `6d1f8f7`
+
+---
+
+### 5. LoginPage Misleading Password Validation ✅
+**Problem**: LoginPage showed "Password must be at least 6 characters" but backend requires 12+.
+
+**Fix**: Removed client-side minLength validation from login form (login should only validate presence, not complexity - backend handles authentication).
+
+**Commit**: Pending push
+
+---
+
 ## Bugs Found During Code Analysis
 
 ### 🔴 CRITICAL - Must Fix Before Testing
 
-| # | Issue | Location | Description |
-|---|-------|----------|-------------|
-| 1 | Password mismatch - Register | `RegisterPage.tsx:117` | Says 8 chars, backend requires 12+ |
-| 2 | Password mismatch - Login | `LoginPage.tsx:97` | Says 6 chars, backend requires 12+ (though login doesn't validate this) |
-| 3 | Password mismatch - Settings | `SettingsPage.tsx:152` | Says 8 chars, backend requires 12+ |
+| # | Issue | Location | Description | Status |
+|---|-------|----------|-------------|--------|
+| 1 | Password mismatch - Register | `RegisterPage.tsx:117` | Says 8 chars, backend requires 12+ | ✅ Already Fixed |
+| 2 | Password mismatch - Login | `LoginPage.tsx:97` | Says 6 chars, backend requires 12+ | ✅ Fixed - removed misleading validation |
+| 3 | Password mismatch - Settings | `SettingsPage.tsx:152` | Says 8 chars, backend requires 12+ | ✅ Already Fixed |
 
 ### 🟡 MEDIUM - Should Fix
 
@@ -73,8 +94,8 @@
 
 ### High Priority - Fix These First
 
-- [ ] **TODO 1**: Fix RegisterPage password validation (change 8 → 12, add requirements hint)
-- [ ] **TODO 2**: Fix SettingsPage password validation (change 8 → 12, add requirements hint)  
+- [x] **TODO 1**: Fix RegisterPage password validation (change 8 → 12, add requirements hint) ✅ Already done
+- [x] **TODO 2**: Fix SettingsPage password validation (change 8 → 12, add requirements hint) ✅ Already done
 - [ ] **TODO 3**: Investigate WebSocket connection issues on production server
 - [ ] **TODO 4**: Test permanent delete now that it's fixed (delete Dane Smith)
 
@@ -82,7 +103,7 @@
 
 - [ ] **TODO 5**: Fix pytest-asyncio compatibility for backend tests
 - [ ] **TODO 6**: Add missing frontend test dependency
-- [ ] **TODO 7**: Update LoginPage password hint (currently says 6 chars - misleading)
+- [x] **TODO 7**: Update LoginPage password hint (currently says 6 chars - misleading) ✅ Fixed - removed client-side validation
 
 ### Low Priority - After Core Fixes
 
@@ -189,6 +210,7 @@ These were verified through code analysis to have correct implementation:
 - `e4bec51` - Fix Invalid Date - add created_at to UserResponse schema
 - `a239e18` - Update StaffPage password requirements to match backend
 - `b9654cf` - Fix permanent delete - remove non-existent TimeModification model reference
+- `6d1f8f7` - Unify staff creation - AdminPage now uses complete 4-step wizard from StaffPage
 
 ---
 
@@ -202,11 +224,11 @@ These were verified through code analysis to have correct implementation:
 
 ---
 
-## Recommendations for Tomorrow
+## Recommendations for Today
 
-1. **Start with critical fixes** - Fix password validation mismatches in RegisterPage and SettingsPage
-2. **Then manual test** - Run through QA checklist section by section
-3. **Fix test infrastructure** - Get backend and frontend tests working
+1. ~~**Start with critical fixes**~~ - ✅ Password validation issues all resolved
+2. **Manual test** - Run through QA checklist section by section
+3. **Fix test infrastructure** - Get backend and frontend tests working (optional)
 4. **Document any new bugs** found during manual testing
 
 ---
@@ -218,8 +240,9 @@ These were verified through code analysis to have correct implementation:
 - `backend/app/routers/users.py` - Removed TimeModification reference
 
 ### Frontend
-- `frontend/src/pages/AdminPage.tsx` - Null-safe date rendering
-- `frontend/src/pages/StaffPage.tsx` - Updated password requirements
+- `frontend/src/pages/AdminPage.tsx` - Removed simple create modal, now redirects to StaffPage
+- `frontend/src/pages/StaffPage.tsx` - Updated password requirements, handles openCreateModal state
+- `frontend/src/pages/LoginPage.tsx` - Removed misleading password minLength validation
 
 ---
 

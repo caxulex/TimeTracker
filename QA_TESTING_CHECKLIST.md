@@ -1,8 +1,23 @@
 # TimeTracker - QA Testing Checklist
 
 **Generated:** December 23, 2025  
+**Last Updated:** December 24, 2025  
 **Application:** TimeTracker  
 **URL:** https://timetracker.shaemarcus.com/
+
+---
+
+## Pre-Testing Code Fixes Status
+
+| Issue | Status | Notes |
+|-------|--------|-------|
+| Password validation - RegisterPage | ✅ Fixed | Now shows 12+ char requirement |
+| Password validation - SettingsPage | ✅ Fixed | Now shows 12+ char requirement |
+| Password validation - LoginPage | ✅ Fixed | Removed misleading 6-char validation |
+| Password validation - StaffPage | ✅ Fixed | Now shows 12+ char requirement |
+| Invalid Date in Admin | ✅ Fixed | Added created_at to UserResponse |
+| Permanent Delete 500 Error | ✅ Fixed | Removed TimeModification reference |
+| Unified Staff Creation | ✅ Fixed | AdminPage now uses 4-step wizard |
 
 ---
 
@@ -21,7 +36,7 @@
 ### 1.1 Login (Public)
 - [ ] Navigate to `/login`
 - [ ] Verify email field validation (required, valid format)
-- [ ] Verify password field validation (required, min 6 characters)
+- [ ] Verify password field validation (required only - no minLength)
 - [ ] Test login with valid credentials → redirects to `/dashboard`
 - [ ] Test login with invalid email → shows error
 - [ ] Test login with invalid password → shows error
@@ -31,6 +46,7 @@
 ### 1.2 Register (Public)
 - [ ] Navigate to `/register`
 - [ ] Verify all required fields validation
+- [ ] Verify password requires 12+ chars with complexity hint
 - [ ] Test successful registration
 - [ ] Test duplicate email registration → shows error
 
@@ -370,11 +386,11 @@
 - [ ] Verify user list displays
 - [ ] Verify search functionality
 
-### 11.2 Create User (Quick)
-- [ ] Click "Add User"
-- [ ] Fill email, password, name
-- [ ] Select role
-- [ ] Submit → verify user created
+### 11.2 Create User (Now redirects to Staff Page)
+- [ ] Click "Add Staff Member" button
+- [ ] Verify redirects to `/staff` page
+- [ ] Verify 4-step creation wizard opens automatically
+- [ ] Complete creation using full wizard (see section 9.2)
 
 ### 11.3 Change User Role
 - [ ] Select a user
