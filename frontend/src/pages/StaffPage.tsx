@@ -82,9 +82,16 @@ export function StaffPage() {
     team_ids: [] as number[],
   });
   
-  // Handle pre-filled data from account requests
+  // Handle navigation state from other pages (AdminPage, AccountRequests, etc.)
   useEffect(() => {
-    if (location.state?.fromAccountRequest && location.state?.initialData) {
+    // Handle direct request to open create modal (from AdminPage)
+    if (location.state?.openCreateModal) {
+      setShowCreateModal(true);
+      // Clear the location state to prevent re-opening on re-render
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+    // Handle pre-filled data from account requests
+    else if (location.state?.fromAccountRequest && location.state?.initialData) {
       const initialData = location.state.initialData;
       const suggestedPassword = generateSuggestedPassword();
       setCreateForm(prev => ({
