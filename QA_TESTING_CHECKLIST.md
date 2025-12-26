@@ -495,95 +495,97 @@
 ## 15. Admin Analytics / Reports (Admin Only)
 
 ### 15.1 Overview Tab
-- [ ] Navigate to `/admin/reports`
-- [ ] Verify Today/Week/Month metrics
-- [ ] Verify active users count
-- [ ] Verify running timers count
-- [ ] Verify charts render
+- [x] Navigate to `/admin/reports` ✅
+- [x] Verify Today/Week/Month metrics ✅
+- [x] Verify active users count ✅
+- [x] Verify running timers count ✅
+- [x] Verify charts render ✅
 
 ### 15.2 Teams Tab
-- [ ] Click "Teams" tab
-- [ ] Verify team-by-team breakdown
-- [ ] Verify member counts
-- [ ] Verify top performers list
+- [x] Click "Teams" tab ✅
+- [x] Verify team-by-team breakdown ✅
+- [x] Verify member counts ✅
+- [x] Verify top performers list ✅
 
 ### 15.3 Individuals Tab
-- [ ] Click "Individuals" tab
-- [ ] Verify user list with hours
-- [ ] Toggle period (today/week/month)
-- [ ] Click on a user → verify navigates to detail page
+- [x] Click "Individuals" tab ✅
+- [x] Verify user list with hours ✅
+- [x] Toggle period (today/week/month) ✅
+- [x] Click on a user → verify navigates to detail page ✅
 
 ---
 
 ## 16. Real-Time Features
 
 ### 16.1 WebSocket Connection
-- [ ] Open browser console
-- [ ] Verify WebSocket connection established
-- [ ] Verify no connection errors
+- [x] Open browser console ✅
+- [ ] Verify WebSocket connection established ⚠️ **Known Issue: WebSocket not connecting in production**
+- [ ] Verify no connection errors ⚠️ **Server-side proxy config needed for WSS**
 
 ### 16.2 Live Updates
-- [ ] Start a timer in one tab
+- [ ] Start a timer in one tab ⚠️ Skipped (WebSocket required)
 - [ ] Open dashboard in another tab
 - [ ] Stop timer → verify dashboard updates without refresh
 - [ ] Create time entry → verify reports update
+
+**Note:** WebSocket requires server-side proxy configuration (nginx/ALB/CloudFront) to support WSS upgrade. App functions normally with polling fallback.
 
 ---
 
 ## 17. Access Control Testing
 
 ### 17.1 Admin Routes Protection
-- [ ] As regular user, navigate to `/admin` → verify redirect to dashboard
-- [ ] As regular user, navigate to `/staff` → verify redirect
-- [ ] As regular user, navigate to `/account-requests` → verify redirect
-- [ ] As regular user, navigate to `/payroll/rates` → verify redirect
-- [ ] As regular user, navigate to `/payroll/periods` → verify redirect
-- [ ] As regular user, navigate to `/payroll/reports` → verify redirect
-- [ ] As regular user, navigate to `/admin/reports` → verify redirect
+- [x] As regular user, navigate to `/admin` → verify redirect to dashboard ✅
+- [x] As regular user, navigate to `/staff` → verify redirect ✅
+- [x] As regular user, navigate to `/account-requests` → verify redirect ✅
+- [x] As regular user, navigate to `/payroll/rates` → verify redirect ✅
+- [x] As regular user, navigate to `/payroll/periods` → verify redirect ✅
+- [x] As regular user, navigate to `/payroll/reports` → verify redirect ✅
+- [x] As regular user, navigate to `/admin/reports` → verify redirect ✅
 
 ### 17.2 Admin UI Elements Hidden
-- [ ] As regular user, verify "New Project" button hidden
-- [ ] As regular user, verify project edit/archive hidden
-- [ ] As regular user, verify team create/edit/delete hidden
-- [ ] As regular user, verify Payroll menu hidden in sidebar
-- [ ] As regular user, verify Admin Reports hidden in sidebar
-- [ ] As regular user, verify Staff menu hidden
-- [ ] As regular user, verify Account Requests hidden
+- [x] As regular user, verify "New Project" button hidden ✅
+- [x] As regular user, verify project edit/archive hidden ✅
+- [x] As regular user, verify team create/edit/delete hidden ✅
+- [x] As regular user, verify Payroll menu hidden in sidebar ✅
+- [x] As regular user, verify Admin Reports hidden in sidebar ✅
+- [x] As regular user, verify Staff menu hidden ✅
+- [x] As regular user, verify Account Requests hidden ✅
 
 ---
 
 ## 18. Error Handling
 
 ### 18.1 Network Errors
-- [ ] Disable network → perform action → verify error message
-- [ ] Re-enable network → retry → verify recovery
+- [x] Disable network → perform action → verify error message ✅
+- [x] Re-enable network → retry → verify recovery ✅
 
 ### 18.2 Validation Errors
-- [ ] Submit empty required fields → verify validation messages
-- [ ] Submit invalid email format → verify error
-- [ ] Submit mismatched passwords → verify error
+- [x] Submit empty required fields → verify validation messages ✅
+- [x] Submit invalid email format → verify error ✅
+- [x] Submit mismatched passwords → verify error ✅
 
 ### 18.3 API Errors
-- [ ] Test duplicate email creation → verify error message
-- [ ] Test unauthorized access → verify error handling
+- [x] Test duplicate email creation → verify error message ✅
+- [x] Test unauthorized access → verify error handling ✅
 
 ---
 
 ## 19. Responsive Design
 
 ### 19.1 Mobile View (< 768px)
-- [ ] Verify sidebar collapses to hamburger menu
-- [ ] Verify forms are usable on mobile
-- [ ] Verify tables scroll horizontally
-- [ ] Verify modals are full-width on mobile
+- [x] Verify sidebar collapses to hamburger menu ✅
+- [x] Verify forms are usable on mobile ✅
+- [x] Verify tables scroll horizontally ✅
+- [x] Verify modals are full-width on mobile ✅
 
 ### 19.2 Tablet View (768px - 1024px)
-- [ ] Verify layout adapts appropriately
-- [ ] Verify all features accessible
+- [x] Verify layout adapts appropriately ✅
+- [x] Verify all features accessible ✅
 
 ### 19.3 Desktop View (> 1024px)
-- [ ] Verify full layout displays
-- [ ] Verify sidebar always visible
+- [x] Verify full layout displays ✅
+- [x] Verify sidebar always visible ✅
 
 ---
 
@@ -601,8 +603,16 @@
 
 - Total Features: 78
 - Total Test Cases: 150+
-- Estimated Testing Time: 4-6 hours (full pass)
+- **QA Testing Completed:** December 26, 2025 ✅
+- **Known Issue:** WebSocket not connecting in production (requires server-side proxy config)
+
+### Bugs Fixed During QA:
+1. `base_rate.toFixed` error - converted string to number
+2. User type `full_name` → `name` property fix
+3. UserDetailPage hardcoded localhost URL → API client
+4. Pay Rates form: replaced User ID input with searchable employee dropdown
+5. Monthly/salaried employees: overtime multiplier disabled (N/A)
 
 ---
 
-*Last Updated: December 23, 2025*
+*Last Updated: December 26, 2025*
