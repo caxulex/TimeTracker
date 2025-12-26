@@ -8,6 +8,7 @@ import { reportsApi, exportApi } from '../api/client';
 import { formatDuration, toISODateString, getStartOfWeek, secondsToHours } from '../utils/helpers';
 import { useAuth } from '../hooks/useAuth';
 import { useWebSocketContext } from '../contexts/WebSocketContext';
+import { useStaffNotifications } from '../hooks/useStaffNotifications';
 import type { WeeklySummary } from '../types';
 import {
   BarChart,
@@ -44,6 +45,7 @@ export function ReportsPage() {
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const queryClient = useQueryClient();
   const { lastMessage } = useWebSocketContext();
+  const notifications = useStaffNotifications();
 
   const [datePreset, setDatePreset] = useState<DatePreset>('this-week');
   const [customStartDate, setCustomStartDate] = useState('');
@@ -109,20 +111,31 @@ export function ReportsPage() {
 
   // Export mutations
   const exportMutation = useMutation({
-    mutationFn: async (format: ExportFormat) => {
+    mutationFn: async (format: ExportFormat): Promise<{ blob: Blob; ext: string; format: string }> => {
       const params = { start_date: startDate, end_date: endDate };
       switch (format) {
         case 'csv':
-          return { blob: await exportApi.downloadCsv(params), ext: 'csv' };
+          return { blob: await exportApi.downloadCsv(params), ext: 'csv', format: 'CSV' };
         case 'excel':
-          return { blob: await exportApi.downloadExcel(params), ext: 'xlsx' };
+          return { blob: await exportApi.downloadExcel(params), ext: 'xlsx', format: 'Excel' };
         case 'pdf':
-          return { blob: await exportApi.downloadPdf(params), ext: 'pdf' };
+          return { blob: await exportApi.downloadPdf(params), ext: 'pdf', format: 'PDF' };
+        default:
+          throw new Error(`Unsupported export format: ${format}`);
       }
     },
     onSuccess: (data) => {
-      const filename = `time_report_${startDate}_to_${endDate}.${data.ext}`;
-      downloadBlob(data.blob, filename);
+      if (data && data.blob) {
+        const filename = `time_report_${startDate}_to_${endDate}.${data.ext}`;
+        downloadBlob(data.blob, filename);
+        setShowExportMenu(false);
+        notifications.notifySuccess('Export Complete', `Your ${data.format} report has been downloaded.`);
+      }
+    },
+    onError: (error: any) => {
+      console.error('Export failed:', error);
+      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to export report';
+      notifications.notifyError('Export Failed', errorMessage);
       setShowExportMenu(false);
     },
   });

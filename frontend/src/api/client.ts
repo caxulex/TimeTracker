@@ -430,11 +430,25 @@ export const exportApi = {
     project_id?: number;
     user_id?: number;
   }): Promise<Blob> => {
-    const response = await api.get('/api/export/excel', {
-      params,
-      responseType: 'blob',
-    });
-    return response.data;
+    try {
+      const response = await api.get('/api/export/excel', {
+        params,
+        responseType: 'blob',
+      });
+      return response.data;
+    } catch (error: any) {
+      // If error response is a blob, try to read it as text
+      if (error.response?.data instanceof Blob) {
+        const text = await error.response.data.text();
+        try {
+          const json = JSON.parse(text);
+          throw new Error(json.detail || 'Export failed');
+        } catch {
+          throw new Error(text || 'Export failed');
+        }
+      }
+      throw error;
+    }
   },
 
   downloadPdf: async (params?: {
@@ -443,11 +457,25 @@ export const exportApi = {
     project_id?: number;
     user_id?: number;
   }): Promise<Blob> => {
-    const response = await api.get('/api/export/pdf', {
-      params,
-      responseType: 'blob',
-    });
-    return response.data;
+    try {
+      const response = await api.get('/api/export/pdf', {
+        params,
+        responseType: 'blob',
+      });
+      return response.data;
+    } catch (error: any) {
+      // If error response is a blob, try to read it as text
+      if (error.response?.data instanceof Blob) {
+        const text = await error.response.data.text();
+        try {
+          const json = JSON.parse(text);
+          throw new Error(json.detail || 'Export failed');
+        } catch {
+          throw new Error(text || 'Export failed');
+        }
+      }
+      throw error;
+    }
   },
 
   downloadCsv: async (params?: {
@@ -456,11 +484,25 @@ export const exportApi = {
     project_id?: number;
     user_id?: number;
   }): Promise<Blob> => {
-    const response = await api.get('/api/export/csv', {
-      params,
-      responseType: 'blob',
-    });
-    return response.data;
+    try {
+      const response = await api.get('/api/export/csv', {
+        params,
+        responseType: 'blob',
+      });
+      return response.data;
+    } catch (error: any) {
+      // If error response is a blob, try to read it as text
+      if (error.response?.data instanceof Blob) {
+        const text = await error.response.data.text();
+        try {
+          const json = JSON.parse(text);
+          throw new Error(json.detail || 'Export failed');
+        } catch {
+          throw new Error(text || 'Export failed');
+        }
+      }
+      throw error;
+    }
   },
 };
 

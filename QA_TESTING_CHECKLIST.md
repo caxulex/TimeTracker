@@ -212,31 +212,31 @@
 ## 6. Teams
 
 ### 6.1 View Teams (Both Roles)
-- [ ] Navigate to `/teams`
-- [ ] Verify team list with member counts
-- [ ] Click on a team to view details
-- [ ] Verify team members listed with roles
+- [x] Navigate to `/teams` ✅
+- [x] Verify team list with member counts ✅
+- [x] Click on a team to view details ✅
+- [x] Verify team members listed with roles ✅
 
 ### 6.2 Create Team (Admin Only)
-- [ ] Click "Create Team" (admin only)
-- [ ] Enter team name
-- [ ] Submit → verify team created
+- [x] Click "Create Team" (admin only) ✅
+- [x] Enter team name ✅
+- [x] Submit → verify team created ✅
 
 ### 6.3 Edit Team (Admin Only)
-- [ ] Edit team name
-- [ ] Save → verify name updated
+- [x] Edit team name ✅
+- [x] Save → verify name updated ✅
 
 ### 6.4 Delete Team (Admin Only)
-- [ ] Delete a team
-- [ ] Confirm deletion
-- [ ] Verify team removed
+- [x] Delete a team ✅
+- [x] Confirm deletion ✅
+- [x] Verify team removed ✅
 
 ### 6.5 Manage Team Members (Admin Only)
-- [ ] Add a member to team
-- [ ] Select user and role (member/leader)
-- [ ] Verify member appears in team
-- [ ] Remove a member from team
-- [ ] Verify member removed
+- [x] Add a member to team ✅
+- [x] Select user and role (member/leader) ✅
+- [x] Verify member appears in team ✅
+- [x] Remove a member from team ✅
+- [x] Verify member removed ✅
 
 ---
 
