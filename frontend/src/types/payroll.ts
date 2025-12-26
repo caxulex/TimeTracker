@@ -114,6 +114,7 @@ export interface PayrollEntry {
   // Extended fields
   user_name?: string;
   user_email?: string;
+  rate_type?: RateType;  // hourly, daily, monthly, project_based
   adjustments?: PayrollAdjustment[];
 }
 

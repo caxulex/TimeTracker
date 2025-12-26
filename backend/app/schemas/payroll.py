@@ -228,6 +228,7 @@ class PayrollEntryWithUser(PayrollEntryResponse):
     """Schema for payroll entry with user details"""
     user_name: Optional[str] = None
     user_email: Optional[str] = None
+    rate_type: Optional[str] = None  # hourly, daily, monthly, project_based
 
 
 class PayrollEntryWithAdjustments(PayrollEntryWithUser):

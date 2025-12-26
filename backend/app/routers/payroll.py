@@ -26,7 +26,8 @@ from app.schemas.payroll import (
 from app.services.payroll_service import (
     PayrollPeriodService,
     PayrollEntryService,
-    PayrollAdjustmentService
+    PayrollAdjustmentService,
+    PayRateService
 )
 
 
@@ -123,9 +124,18 @@ async def get_payroll_period(
             detail="Payroll period not found"
         )
     
+    # Get pay rate service for rate_type lookup
+    pay_rate_service = PayRateService(db)
+    
     # Transform entries to include user information
     entries_with_users = []
     for entry in period.entries:
+        # Get user's pay rate to determine rate_type
+        rate_type = None
+        if entry.user:
+            pay_rate = await pay_rate_service.get_user_active_rate(entry.user_id, period.end_date)
+            rate_type = pay_rate.rate_type if pay_rate else None
+        
         entry_dict = {
             "id": entry.id,
             "payroll_period_id": entry.payroll_period_id,
@@ -143,6 +153,7 @@ async def get_payroll_period(
             "updated_at": entry.updated_at,
             "user_name": entry.user.name if entry.user else None,
             "user_email": entry.user.email if entry.user else None,
+            "rate_type": rate_type,
         }
         entries_with_users.append(entry_dict)
     

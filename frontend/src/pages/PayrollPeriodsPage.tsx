@@ -599,7 +599,8 @@ export const PayrollPeriodsPage: React.FC = () => {
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Regular Hours</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Rate Type</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Hours/Base</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">OT Hours</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Gross</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Adjustments</th>
@@ -608,26 +609,56 @@ export const PayrollPeriodsPage: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {periodDetails.entries.map((entry: PayrollEntry) => (
-                      <tr key={entry.id}>
-                        <td className="px-4 py-2">
-                          <div className="text-sm font-medium text-gray-900">
-                            {entry.user_name || `User #${entry.user_id}`}
-                          </div>
-                          <div className="text-xs text-gray-500">{entry.user_email}</div>
-                        </td>
-                        <td className="px-4 py-2 text-sm">{Number(entry.regular_hours).toFixed(2)}</td>
-                        <td className="px-4 py-2 text-sm">{Number(entry.overtime_hours).toFixed(2)}</td>
-                        <td className="px-4 py-2 text-sm">{formatCurrency(entry.gross_amount)}</td>
-                        <td className="px-4 py-2 text-sm">{formatCurrency(entry.adjustments_amount)}</td>
-                        <td className="px-4 py-2 text-sm font-medium">{formatCurrency(entry.net_amount)}</td>
-                        <td className="px-4 py-2">
-                          <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-600">
-                            {entry.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                    {periodDetails.entries.map((entry: PayrollEntry) => {
+                      const rateType = entry.rate_type || 'hourly';
+                      const isSalaried = rateType === 'monthly' || rateType === 'project_based';
+                      
+                      return (
+                        <tr key={entry.id}>
+                          <td className="px-4 py-2">
+                            <div className="text-sm font-medium text-gray-900">
+                              {entry.user_name || `User #${entry.user_id}`}
+                            </div>
+                            <div className="text-xs text-gray-500">{entry.user_email}</div>
+                          </td>
+                          <td className="px-4 py-2">
+                            <span className={`px-2 py-1 text-xs rounded-full ${
+                              rateType === 'monthly' ? 'bg-purple-100 text-purple-700' :
+                              rateType === 'daily' ? 'bg-blue-100 text-blue-700' :
+                              rateType === 'project_based' ? 'bg-green-100 text-green-700' :
+                              'bg-gray-100 text-gray-700'
+                            }`}>
+                              {rateType === 'monthly' ? 'Monthly' :
+                               rateType === 'daily' ? 'Daily' :
+                               rateType === 'project_based' ? 'Project' :
+                               'Hourly'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 text-sm">
+                            {isSalaried ? (
+                              <span className="text-gray-400">—</span>
+                            ) : (
+                              Number(entry.regular_hours).toFixed(2)
+                            )}
+                          </td>
+                          <td className="px-4 py-2 text-sm">
+                            {isSalaried ? (
+                              <span className="text-gray-400">—</span>
+                            ) : (
+                              Number(entry.overtime_hours).toFixed(2)
+                            )}
+                          </td>
+                          <td className="px-4 py-2 text-sm">{formatCurrency(entry.gross_amount)}</td>
+                          <td className="px-4 py-2 text-sm">{formatCurrency(entry.adjustments_amount)}</td>
+                          <td className="px-4 py-2 text-sm font-medium">{formatCurrency(entry.net_amount)}</td>
+                          <td className="px-4 py-2">
+                            <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-600">
+                              {entry.status}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               ) : (

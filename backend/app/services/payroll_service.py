@@ -274,14 +274,17 @@ class PayrollPeriodService:
         return period
     
     async def process_period(self, period_id: int) -> Optional[PayrollPeriod]:
-        """Process a payroll period - calculate all entries"""
+        """Process a payroll period - calculate all entries based on pay rate type"""
         period = await self.get_period_with_entries(period_id)
         if not period or period.status != PeriodStatusEnum.DRAFT.value:
             return None
         
         period.status = PeriodStatusEnum.PROCESSING.value
         
-        # Calculate overtime threshold based on period type
+        # Calculate period duration for prorating
+        period_days = (period.end_date - period.start_date).days + 1
+        
+        # Calculate overtime threshold based on period type (for hourly workers)
         # Standard is 40 hours/week
         period_weeks = {
             'weekly': Decimal("1"),
@@ -306,7 +309,12 @@ class PayrollPeriodService:
         entries_processed = 0
         
         for user in users:
-            # Get user's time entries for this period
+            # Get active pay rate for the period end date
+            pay_rate = await self.pay_rate_service.get_user_active_rate(user.id, period.end_date)
+            if not pay_rate:
+                continue
+            
+            # Get user's time entries for this period (needed for hourly/daily calculations)
             time_stmt = select(TimeEntry).where(
                 and_(
                     TimeEntry.user_id == user.id,
@@ -318,21 +326,63 @@ class PayrollPeriodService:
             time_result = await self.db.execute(time_stmt)
             time_entries = time_result.scalars().all()
             
-            # Calculate total hours
-            total_seconds = sum(te.duration_seconds or 0 for te in time_entries)
-            total_hours = Decimal(total_seconds) / Decimal("3600")
+            # Calculate based on rate type
+            rate_type = pay_rate.rate_type.lower() if pay_rate.rate_type else 'hourly'
             
-            # Get active pay rate for the period end date
-            pay_rate = await self.pay_rate_service.get_user_active_rate(user.id, period.end_date)
-            if not pay_rate:
-                continue
-            
-            # Calculate regular and overtime hours based on period type
-            regular_hours = min(total_hours, overtime_threshold)
-            overtime_hours = max(total_hours - overtime_threshold, Decimal("0"))
-            
-            overtime_rate = pay_rate.base_rate * pay_rate.overtime_multiplier
-            gross_amount = (regular_hours * pay_rate.base_rate) + (overtime_hours * overtime_rate)
+            if rate_type == 'monthly':
+                # Monthly salary - pay the full amount for a monthly period
+                # For partial months, prorate based on days
+                if period.period_type == 'monthly':
+                    # Full month salary
+                    gross_amount = pay_rate.base_rate
+                    regular_hours = Decimal("0")  # Hours not tracked for salaried
+                    overtime_hours = Decimal("0")
+                    regular_rate = pay_rate.base_rate
+                    overtime_rate = pay_rate.base_rate  # No overtime for monthly
+                else:
+                    # Prorate monthly salary for shorter periods
+                    # Assuming 30 days in a month for proration
+                    daily_rate = pay_rate.base_rate / Decimal("30")
+                    gross_amount = daily_rate * Decimal(period_days)
+                    regular_hours = Decimal("0")
+                    overtime_hours = Decimal("0")
+                    regular_rate = pay_rate.base_rate
+                    overtime_rate = pay_rate.base_rate
+                    
+            elif rate_type == 'daily':
+                # Daily rate - calculate based on days worked (time entries)
+                # Count unique days with time entries
+                worked_days = set()
+                for te in time_entries:
+                    worked_days.add(te.start_time.date())
+                days_worked = Decimal(len(worked_days))
+                
+                gross_amount = days_worked * pay_rate.base_rate
+                regular_hours = days_worked * Decimal("8")  # Assume 8 hours/day for display
+                overtime_hours = Decimal("0")
+                regular_rate = pay_rate.base_rate / Decimal("8")  # Convert to hourly for display
+                overtime_rate = regular_rate * pay_rate.overtime_multiplier
+                
+            elif rate_type == 'project_based':
+                # Project-based - pay the agreed amount
+                gross_amount = pay_rate.base_rate
+                regular_hours = Decimal("0")
+                overtime_hours = Decimal("0")
+                regular_rate = pay_rate.base_rate
+                overtime_rate = pay_rate.base_rate
+                
+            else:  # hourly (default)
+                # Hourly rate - calculate based on actual hours worked
+                total_seconds = sum(te.duration_seconds or 0 for te in time_entries)
+                total_hours = Decimal(total_seconds) / Decimal("3600")
+                
+                # Calculate regular and overtime hours
+                regular_hours = min(total_hours, overtime_threshold)
+                overtime_hours = max(total_hours - overtime_threshold, Decimal("0"))
+                
+                regular_rate = pay_rate.base_rate
+                overtime_rate = pay_rate.base_rate * pay_rate.overtime_multiplier
+                gross_amount = (regular_hours * regular_rate) + (overtime_hours * overtime_rate)
             
             # Round to 2 decimal places
             regular_hours = regular_hours.quantize(Decimal("0.01"))
@@ -352,7 +402,7 @@ class PayrollPeriodService:
             if entry:
                 entry.regular_hours = regular_hours
                 entry.overtime_hours = overtime_hours
-                entry.regular_rate = pay_rate.base_rate
+                entry.regular_rate = regular_rate
                 entry.overtime_rate = overtime_rate
                 entry.gross_amount = gross_amount
                 entry.net_amount = (gross_amount + entry.adjustments_amount).quantize(Decimal("0.01"))
@@ -362,7 +412,7 @@ class PayrollPeriodService:
                     user_id=user.id,
                     regular_hours=regular_hours,
                     overtime_hours=overtime_hours,
-                    regular_rate=pay_rate.base_rate,
+                    regular_rate=regular_rate,
                     overtime_rate=overtime_rate,
                     gross_amount=gross_amount,
                     net_amount=gross_amount
