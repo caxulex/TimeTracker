@@ -109,12 +109,6 @@ export const PayrollPeriodsPage: React.FC = () => {
     );
   }, [employeesData?.items, formData.rate_type_filter]);
 
-  // Fetch payroll periods
-  const { data: periodsData, isLoading, error } = useQuery({
-    queryKey: ['payrollPeriods', statusFilter],
-    queryFn: () => payrollPeriodsApi.list(0, 100, statusFilter || undefined),
-  });
-
   // Fetch period details with entries when viewing
   const { data: periodDetails } = useQuery({
     queryKey: ['payrollPeriodDetails', viewingPeriod?.id],
@@ -328,6 +322,8 @@ export const PayrollPeriodsPage: React.FC = () => {
       period_type: period.period_type as PeriodType,
       start_date: period.start_date,
       end_date: period.end_date,
+      user_ids: [],
+      rate_type_filter: '',
     });
   };
 
