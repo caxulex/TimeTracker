@@ -281,6 +281,17 @@ class PayrollPeriodService:
         
         period.status = PeriodStatusEnum.PROCESSING.value
         
+        # Calculate overtime threshold based on period type
+        # Standard is 40 hours/week
+        period_weeks = {
+            'weekly': Decimal("1"),
+            'bi_weekly': Decimal("2"),
+            'semi_monthly': Decimal("2.17"),  # ~2.17 weeks in semi-monthly
+            'monthly': Decimal("4.33"),  # ~4.33 weeks in a month
+        }
+        weeks_in_period = period_weeks.get(period.period_type, Decimal("2"))
+        overtime_threshold = Decimal("40") * weeks_in_period
+        
         # Get all users with active pay rates
         stmt = select(User).join(PayRate, User.id == PayRate.user_id).where(
             and_(
@@ -292,6 +303,7 @@ class PayrollPeriodService:
         users = result.scalars().all()
         
         total_amount = Decimal("0.00")
+        entries_processed = 0
         
         for user in users:
             # Get user's time entries for this period
@@ -310,17 +322,22 @@ class PayrollPeriodService:
             total_seconds = sum(te.duration_seconds or 0 for te in time_entries)
             total_hours = Decimal(total_seconds) / Decimal("3600")
             
-            # Get active pay rate
+            # Get active pay rate for the period end date
             pay_rate = await self.pay_rate_service.get_user_active_rate(user.id, period.end_date)
             if not pay_rate:
                 continue
             
-            # Calculate regular and overtime hours (assuming 40 hours/week is regular)
-            regular_hours = min(total_hours, Decimal("40"))
-            overtime_hours = max(total_hours - Decimal("40"), Decimal("0"))
+            # Calculate regular and overtime hours based on period type
+            regular_hours = min(total_hours, overtime_threshold)
+            overtime_hours = max(total_hours - overtime_threshold, Decimal("0"))
             
             overtime_rate = pay_rate.base_rate * pay_rate.overtime_multiplier
             gross_amount = (regular_hours * pay_rate.base_rate) + (overtime_hours * overtime_rate)
+            
+            # Round to 2 decimal places
+            regular_hours = regular_hours.quantize(Decimal("0.01"))
+            overtime_hours = overtime_hours.quantize(Decimal("0.01"))
+            gross_amount = gross_amount.quantize(Decimal("0.01"))
             
             # Check if entry exists
             existing_entry_stmt = select(PayrollEntry).where(
@@ -338,7 +355,7 @@ class PayrollPeriodService:
                 entry.regular_rate = pay_rate.base_rate
                 entry.overtime_rate = overtime_rate
                 entry.gross_amount = gross_amount
-                entry.net_amount = gross_amount + entry.adjustments_amount
+                entry.net_amount = (gross_amount + entry.adjustments_amount).quantize(Decimal("0.01"))
             else:
                 entry = PayrollEntry(
                     payroll_period_id=period_id,
@@ -353,8 +370,9 @@ class PayrollPeriodService:
                 self.db.add(entry)
             
             total_amount += entry.net_amount
+            entries_processed += 1
         
-        period.total_amount = total_amount
+        period.total_amount = total_amount.quantize(Decimal("0.01"))
         period.status = PeriodStatusEnum.DRAFT.value  # Back to draft for review
         
         await self.db.commit()

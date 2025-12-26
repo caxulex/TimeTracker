@@ -216,20 +216,55 @@ export const PayrollPeriodsPage: React.FC = () => {
     });
   };
 
-  // Generate period name
-  const generatePeriodName = (type: PeriodType, startDate: string) => {
+  // English month names (always English regardless of browser locale)
+  const ENGLISH_MONTHS = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  // Generate period name (always in English)
+  const generatePeriodName = (type: PeriodType, startDate: string, endDate?: string) => {
     if (!startDate) return '';
-    const date = new Date(startDate);
-    const month = date.toLocaleString('default', { month: 'long' });
-    const year = date.getFullYear();
-    return `${month} ${year} - ${PERIOD_TYPE_LABELS[type]}`;
+    // Parse as local date to avoid timezone issues
+    const [startYear, startMonth] = startDate.split('-').map(Number);
+    const startMonthName = ENGLISH_MONTHS[startMonth - 1];
+    
+    if (endDate) {
+      const [endYear, endMonth] = endDate.split('-').map(Number);
+      const endMonthName = ENGLISH_MONTHS[endMonth - 1];
+      
+      // If same month, just use single month
+      if (startYear === endYear && startMonth === endMonth) {
+        return `${startMonthName} ${startYear} - ${PERIOD_TYPE_LABELS[type]}`;
+      }
+      // If different months but same year
+      if (startYear === endYear) {
+        return `${startMonthName}-${endMonthName} ${startYear} - ${PERIOD_TYPE_LABELS[type]}`;
+      }
+      // Different years
+      return `${startMonthName} ${startYear} - ${endMonthName} ${endYear} - ${PERIOD_TYPE_LABELS[type]}`;
+    }
+    
+    return `${startMonthName} ${startYear} - ${PERIOD_TYPE_LABELS[type]}`;
   };
 
   // Auto-generate name when dates change
   const handleDateChange = (field: 'start_date' | 'end_date', value: string) => {
     const newFormData = { ...formData, [field]: value };
-    if (field === 'start_date' && !formData.name) {
-      newFormData.name = generatePeriodName(formData.period_type, value);
+    // Auto-generate name when start_date changes OR when we have both dates
+    if (field === 'start_date' && value) {
+      newFormData.name = generatePeriodName(newFormData.period_type, value, newFormData.end_date);
+    } else if (field === 'end_date' && newFormData.start_date && value) {
+      newFormData.name = generatePeriodName(newFormData.period_type, newFormData.start_date, value);
+    }
+    setFormData(newFormData);
+  };
+
+  // Regenerate name when period type changes
+  const handlePeriodTypeChange = (type: PeriodType) => {
+    const newFormData = { ...formData, period_type: type };
+    if (formData.start_date) {
+      newFormData.name = generatePeriodName(type, formData.start_date, formData.end_date);
     }
     setFormData(newFormData);
   };
@@ -240,6 +275,14 @@ export const PayrollPeriodsPage: React.FC = () => {
       style: 'currency',
       currency: 'USD',
     }).format(amount);
+  };
+
+  // Format date for display (always in English)
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const monthName = ENGLISH_MONTHS[month - 1];
+    return `${monthName} ${day}, ${year}`;
   };
 
   if (isLoading) {
@@ -327,7 +370,7 @@ export const PayrollPeriodsPage: React.FC = () => {
             <div className="space-y-2 mb-4">
               <div className="flex items-center gap-2 text-sm text-gray-600">
                 <Calendar className="w-4 h-4" />
-                {period.start_date} - {period.end_date}
+                {formatDate(period.start_date)} - {formatDate(period.end_date)}
               </div>
               <div className="flex items-center gap-2 text-sm text-gray-600">
                 <Users className="w-4 h-4" />
@@ -433,7 +476,7 @@ export const PayrollPeriodsPage: React.FC = () => {
                 </label>
                 <select
                   value={formData.period_type}
-                  onChange={(e) => setFormData({ ...formData, period_type: e.target.value as PeriodType })}
+                  onChange={(e) => handlePeriodTypeChange(e.target.value as PeriodType)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 >
                   {Object.entries(PERIOD_TYPE_LABELS).map(([value, label]) => (
@@ -519,7 +562,7 @@ export const PayrollPeriodsPage: React.FC = () => {
                 <div>
                   <h2 className="text-lg font-semibold">{viewingPeriod.name}</h2>
                   <p className="text-sm text-gray-500">
-                    {viewingPeriod.start_date} - {viewingPeriod.end_date}
+                    {formatDate(viewingPeriod.start_date)} - {formatDate(viewingPeriod.end_date)}
                   </p>
                 </div>
                 <span className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[viewingPeriod.status as PeriodStatus].bg} ${STATUS_COLORS[viewingPeriod.status as PeriodStatus].text}`}>

@@ -178,7 +178,7 @@ class PayrollPeriodResponse(PayrollPeriodBase):
 
 class PayrollPeriodWithEntries(PayrollPeriodResponse):
     """Schema for payroll period with entries"""
-    entries: List["PayrollEntryResponse"] = []
+    entries: List["PayrollEntryWithUser"] = []
 
 
 # ============================================

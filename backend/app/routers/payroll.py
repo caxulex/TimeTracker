@@ -123,7 +123,44 @@ async def get_payroll_period(
             detail="Payroll period not found"
         )
     
-    return period
+    # Transform entries to include user information
+    entries_with_users = []
+    for entry in period.entries:
+        entry_dict = {
+            "id": entry.id,
+            "payroll_period_id": entry.payroll_period_id,
+            "user_id": entry.user_id,
+            "regular_hours": entry.regular_hours,
+            "overtime_hours": entry.overtime_hours,
+            "regular_rate": entry.regular_rate,
+            "overtime_rate": entry.overtime_rate,
+            "gross_amount": entry.gross_amount,
+            "adjustments_amount": entry.adjustments_amount,
+            "net_amount": entry.net_amount,
+            "status": entry.status,
+            "notes": entry.notes,
+            "created_at": entry.created_at,
+            "updated_at": entry.updated_at,
+            "user_name": entry.user.name if entry.user else None,
+            "user_email": entry.user.email if entry.user else None,
+        }
+        entries_with_users.append(entry_dict)
+    
+    return {
+        "id": period.id,
+        "name": period.name,
+        "period_type": period.period_type,
+        "start_date": period.start_date,
+        "end_date": period.end_date,
+        "status": period.status,
+        "total_amount": period.total_amount,
+        "approved_by": period.approved_by,
+        "approved_at": period.approved_at,
+        "created_at": period.created_at,
+        "updated_at": period.updated_at,
+        "entries_count": len(period.entries),
+        "entries": entries_with_users,
+    }
 
 
 @router.put("/periods/{period_id}", response_model=PayrollPeriodResponse)
