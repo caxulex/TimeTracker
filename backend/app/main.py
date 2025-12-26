@@ -180,9 +180,13 @@ app.include_router(account_requests.router, prefix="/api/account-requests", tags
 @app.exception_handler(AppException)
 async def app_exception_handler(request: Request, exc: AppException):
     """Handle custom application exceptions with safe error messages"""
+    content = exc.detail.copy() if isinstance(exc.detail, dict) else {"detail": exc.detail}
+    # Include details if available (e.g., password requirements)
+    if hasattr(exc, 'details') and exc.details:
+        content['details'] = exc.details
     return JSONResponse(
         status_code=exc.status_code,
-        content=exc.detail,
+        content=content,
         headers=getattr(exc, 'headers', None)
     )
 

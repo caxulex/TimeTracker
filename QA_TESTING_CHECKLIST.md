@@ -243,23 +243,23 @@
 ## 7. Reports
 
 ### 7.1 Personal Reports (Both Roles)
-- [ ] Navigate to `/reports`
-- [ ] Verify weekly summary displays
-- [ ] Verify daily breakdown chart
-- [ ] Verify project distribution pie chart
+- [x] Navigate to `/reports` ✅
+- [x] Verify weekly summary displays ✅
+- [x] Verify daily breakdown chart ✅
+- [x] Verify project distribution pie chart ✅
 
 ### 7.2 Date Range Selection (Both Roles)
-- [ ] Select "This Week" → verify data updates
-- [ ] Select "Last Week" → verify data updates
-- [ ] Select "This Month" → verify data updates
-- [ ] Select "Last Month" → verify data updates
-- [ ] Select "Custom" → enter date range → verify data
+- [x] Select "This Week" → verify data updates ✅
+- [x] Select "Last Week" → verify data updates ✅
+- [x] Select "This Month" → verify data updates ✅
+- [x] Select "Last Month" → verify data updates ✅
+- [x] Select "Custom" → enter date range → verify data ✅
 
 ### 7.3 Export Reports (Both Roles)
-- [ ] Export to CSV → verify file downloads
-- [ ] Export to Excel → verify file downloads
-- [ ] Export to PDF → verify file downloads
-- [ ] Verify exported data matches displayed data
+- [x] Export to CSV → verify file downloads ✅
+- [x] Export to Excel → verify file downloads ✅
+- [x] Export to PDF → verify file downloads ✅
+- [x] Verify exported data matches displayed data ✅
 
 ---
 

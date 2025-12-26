@@ -80,10 +80,25 @@ export function SettingsPage() {
       });
       resetPassword();
     } catch (error: any) {
+      // Extract error message - check for detailed password requirements
+      let errorMessage = 'Failed to change password';
+      const responseData = error.response?.data;
+      
+      if (responseData) {
+        // Check if there are password requirement details
+        if (responseData.details?.requirements && Array.isArray(responseData.details.requirements)) {
+          errorMessage = responseData.details.requirements.join('. ');
+        } else if (responseData.message) {
+          errorMessage = responseData.message;
+        } else if (typeof responseData.detail === 'string') {
+          errorMessage = responseData.detail;
+        }
+      }
+      
       addNotification({
         type: 'error',
         title: 'Password Change Failed',
-        message: error.response?.data?.detail || 'Failed to change password',
+        message: errorMessage,
       });
     } finally {
       setPasswordLoading(false);
