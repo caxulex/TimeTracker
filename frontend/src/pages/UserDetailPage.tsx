@@ -1,6 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../stores/authStore';
+import { reportsApi } from '../api/client';
 import {
   ArrowLeftIcon,
   UserCircleIcon,
@@ -56,13 +57,7 @@ export default function UserDetailPage() {
   const { data: userData, isLoading } = useQuery<IndividualUserMetrics>({
     queryKey: ['user-detail', userId],
     queryFn: async () => {
-      const response = await fetch(`http://localhost:8080/api/reports/admin/users/${userId}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      });
-      if (!response.ok) throw new Error('Failed to fetch user details');
-      return response.json();
+      return reportsApi.getAdminUserDetail(parseInt(userId!));
     },
     enabled: !!userId,
   });

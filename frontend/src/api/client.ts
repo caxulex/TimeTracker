@@ -396,6 +396,11 @@ export const reportsApi = {
     return response.data;
   },
 
+  getAdminUserDetail: async (userId: number) => {
+    const response = await api.get(`/api/reports/admin/users/${userId}`);
+    return response.data;
+  },
+
   getAdminTimeEntries: async (params: {
     start_date: string;
     end_date: string;
