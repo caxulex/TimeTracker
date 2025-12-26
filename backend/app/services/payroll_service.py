@@ -476,9 +476,9 @@ class PayrollPeriodService:
         return period
     
     async def delete_period(self, period_id: int) -> bool:
-        """Delete a payroll period (only if draft)"""
+        """Delete a payroll period (any status - admin responsibility)"""
         period = await self.get_period(period_id)
-        if not period or period.status != PeriodStatusEnum.DRAFT.value:
+        if not period:
             return False
         
         await self.db.delete(period)

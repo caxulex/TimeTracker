@@ -270,16 +270,16 @@ async def delete_payroll_period(
     current_user: User = Depends(require_admin)
 ):
     """
-    Delete a payroll period (only if in draft status).
-    Admin only.
+    Delete a payroll period.
+    Admin only. Can delete periods in any status.
     """
     service = PayrollPeriodService(db)
     deleted = await service.delete_period(period_id)
     
     if not deleted:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete period. Make sure it exists and is in draft status."
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payroll period not found."
         )
 
 

@@ -403,20 +403,21 @@ export const PayrollPeriodsPage: React.FC = () => {
                     </button>
                   </>
                 )}
-                {/* Delete button for draft and void periods */}
-                {(period.status === 'draft' || period.status === 'void') && (
-                  <button
-                    onClick={() => {
-                      if (confirm(`Are you sure you want to delete "${period.name}"?`)) {
-                        deleteMutation.mutate(period.id);
-                      }
-                    }}
-                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition"
-                    title="Delete"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
+                {/* Delete button - always available */}
+                <button
+                  onClick={() => {
+                    const warning = period.status === 'paid' 
+                      ? `⚠️ WARNING: This period has been marked as PAID.\n\nAre you sure you want to delete "${period.name}"? This cannot be undone.`
+                      : `Are you sure you want to delete "${period.name}"?`;
+                    if (confirm(warning)) {
+                      deleteMutation.mutate(period.id);
+                    }
+                  }}
+                  className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition"
+                  title="Delete"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
                 {(period.status === 'draft' || period.status === 'processing') && (
                   <button
                     onClick={() => approveMutation.mutate(period.id)}
@@ -670,24 +671,23 @@ export const PayrollPeriodsPage: React.FC = () => {
             </div>
             
             <div className="p-6 border-t border-gray-200 flex justify-between">
-              {/* Delete button - only for draft or void status */}
-              {(viewingPeriod.status === 'draft' || viewingPeriod.status === 'void') ? (
-                <button
-                  onClick={() => {
-                    if (confirm(`Are you sure you want to delete "${viewingPeriod.name}"? This action cannot be undone.`)) {
-                      deleteMutation.mutate(viewingPeriod.id);
-                      setViewingPeriod(null);
-                    }
-                  }}
-                  disabled={deleteMutation.isPending}
-                  className="flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  Delete Period
-                </button>
-              ) : (
-                <div></div>
-              )}
+              {/* Delete button - always available */}
+              <button
+                onClick={() => {
+                  const warning = viewingPeriod.status === 'paid' 
+                    ? `⚠️ WARNING: This period has been marked as PAID.\n\nAre you sure you want to delete "${viewingPeriod.name}"? This action cannot be undone.`
+                    : `Are you sure you want to delete "${viewingPeriod.name}"? This action cannot be undone.`;
+                  if (confirm(warning)) {
+                    deleteMutation.mutate(viewingPeriod.id);
+                    setViewingPeriod(null);
+                  }
+                }}
+                disabled={deleteMutation.isPending}
+                className="flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete Period
+              </button>
               <button
                 onClick={() => setViewingPeriod(null)}
                 className="px-4 py-2 text-gray-600 hover:text-gray-800 transition"
