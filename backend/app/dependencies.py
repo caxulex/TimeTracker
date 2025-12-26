@@ -120,7 +120,7 @@ async def get_current_user_ws(token: str) -> Optional[User]:
     Enhanced with token blacklist checking.
     Returns None if authentication fails instead of raising exception.
     """
-    from app.database import async_session_maker
+    from app.database import async_session
 
     payload = auth_service.decode_token(token)
     if payload is None:
@@ -142,7 +142,7 @@ async def get_current_user_ws(token: str) -> Optional[User]:
     if user_id is None:
         return None
 
-    async with async_session_maker() as db:
+    async with async_session() as db:
         result = await db.execute(select(User).where(User.id == int(user_id)))
         user = result.scalar_one_or_none()
 
