@@ -731,7 +731,7 @@ export const PayrollPeriodsPage: React.FC = () => {
                                   {RATE_TYPE_LABELS[payRate.rate_type as RateType]}
                                 </span>
                                 <p className="text-xs text-gray-500 mt-0.5">
-                                  ${payRate.base_rate.toFixed(2)}/{payRate.rate_type === 'hourly' ? 'hr' : payRate.rate_type === 'daily' ? 'day' : 'mo'}
+                                  ${Number(payRate.base_rate).toFixed(2)}/{payRate.rate_type === 'hourly' ? 'hr' : payRate.rate_type === 'daily' ? 'day' : 'mo'}
                                 </p>
                               </div>
                             </label>

@@ -284,7 +284,11 @@ export const PayRatesPage: React.FC = () => {
                   {formatCurrency(rate.base_rate, rate.currency)}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {rate.overtime_multiplier}x
+                  {['monthly', 'project_based'].includes(rate.rate_type) ? (
+                    <span className="text-gray-400">N/A</span>
+                  ) : (
+                    <span>{rate.overtime_multiplier}x</span>
+                  )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   {rate.effective_from}
@@ -375,7 +379,16 @@ export const PayRatesPage: React.FC = () => {
                 </label>
                 <select
                   value={formData.rate_type}
-                  onChange={(e) => setFormData({ ...formData, rate_type: e.target.value as RateType })}
+                  onChange={(e) => {
+                    const newRateType = e.target.value as RateType;
+                    // Salaried/project employees don't get overtime - set multiplier to 1.0
+                    const noOvertimeTypes = ['monthly', 'project_based'];
+                    setFormData({ 
+                      ...formData, 
+                      rate_type: newRateType,
+                      overtime_multiplier: noOvertimeTypes.includes(newRateType) ? '1.0' : formData.overtime_multiplier
+                    });
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 >
                   {Object.entries(RATE_TYPE_LABELS).map(([value, label]) => (
@@ -419,15 +432,21 @@ export const PayRatesPage: React.FC = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Overtime Multiplier
                 </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="1"
-                  value={formData.overtime_multiplier}
-                  onChange={(e) => setFormData({ ...formData, overtime_multiplier: e.target.value })}
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
+                {['monthly', 'project_based'].includes(formData.rate_type) ? (
+                  <div className="px-3 py-2 bg-gray-100 border border-gray-300 rounded-lg text-gray-500">
+                    N/A - Salaried employees don't receive overtime
+                  </div>
+                ) : (
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="1"
+                    value={formData.overtime_multiplier}
+                    onChange={(e) => setFormData({ ...formData, overtime_multiplier: e.target.value })}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                )}
               </div>
               
               <div className="grid grid-cols-2 gap-4">
