@@ -83,7 +83,7 @@ export const PayRatesPage: React.FC = () => {
     if (!userSearchTerm) return users;
     const search = userSearchTerm.toLowerCase();
     return users.filter(user => 
-      user.full_name?.toLowerCase().includes(search) ||
+      user.name?.toLowerCase().includes(search) ||
       user.email?.toLowerCase().includes(search)
     );
   }, [usersData, userSearchTerm]);
@@ -92,7 +92,7 @@ export const PayRatesPage: React.FC = () => {
   const selectedUserName = useMemo(() => {
     if (!formData.user_id) return '';
     const user = usersData?.items?.find(u => u.id.toString() === formData.user_id);
-    return user ? user.full_name || user.email : '';
+    return user ? user.name || user.email : '';
   }, [formData.user_id, usersData]);
 
   // Fetch pay rates
@@ -438,7 +438,7 @@ export const PayRatesPage: React.FC = () => {
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium text-gray-900 truncate">
-                                {user.full_name || 'No name'}
+                                {user.name || 'No name'}
                               </p>
                               <p className="text-xs text-gray-500 truncate">{user.email}</p>
                             </div>
