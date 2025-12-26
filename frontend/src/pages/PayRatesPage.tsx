@@ -3,7 +3,7 @@
  * Admin-only page for managing user pay rates
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   DollarSign, 
@@ -14,9 +14,11 @@ import {
   Search,
   AlertCircle,
   CheckCircle,
-  User
+  User,
+  ChevronDown
 } from 'lucide-react';
 import { payRatesApi } from '../api/payroll';
+import { usersApi } from '../api/client';
 import { 
   PayRate, 
   PayRateCreate, 
@@ -66,6 +68,32 @@ export const PayRatesPage: React.FC = () => {
   const [formData, setFormData] = useState<PayRateFormData>(initialFormData);
   const [searchTerm, setSearchTerm] = useState('');
   const [showInactive, setShowInactive] = useState(false);
+  const [userSearchTerm, setUserSearchTerm] = useState('');
+  const [showUserDropdown, setShowUserDropdown] = useState(false);
+
+  // Fetch all users for the dropdown
+  const { data: usersData } = useQuery({
+    queryKey: ['allUsers'],
+    queryFn: () => usersApi.getAll(1, 500),
+  });
+
+  // Filter users based on search term
+  const filteredUsers = useMemo(() => {
+    const users = usersData?.items || [];
+    if (!userSearchTerm) return users;
+    const search = userSearchTerm.toLowerCase();
+    return users.filter(user => 
+      user.full_name?.toLowerCase().includes(search) ||
+      user.email?.toLowerCase().includes(search)
+    );
+  }, [usersData, userSearchTerm]);
+
+  // Get selected user name for display
+  const selectedUserName = useMemo(() => {
+    if (!formData.user_id) return '';
+    const user = usersData?.items?.find(u => u.id.toString() === formData.user_id);
+    return user ? user.full_name || user.email : '';
+  }, [formData.user_id, usersData]);
 
   // Fetch pay rates
   const { data: ratesData, isLoading, error } = useQuery({
@@ -199,6 +227,8 @@ export const PayRatesPage: React.FC = () => {
         <button
           onClick={() => {
             setFormData(initialFormData);
+            setUserSearchTerm('');
+            setShowUserDropdown(false);
             setShowCreateModal(true);
           }}
           className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
@@ -358,18 +388,68 @@ export const PayRatesPage: React.FC = () => {
             
             <form onSubmit={handleSubmit} className="space-y-4">
               {!editingRate && (
-                <div>
+                <div className="relative">
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    User ID
+                    Employee
                   </label>
-                  <input
-                    type="number"
-                    value={formData.user_id}
-                    onChange={(e) => setFormData({ ...formData, user_id: e.target.value })}
-                    required
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                    placeholder="Enter user ID"
-                  />
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={showUserDropdown ? userSearchTerm : selectedUserName}
+                      onChange={(e) => {
+                        setUserSearchTerm(e.target.value);
+                        setShowUserDropdown(true);
+                      }}
+                      onFocus={() => setShowUserDropdown(true)}
+                      onBlur={() => {
+                        // Delay to allow click on dropdown item
+                        setTimeout(() => setShowUserDropdown(false), 200);
+                      }}
+                      required={!formData.user_id}
+                      className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      placeholder="Search by name or email..."
+                    />
+                    <ChevronDown 
+                      className={`absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 cursor-pointer transition-transform ${showUserDropdown ? 'rotate-180' : ''}`}
+                      onClick={() => setShowUserDropdown(!showUserDropdown)}
+                    />
+                  </div>
+                  
+                  {/* User Dropdown */}
+                  {showUserDropdown && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                      {filteredUsers.length === 0 ? (
+                        <div className="px-3 py-2 text-sm text-gray-500">No users found</div>
+                      ) : (
+                        filteredUsers.map(user => (
+                          <div
+                            key={user.id}
+                            onClick={() => {
+                              setFormData({ ...formData, user_id: user.id.toString() });
+                              setUserSearchTerm('');
+                              setShowUserDropdown(false);
+                            }}
+                            className={`px-3 py-2 cursor-pointer hover:bg-blue-50 flex items-center gap-2 ${
+                              formData.user_id === user.id.toString() ? 'bg-blue-100' : ''
+                            }`}
+                          >
+                            <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                              <User className="w-4 h-4 text-blue-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-900 truncate">
+                                {user.full_name || 'No name'}
+                              </p>
+                              <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* Hidden input for form validation */}
+                  <input type="hidden" value={formData.user_id} required />
                 </div>
               )}
               
