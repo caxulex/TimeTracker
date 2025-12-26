@@ -389,26 +389,26 @@
 ## 11. User Management / Admin Page (Admin Only)
 
 ### 11.1 View Users
-- [ ] Navigate to `/admin`
-- [ ] Verify user list displays
-- [ ] Verify search functionality
+- [x] Navigate to `/admin` ✅
+- [x] Verify user list displays ✅
+- [x] Verify search functionality ✅
 
 ### 11.2 Create User (Now redirects to Staff Page)
-- [ ] Click "Add Staff Member" button
-- [ ] Verify redirects to `/staff` page
-- [ ] Verify 4-step creation wizard opens automatically
-- [ ] Complete creation using full wizard (see section 9.2)
+- [x] Click "Add Staff Member" button ✅
+- [x] Verify redirects to `/staff` page ✅
+- [x] Verify 4-step creation wizard opens automatically ✅
+- [x] Complete creation using full wizard (see section 9.2) ✅
 
 ### 11.3 Change User Role
-- [ ] Select a user
-- [ ] Change role dropdown
-- [ ] Verify role updated
-- [ ] Verify cannot change own role
+- [x] Select a user ✅
+- [x] Change role dropdown ✅
+- [x] Verify role updated ✅
+- [x] Verify cannot change own role ✅
 
 ### 11.4 Toggle User Status
-- [ ] Deactivate a user
-- [ ] Activate a user
-- [ ] Verify cannot deactivate yourself
+- [x] Deactivate a user ✅
+- [x] Activate a user ✅
+- [x] Verify cannot deactivate yourself ✅
 
 ---
 

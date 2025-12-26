@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { 
   Calendar, 
   Plus, 
@@ -87,6 +88,14 @@ export const PayrollPeriodsPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['payrollPeriods'] });
       setShowCreateModal(false);
       setFormData(initialFormData);
+      toast.success('Payroll period created successfully');
+    },
+    onError: (error: unknown) => {
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to create payroll period';
+      toast.error(errorMessage);
+      console.error('Create period error:', error);
     },
   });
 
@@ -98,6 +107,14 @@ export const PayrollPeriodsPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['payrollPeriods'] });
       setEditingPeriod(null);
       setFormData(initialFormData);
+      toast.success('Payroll period updated successfully');
+    },
+    onError: (error: unknown) => {
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to update payroll period';
+      toast.error(errorMessage);
+      console.error('Update period error:', error);
     },
   });
 
@@ -107,6 +124,13 @@ export const PayrollPeriodsPage: React.FC = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['payrollPeriods'] });
       queryClient.invalidateQueries({ queryKey: ['payrollPeriodDetails'] });
+      toast.success('Payroll period processed successfully');
+    },
+    onError: (error: unknown) => {
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to process payroll period';
+      toast.error(errorMessage);
     },
   });
 
@@ -116,6 +140,13 @@ export const PayrollPeriodsPage: React.FC = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['payrollPeriods'] });
       queryClient.invalidateQueries({ queryKey: ['payrollPeriodDetails'] });
+      toast.success('Payroll period approved successfully');
+    },
+    onError: (error: unknown) => {
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to approve payroll period';
+      toast.error(errorMessage);
     },
   });
 
@@ -125,6 +156,13 @@ export const PayrollPeriodsPage: React.FC = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['payrollPeriods'] });
       queryClient.invalidateQueries({ queryKey: ['payrollPeriodDetails'] });
+      toast.success('Payroll period marked as paid');
+    },
+    onError: (error: unknown) => {
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to mark payroll period as paid';
+      toast.error(errorMessage);
     },
   });
 
@@ -133,6 +171,13 @@ export const PayrollPeriodsPage: React.FC = () => {
     mutationFn: (id: number) => payrollPeriodsApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['payrollPeriods'] });
+      toast.success('Payroll period deleted');
+    },
+    onError: (error: unknown) => {
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to delete payroll period';
+      toast.error(errorMessage);
     },
   });
 
