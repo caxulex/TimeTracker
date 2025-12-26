@@ -85,6 +85,9 @@ export interface PayrollPeriodCreate {
   period_type?: PeriodType;
   start_date: string;
   end_date: string;
+  // Employee selection options
+  user_ids?: number[];           // Specific user IDs to include (empty = all)
+  rate_type_filter?: RateType;   // Filter by rate type (hourly, monthly, etc.)
 }
 
 export interface PayrollPeriodUpdate {

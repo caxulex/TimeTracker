@@ -149,7 +149,9 @@ class PayrollPeriodBase(BaseModel):
 
 class PayrollPeriodCreate(PayrollPeriodBase):
     """Schema for creating a payroll period"""
-    pass
+    # Employee selection options
+    user_ids: Optional[List[int]] = None         # Specific user IDs to include (empty/None = all)
+    rate_type_filter: Optional[RateTypeEnum] = None  # Filter by rate type (hourly, monthly, etc.)
 
 
 class PayrollPeriodUpdate(BaseModel):

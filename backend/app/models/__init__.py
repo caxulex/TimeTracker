@@ -279,6 +279,11 @@ class PayrollPeriod(Base):
     end_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=PeriodStatus.DRAFT.value, index=True)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    
+    # Employee selection criteria (stored as JSON-like string for filtering)
+    selected_user_ids: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Comma-separated user IDs, null = all
+    rate_type_filter: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # Filter by rate type (hourly, monthly, etc.)
+    
     approved_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"))
     approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

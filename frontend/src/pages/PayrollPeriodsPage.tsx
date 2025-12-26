@@ -3,7 +3,7 @@
  * Admin-only page for managing payroll periods and entries
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useStaffNotifications } from '../hooks/useStaffNotifications';
 import { 
@@ -17,17 +17,29 @@ import {
   AlertCircle,
   ChevronRight,
   Eye,
-  Users
+  Users,
+  Filter,
+  UserCheck
 } from 'lucide-react';
-import { payrollPeriodsApi } from '../api/payroll';
+import { payrollPeriodsApi, payRatesApi } from '../api/payroll';
 import { 
   PayrollPeriod, 
   PayrollPeriodCreate, 
   PayrollPeriodUpdate, 
   PeriodType, 
   PeriodStatus,
-  PayrollEntry
+  PayrollEntry,
+  RateType,
+  PayRate
 } from '../types/payroll';
+
+// Rate Type Labels
+const RATE_TYPE_LABELS: Record<RateType, string> = {
+  hourly: 'Hourly',
+  daily: 'Daily',
+  monthly: 'Monthly',
+  project_based: 'Project Based',
+};
 
 // Period Type Labels
 const PERIOD_TYPE_LABELS: Record<PeriodType, string> = {
@@ -51,6 +63,9 @@ interface PayrollPeriodFormData {
   period_type: PeriodType;
   start_date: string;
   end_date: string;
+  // Employee selection
+  user_ids: number[];
+  rate_type_filter: RateType | '';
 }
 
 const initialFormData: PayrollPeriodFormData = {
@@ -58,6 +73,8 @@ const initialFormData: PayrollPeriodFormData = {
   period_type: 'monthly',
   start_date: '',
   end_date: '',
+  user_ids: [],
+  rate_type_filter: '',
 };
 
 export const PayrollPeriodsPage: React.FC = () => {
@@ -68,6 +85,29 @@ export const PayrollPeriodsPage: React.FC = () => {
   const [viewingPeriod, setViewingPeriod] = useState<PayrollPeriod | null>(null);
   const [formData, setFormData] = useState<PayrollPeriodFormData>(initialFormData);
   const [statusFilter, setStatusFilter] = useState<PeriodStatus | ''>('');
+  const [selectAll, setSelectAll] = useState(true);
+
+  // Fetch payroll periods
+  const { data: periodsData, isLoading, error } = useQuery({
+    queryKey: ['payrollPeriods', statusFilter],
+    queryFn: () => payrollPeriodsApi.list(0, 100, statusFilter || undefined),
+  });
+
+  // Fetch employees with pay rates for selection
+  const { data: employeesData } = useQuery({
+    queryKey: ['payRatesForSelection'],
+    queryFn: () => payRatesApi.list(0, 500, true),
+    enabled: showCreateModal || !!editingPeriod,
+  });
+
+  // Filter employees based on rate type filter
+  const filteredEmployees = useMemo(() => {
+    if (!employeesData?.items) return [];
+    if (!formData.rate_type_filter) return employeesData.items;
+    return employeesData.items.filter(
+      (pr: PayRate) => pr.rate_type === formData.rate_type_filter
+    );
+  }, [employeesData?.items, formData.rate_type_filter]);
 
   // Fetch payroll periods
   const { data: periodsData, isLoading, error } = useQuery({
@@ -229,14 +269,55 @@ export const PayrollPeriodsPage: React.FC = () => {
       };
       updateMutation.mutate({ id: editingPeriod.id, data: updateData });
     } else {
+      // Determine which user IDs to include
+      const userIdsToInclude = selectAll 
+        ? [] // Empty array means "all employees"
+        : formData.user_ids;
+      
       const createData: PayrollPeriodCreate = {
         name: formData.name,
         period_type: formData.period_type,
         start_date: formData.start_date,
         end_date: formData.end_date,
+        user_ids: userIdsToInclude.length > 0 ? userIdsToInclude : undefined,
+        rate_type_filter: formData.rate_type_filter || undefined,
       };
       createMutation.mutate(createData);
     }
+  };
+
+  // Toggle employee selection
+  const toggleEmployeeSelection = (userId: number) => {
+    setFormData(prev => ({
+      ...prev,
+      user_ids: prev.user_ids.includes(userId)
+        ? prev.user_ids.filter(id => id !== userId)
+        : [...prev.user_ids, userId]
+    }));
+    setSelectAll(false);
+  };
+
+  // Select all employees (based on current filter)
+  const handleSelectAll = () => {
+    if (selectAll) {
+      // Deselect all - switch to manual selection
+      setSelectAll(false);
+      setFormData(prev => ({ ...prev, user_ids: [] }));
+    } else {
+      // Select all - switch back to "all employees" mode
+      setSelectAll(true);
+      setFormData(prev => ({ ...prev, user_ids: [] }));
+    }
+  };
+
+  // Handle rate type filter change
+  const handleRateTypeFilterChange = (rateType: RateType | '') => {
+    setFormData(prev => ({
+      ...prev,
+      rate_type_filter: rateType,
+      user_ids: [] // Reset selections when filter changes
+    }));
+    setSelectAll(true); // Reset to "all employees" in the filtered group
   };
 
   // Open edit modal
@@ -502,25 +583,43 @@ export const PayrollPeriodsPage: React.FC = () => {
       {/* Create/Edit Modal */}
       {(showCreateModal || editingPeriod) && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
-            <h2 className="text-lg font-semibold mb-4">
-              {editingPeriod ? 'Edit Payroll Period' : 'Create New Payroll Period'}
-            </h2>
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
+            <div className="p-6 border-b border-gray-200">
+              <h2 className="text-lg font-semibold">
+                {editingPeriod ? 'Edit Payroll Period' : 'Create New Payroll Period'}
+              </h2>
+            </div>
             
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Period Type
-                </label>
-                <select
-                  value={formData.period_type}
-                  onChange={(e) => handlePeriodTypeChange(e.target.value as PeriodType)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                >
-                  {Object.entries(PERIOD_TYPE_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
+            <form onSubmit={handleSubmit} className="p-6 overflow-y-auto max-h-[calc(90vh-160px)] space-y-4">
+              {/* Period Settings */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Period Type
+                  </label>
+                  <select
+                    value={formData.period_type}
+                    onChange={(e) => handlePeriodTypeChange(e.target.value as PeriodType)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    {Object.entries(PERIOD_TYPE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Period Name
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g., January 2025 - Monthly"
+                  />
+                </div>
               </div>
               
               <div className="grid grid-cols-2 gap-4">
@@ -550,27 +649,125 @@ export const PayrollPeriodsPage: React.FC = () => {
                 </div>
               </div>
               
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Period Name
-                </label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g., January 2025 - Monthly"
-                />
-              </div>
+              {/* Employee Selection Section (only for new periods) */}
+              {!editingPeriod && (
+                <div className="border-t pt-4 mt-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Users className="w-5 h-5 text-gray-600" />
+                      <h3 className="font-medium text-gray-900">Employee Selection</h3>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Filter className="w-4 h-4 text-gray-400" />
+                      <select
+                        value={formData.rate_type_filter}
+                        onChange={(e) => handleRateTypeFilterChange(e.target.value as RateType | '')}
+                        className="text-sm px-2 py-1 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">All Rate Types</option>
+                        {Object.entries(RATE_TYPE_LABELS).map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  
+                  {/* Select All Toggle */}
+                  <div className="mb-3 p-3 bg-gray-50 rounded-lg">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectAll}
+                        onChange={handleSelectAll}
+                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      />
+                      <div className="flex items-center gap-2">
+                        <UserCheck className="w-4 h-4 text-blue-600" />
+                        <span className="font-medium text-gray-700">
+                          {selectAll 
+                            ? `Include all ${formData.rate_type_filter ? RATE_TYPE_LABELS[formData.rate_type_filter] : ''} employees (${filteredEmployees.length})`
+                            : 'Select specific employees'}
+                        </span>
+                      </div>
+                    </label>
+                    {selectAll && formData.rate_type_filter && (
+                      <p className="mt-2 text-sm text-blue-600 ml-7">
+                        ✓ Only {RATE_TYPE_LABELS[formData.rate_type_filter].toLowerCase()} rate employees will be included
+                      </p>
+                    )}
+                  </div>
+                  
+                  {/* Employee List (only show when not "select all") */}
+                  {!selectAll && (
+                    <div className="border rounded-lg max-h-48 overflow-y-auto">
+                      {filteredEmployees.length === 0 ? (
+                        <p className="p-4 text-center text-gray-500">
+                          No employees found{formData.rate_type_filter ? ` with ${RATE_TYPE_LABELS[formData.rate_type_filter].toLowerCase()} rate` : ''}
+                        </p>
+                      ) : (
+                        <div className="divide-y divide-gray-100">
+                          {filteredEmployees.map((payRate: PayRate) => (
+                            <label
+                              key={payRate.user_id}
+                              className="flex items-center gap-3 p-3 hover:bg-gray-50 cursor-pointer transition"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={formData.user_ids.includes(payRate.user_id)}
+                                onChange={() => toggleEmployeeSelection(payRate.user_id)}
+                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-gray-900 truncate">
+                                  {payRate.user_name || `User #${payRate.user_id}`}
+                                </p>
+                                <p className="text-xs text-gray-500 truncate">
+                                  {payRate.user_email}
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <span className={`inline-block px-2 py-0.5 text-xs rounded-full ${
+                                  payRate.rate_type === 'hourly' ? 'bg-green-100 text-green-700' :
+                                  payRate.rate_type === 'monthly' ? 'bg-blue-100 text-blue-700' :
+                                  payRate.rate_type === 'daily' ? 'bg-yellow-100 text-yellow-700' :
+                                  'bg-purple-100 text-purple-700'
+                                }`}>
+                                  {RATE_TYPE_LABELS[payRate.rate_type as RateType]}
+                                </span>
+                                <p className="text-xs text-gray-500 mt-0.5">
+                                  ${payRate.base_rate.toFixed(2)}/{payRate.rate_type === 'hourly' ? 'hr' : payRate.rate_type === 'daily' ? 'day' : 'mo'}
+                                </p>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* Selection Summary */}
+                  {!selectAll && formData.user_ids.length > 0 && (
+                    <p className="mt-2 text-sm text-gray-600">
+                      {formData.user_ids.length} employee{formData.user_ids.length !== 1 ? 's' : ''} selected
+                    </p>
+                  )}
+                  {!selectAll && formData.user_ids.length === 0 && (
+                    <p className="mt-2 text-sm text-amber-600">
+                      ⚠️ No employees selected. Select at least one employee or choose "Include all employees".
+                    </p>
+                  )}
+                </div>
+              )}
               
-              <div className="flex justify-end gap-3 mt-6">
+              {/* Form Actions */}
+              <div className="flex justify-end gap-3 pt-4 border-t">
                 <button
                   type="button"
                   onClick={() => {
                     setShowCreateModal(false);
                     setEditingPeriod(null);
                     setFormData(initialFormData);
+                    setSelectAll(true);
                   }}
                   className="px-4 py-2 text-gray-600 hover:text-gray-800 transition"
                 >
@@ -578,12 +775,16 @@ export const PayrollPeriodsPage: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={createMutation.isPending || updateMutation.isPending}
+                  disabled={
+                    createMutation.isPending || 
+                    updateMutation.isPending ||
+                    (!editingPeriod && !selectAll && formData.user_ids.length === 0)
+                  }
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
                 >
                   {createMutation.isPending || updateMutation.isPending 
                     ? 'Saving...' 
-                    : editingPeriod ? 'Update' : 'Create'}
+                    : editingPeriod ? 'Update' : 'Create Period'}
                 </button>
               </div>
             </form>

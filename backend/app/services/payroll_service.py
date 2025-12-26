@@ -197,13 +197,25 @@ class PayrollPeriodService:
         self.pay_rate_service = PayRateService(db)
     
     async def create_period(self, period_data: PayrollPeriodCreate) -> PayrollPeriod:
-        """Create a new payroll period"""
+        """Create a new payroll period with optional employee selection criteria"""
+        # Convert user_ids list to comma-separated string for storage
+        selected_user_ids = None
+        if period_data.user_ids and len(period_data.user_ids) > 0:
+            selected_user_ids = ','.join(str(uid) for uid in period_data.user_ids)
+        
+        # Get rate type filter value
+        rate_type_filter = None
+        if period_data.rate_type_filter:
+            rate_type_filter = period_data.rate_type_filter.value
+        
         period = PayrollPeriod(
             name=period_data.name,
             period_type=period_data.period_type.value,
             start_date=period_data.start_date,
             end_date=period_data.end_date,
-            status=PeriodStatusEnum.DRAFT.value
+            status=PeriodStatusEnum.DRAFT.value,
+            selected_user_ids=selected_user_ids,
+            rate_type_filter=rate_type_filter
         )
         self.db.add(period)
         await self.db.commit()
@@ -274,7 +286,7 @@ class PayrollPeriodService:
         return period
     
     async def process_period(self, period_id: int) -> Optional[PayrollPeriod]:
-        """Process a payroll period - calculate all entries based on pay rate type"""
+        """Process a payroll period - calculate all entries based on pay rate type and selection criteria"""
         period = await self.get_period_with_entries(period_id)
         if not period or period.status != PeriodStatusEnum.DRAFT.value:
             return None
@@ -295,12 +307,26 @@ class PayrollPeriodService:
         weeks_in_period = period_weeks.get(period.period_type, Decimal("2"))
         overtime_threshold = Decimal("40") * weeks_in_period
         
-        # Get all users with active pay rates
+        # Parse selection criteria from the period
+        selected_user_ids = None
+        if period.selected_user_ids:
+            selected_user_ids = [int(uid.strip()) for uid in period.selected_user_ids.split(',') if uid.strip()]
+        
+        rate_type_filter = period.rate_type_filter  # e.g., 'hourly', 'monthly', etc.
+        
+        # Build query for users with active pay rates
+        conditions = [PayRate.is_active == True, User.is_active == True]
+        
+        # Filter by specific user IDs if provided
+        if selected_user_ids:
+            conditions.append(User.id.in_(selected_user_ids))
+        
+        # Filter by rate type if provided
+        if rate_type_filter:
+            conditions.append(PayRate.rate_type == rate_type_filter)
+        
         stmt = select(User).join(PayRate, User.id == PayRate.user_id).where(
-            and_(
-                PayRate.is_active == True,
-                User.is_active == True
-            )
+            and_(*conditions)
         ).distinct()
         result = await self.db.execute(stmt)
         users = result.scalars().all()
@@ -312,6 +338,10 @@ class PayrollPeriodService:
             # Get active pay rate for the period end date
             pay_rate = await self.pay_rate_service.get_user_active_rate(user.id, period.end_date)
             if not pay_rate:
+                continue
+            
+            # Double-check rate type filter (in case user has multiple rates)
+            if rate_type_filter and pay_rate.rate_type != rate_type_filter:
                 continue
             
             # Get user's time entries for this period (needed for hourly/daily calculations)
