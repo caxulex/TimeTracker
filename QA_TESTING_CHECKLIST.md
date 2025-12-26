@@ -519,16 +519,14 @@
 
 ### 16.1 WebSocket Connection
 - [x] Open browser console ✅
-- [ ] Verify WebSocket connection established ⚠️ **Known Issue: WebSocket not connecting in production**
-- [ ] Verify no connection errors ⚠️ **Server-side proxy config needed for WSS**
+- [x] Verify WebSocket connection established ✅
+- [x] Verify no connection errors ✅
 
 ### 16.2 Live Updates
-- [ ] Start a timer in one tab ⚠️ Skipped (WebSocket required)
-- [ ] Open dashboard in another tab
-- [ ] Stop timer → verify dashboard updates without refresh
-- [ ] Create time entry → verify reports update
-
-**Note:** WebSocket requires server-side proxy configuration (nginx/ALB/CloudFront) to support WSS upgrade. App functions normally with polling fallback.
+- [x] Start a timer in one tab ✅
+- [x] Open dashboard in another tab ✅
+- [x] Stop timer → verify dashboard updates without refresh ✅
+- [x] Create time entry → verify reports update ✅
 
 ---
 
