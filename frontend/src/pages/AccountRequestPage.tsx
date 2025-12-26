@@ -36,14 +36,28 @@ export function AccountRequestPage() {
         navigate('/login');
       }, 5000);
     } catch (error: unknown) {
-      const err = error as { response?: { status?: number; data?: { detail?: string } } };
+      const err = error as { response?: { status?: number; data?: { detail?: string; message?: string; details?: { requirements?: string[] } } }; message?: string };
+      
+      // Extract the most specific error message available
+      let errorMessage = 'Failed to submit request. Please try again.';
+      
       if (err.response?.status === 429) {
-        setSubmitError('Too many requests. Please try again later.');
-      } else if (err.response?.status === 400) {
-        setSubmitError(err.response.data?.detail || 'Invalid request. Please check your information.');
-      } else {
-        setSubmitError('Failed to submit request. Please try again.');
+        errorMessage = 'Too many requests. Please try again later.';
+      } else if (err.response?.data) {
+        const responseData = err.response.data;
+        // Check for detailed requirements (like password validation)
+        if (responseData.details?.requirements && Array.isArray(responseData.details.requirements)) {
+          errorMessage = responseData.details.requirements.join('. ');
+        } else if (responseData.message) {
+          errorMessage = responseData.message;
+        } else if (responseData.detail) {
+          errorMessage = responseData.detail;
+        }
+      } else if (err.message) {
+        errorMessage = err.message;
       }
+      
+      setSubmitError(errorMessage);
     } finally {
       setIsSubmitting(false);
     }

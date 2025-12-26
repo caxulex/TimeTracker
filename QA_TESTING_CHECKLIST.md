@@ -266,21 +266,21 @@
 ## 8. Settings
 
 ### 8.1 Update Profile (Both Roles)
-- [ ] Navigate to `/settings`
-- [ ] Change name → save → verify updated
-- [ ] Change email → save → verify updated
-- [ ] Verify success notification
+- [x] Navigate to `/settings` ✅
+- [x] Change name → save → verify updated ✅
+- [x] Change email → save → verify updated ✅
+- [x] Verify success notification ✅
 
 ### 8.2 Change Password (Both Roles)
-- [ ] Enter current password
-- [ ] Enter new password
-- [ ] Confirm new password
-- [ ] Submit → verify success notification
-- [ ] Logout and login with new password
+- [x] Enter current password ✅
+- [x] Enter new password ✅
+- [x] Confirm new password ✅
+- [x] Submit → verify success notification ✅
+- [x] Logout and login with new password ✅
 
 ### 8.3 Preferences (Both Roles)
-- [ ] Verify Dark Mode toggle present
-- [ ] Verify Email Notifications toggle present
+- [x] Verify Dark Mode toggle present ✅
+- [x] Verify Email Notifications toggle present ✅
 
 ---
 
