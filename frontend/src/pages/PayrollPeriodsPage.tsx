@@ -82,6 +82,36 @@ export const PayrollPeriodsPage: React.FC = () => {
     enabled: !!viewingPeriod,
   });
 
+  // Helper to extract error message from various error formats
+  const extractErrorMessage = (error: unknown, fallback: string): string => {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    const axiosError = error as { response?: { data?: { detail?: string | Array<{ msg?: string; loc?: string[] }> } } };
+    const detail = axiosError?.response?.data?.detail;
+    
+    // Handle Pydantic validation errors (array of error objects)
+    if (Array.isArray(detail)) {
+      const messages = detail.map(err => {
+        const field = err.loc?.slice(-1)[0] || 'field';
+        const msg = err.msg || 'Invalid value';
+        // Make the message more user-friendly
+        if (msg.includes('end_date must be after start_date')) {
+          return 'End date must be after start date';
+        }
+        return `${field}: ${msg}`;
+      });
+      return messages.join('. ');
+    }
+    
+    // Handle string detail
+    if (typeof detail === 'string') {
+      return detail;
+    }
+    
+    return fallback;
+  };
+
   // Create mutation
   const createMutation = useMutation({
     mutationFn: (data: PayrollPeriodCreate) => payrollPeriodsApi.create(data),
@@ -92,9 +122,7 @@ export const PayrollPeriodsPage: React.FC = () => {
       notifications.notifySuccess('Period Created', 'Payroll period created successfully');
     },
     onError: (error: unknown) => {
-      const errorMessage = error instanceof Error 
-        ? error.message 
-        : (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to create payroll period';
+      const errorMessage = extractErrorMessage(error, 'Failed to create payroll period');
       notifications.notifyError('Create Failed', errorMessage);
       console.error('Create period error:', error);
     },
@@ -111,9 +139,7 @@ export const PayrollPeriodsPage: React.FC = () => {
       notifications.notifySuccess('Period Updated', 'Payroll period updated successfully');
     },
     onError: (error: unknown) => {
-      const errorMessage = error instanceof Error 
-        ? error.message 
-        : (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to update payroll period';
+      const errorMessage = extractErrorMessage(error, 'Failed to update payroll period');
       notifications.notifyError('Update Failed', errorMessage);
       console.error('Update period error:', error);
     },
@@ -185,6 +211,14 @@ export const PayrollPeriodsPage: React.FC = () => {
   // Handle form submit
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validate dates before submission
+    if (formData.start_date && formData.end_date) {
+      if (new Date(formData.end_date) < new Date(formData.start_date)) {
+        notifications.notifyError('Invalid Dates', 'End date must be after start date');
+        return;
+      }
+    }
     
     if (editingPeriod) {
       const updateData: PayrollPeriodUpdate = {
