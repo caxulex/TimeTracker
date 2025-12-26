@@ -287,102 +287,102 @@
 ## 9. Staff Management (Admin Only)
 
 ### 9.1 View Staff List
-- [ ] Navigate to `/staff`
-- [ ] Verify staff list displays
-- [ ] Verify search by name works
-- [ ] Verify search by email works
-- [ ] Verify search by job title works
-- [ ] Verify search by department works
-- [ ] Verify pagination works
+- [x] Navigate to `/staff` ✅
+- [x] Verify staff list displays ✅
+- [x] Verify search by name works ✅
+- [x] Verify search by email works ✅
+- [x] Verify search by job title works ✅
+- [x] Verify search by department works ✅
+- [x] Verify pagination works ✅
 
 ### 9.2 Create Staff Member
-- [ ] Click "Add Staff" button
-- [ ] **Step 1 - Basic Info:** Fill name, email, password, role
-- [ ] **Step 2 - Contact:** Fill phone, address, emergency contact
-- [ ] **Step 3 - Employment:** Fill job title, department, employment type, start date
-- [ ] **Step 4 - Payroll:** Fill pay rate, rate type, overtime multiplier, currency
-- [ ] **Step 5 - Teams:** Assign to teams
-- [ ] Submit → verify staff created
+- [x] Click "Add Staff" button ✅
+- [x] **Step 1 - Basic Info:** Fill name, email, password, role ✅
+- [x] **Step 2 - Contact:** Fill phone, address, emergency contact ✅
+- [x] **Step 3 - Employment:** Fill job title, department, employment type, start date ✅
+- [x] **Step 4 - Payroll:** Fill pay rate, rate type, overtime multiplier, currency ✅
+- [x] **Step 5 - Teams:** Assign to teams ✅
+- [x] Submit → verify staff created ✅
 
 ### 9.3 Credentials Summary Modal
-- [ ] After creating staff, verify modal appears
-- [ ] Verify all credentials displayed (name, email, phone, password, job title, department)
-- [ ] Click "Copy to Clipboard"
-- [ ] Verify "Copied!" feedback
-- [ ] Paste clipboard → verify formatted message with login URL
-- [ ] Close modal
+- [x] After creating staff, verify modal appears ✅
+- [x] Verify all credentials displayed (name, email, phone, password, job title, department) ✅
+- [x] Click "Copy to Clipboard" ✅
+- [x] Verify "Copied!" feedback ✅
+- [x] Paste clipboard → verify formatted message with login URL ✅
+- [x] Close modal ✅
 
 ### 9.4 Edit Staff Profile
-- [ ] Select a staff member
-- [ ] Click edit
-- [ ] Modify details
-- [ ] Save → verify changes applied
+- [x] Select a staff member ✅
+- [x] Click edit ✅
+- [x] Modify details ✅
+- [x] Save → verify changes applied ✅
 
 ### 9.5 Activate/Deactivate Staff
-- [ ] Deactivate a staff member
-- [ ] Verify status shows "Inactive"
-- [ ] Verify correct notification message
-- [ ] Activate the staff member
-- [ ] Verify status shows "Active"
+- [x] Deactivate a staff member ✅
+- [x] Verify status shows "Inactive" ✅
+- [x] Verify correct notification message ✅
+- [x] Activate the staff member ✅
+- [x] Verify status shows "Active" ✅
 
 ### 9.6 Permanently Delete Staff
-- [ ] Click permanent delete on a user
-- [ ] Verify first confirmation dialog
-- [ ] Verify second confirmation (type to confirm)
-- [ ] Confirm → verify user deleted
-- [ ] Verify cannot delete yourself
-- [ ] Verify cannot delete super_admin
+- [x] Click permanent delete on a user ✅
+- [x] Verify first confirmation dialog ✅
+- [x] Verify second confirmation (type to confirm) ✅
+- [x] Confirm → verify user deleted ✅
+- [x] Verify cannot delete yourself ✅
+- [x] Verify cannot delete super_admin ✅
 
 ### 9.7 Manage Staff Teams
-- [ ] Open teams modal for a staff member
-- [ ] Add to a team
-- [ ] Remove from a team
-- [ ] Verify changes reflected
+- [x] Open teams modal for a staff member ✅
+- [x] Add to a team ✅
+- [x] Remove from a team ✅
+- [x] Verify changes reflected ✅
 
 ### 9.8 View Staff Time Entries
-- [ ] Open time modal for a staff member
-- [ ] Verify their time entries displayed
+- [x] Open time modal for a staff member ✅
+- [x] Verify their time entries displayed ✅
 
 ### 9.9 View Staff Analytics
-- [ ] Open analytics modal for a staff member
-- [ ] Verify performance metrics displayed
+- [x] Open analytics modal for a staff member ✅
+- [x] Verify performance metrics displayed ✅
 
 ---
 
 ## 10. Account Requests Management (Admin Only)
 
 ### 10.1 View Requests
-- [ ] Navigate to `/account-requests`
-- [ ] Verify "Pending" tab shows pending requests
-- [ ] Verify "Approved" tab shows approved requests
-- [ ] Verify "Rejected" tab shows rejected requests
-- [ ] Verify "All" tab shows all requests
-- [ ] Verify pending count badge
+- [x] Navigate to `/account-requests` ✅
+- [x] Verify "Pending" tab shows pending requests ✅
+- [x] Verify "Approved" tab shows approved requests ✅
+- [x] Verify "Rejected" tab shows rejected requests ✅
+- [x] Verify "All" tab shows all requests ✅
+- [x] Verify pending count badge ✅
 
 ### 10.2 Search Requests
-- [ ] Search by name
-- [ ] Search by email
-- [ ] Clear search → verify all shown
+- [x] Search by name ✅
+- [x] Search by email ✅
+- [x] Clear search → verify all shown ✅
 
 ### 10.3 Approve Request
-- [ ] Select a pending request
-- [ ] Click "Approve"
-- [ ] Add optional admin notes
-- [ ] Confirm → verify redirects to Staff creation
-- [ ] Verify form pre-filled with request data
-- [ ] Verify suggested password auto-generated
-- [ ] Complete staff creation
-- [ ] Verify credentials summary modal appears
+- [x] Select a pending request ✅
+- [x] Click "Approve" ✅
+- [x] Add optional admin notes ✅
+- [x] Confirm → verify redirects to Staff creation ✅
+- [x] Verify form pre-filled with request data ✅
+- [x] Verify suggested password auto-generated ✅
+- [x] Complete staff creation ✅
+- [x] Verify credentials summary modal appears ✅
 
 ### 10.4 Reject Request
-- [ ] Select a pending request
-- [ ] Click "Reject"
-- [ ] Add optional rejection notes
-- [ ] Confirm → verify request status changed
+- [x] Select a pending request ✅
+- [x] Click "Reject" ✅
+- [x] Add optional rejection notes ✅
+- [x] Confirm → verify request status changed ✅
 
 ### 10.5 Delete Request
-- [ ] Delete a request
-- [ ] Confirm → verify removed
+- [x] Delete a request ✅
+- [x] Confirm → verify removed ✅
 
 ---
 

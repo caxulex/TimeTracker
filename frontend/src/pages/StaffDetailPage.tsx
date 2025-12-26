@@ -254,17 +254,14 @@ export function StaffDetailPage() {
 
   const startEdit = () => {
     if (staff) {
-      setEditForm({
-        name: staff.name,
-        email: staff.email,
-        job_title: staff.job_title || '',
-        department: staff.department || '',
-        phone: staff.phone || '',
-        address: staff.address || '',
-        emergency_contact_name: staff.emergency_contact_name || '',
-        emergency_contact_phone: staff.emergency_contact_phone || '',
+      // Navigate to StaffPage with state to open the edit modal
+      navigate('/staff', { 
+        state: { 
+          openEditModal: true, 
+          staffToEdit: staff,
+          payRate: currentRate 
+        } 
       });
-      setEditMode(true);
     }
   };
 

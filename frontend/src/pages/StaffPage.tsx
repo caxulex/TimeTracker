@@ -82,11 +82,37 @@ export function StaffPage() {
     team_ids: [] as number[],
   });
   
-  // Handle navigation state from other pages (AdminPage, AccountRequests, etc.)
+  // Handle navigation state from other pages (AdminPage, AccountRequests, StaffDetailPage, etc.)
   useEffect(() => {
     // Handle direct request to open create modal (from AdminPage)
     if (location.state?.openCreateModal) {
       setShowCreateModal(true);
+      // Clear the location state to prevent re-opening on re-render
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+    // Handle request to open edit modal (from StaffDetailPage)
+    else if (location.state?.openEditModal && location.state?.staffToEdit) {
+      const staffToEdit = location.state.staffToEdit;
+      setSelectedStaff(staffToEdit);
+      
+      // Pre-fill edit form with staff data
+      setEditForm({
+        name: staffToEdit.name || '',
+        email: staffToEdit.email || '',
+        phone: staffToEdit.phone || '',
+        address: staffToEdit.address || '',
+        emergency_contact_name: staffToEdit.emergency_contact_name || '',
+        emergency_contact_phone: staffToEdit.emergency_contact_phone || '',
+        job_title: staffToEdit.job_title || '',
+        department: staffToEdit.department || '',
+        employment_type: staffToEdit.employment_type || 'full_time',
+        start_date: staffToEdit.start_date || '',
+        expected_hours_per_week: staffToEdit.expected_hours_per_week || 40,
+        pay_rate: location.state.payRate?.base_rate ? Number(location.state.payRate.base_rate) : 0,
+        pay_rate_type: location.state.payRate?.rate_type || 'hourly',
+        overtime_multiplier: location.state.payRate?.overtime_multiplier ? Number(location.state.payRate.overtime_multiplier) : 1.5,
+      });
+      setShowEditModal(true);
       // Clear the location state to prevent re-opening on re-render
       navigate(location.pathname, { replace: true, state: {} });
     }
