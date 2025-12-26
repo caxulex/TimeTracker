@@ -330,23 +330,39 @@ class PayrollPeriodService:
             rate_type = pay_rate.rate_type.lower() if pay_rate.rate_type else 'hourly'
             
             if rate_type == 'monthly':
-                # Monthly salary - pay based on period type, not actual days
-                # This ensures consistent pay regardless of calendar variations
+                # MONTHLY SALARY CALCULATION
+                # =========================
+                # Monthly rate = base salary per month
+                # To calculate per-period pay, we convert to annual then divide by periods/year
+                # This ensures the annual total is always correct regardless of period type
+                #
+                # Period Types and their frequencies:
+                # - weekly:       52 periods/year  → Annual ÷ 52 per paycheck
+                # - bi_weekly:    26 periods/year  → Annual ÷ 26 per paycheck (every 2 weeks)
+                # - semi_monthly: 24 periods/year  → Annual ÷ 24 per paycheck (twice per month, e.g., 1st & 15th)
+                # - monthly:      12 periods/year  → Annual ÷ 12 per paycheck (full monthly salary)
+                #
+                # Example: $1,200/month salary = $14,400/year
+                # - Weekly:       $14,400 ÷ 52 = $276.92/paycheck
+                # - Bi-Weekly:    $14,400 ÷ 26 = $553.85/paycheck  
+                # - Semi-Monthly: $14,400 ÷ 24 = $600.00/paycheck
+                # - Monthly:      $14,400 ÷ 12 = $1,200.00/paycheck
                 
-                # Define how many pay periods per month for each type
-                periods_per_month = {
-                    'monthly': Decimal("1"),        # 1 pay period per month
-                    'bi_weekly': Decimal("2.17"),   # ~2.17 bi-weekly periods per month (26/12)
-                    'semi_monthly': Decimal("2"),   # 2 semi-monthly periods per month
-                    'weekly': Decimal("4.33"),      # ~4.33 weekly periods per month (52/12)
+                periods_per_year = {
+                    'weekly': Decimal("52"),        # Paid every week
+                    'bi_weekly': Decimal("26"),     # Paid every 2 weeks
+                    'semi_monthly': Decimal("24"),  # Paid twice per month (fixed dates)
+                    'monthly': Decimal("12"),       # Paid once per month
                 }
                 
-                divisor = periods_per_month.get(period.period_type, Decimal("1"))
-                gross_amount = (pay_rate.base_rate / divisor).quantize(Decimal("0.01"))
-                regular_hours = Decimal("0")  # Hours not tracked for salaried
+                annual_salary = pay_rate.base_rate * Decimal("12")
+                periods = periods_per_year.get(period.period_type, Decimal("12"))
+                gross_amount = (annual_salary / periods).quantize(Decimal("0.01"))
+                
+                regular_hours = Decimal("0")  # Hours not tracked for salaried employees
                 overtime_hours = Decimal("0")
                 regular_rate = pay_rate.base_rate
-                overtime_rate = pay_rate.base_rate  # No overtime for monthly
+                overtime_rate = pay_rate.base_rate  # No overtime for monthly salary
                     
             elif rate_type == 'daily':
                 # Daily rate - calculate based on days worked (time entries)
