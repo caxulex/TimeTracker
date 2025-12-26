@@ -358,17 +358,14 @@ export const PayrollReportsPage: React.FC = () => {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Period
                   </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Regular Hours
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Rate Type
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    OT Hours
+                    Hours
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Regular Rate
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    OT Rate
+                    Rate
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Gross
@@ -382,7 +379,17 @@ export const PayrollReportsPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {reportData.entries.map((entry, index) => (
+                {reportData.entries.map((entry, index) => {
+                  const isSalaried = entry.rate_type === 'monthly' || entry.rate_type === 'project_based';
+                  const rateTypeLabel = entry.rate_type 
+                    ? entry.rate_type.charAt(0).toUpperCase() + entry.rate_type.slice(1).replace('_', ' ')
+                    : 'Unknown';
+                  const rateTypeColor = entry.rate_type === 'hourly' ? 'bg-green-100 text-green-700' :
+                                        entry.rate_type === 'monthly' ? 'bg-blue-100 text-blue-700' :
+                                        entry.rate_type === 'daily' ? 'bg-yellow-100 text-yellow-700' :
+                                        'bg-purple-100 text-purple-700';
+                  
+                  return (
                   <tr key={`${entry.user_id}-${entry.period_name}-${index}`} className="hover:bg-gray-50">
                     <td className="px-4 py-3 whitespace-nowrap">
                       <div className="text-sm font-medium text-gray-900">{entry.user_name}</div>
@@ -394,17 +401,34 @@ export const PayrollReportsPage: React.FC = () => {
                         {entry.start_date} - {entry.end_date}
                       </div>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-900">
-                      {formatHours(entry.regular_hours)}
+                    <td className="px-4 py-3 whitespace-nowrap text-center">
+                      <span className={`inline-block px-2 py-0.5 text-xs rounded-full ${rateTypeColor}`}>
+                        {rateTypeLabel}
+                      </span>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-orange-600">
-                      {formatHours(entry.overtime_hours)}
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-right">
+                      {isSalaried ? (
+                        <span className="text-gray-400">—</span>
+                      ) : (
+                        <div>
+                          <span className="text-gray-900">{formatHours(entry.regular_hours)}</span>
+                          {entry.overtime_hours > 0 && (
+                            <span className="text-orange-600 ml-1">(+{formatHours(entry.overtime_hours)} OT)</span>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-500">
-                      {formatCurrency(entry.regular_rate)}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-500">
-                      {formatCurrency(entry.overtime_rate)}
+                      {isSalaried ? (
+                        <span>{formatCurrency(entry.regular_rate)}/mo</span>
+                      ) : (
+                        <div>
+                          <span>{formatCurrency(entry.regular_rate)}/hr</span>
+                          {entry.overtime_hours > 0 && (
+                            <div className="text-xs text-orange-500">{formatCurrency(entry.overtime_rate)}/hr OT</div>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-900">
                       {formatCurrency(entry.gross_amount)}
@@ -423,20 +447,21 @@ export const PayrollReportsPage: React.FC = () => {
                       {formatCurrency(entry.net_amount)}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
               <tfoot className="bg-gray-50">
                 <tr>
-                  <td colSpan={2} className="px-4 py-3 text-sm font-medium text-gray-900">
+                  <td colSpan={3} className="px-4 py-3 text-sm font-medium text-gray-900">
                     TOTALS
                   </td>
-                  <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">
-                    {formatHours(reportData.summary.total_regular_hours)}
+                  <td className="px-4 py-3 text-sm text-right font-medium text-gray-600">
+                    {formatHours(reportData.summary.total_regular_hours)} hrs
+                    {reportData.summary.total_overtime_hours > 0 && (
+                      <span className="text-orange-600 ml-1">(+{formatHours(reportData.summary.total_overtime_hours)} OT)</span>
+                    )}
                   </td>
-                  <td className="px-4 py-3 text-sm text-right font-medium text-orange-600">
-                    {formatHours(reportData.summary.total_overtime_hours)}
-                  </td>
-                  <td colSpan={2}></td>
+                  <td></td>
                   <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">
                     {formatCurrency(reportData.summary.total_gross_amount)}
                   </td>

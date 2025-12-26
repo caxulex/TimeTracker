@@ -10,7 +10,7 @@ from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import PayrollPeriod, PayrollEntry, PayrollAdjustment, User
+from app.models import PayrollPeriod, PayrollEntry, PayrollAdjustment, User, PayRate
 from app.schemas.payroll import (
     PayrollReportFilters,
     PayrollSummaryReport,
@@ -165,6 +165,19 @@ class PayrollReportService:
                 if filters.user_id and entry.user_id != filters.user_id:
                     continue
                 
+                # Get user's rate type from their active pay rate
+                rate_type = None
+                pay_rate_stmt = select(PayRate).where(
+                    and_(
+                        PayRate.user_id == entry.user_id,
+                        PayRate.is_active == True
+                    )
+                ).order_by(PayRate.effective_from.desc()).limit(1)
+                pay_rate_result = await self.db.execute(pay_rate_stmt)
+                pay_rate = pay_rate_result.scalar_one_or_none()
+                if pay_rate:
+                    rate_type = pay_rate.rate_type
+                
                 adjustments = [
                     PayrollAdjustmentResponse(
                         id=adj.id,
@@ -183,6 +196,7 @@ class PayrollReportService:
                     user_id=entry.user_id,
                     user_name=entry.user.name,
                     user_email=entry.user.email,
+                    rate_type=rate_type,
                     period_name=period.name,
                     start_date=period.start_date,
                     end_date=period.end_date,

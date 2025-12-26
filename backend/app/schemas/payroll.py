@@ -297,6 +297,7 @@ class UserPayrollReport(BaseModel):
     user_id: int
     user_name: str
     user_email: str
+    rate_type: Optional[str] = None  # hourly, monthly, daily, project_based
     period_name: str
     start_date: date
     end_date: date

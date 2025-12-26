@@ -180,6 +180,7 @@ export interface UserPayrollReport {
   user_id: number;
   user_name: string;
   user_email: string;
+  rate_type?: RateType;  // hourly, monthly, daily, project_based
   period_name: string;
   start_date: string;
   end_date: string;
