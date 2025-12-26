@@ -330,24 +330,23 @@ class PayrollPeriodService:
             rate_type = pay_rate.rate_type.lower() if pay_rate.rate_type else 'hourly'
             
             if rate_type == 'monthly':
-                # Monthly salary - pay the full amount for a monthly period
-                # For partial months, prorate based on days
-                if period.period_type == 'monthly':
-                    # Full month salary
-                    gross_amount = pay_rate.base_rate
-                    regular_hours = Decimal("0")  # Hours not tracked for salaried
-                    overtime_hours = Decimal("0")
-                    regular_rate = pay_rate.base_rate
-                    overtime_rate = pay_rate.base_rate  # No overtime for monthly
-                else:
-                    # Prorate monthly salary for shorter periods
-                    # Assuming 30 days in a month for proration
-                    daily_rate = pay_rate.base_rate / Decimal("30")
-                    gross_amount = daily_rate * Decimal(period_days)
-                    regular_hours = Decimal("0")
-                    overtime_hours = Decimal("0")
-                    regular_rate = pay_rate.base_rate
-                    overtime_rate = pay_rate.base_rate
+                # Monthly salary - pay based on period type, not actual days
+                # This ensures consistent pay regardless of calendar variations
+                
+                # Define how many pay periods per month for each type
+                periods_per_month = {
+                    'monthly': Decimal("1"),        # 1 pay period per month
+                    'bi_weekly': Decimal("2.17"),   # ~2.17 bi-weekly periods per month (26/12)
+                    'semi_monthly': Decimal("2"),   # 2 semi-monthly periods per month
+                    'weekly': Decimal("4.33"),      # ~4.33 weekly periods per month (52/12)
+                }
+                
+                divisor = periods_per_month.get(period.period_type, Decimal("1"))
+                gross_amount = (pay_rate.base_rate / divisor).quantize(Decimal("0.01"))
+                regular_hours = Decimal("0")  # Hours not tracked for salaried
+                overtime_hours = Decimal("0")
+                regular_rate = pay_rate.base_rate
+                overtime_rate = pay_rate.base_rate  # No overtime for monthly
                     
             elif rate_type == 'daily':
                 # Daily rate - calculate based on days worked (time entries)
