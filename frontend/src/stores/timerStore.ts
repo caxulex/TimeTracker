@@ -42,6 +42,13 @@ export const useTimerStore = create<TimerState>()(
       lastSyncTime: null,
 
       fetchTimer: async () => {
+        // Debounce: Don't fetch if we synced in the last 2 seconds
+        const { lastSyncTime } = get();
+        if (lastSyncTime && Date.now() - lastSyncTime < 2000) {
+          console.log('[TimerStore] Skipping fetch - recently synced');
+          return;
+        }
+        
         set({ isLoading: true, error: null });
         try {
           const status = await timeEntriesApi.getTimer();
@@ -67,6 +74,12 @@ export const useTimerStore = create<TimerState>()(
             });
           }
         } catch (error: any) {
+          // Handle 429 (rate limit) gracefully - just use local state
+          if (error.response?.status === 429) {
+            console.warn('[TimerStore] Rate limited, using local state');
+            set({ isLoading: false });
+            return;
+          }
           console.error('[TimerStore] Error fetching timer:', error);
           set({ error: error.message, isLoading: false });
         }
@@ -165,7 +178,7 @@ export const useTimerStore = create<TimerState>()(
         isRunning: state.isRunning,
         lastSyncTime: state.lastSyncTime,
       }),
-      // On rehydrate, immediately sync with backend to get fresh state
+      // On rehydrate, sync with backend to get fresh state (with debounce)
       onRehydrateStorage: () => (state) => {
         console.log('[TimerStore] Rehydrating state from localStorage:', state);
         if (state?.isRunning && state?.currentEntry) {
@@ -173,11 +186,16 @@ export const useTimerStore = create<TimerState>()(
           state.elapsedSeconds = elapsed;
           console.log('[TimerStore] Rehydrated with running timer, elapsed:', elapsed);
         }
-        // Always fetch fresh state from backend immediately on page load
-        console.log('[TimerStore] Triggering immediate backend sync...');
-        if (state) {
+        
+        // Only fetch from backend if we haven't synced in the last 30 seconds
+        // This prevents excessive API calls during development/testing
+        const shouldSync = !state?.lastSyncTime || Date.now() - state.lastSyncTime > 30000;
+        if (shouldSync && state) {
+          console.log('[TimerStore] Triggering backend sync (stale data)...');
           // Use setTimeout to avoid calling async during rehydration
-          setTimeout(() => state.fetchTimer(), 0);
+          setTimeout(() => state.fetchTimer(), 100);
+        } else {
+          console.log('[TimerStore] Skipping backend sync (recent data available)');
         }
       },
     }
