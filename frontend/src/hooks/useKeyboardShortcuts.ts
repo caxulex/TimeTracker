@@ -101,7 +101,7 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers = {}) {
         window.dispatchEvent(new CustomEvent('show-shortcuts-help'));
       }
     },
-    [isAuthenticated, activeTimer, navigate, handlers, stopTimer]
+    [isAuthenticated, isRunning, navigate, handlers, stopTimer]
   );
 
   useEffect(() => {
