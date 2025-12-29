@@ -2,6 +2,7 @@
 export { Button } from './Button';
 export { Input } from './Input';
 export { PasswordInput } from './PasswordInput';
+export { PasswordStrengthIndicator } from './PasswordStrengthIndicator';
 export { Select } from './Select';
 export { Card, CardHeader } from './Card';
 export { Modal } from './Modal';

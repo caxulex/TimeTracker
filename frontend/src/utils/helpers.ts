@@ -199,3 +199,93 @@ export function formatDistanceToNow(date: Date): string {
     return formatDate(date);
   }
 }
+
+// ============================================
+// PASSWORD STRENGTH VALIDATION
+// ============================================
+
+export interface PasswordStrength {
+  score: number; // 0-5
+  label: 'Very Weak' | 'Weak' | 'Fair' | 'Good' | 'Strong' | 'Very Strong';
+  color: string;
+  feedback: string[];
+}
+
+export function checkPasswordStrength(password: string): PasswordStrength {
+  const feedback: string[] = [];
+  let score = 0;
+
+  if (!password) {
+    return {
+      score: 0,
+      label: 'Very Weak',
+      color: 'bg-red-500',
+      feedback: ['Password is required'],
+    };
+  }
+
+  // Length checks
+  if (password.length >= 8) score += 1;
+  else feedback.push('Use at least 8 characters');
+
+  if (password.length >= 12) score += 1;
+  else if (password.length >= 8) feedback.push('12+ characters recommended');
+
+  // Character type checks
+  if (/[a-z]/.test(password)) score += 0.5;
+  else feedback.push('Add lowercase letters');
+
+  if (/[A-Z]/.test(password)) score += 0.5;
+  else feedback.push('Add uppercase letters');
+
+  if (/\d/.test(password)) score += 0.5;
+  else feedback.push('Add numbers');
+
+  if (/[!@#$%^&*(),.?":{}|<>]/.test(password)) score += 1;
+  else feedback.push('Add special characters (!@#$%^&*)');
+
+  // Bonus for variety
+  if (password.length >= 16 && score >= 4) score += 0.5;
+
+  // Cap at 5
+  score = Math.min(5, Math.round(score));
+
+  const labels: PasswordStrength['label'][] = [
+    'Very Weak',
+    'Weak',
+    'Fair',
+    'Good',
+    'Strong',
+    'Very Strong',
+  ];
+
+  const colors = [
+    'bg-red-500',
+    'bg-orange-500',
+    'bg-yellow-500',
+    'bg-lime-500',
+    'bg-green-500',
+    'bg-emerald-600',
+  ];
+
+  return {
+    score,
+    label: labels[score],
+    color: colors[score],
+    feedback: feedback.slice(0, 3), // Show max 3 suggestions
+  };
+}
+
+/**
+ * Validate password meets minimum requirements
+ * Returns error message or null if valid
+ */
+export function validatePassword(password: string): string | null {
+  if (!password) return 'Password is required';
+  if (password.length < 8) return 'Password must be at least 8 characters';
+  if (!/[a-z]/.test(password)) return 'Password must contain a lowercase letter';
+  if (!/[A-Z]/.test(password)) return 'Password must contain an uppercase letter';
+  if (!/\d/.test(password)) return 'Password must contain a number';
+  if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) return 'Password must contain a special character';
+  return null;
+}

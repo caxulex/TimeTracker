@@ -5,7 +5,8 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { useAuthStore } from '../stores/authStore';
-import { Button, Input } from '../components/common';
+import { Button, Input, PasswordStrengthIndicator } from '../components/common';
+import { validatePassword } from '../utils/helpers';
 
 interface RegisterForm {
   name: string;
@@ -114,10 +115,7 @@ export function RegisterPage() {
                 error={errors.password?.message}
                 {...register('password', {
                   required: 'Password is required',
-                  minLength: {
-                    value: 12,
-                    message: 'Password must be at least 12 characters with upper, lower, number, special char',
-                  },
+                  validate: (value) => validatePassword(value) || true,
                 })}
               />
               <button
@@ -136,6 +134,7 @@ export function RegisterPage() {
                   </svg>
                 )}
               </button>
+              <PasswordStrengthIndicator password={password || ''} />
             </div>
 
             <Input

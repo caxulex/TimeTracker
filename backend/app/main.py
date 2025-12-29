@@ -120,8 +120,73 @@ async def add_security_headers(request: Request, call_next):
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "version": settings.APP_VERSION}
+    """Health check endpoint for monitoring and load balancers"""
+    return {
+        "status": "healthy",
+        "version": settings.APP_VERSION,
+        "environment": settings.ENVIRONMENT
+    }
+
+
+@app.get("/api/health")
+async def api_health_check():
+    """
+    Detailed health check endpoint with database and Redis status.
+    Use this for comprehensive monitoring.
+    """
+    import redis.asyncio as redis_client
+    from sqlalchemy import text
+    from app.database import async_engine
+    
+    health_status = {
+        "status": "healthy",
+        "version": settings.APP_VERSION,
+        "environment": settings.ENVIRONMENT,
+        "checks": {
+            "database": "unknown",
+            "redis": "unknown"
+        }
+    }
+    
+    # Check database connection
+    try:
+        async with async_engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        health_status["checks"]["database"] = "healthy"
+    except Exception as e:
+        health_status["checks"]["database"] = f"unhealthy: {str(e)[:50]}"
+        health_status["status"] = "degraded"
+    
+    # Check Redis connection
+    try:
+        redis = redis_client.from_url(settings.REDIS_URL)
+        await redis.ping()
+        await redis.close()
+        health_status["checks"]["redis"] = "healthy"
+    except Exception as e:
+        health_status["checks"]["redis"] = f"unhealthy: {str(e)[:50]}"
+        health_status["status"] = "degraded"
+    
+    return health_status
+
+
+@app.get("/api/version")
+async def version_info():
+    """
+    Version and build information endpoint.
+    Useful for debugging and deployment verification.
+    """
+    import sys
+    import platform
+    
+    return {
+        "app_name": settings.APP_NAME,
+        "version": settings.APP_VERSION,
+        "environment": settings.ENVIRONMENT,
+        "python_version": sys.version.split()[0],
+        "platform": platform.system(),
+        "debug_mode": settings.DEBUG
+    }
 
 
 @app.get("/")
