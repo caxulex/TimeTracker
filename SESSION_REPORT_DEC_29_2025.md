@@ -217,6 +217,45 @@ def calculate_entry_duration(entry: TimeEntry, now: datetime) -> int:
 
 ---
 
+### 6. ✅ SuperAdmin User Management Fix
+
+**Bug Reported**: SuperAdmin couldn't change user emails or other user properties
+
+**Root Cause Analysis**:
+1. Email duplicate check was querying ALL users, not excluding the user being edited
+2. `RoleUpdate` schema was missing the `admin` role option (only had `super_admin` and `regular_user`)
+3. `UserCreate` schema had no role validation
+
+**Solution Implemented** (`backend/app/routers/users.py`):
+
+**Fix 1 - Email duplicate check**:
+```python
+# Before: Checked ALL users (would fail even if same email)
+email_check = await db.execute(select(User).where(User.email == user_data.email))
+
+# After: Exclude the user being updated
+email_check = await db.execute(
+    select(User).where(User.email == user_data.email, User.id != user_id)
+)
+```
+
+**Fix 2 - Role validation patterns**:
+```python
+# UserCreate role - added validation
+role: str = Field(default="regular_user", pattern="^(super_admin|admin|regular_user)$")
+
+# RoleUpdate - added missing 'admin' role
+role: str = Field(..., pattern="^(super_admin|admin|regular_user)$")
+```
+
+**Impact**: SuperAdmin can now:
+- ✅ Edit any user's email (if not duplicate)
+- ✅ Edit any user's name
+- ✅ Activate/deactivate users
+- ✅ Change user roles (including to 'admin')
+
+---
+
 ## Git Commits
 
 | Commit | Message | Files Changed |
@@ -225,7 +264,8 @@ def calculate_entry_duration(entry: TimeEntry, now: datetime) -> int:
 | `62f89ed` | WebSocket broadcast fix for real-time updates | 2 files |
 | `8bc430c` | Add session report for December 29, 2025 | 1 file |
 | `e4606b6` | Fix reports to include running timers | 1 file |
-| Pending | Fix 403 error - redirect to login | 2 files |
+| `f0b216d` | Fix 403 error - redirect to login | 2 files |
+| Pending | Fix SuperAdmin user management | 2 files |
 
 ---
 

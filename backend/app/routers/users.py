@@ -24,7 +24,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8)
     name: str = Field(..., min_length=1, max_length=255)
-    role: str = Field(default="regular_user")
+    role: str = Field(default="regular_user", pattern="^(super_admin|admin|regular_user)$")
     
     # Contact Information
     phone: Optional[str] = Field(None, max_length=50)
@@ -57,7 +57,7 @@ class UserAdminUpdate(BaseModel):
 
 
 class RoleUpdate(BaseModel):
-    role: str = Field(..., pattern="^(super_admin|regular_user)$")
+    role: str = Field(..., pattern="^(super_admin|admin|regular_user)$")
 
 
 class PaginatedUsers(BaseModel):
@@ -274,7 +274,10 @@ async def update_user(
     }
     
     if user_data.email and user_data.email != user.email:
-        email_check = await db.execute(select(User).where(User.email == user_data.email))
+        # Check if email is already in use by ANOTHER user (not this one)
+        email_check = await db.execute(
+            select(User).where(User.email == user_data.email, User.id != user_id)
+        )
         if email_check.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already in use")
         user.email = user_data.email
