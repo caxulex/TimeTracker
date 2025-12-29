@@ -8,9 +8,9 @@
 | Field | Value |
 |-------|-------|
 | **Date** | December 29, 2025 |
-| **Session Focus** | Admin Setup & Real-Time Bug Fix |
+| **Session Focus** | Bug Fixes, Rate Limiting, & Resale Documentation |
 | **Production URL** | https://timetracker.shaemarcus.com |
-| **Status** | ✅ Changes Pushed - Ready for Deployment |
+| **Status** | ✅ All Changes Pushed - Ready for Deployment |
 
 ---
 
@@ -256,79 +256,6 @@ role: str = Field(..., pattern="^(super_admin|admin|regular_user)$")
 
 ---
 
-## Git Commits
-
-| Commit | Message | Files Changed |
-|--------|---------|---------------|
-| Previous | Superadmin creation scripts | 3 files |
-| `62f89ed` | WebSocket broadcast fix for real-time updates | 2 files |
-| `8bc430c` | Add session report for December 29, 2025 | 1 file |
-| `e4606b6` | Fix reports to include running timers | 1 file |
-| `f0b216d` | Fix 403 error - redirect to login | 2 files |
-| Pending | Fix SuperAdmin user management | 2 files |
-
----
-
-## Pending Actions
-
-### For Deployment:
-
-1. **Run deployment script on server**:
-   ```bash
-   ~/deploy.sh
-   ```
-
-2. **Create superadmin user**:
-   ```bash
-   docker exec time-tracker-backend python -m scripts.create_superadmin
-   ```
-
-### Testing After Deployment:
-
-1. Open app in **two different browsers** (or incognito window)
-2. Log in as different users
-3. Start a timer in one browser
-4. Verify the "Who's Working Now" widget updates **immediately** in the other browser (no refresh)
-5. Stop the timer and verify it disappears from the widget in real-time
-
----
-
-## Technical Notes
-
-### Container Names (Important!)
-- Backend: `time-tracker-backend` (with hyphens, not underscores)
-- Frontend: `time-tracker-frontend`
-- Database: `time-tracker-postgres`
-- Cache: `time-tracker-redis`
-
-### WebSocket Architecture
-- ConnectionManager handles all WebSocket connections
-- `active_timers` dictionary caches current running timers
-- `broadcast_to_all()` sends messages to all connected users
-- `set_active_timer()` / `clear_active_timer()` maintain cache consistency
-
----
-
-## Session Timeline
-
-| Time | Activity |
-|------|----------|
-| Start | Created superadmin creation scripts |
-| | Attempted local execution (DB not accessible) |
-| | Committed and pushed scripts |
-| | User deployed and ran superadmin creation |
-| | User reported "Who's Working Now" bug |
-| | Conducted WebSocket assessment |
-| | Identified root cause (REST API not broadcasting) |
-| | Implemented fix in backend and frontend |
-| | Committed and pushed fix |
-| | Performed full code assessment |
-| | Created deployment guide for resale |
-| | Fixed "undefined.split()" error in ActiveTimers & helpers |
-| Current | Documentation and deployment preparation |
-
----
-
 ### 7. ✅ Fix TypeError: Cannot read properties of undefined (reading 'split')
 
 **Bug Reported**: Console error when timer starts tracking - `TypeError: Cannot read properties of undefined (reading 'split')`
@@ -380,12 +307,278 @@ const getInitials = (name: string | null | undefined): string => {
 
 ---
 
-## Next Steps (After Deployment Verification)
+### 8. ✅ Rate Limit Handling & Debouncing in TimerStore
 
-1. Verify real-time updates working in production
-2. Continue with AI Integration Phase 1 (per AIupgrade.md roadmap)
-3. Set up OpenAI API integration for time entry suggestions
+**Bug Reported**: 429 Too Many Requests error when timer store syncs with backend, especially during development/testing
+
+**Root Cause Analysis**:
+- Backend has rate limit of 60 requests/minute
+- Multiple page refreshes, browser tabs, or hot-reloads triggered excessive API calls
+- `fetchTimer()` was called on every page load without debouncing
+
+**Solution Implemented** (`frontend/src/stores/timerStore.ts`):
+
+```typescript
+fetchTimer: async () => {
+  // Debounce: Don't fetch if we synced in the last 2 seconds
+  const { lastSyncTime } = get();
+  if (lastSyncTime && Date.now() - lastSyncTime < 2000) {
+    console.log('[TimerStore] Skipping fetch - recently synced');
+    return;
+  }
+  
+  // ... fetch logic ...
+  
+  // Handle 429 (rate limit) gracefully - just use local state
+  if (error.response?.status === 429) {
+    console.warn('[TimerStore] Rate limited, using local state');
+    set({ isLoading: false });
+    return;
+  }
+}
+```
+
+**Rehydration Logic** - Only sync if data is stale:
+```typescript
+onRehydrateStorage: () => (state) => {
+  // Only fetch from backend if we haven't synced in the last 30 seconds
+  const shouldSync = !state?.lastSyncTime || Date.now() - state.lastSyncTime > 30000;
+  if (shouldSync && state) {
+    setTimeout(() => state.fetchTimer(), 100);
+  }
+}
+```
+
+**Impact**:
+- 429 errors now gracefully fall back to local state
+- 2-second debounce prevents rapid-fire requests
+- 30-second threshold on rehydration reduces unnecessary API calls
 
 ---
 
-**Report Status**: ✅ Complete - Changes Pushed
+### 9. ✅ Fix TimerStore Making API Calls on Login Page
+
+**Bug Reported**: TimerStore was making API calls even on the login page (no auth token), causing 401/403/429 errors in console
+
+**Root Cause Analysis**:
+- `onRehydrateStorage` triggered `fetchTimer()` on EVERY page load
+- No check for authentication before making API calls
+- Login page was hitting `/api/time/timer` without a token
+
+**Solution Implemented** (`frontend/src/stores/timerStore.ts`):
+
+```typescript
+// Helper to check if user is authenticated
+const isAuthenticated = (): boolean => {
+  return !!localStorage.getItem('access_token');
+};
+
+fetchTimer: async () => {
+  // Don't fetch if not authenticated
+  if (!isAuthenticated()) {
+    console.log('[TimerStore] Skipping fetch - not authenticated');
+    return;
+  }
+  // ... rest of fetch logic
+}
+
+onRehydrateStorage: () => (state) => {
+  // Only fetch from backend if authenticated
+  if (!isAuthenticated()) {
+    console.log('[TimerStore] Skipping backend sync - not authenticated');
+    return;
+  }
+  // ... rest of rehydration logic
+}
+```
+
+**Also added** handling for 401/403 errors:
+```typescript
+// Handle 401/403 (auth errors) and 429 (rate limit) gracefully
+const status = error.response?.status;
+if (status === 401 || status === 403 || status === 429) {
+  console.warn(`[TimerStore] ${status === 429 ? 'Rate limited' : 'Auth error'}, using local state`);
+  set({ isLoading: false });
+  return;
+}
+```
+
+**Impact**: 
+- No more console errors on login page
+- Clean separation between authenticated and unauthenticated states
+- Graceful handling of auth errors
+
+---
+
+### 10. ✅ DEPLOYMENT_RESALE_GUIDE.md Created
+
+**Objective**: Create comprehensive documentation for deploying TimeTracker to business clients for resale
+
+**Guide Contents**:
+
+| Section | Description |
+|---------|-------------|
+| Executive Summary | Difficulty assessment, time estimates, costs |
+| Architecture Overview | Docker Compose diagram, component list |
+| Manual Deployment Steps | Step-by-step VPS setup guide |
+| Automated Script | `deploy-client.sh` one-command deployment |
+| Configuration Template | Environment variables template |
+| Deployment Options | Single vs Multi-tenant comparison |
+| Pricing Recommendations | Infrastructure costs & suggested pricing |
+| Post-Deployment Checklist | Verification steps |
+| Maintenance & Updates | Update and backup procedures |
+| Troubleshooting | Common issues and solutions |
+| Security Checklist | Per-deployment security requirements |
+
+**File**: `DEPLOYMENT_RESALE_GUIDE.md` (544 lines)
+
+---
+
+### 11. ✅ Global Update Repository Strategy Added
+
+**Objective**: Document how to manage updates across multiple client deployments
+
+**New Sections Added to DEPLOYMENT_RESALE_GUIDE.md**:
+
+| Section | Content |
+|---------|---------|
+| **12. Global Update Repository** | Architecture for centralized updates |
+| **13. Version Control** | Branch strategy, semantic versioning, release workflow |
+| **14. Watchtower Auto-Updates** | Docker Compose config for automatic updates |
+| **15. Client Instance Registry** | JSON template for tracking deployments |
+| **16. Feature Flags** | Per-client configuration (backend + frontend) |
+| **17. Custom Client Builds** | When/how to create client branches |
+| **18. Rollback Strategy** | Quick rollback scripts |
+
+**Key Architecture**:
+```
+Standard Clients  →  :latest tag  →  Watchtower auto-updates
+Enterprise Clients →  :v2.1.0 tag →  Manual approval required
+Custom Builds     →  :client-name →  Separate branch, manual only
+```
+
+---
+
+### 12. ✅ GitHub Actions CI/CD Timeout Fix
+
+**Issue**: Docker login to ghcr.io timing out during CI/CD pipeline
+
+**Error**: `net/http: request canceled while waiting for connection (Client.Timeout exceeded)`
+
+**Solution** (`.github/workflows/ci-cd.yml`):
+```yaml
+- name: Login to GitHub Container Registry
+  uses: docker/login-action@v3
+  with:
+    registry: ghcr.io
+    username: ${{ github.actor }}
+    password: ${{ secrets.GITHUB_TOKEN }}
+  env:
+    DOCKER_CLIENT_TIMEOUT: 120
+    COMPOSE_HTTP_TIMEOUT: 120
+```
+
+**Note**: This is a transient GitHub infrastructure issue. Fix adds timeout settings but main solution is to re-run failed jobs.
+
+---
+
+## Git Commits (Today)
+
+| Commit | Message |
+|--------|---------|
+| `62f89ed` | WebSocket broadcast fix for real-time updates |
+| `8bc430c` | Add session report for December 29, 2025 |
+| `e4606b6` | Fix reports to include running timers |
+| `f0b216d` | Fix 403 error handling - redirect to login |
+| `1eb1e3e` | Fix SuperAdmin user management capabilities |
+| `73a8a4a` | Add deployment guide for reselling TimeTracker |
+| `483460f` | Fix TypeError: Cannot read properties of undefined (reading 'split') |
+| `e0e9a34` | Add rate limit handling and debouncing to timerStore |
+| `2dd4b54` | Fix timerStore making API calls on login page |
+| `d3b0125` | Add Docker timeout settings for ghcr.io login |
+| `348ada6` | Add global update repository strategy to deployment guide |
+
+---
+
+## Pending Actions
+
+### For Deployment:
+
+1. **Run deployment script on server**:
+   ```bash
+   ~/deploy.sh
+   ```
+
+2. **Create superadmin user** (if not already done):
+   ```bash
+   docker exec time-tracker-backend python -m scripts.create_superadmin
+   ```
+
+### Testing After Deployment:
+
+1. Open app in **two different browsers** (or incognito window)
+2. Log in as different users
+3. Start a timer in one browser
+4. Verify the "Who's Working Now" widget updates **immediately** in the other browser (no refresh)
+5. Stop the timer and verify it disappears from the widget in real-time
+6. Verify login page shows no console errors
+7. Verify Weekly Activity chart shows data when timer is running
+
+---
+
+## Technical Notes
+
+### Container Names (Important!)
+- Backend: `time-tracker-backend` (with hyphens, not underscores)
+- Frontend: `time-tracker-frontend`
+- Database: `time-tracker-postgres`
+- Cache: `time-tracker-redis`
+
+### WebSocket Architecture
+- ConnectionManager handles all WebSocket connections
+- `active_timers` dictionary caches current running timers
+- `broadcast_to_all()` sends messages to all connected users
+- `set_active_timer()` / `clear_active_timer()` maintain cache consistency
+
+### TimerStore Guards
+- `isAuthenticated()` - Checks for access_token before API calls
+- 2-second debounce on `fetchTimer()`
+- 30-second threshold on rehydration sync
+- Graceful handling of 401/403/429 errors
+
+---
+
+## Session Timeline
+
+| Time | Activity |
+|------|----------|
+| Start | Created superadmin creation scripts |
+| | User deployed and ran superadmin creation |
+| | Fixed "Who's Working Now" real-time bug |
+| | Fixed Weekly Activity chart (running timer) |
+| | Fixed 403 error redirect to login |
+| | Fixed SuperAdmin user management |
+| | Created DEPLOYMENT_RESALE_GUIDE.md |
+| | Fixed TypeError: undefined.split() |
+| | Fixed 429 rate limit handling |
+| | Fixed timerStore login page API calls |
+| | Fixed GitHub Actions timeout |
+| | Added global update strategy to guide |
+| End | Updated session report |
+
+---
+
+## Next Steps
+
+1. **Deploy all fixes** - Run `~/deploy.sh` on server
+2. **Verify production** - Test all fixes in production
+3. **Continue AI Integration** - Phase 1 per AIupgrade.md roadmap
+4. **OAuth Integration** - Add "Login with Google/Apple" (optional)
+5. **Multi-tenant consideration** - If scaling to many clients
+
+---
+
+**Report Status**: ✅ Complete - All Changes Pushed  
+**Total Commits Today**: 11  
+**Files Changed**: 15+  
+**New Documentation**: DEPLOYMENT_RESALE_GUIDE.md (960+ lines)
