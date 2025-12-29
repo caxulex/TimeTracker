@@ -17,7 +17,7 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers = {}) {
   const navigate = useNavigate();
   const location = useLocation();
   const { isAuthenticated } = useAuthStore();
-  const { activeTimer, startTimer, stopTimer } = useTimerStore();
+  const { isRunning, stopTimer } = useTimerStore();
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
@@ -39,7 +39,7 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers = {}) {
       // Ctrl/Cmd + S: Start timer (if not running)
       if (isCtrlOrCmd && event.key === 's') {
         event.preventDefault();
-        if (!activeTimer) {
+        if (!isRunning) {
           if (handlers.onStartTimer) {
             handlers.onStartTimer();
           } else {
@@ -52,7 +52,7 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers = {}) {
       // Ctrl/Cmd + E: Stop timer (if running)
       if (isCtrlOrCmd && event.key === 'e') {
         event.preventDefault();
-        if (activeTimer) {
+        if (isRunning) {
           if (handlers.onStopTimer) {
             handlers.onStopTimer();
           } else {
