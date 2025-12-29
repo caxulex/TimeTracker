@@ -539,6 +539,422 @@ For each deployment, ensure:
 
 ---
 
-**Document Version**: 1.0  
+## 12. Global Update Repository Strategy
+
+When selling to multiple clients, you need a centralized way to push updates while keeping custom builds isolated.
+
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     YOUR CENTRAL REPOSITORY                          │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │  GitHub Repo    →    GHCR Images    →    Version Tags       │    │
+│  │  (Source Code)       (Built Images)      (Release Control)   │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────┘
+                                │
+                                │ Pull Updates
+        ┌───────────────────────┼───────────────────────┐
+        ▼                       ▼                       ▼
+   ┌─────────────┐        ┌─────────────┐        ┌─────────────┐
+   │  Client A   │        │  Client B   │        │  Client C   │
+   │  Standard   │        │  Standard   │        │  CUSTOM     │
+   │  :latest    │        │  :latest    │        │  :v2.1.0    │
+   │  (Auto)     │        │  (Auto)     │        │  (Frozen)   │
+   └─────────────┘        └─────────────┘        └─────────────┘
+        │                       │                       │
+   Auto-updates            Auto-updates           Manual updates
+   via Watchtower          via Watchtower         (approval req)
+```
+
+### Image Tagging Strategy
+
+| Tag | Purpose | Who Uses It |
+|-----|---------|-------------|
+| `:latest` | Current stable release | Standard clients (auto-update) |
+| `:v2.1.0` | Specific version | Custom/Enterprise clients (frozen) |
+| `:develop` | Pre-release testing | Internal QA only |
+| `:client-acme` | Client-specific build | Heavily customized clients |
+
+### Client Tier Update Policies
+
+| Tier | Image Tag | Update Method | Customization |
+|------|-----------|---------------|---------------|
+| **Standard** | `:latest` | Automatic (Watchtower) | None - core product only |
+| **Professional** | `:latest` | Scheduled (weekly) | Config-level only |
+| **Enterprise** | `:v2.x.x` | Manual approval | Full custom features |
+| **Custom Build** | `:client-name` | Manual only | Separate branch |
+
+---
+
+## 13. Version Control & Release Management
+
+### Branch Strategy
+
+```
+main (stable)
+  │
+  ├── develop (integration)
+  │     │
+  │     ├── feature/new-reports
+  │     ├── feature/api-v2
+  │     └── fix/timer-bug
+  │
+  ├── release/v2.1.0 (release candidate)
+  │
+  └── client/acme-custom (client-specific)
+```
+
+### Release Workflow
+
+```bash
+# 1. Create release branch from develop
+git checkout develop
+git checkout -b release/v2.1.0
+
+# 2. Final testing and bug fixes on release branch
+# ... testing ...
+
+# 3. Merge to main and tag
+git checkout main
+git merge release/v2.1.0
+git tag -a v2.1.0 -m "Release v2.1.0 - New reporting features"
+git push origin main --tags
+
+# 4. Build and push Docker images
+docker build -t ghcr.io/yourcompany/timetracker-backend:v2.1.0 ./backend
+docker build -t ghcr.io/yourcompany/timetracker-backend:latest ./backend
+docker push ghcr.io/yourcompany/timetracker-backend:v2.1.0
+docker push ghcr.io/yourcompany/timetracker-backend:latest
+
+# 5. Standard clients auto-update via Watchtower
+# 6. Enterprise clients notified of new version available
+```
+
+### Semantic Versioning
+
+| Version Change | When | Example |
+|----------------|------|---------|
+| **Major** (X.0.0) | Breaking changes, major features | v2.0.0 → v3.0.0 |
+| **Minor** (0.X.0) | New features, backward compatible | v2.1.0 → v2.2.0 |
+| **Patch** (0.0.X) | Bug fixes, security patches | v2.1.0 → v2.1.1 |
+
+---
+
+## 14. Automatic Updates with Watchtower
+
+### Setup Watchtower for Standard Clients
+
+Add to client's `docker-compose.prod.yml`:
+
+```yaml
+services:
+  # ... existing services ...
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Check for updates daily at 3 AM
+      - WATCHTOWER_SCHEDULE=0 0 3 * * *
+      # Only update specific containers
+      - WATCHTOWER_LABEL_ENABLE=true
+      # Cleanup old images
+      - WATCHTOWER_CLEANUP=true
+      # Notification (optional)
+      - WATCHTOWER_NOTIFICATIONS=email
+      - WATCHTOWER_NOTIFICATION_EMAIL_FROM=updates@yourcompany.com
+      - WATCHTOWER_NOTIFICATION_EMAIL_TO=admin@client.com
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+```
+
+### Label Containers for Auto-Update
+
+```yaml
+services:
+  backend:
+    image: ghcr.io/yourcompany/timetracker-backend:latest
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    # ...
+
+  frontend:
+    image: ghcr.io/yourcompany/timetracker-frontend:latest
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    # ...
+
+  # Database should NOT auto-update
+  db:
+    image: postgres:15
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    # ...
+```
+
+### Update Notification Script
+
+Save as `notify-update.sh` on your build server:
+
+```bash
+#!/bin/bash
+# Run after pushing new images
+
+VERSION=$1
+CHANGELOG=$2
+
+# List of client webhooks/emails
+CLIENTS=(
+  "https://hooks.slack.com/services/CLIENT_A_WEBHOOK"
+  "https://hooks.slack.com/services/CLIENT_B_WEBHOOK"
+)
+
+for WEBHOOK in "${CLIENTS[@]}"; do
+  curl -X POST -H 'Content-type: application/json' \
+    --data "{\"text\":\"🚀 TimeTracker $VERSION released!\n$CHANGELOG\nAuto-update will occur at 3 AM.\"}" \
+    "$WEBHOOK"
+done
+```
+
+---
+
+## 15. Client Instance Registry
+
+Track all deployments in a central registry:
+
+### Client Registry Template (clients.json)
+
+```json
+{
+  "clients": [
+    {
+      "id": "client-001",
+      "name": "Acme Corp",
+      "domain": "timetracker.acme.com",
+      "tier": "standard",
+      "version": "latest",
+      "auto_update": true,
+      "deployed_at": "2025-01-15",
+      "server_ip": "192.168.1.100",
+      "server_provider": "aws-lightsail",
+      "monthly_cost": 12,
+      "monthly_price": 79,
+      "contact_email": "admin@acme.com",
+      "features": {
+        "payroll": true,
+        "reports_export": true,
+        "api_access": false,
+        "custom_branding": false
+      },
+      "notes": "Standard deployment, no customizations"
+    },
+    {
+      "id": "client-002",
+      "name": "TechStart Inc",
+      "domain": "time.techstart.io",
+      "tier": "enterprise",
+      "version": "v2.1.0",
+      "auto_update": false,
+      "deployed_at": "2025-02-01",
+      "server_ip": "192.168.1.101",
+      "server_provider": "digitalocean",
+      "monthly_cost": 50,
+      "monthly_price": 299,
+      "contact_email": "it@techstart.io",
+      "features": {
+        "payroll": true,
+        "reports_export": true,
+        "api_access": true,
+        "custom_branding": true,
+        "sso_integration": true
+      },
+      "custom_branch": "client/techstart",
+      "notes": "Custom SSO integration with Okta"
+    }
+  ]
+}
+```
+
+### Client Management Dashboard (Future)
+
+Consider building a simple admin dashboard to:
+- View all client deployments
+- Monitor health/status of each instance
+- Trigger manual updates
+- View revenue/costs per client
+- Manage feature flags
+
+---
+
+## 16. Feature Flags for Per-Client Configuration
+
+### Environment-Based Feature Flags
+
+Add to client's `.env`:
+
+```env
+# Feature Flags
+FEATURE_PAYROLL_ENABLED=true
+FEATURE_REPORTS_EXPORT=true
+FEATURE_API_ACCESS=false
+FEATURE_CUSTOM_BRANDING=false
+FEATURE_SSO_ENABLED=false
+FEATURE_ADVANCED_ANALYTICS=false
+```
+
+### Backend Feature Flag Check
+
+```python
+# backend/app/config.py
+class Settings:
+    # ... existing settings ...
+    
+    # Feature Flags
+    FEATURE_PAYROLL_ENABLED: bool = True
+    FEATURE_REPORTS_EXPORT: bool = True
+    FEATURE_API_ACCESS: bool = False
+    FEATURE_CUSTOM_BRANDING: bool = False
+    FEATURE_SSO_ENABLED: bool = False
+
+# backend/app/dependencies.py
+from app.config import settings
+
+def require_feature(feature_name: str):
+    """Dependency to check if feature is enabled"""
+    def check_feature():
+        feature_enabled = getattr(settings, f"FEATURE_{feature_name.upper()}_ENABLED", False)
+        if not feature_enabled:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Feature '{feature_name}' is not enabled for this instance"
+            )
+        return True
+    return Depends(check_feature)
+
+# Usage in router
+@router.get("/api/payroll/report")
+async def get_payroll_report(
+    _: bool = require_feature("payroll"),
+    db: AsyncSession = Depends(get_db)
+):
+    # ... endpoint logic ...
+```
+
+### Frontend Feature Flag Check
+
+```typescript
+// frontend/src/config/features.ts
+export const features = {
+  payroll: import.meta.env.VITE_FEATURE_PAYROLL === 'true',
+  reportsExport: import.meta.env.VITE_FEATURE_REPORTS_EXPORT === 'true',
+  apiAccess: import.meta.env.VITE_FEATURE_API_ACCESS === 'true',
+  customBranding: import.meta.env.VITE_FEATURE_CUSTOM_BRANDING === 'true',
+};
+
+// Usage in component
+{features.payroll && <PayrollSection />}
+```
+
+---
+
+## 17. Handling Custom Client Builds
+
+### When to Create a Custom Branch
+
+| Scenario | Solution |
+|----------|----------|
+| Config changes only | Environment variables |
+| Logo/branding changes | Feature flag + assets |
+| Minor UI tweaks | Feature flag |
+| New feature for one client | Custom branch |
+| Major workflow changes | Custom branch |
+| Third-party integration | Custom branch |
+
+### Custom Branch Workflow
+
+```bash
+# Create client-specific branch from latest release
+git checkout v2.1.0
+git checkout -b client/acme-custom
+
+# Make client-specific changes
+# ... develop custom features ...
+
+# Commit and push
+git add .
+git commit -m "[ACME] Add custom PTO tracking feature"
+git push origin client/acme-custom
+
+# Build client-specific image
+docker build -t ghcr.io/yourcompany/timetracker-backend:client-acme ./backend
+docker push ghcr.io/yourcompany/timetracker-backend:client-acme
+
+# Deploy to client
+# In client's docker-compose.yml, use:
+# image: ghcr.io/yourcompany/timetracker-backend:client-acme
+```
+
+### Merging Core Updates to Custom Branches
+
+```bash
+# When new version released, merge to custom branch
+git checkout client/acme-custom
+git merge v2.2.0
+
+# Resolve any conflicts
+# Test thoroughly
+# Rebuild and deploy client-specific image
+```
+
+---
+
+## 18. Rollback Strategy
+
+### Quick Rollback for Standard Clients
+
+```bash
+# SSH into client server
+ssh client-server
+
+# Roll back to previous version
+cd /opt/timetracker-client.com
+
+# Update docker-compose to use specific version
+# Change: image: ghcr.io/yourcompany/timetracker-backend:latest
+# To:     image: ghcr.io/yourcompany/timetracker-backend:v2.0.9
+
+docker compose pull
+docker compose up -d
+```
+
+### Automated Rollback Script
+
+```bash
+#!/bin/bash
+# rollback.sh <version>
+
+VERSION=${1:-"v2.0.9"}
+
+echo "🔄 Rolling back to $VERSION..."
+
+# Stop watchtower temporarily
+docker stop watchtower
+
+# Update images
+docker compose pull backend frontend
+docker compose up -d backend frontend
+
+echo "✅ Rolled back to $VERSION"
+echo "⚠️  Remember to restart watchtower when ready for updates"
+```
+
+---
+
+**Document Version**: 1.1  
 **Last Updated**: December 29, 2025  
 **Author**: TimeTracker Team
