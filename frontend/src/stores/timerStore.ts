@@ -31,6 +31,11 @@ const calculateElapsed = (startTime: string): number => {
   return Math.max(0, Math.floor((now - start) / 1000));
 };
 
+// Helper to check if user is authenticated
+const isAuthenticated = (): boolean => {
+  return !!localStorage.getItem('access_token');
+};
+
 export const useTimerStore = create<TimerState>()(
   persist(
     (set, get) => ({
@@ -42,6 +47,12 @@ export const useTimerStore = create<TimerState>()(
       lastSyncTime: null,
 
       fetchTimer: async () => {
+        // Don't fetch if not authenticated
+        if (!isAuthenticated()) {
+          console.log('[TimerStore] Skipping fetch - not authenticated');
+          return;
+        }
+        
         // Debounce: Don't fetch if we synced in the last 2 seconds
         const { lastSyncTime } = get();
         if (lastSyncTime && Date.now() - lastSyncTime < 2000) {
@@ -74,9 +85,10 @@ export const useTimerStore = create<TimerState>()(
             });
           }
         } catch (error: any) {
-          // Handle 429 (rate limit) gracefully - just use local state
-          if (error.response?.status === 429) {
-            console.warn('[TimerStore] Rate limited, using local state');
+          // Handle 401/403 (auth errors) and 429 (rate limit) gracefully - just use local state
+          const status = error.response?.status;
+          if (status === 401 || status === 403 || status === 429) {
+            console.warn(`[TimerStore] ${status === 429 ? 'Rate limited' : 'Auth error'}, using local state`);
             set({ isLoading: false });
             return;
           }
@@ -187,8 +199,12 @@ export const useTimerStore = create<TimerState>()(
           console.log('[TimerStore] Rehydrated with running timer, elapsed:', elapsed);
         }
         
-        // Only fetch from backend if we haven't synced in the last 30 seconds
-        // This prevents excessive API calls during development/testing
+        // Only fetch from backend if authenticated and we haven't synced recently
+        if (!isAuthenticated()) {
+          console.log('[TimerStore] Skipping backend sync - not authenticated');
+          return;
+        }
+        
         const shouldSync = !state?.lastSyncTime || Date.now() - state.lastSyncTime > 30000;
         if (shouldSync && state) {
           console.log('[TimerStore] Triggering backend sync (stale data)...');
