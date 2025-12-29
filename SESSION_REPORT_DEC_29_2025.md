@@ -323,7 +323,60 @@ role: str = Field(..., pattern="^(super_admin|admin|regular_user)$")
 | | Implemented fix in backend and frontend |
 | | Committed and pushed fix |
 | | Performed full code assessment |
+| | Created deployment guide for resale |
+| | Fixed "undefined.split()" error in ActiveTimers & helpers |
 | Current | Documentation and deployment preparation |
+
+---
+
+### 7. ✅ Fix TypeError: Cannot read properties of undefined (reading 'split')
+
+**Bug Reported**: Console error when timer starts tracking - `TypeError: Cannot read properties of undefined (reading 'split')`
+
+**Root Cause Analysis**:
+- `getInitials()` function in both `helpers.ts` and `ActiveTimers.tsx` called `.split(' ')` on name without null checks
+- If a user's name is `null` or `undefined`, the function crashes
+- Similar issues in `PayrollPeriodsPage.tsx` with date parsing using `.split('-')`
+
+**Solution Implemented**:
+
+#### 1. Fixed `frontend/src/utils/helpers.ts`:
+```typescript
+export function getInitials(name: string | null | undefined): string {
+  if (!name) return '?';
+  return name
+    .split(' ')
+    .map((n) => n[0])
+    .filter(Boolean)
+    .join('')
+    .toUpperCase()
+    .slice(0, 2) || '?';
+}
+```
+
+#### 2. Fixed `frontend/src/components/ActiveTimers.tsx`:
+```typescript
+const getInitials = (name: string | null | undefined): string => {
+  if (!name) return '?';
+  return name
+    .split(' ')
+    .map(n => n[0])
+    .filter(Boolean)
+    .join('')
+    .toUpperCase()
+    .slice(0, 2) || '?';
+};
+```
+
+#### 3. Fixed `frontend/src/pages/PayrollPeriodsPage.tsx`:
+- `generatePeriodName()` - Added null/undefined checks before split
+- `formatDate()` - Added null/undefined checks before split
+
+**Key Changes**:
+- Added null/undefined guards before calling `.split()`
+- Added `.filter(Boolean)` to handle empty strings in split results
+- Return fallback value `'?'` when name is undefined
+- Added `.includes('-')` check before date parsing
 
 ---
 
@@ -335,4 +388,4 @@ role: str = Field(..., pattern="^(super_admin|admin|regular_user)$")
 
 ---
 
-**Report Status**: 🔄 In Progress (will update as session continues)
+**Report Status**: ✅ Complete - Changes Pushed

@@ -334,15 +334,19 @@ export const PayrollPeriodsPage: React.FC = () => {
   ];
 
   // Generate period name (always in English)
-  const generatePeriodName = (type: PeriodType, startDate: string, endDate?: string) => {
-    if (!startDate) return '';
+  const generatePeriodName = (type: PeriodType, startDate: string | null | undefined, endDate?: string | null) => {
+    if (!startDate || !startDate.includes('-')) return '';
     // Parse as local date to avoid timezone issues
-    const [startYear, startMonth] = startDate.split('-').map(Number);
-    const startMonthName = ENGLISH_MONTHS[startMonth - 1];
+    const startParts = startDate.split('-').map(Number);
+    if (startParts.length < 2) return '';
+    const [startYear, startMonth] = startParts;
+    const startMonthName = ENGLISH_MONTHS[startMonth - 1] || '';
     
-    if (endDate) {
-      const [endYear, endMonth] = endDate.split('-').map(Number);
-      const endMonthName = ENGLISH_MONTHS[endMonth - 1];
+    if (endDate && endDate.includes('-')) {
+      const endParts = endDate.split('-').map(Number);
+      if (endParts.length < 2) return `${startMonthName} ${startYear} - ${PERIOD_TYPE_LABELS[type]}`;
+      const [endYear, endMonth] = endParts;
+      const endMonthName = ENGLISH_MONTHS[endMonth - 1] || '';
       
       // If same month, just use single month
       if (startYear === endYear && startMonth === endMonth) {
@@ -389,10 +393,12 @@ export const PayrollPeriodsPage: React.FC = () => {
   };
 
   // Format date for display (always in English)
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return '';
-    const [year, month, day] = dateStr.split('-').map(Number);
-    const monthName = ENGLISH_MONTHS[month - 1];
+  const formatDate = (dateStr: string | null | undefined) => {
+    if (!dateStr || !dateStr.includes('-')) return '';
+    const parts = dateStr.split('-').map(Number);
+    if (parts.length < 3) return dateStr;
+    const [year, month, day] = parts;
+    const monthName = ENGLISH_MONTHS[month - 1] || '';
     return `${monthName} ${day}, ${year}`;
   };
 

@@ -167,13 +167,15 @@ export function secondsToHours(seconds: number): number {
 /**
  * Get initials from name
  */
-export function getInitials(name: string): string {
+export function getInitials(name: string | null | undefined): string {
+  if (!name) return '?';
   return name
     .split(' ')
     .map((n) => n[0])
+    .filter(Boolean)
     .join('')
     .toUpperCase()
-    .slice(0, 2);
+    .slice(0, 2) || '?';
 }
 
 // Format distance to now (e.g., "2 hours ago", "3 days ago")

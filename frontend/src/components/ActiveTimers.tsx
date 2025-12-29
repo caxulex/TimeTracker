@@ -63,13 +63,15 @@ export function ActiveTimers({ teamId, className = '' }: ActiveTimersProps) {
     return hours.toString().padStart(2, '0') + ':' + minutes.toString().padStart(2, '0') + ':' + secs.toString().padStart(2, '0');
   };
 
-  const getInitials = (name: string): string => {
+  const getInitials = (name: string | null | undefined): string => {
+    if (!name) return '?';
     return name
       .split(' ')
       .map(n => n[0])
+      .filter(Boolean)
       .join('')
       .toUpperCase()
-      .slice(0, 2);
+      .slice(0, 2) || '?';
   };
 
   const getRandomColor = (userId: number): string => {
