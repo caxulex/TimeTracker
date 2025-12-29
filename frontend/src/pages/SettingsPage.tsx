@@ -7,6 +7,7 @@ import { Card, CardHeader, Button, Input, PasswordInput } from '../components/co
 import { useAuthStore } from '../stores/authStore';
 import { authApi } from '../api/client';
 import { useNotifications } from '../hooks/useNotifications';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface ProfileForm {
   name: string;
@@ -22,6 +23,7 @@ interface PasswordForm {
 export function SettingsPage() {
   const { user, setUser } = useAuthStore();
   const { addNotification } = useNotifications();
+  const { isDark, toggleTheme } = useTheme();
   const [profileLoading, setProfileLoading] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
 
@@ -109,8 +111,8 @@ export function SettingsPage() {
     <div className="max-w-2xl mx-auto space-y-6">
       {/* Page header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
-        <p className="text-gray-500">Manage your account settings</p>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Settings</h1>
+        <p className="text-gray-500 dark:text-gray-400">Manage your account settings</p>
       </div>
 
       {/* Profile section */}
@@ -191,23 +193,30 @@ export function SettingsPage() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="font-medium text-gray-900">Dark Mode</p>
-              <p className="text-sm text-gray-500">Use dark theme across the application</p>
+              <p className="font-medium text-gray-900 dark:text-gray-100">Dark Mode</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Use dark theme across the application</p>
             </div>
             <button
               type="button"
-              className="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-gray-200 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              onClick={toggleTheme}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                isDark ? 'bg-blue-600' : 'bg-gray-200'
+              }`}
               role="switch"
-              aria-checked="false"
+              aria-checked={isDark}
             >
-              <span className="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" />
+              <span 
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  isDark ? 'translate-x-5' : 'translate-x-0'
+                }`} 
+              />
             </button>
           </div>
 
           <div className="flex items-center justify-between">
             <div>
-              <p className="font-medium text-gray-900">Email Notifications</p>
-              <p className="text-sm text-gray-500">Receive weekly summary emails</p>
+              <p className="font-medium text-gray-900 dark:text-gray-100">Email Notifications</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Receive weekly summary emails</p>
             </div>
             <button
               type="button"
@@ -226,15 +235,15 @@ export function SettingsPage() {
         <CardHeader title="Account Information" />
         <div className="space-y-3 text-sm">
           <div className="flex justify-between">
-            <span className="text-gray-500">User ID</span>
-            <span className="text-gray-900 font-mono">{user?.id}</span>
+            <span className="text-gray-500 dark:text-gray-400">User ID</span>
+            <span className="text-gray-900 dark:text-gray-100 font-mono">{user?.id}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-gray-500">Role</span>
-            <span className="text-gray-900 capitalize">{user?.role}</span>
+            <span className="text-gray-500 dark:text-gray-400">Role</span>
+            <span className="text-gray-900 dark:text-gray-100 capitalize">{user?.role}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-gray-500">Account Status</span>
+            <span className="text-gray-500 dark:text-gray-400">Account Status</span>
             <span className={`font-medium ${user?.is_active ? 'text-green-600' : 'text-red-600'}`}>
               {user?.is_active ? 'Active' : 'Inactive'}
             </span>
@@ -243,12 +252,12 @@ export function SettingsPage() {
       </Card>
 
       {/* Danger zone */}
-      <Card className="border-red-200">
+      <Card className="border-red-200 dark:border-red-800">
         <CardHeader title="Danger Zone" subtitle="Irreversible actions" />
         <div className="flex items-center justify-between">
           <div>
-            <p className="font-medium text-gray-900">Delete Account</p>
-            <p className="text-sm text-gray-500">Permanently delete your account and all data</p>
+            <p className="font-medium text-gray-900 dark:text-gray-100">Delete Account</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">Permanently delete your account and all data</p>
           </div>
           <Button variant="danger" size="sm">
             Delete Account
