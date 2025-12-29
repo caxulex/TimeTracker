@@ -194,6 +194,29 @@ def calculate_entry_duration(entry: TimeEntry, now: datetime) -> int:
 
 ---
 
+### 5. ✅ 403 Error Handling & Auto-Redirect to Login
+
+**Bug Reported**: When user gets disconnected (without logging out), a 403 error appears instead of redirecting to login
+
+**Root Cause Analysis**:
+- The axios interceptor only handled **401** (Unauthorized) errors
+- **403** (Forbidden) errors were not being caught and redirected
+- When token expires or user session is invalid, 403 errors would show instead of graceful redirect
+
+**Solution Implemented** (`frontend/src/api/client.ts`):
+
+**Key Changes**:
+1. Added 403 status to the redirect condition alongside 401
+2. Added network error handling (no redirect on network issues, let UI handle)
+3. Added check to skip auth endpoints to avoid infinite loops
+4. For 401: Try token refresh first, then redirect if refresh fails
+5. For 403: Directly clear tokens and redirect to login
+
+**Before**: Only 401 was handled, 403 showed error to user
+**After**: Both 401 and 403 cleanly redirect to login page
+
+---
+
 ## Git Commits
 
 | Commit | Message | Files Changed |
@@ -201,7 +224,8 @@ def calculate_entry_duration(entry: TimeEntry, now: datetime) -> int:
 | Previous | Superadmin creation scripts | 3 files |
 | `62f89ed` | WebSocket broadcast fix for real-time updates | 2 files |
 | `8bc430c` | Add session report for December 29, 2025 | 1 file |
-| Pending | Fix reports to include running timers | 1 file |
+| `e4606b6` | Fix reports to include running timers | 1 file |
+| Pending | Fix 403 error - redirect to login | 2 files |
 
 ---
 
