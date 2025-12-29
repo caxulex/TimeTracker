@@ -262,6 +262,34 @@ async def start_timer(
     await db.commit()
     await db.refresh(entry)
     
+    # Broadcast timer start to all connected users for real-time "Who's Working Now" updates
+    await ws_manager.broadcast_to_all({
+        "type": "timer_started",
+        "data": {
+            "entry_id": entry.id,
+            "user_id": current_user.id,
+            "user_name": current_user.name,
+            "project_id": entry.project_id,
+            "project_name": project.name,
+            "task_id": entry.task_id,
+            "task_name": task_name,
+            "description": entry.description,
+            "start_time": entry.start_time.isoformat(),
+            "is_running": True
+        }
+    })
+    
+    # Update the WebSocket manager's active timers cache
+    ws_manager.set_active_timer(current_user.id, {
+        "user_name": current_user.name,
+        "project_id": entry.project_id,
+        "project_name": project.name,
+        "task_id": entry.task_id,
+        "task_name": task_name,
+        "description": entry.description,
+        "start_time": entry.start_time.isoformat()
+    })
+    
     return make_entry_response(entry, project.name, task_name, current_user.name)
 
 
@@ -297,7 +325,22 @@ async def stop_timer(
         task_result = await db.execute(select(Task.name).where(Task.id == entry.task_id))
         task_name = task_result.scalar()
     
-    # Broadcast time entry completion to all users for real-time reports update
+    # Broadcast timer stopped to all users for real-time "Who's Working Now" updates
+    await ws_manager.broadcast_to_all({
+        "type": "timer_stopped",
+        "data": {
+            "user_id": current_user.id,
+            "user_name": current_user.name,
+            "project_name": project_name,
+            "task_name": task_name,
+            "duration_seconds": entry.duration_seconds
+        }
+    })
+    
+    # Clear the WebSocket manager's active timer cache for this user
+    ws_manager.clear_active_timer(current_user.id)
+    
+    # Also broadcast time entry completion for reports update
     await ws_manager.broadcast_to_all({
         "type": "time_entry_completed",
         "data": {

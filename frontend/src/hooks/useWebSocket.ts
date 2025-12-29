@@ -122,24 +122,30 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
             case 'online_users':
               setOnlineUsers(message.users || []);
               break;
-            case 'timer_started':
+            case 'timer_started': {
+              // Handle both old format (data at top level) and new format (data in .data property)
+              const timerData = message.data || message;
               setActiveTimers(prev => {
-                const filtered = prev.filter(t => t.user_id !== message.user_id);
+                const filtered = prev.filter(t => t.user_id !== timerData.user_id);
                 return [...filtered, {
-                  user_id: message.user_id,
-                  user_name: message.user_name,
-                  project_id: message.project_id,
-                  project_name: message.project_name,
-                  task_id: message.task_id,
-                  task_name: message.task_name,
-                  description: message.description,
-                  start_time: message.start_time,
+                  user_id: timerData.user_id,
+                  user_name: timerData.user_name,
+                  project_id: timerData.project_id,
+                  project_name: timerData.project_name,
+                  task_id: timerData.task_id,
+                  task_name: timerData.task_name,
+                  description: timerData.description,
+                  start_time: timerData.start_time,
                 }];
               });
               break;
-            case 'timer_stopped':
-              setActiveTimers(prev => prev.filter(t => t.user_id !== message.user_id));
+            }
+            case 'timer_stopped': {
+              // Handle both old format (data at top level) and new format (data in .data property)
+              const stopData = message.data || message;
+              setActiveTimers(prev => prev.filter(t => t.user_id !== stopData.user_id));
               break;
+            }
             case 'team_added':
             case 'member_added':
             case 'project_created':
