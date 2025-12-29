@@ -15,6 +15,7 @@ export { AdminPage } from './AdminPage';
 export { UsersPage } from './UsersPage';
 export { StaffPage } from './StaffPage';
 export { AccountRequestsPage } from './AccountRequestsPage';
+export { NotFoundPage } from './NotFoundPage';
 
 // Payroll Pages
 export { PayRatesPage } from './PayRatesPage';

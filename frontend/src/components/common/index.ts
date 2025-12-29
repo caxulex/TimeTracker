@@ -7,6 +7,7 @@ export { Select } from './Select';
 export { Card, CardHeader } from './Card';
 export { Modal } from './Modal';
 export { Spinner, LoadingOverlay } from './Spinner';
+export { ThemeToggle } from './ThemeToggle';
 
 // Skeleton Components (TASK-032)
 export {

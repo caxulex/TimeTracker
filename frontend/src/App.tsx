@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from './components/layout/Layout';
 import { NotificationProvider } from './components/Notifications';
 import { WebSocketProvider } from './contexts/WebSocketContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import {
   LoginPage,
   RegisterPage,
@@ -24,6 +25,7 @@ import {
   UsersPage,
   StaffPage,
   AccountRequestsPage,
+  NotFoundPage,
 } from './pages';
 import { StaffDetailPage } from './pages/StaffDetailPage';
 import AdminReportsPage from './pages/AdminReportsPage';
@@ -88,9 +90,10 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <NotificationProvider>
-        <WebSocketProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <NotificationProvider>
+          <WebSocketProvider>
           <BrowserRouter>
           <Routes>
             {/* Public routes */}
@@ -264,12 +267,15 @@ function App() {
 
             {/* Default redirect */}
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            
+            {/* 404 Not Found */}
+            <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </BrowserRouter>
         </WebSocketProvider>
       </NotificationProvider>
     </QueryClientProvider>
+    </ThemeProvider>
   );
 }
 
