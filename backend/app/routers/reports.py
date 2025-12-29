@@ -4,6 +4,7 @@ Reports and analytics router
 
 import logging
 from typing import Optional, List
+from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
@@ -84,6 +85,18 @@ class TimeReport(BaseModel):
     by_day: List[DailySummary]
 
 
+def calculate_entry_duration(entry: TimeEntry, now: datetime) -> int:
+    """Calculate duration for a time entry, including running timers"""
+    if entry.end_time is None:
+        # Active timer - calculate elapsed time
+        start = entry.start_time
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        return int((now - start).total_seconds())
+    else:
+        return entry.duration_seconds or 0
+
+
 @router.get("/dashboard", response_model=DashboardStats)
 async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),
@@ -104,26 +117,29 @@ async def get_dashboard_stats(
         team_members = select(TeamMember.user_id).where(TeamMember.team_id.in_(user_teams_query))
         user_filter = TimeEntry.user_id.in_(team_members)
     
-    # Today's time
-    today_query = select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0)).where(TimeEntry.start_time >= today_start)
+    # Today's time - fetch entries to properly handle running timers
+    today_query = select(TimeEntry).where(TimeEntry.start_time >= today_start)
     if user_filter is not True:
         today_query = today_query.where(user_filter)
     today_result = await db.execute(today_query)
-    today_seconds = today_result.scalar() or 0
+    today_entries = today_result.scalars().all()
+    today_seconds = sum(calculate_entry_duration(e, now) for e in today_entries)
     
-    # This week's time
-    week_query = select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0)).where(TimeEntry.start_time >= week_start)
+    # This week's time - fetch entries to properly handle running timers
+    week_query = select(TimeEntry).where(TimeEntry.start_time >= week_start)
     if user_filter is not True:
         week_query = week_query.where(user_filter)
     week_result = await db.execute(week_query)
-    week_seconds = week_result.scalar() or 0
+    week_entries = week_result.scalars().all()
+    week_seconds = sum(calculate_entry_duration(e, now) for e in week_entries)
     
-    # This month's time
-    month_query = select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0)).where(TimeEntry.start_time >= month_start)
+    # This month's time - fetch entries to properly handle running timers
+    month_query = select(TimeEntry).where(TimeEntry.start_time >= month_start)
     if user_filter is not True:
         month_query = month_query.where(user_filter)
     month_result = await db.execute(month_query)
-    month_seconds = month_result.scalar() or 0
+    month_entries = month_result.scalars().all()
+    month_seconds = sum(calculate_entry_duration(e, now) for e in month_entries)
     
     # Active projects (user has access to)
     user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
@@ -138,11 +154,7 @@ async def get_dashboard_stats(
     pending_tasks = 0  # Simplified for now
     
     # Check for running timer
-    running_query = select(func.count(TimeEntry.id)).where(TimeEntry.end_time == None)
-    if user_filter is not True:
-        running_query = running_query.where(user_filter)
-    running_result = await db.execute(running_query)
-    running_timer = (running_result.scalar() or 0) > 0
+    running_timer = any(e.end_time is None for e in today_entries)
     
     return DashboardStats(
         today_seconds=today_seconds,
@@ -175,8 +187,8 @@ async def get_weekly_summary(
     
     week_end = week_start + timedelta(days=6)
     
-    start_datetime = datetime.combine(week_start, datetime.min.time())
-    end_datetime = datetime.combine(week_end, datetime.max.time())
+    start_datetime = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
+    end_datetime = datetime.combine(week_end, datetime.max.time()).replace(tzinfo=timezone.utc)
     
     # Build user filter: admins see all, regular users see team data
     if current_user.role in ["super_admin", "admin"]:
@@ -189,34 +201,27 @@ async def get_weekly_summary(
     
     date_filter = and_(TimeEntry.start_time >= start_datetime, TimeEntry.start_time <= end_datetime)
     
-    # Total for week
-    total_query = select(
-        func.coalesce(func.sum(TimeEntry.duration_seconds), 0),
-        func.count(TimeEntry.id)
-    ).where(date_filter)
+    # Fetch all entries for the week to properly handle running timers
+    entries_query = select(TimeEntry).where(date_filter)
     if user_filter is not True:
-        total_query = total_query.where(user_filter)
-    total_result = await db.execute(total_query)
-    total_row = total_result.first()
-    total_seconds = total_row[0] or 0
+        entries_query = entries_query.where(user_filter)
+    entries_result = await db.execute(entries_query)
+    all_entries = entries_result.scalars().all()
+    
+    # Calculate total seconds including running timers
+    total_seconds = sum(calculate_entry_duration(e, now) for e in all_entries)
     
     # Daily breakdown
     daily_breakdown = []
     for i in range(7):
         day = week_start + timedelta(days=i)
-        day_start = datetime.combine(day, datetime.min.time())
-        day_end = datetime.combine(day, datetime.max.time())
+        day_start = datetime.combine(day, datetime.min.time()).replace(tzinfo=timezone.utc)
+        day_end = datetime.combine(day, datetime.max.time()).replace(tzinfo=timezone.utc)
         
-        day_query = select(
-            func.coalesce(func.sum(TimeEntry.duration_seconds), 0),
-            func.count(TimeEntry.id)
-        ).where(TimeEntry.start_time >= day_start, TimeEntry.start_time <= day_end)
-        if user_filter is not True:
-            day_query = day_query.where(user_filter)
-        day_result = await db.execute(day_query)
-        day_row = day_result.first()
-        day_seconds = day_row[0] or 0
-        day_count = day_row[1] or 0
+        # Filter entries for this day
+        day_entries = [e for e in all_entries if day_start <= e.start_time.replace(tzinfo=timezone.utc) <= day_end]
+        day_seconds = sum(calculate_entry_duration(e, now) for e in day_entries)
+        day_count = len(day_entries)
         
         daily_breakdown.append(DailySummary(
             date=day,
@@ -242,15 +247,16 @@ async def get_time_by_project(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get time summary grouped by project"""
+    now = datetime.now(timezone.utc)
+    
     # Default to current month
     if not start_date:
-        now = datetime.now(timezone.utc)
         start_date = now.replace(day=1).date()
     if not end_date:
-        end_date = datetime.now(timezone.utc).date()
+        end_date = now.date()
     
-    start_datetime = datetime.combine(start_date, datetime.min.time())
-    end_datetime = datetime.combine(end_date, datetime.max.time())
+    start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+    end_datetime = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
     
     # Get accessible projects and users for current user
     if current_user.role in ["super_admin", "admin"]:
@@ -265,7 +271,7 @@ async def get_time_by_project(
         team_members = select(TeamMember.user_id).where(TeamMember.team_id.in_(user_teams))
         user_filter = TimeEntry.user_id.in_(team_members)
     
-    # Query time by project
+    # Fetch entries with project info to properly handle running timers
     query_filters = [
         TimeEntry.start_time >= start_datetime,
         TimeEntry.start_time <= end_datetime,
@@ -275,38 +281,38 @@ async def get_time_by_project(
         query_filters.append(user_filter)
     
     result = await db.execute(
-        select(
-            TimeEntry.project_id,
-            Project.name,
-            # Project.is_billable,
-            # Project.hourly_rate,
-            # Project.budget_hours,
-            func.coalesce(func.sum(TimeEntry.duration_seconds), 0).label("total_seconds"),
-            func.count(TimeEntry.id).label("entry_count")
-        )
+        select(TimeEntry, Project.name)
         .join(Project, TimeEntry.project_id == Project.id)
         .where(*query_filters)
-        .group_by(TimeEntry.project_id, Project.name)
-        .order_by(func.sum(TimeEntry.duration_seconds).desc())
     )
     
+    # Group by project and calculate totals including running timers
+    project_data = defaultdict(lambda: {"name": "", "seconds": 0, "count": 0})
+    
+    for entry, project_name in result.all():
+        pid = entry.project_id
+        project_data[pid]["name"] = project_name
+        project_data[pid]["seconds"] += calculate_entry_duration(entry, now)
+        project_data[pid]["count"] += 1
+    
     summaries = []
-    for row in result.all():
-        total_seconds = row.total_seconds or 0
+    for project_id, data in sorted(project_data.items(), key=lambda x: x[1]["seconds"], reverse=True):
+        total_seconds = data["seconds"]
         total_hours = round(total_seconds / 3600, 2)
 
         summaries.append(ProjectSummary(
-            project_id=row.project_id,
-            project_name=row.name,
+            project_id=project_id,
+            project_name=data["name"],
             total_seconds=total_seconds,
             total_hours=total_hours,
-            entry_count=row.entry_count,
+            entry_count=data["count"],
             billable_amount=None,
             budget_hours=None,
             budget_used_percent=None
         ))
 
     return summaries
+
 @router.get("/by-task", response_model=List[TaskSummary])
 async def get_time_by_task(
     project_id: Optional[int] = None,
@@ -316,24 +322,20 @@ async def get_time_by_task(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get time summary grouped by task"""
+    now = datetime.now(timezone.utc)
+    
     # Default to current month
     if not start_date:
-        now = datetime.now(timezone.utc)
         start_date = now.replace(day=1).date()
     if not end_date:
-        end_date = datetime.now(timezone.utc).date()
+        end_date = now.date()
     
-    start_datetime = datetime.combine(start_date, datetime.min.time())
-    end_datetime = datetime.combine(end_date, datetime.max.time())
+    start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+    end_datetime = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
     
+    # Fetch entries with task/project info to properly handle running timers
     query = (
-        select(
-            TimeEntry.task_id,
-            Task.name.label("task_name"),
-            Task.status,
-            Project.name.label("project_name"),
-            func.coalesce(func.sum(TimeEntry.duration_seconds), 0).label("total_seconds")
-        )
+        select(TimeEntry, Task.name.label("task_name"), Task.status, Project.name.label("project_name"))
         .join(Task, TimeEntry.task_id == Task.id)
         .join(Project, TimeEntry.project_id == Project.id)
         .where(
@@ -342,8 +344,6 @@ async def get_time_by_task(
             TimeEntry.start_time >= start_datetime,
             TimeEntry.start_time <= end_datetime
         )
-        .group_by(TimeEntry.task_id, Task.name, Task.status, Project.name)
-        .order_by(func.sum(TimeEntry.duration_seconds).desc())
     )
     
     if project_id:
@@ -351,16 +351,26 @@ async def get_time_by_task(
     
     result = await db.execute(query)
     
+    # Group by task and calculate totals including running timers
+    task_data = defaultdict(lambda: {"task_name": "", "project_name": "", "status": "", "seconds": 0})
+    
+    for entry, task_name, task_status, project_name in result.all():
+        tid = entry.task_id
+        task_data[tid]["task_name"] = task_name
+        task_data[tid]["project_name"] = project_name
+        task_data[tid]["status"] = task_status
+        task_data[tid]["seconds"] += calculate_entry_duration(entry, now)
+    
     summaries = []
-    for row in result.all():
-        total_seconds = row.total_seconds or 0
+    for task_id, data in sorted(task_data.items(), key=lambda x: x[1]["seconds"], reverse=True):
+        total_seconds = data["seconds"]
         summaries.append(TaskSummary(
-            task_id=row.task_id,
-            task_name=row.task_name,
-            project_name=row.project_name,
+            task_id=task_id,
+            task_name=data["task_name"],
+            project_name=data["project_name"],
             total_seconds=total_seconds,
             total_hours=round(total_seconds / 3600, 2),
-            status=row.status
+            status=data["status"]
         ))
     
     return summaries

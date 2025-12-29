@@ -130,9 +130,52 @@ case 'timer_stopped': {
 
 ---
 
-### 3. ✅ Code Assessment (Regression Testing)
+### 3. ✅ Weekly Activity & Dashboard Running Timer Fix
 
-**Objective**: Verify WebSocket fix doesn't break existing functionality
+**Bug Reported**: "Weekly Activity" chart showing "No time tracked this week" even though user has an active/running timer
+
+**Root Cause Analysis**:
+- Report endpoints (`/dashboard`, `/weekly`, `/by-project`, `/by-task`) used `SUM(duration_seconds)` SQL aggregation
+- Running timers have `duration_seconds = NULL` (only calculated when timer stops)
+- SQL `SUM()` ignores NULL values, so running timers were not counted
+
+**Solution Implemented** (`backend/app/routers/reports.py`):
+
+#### Created Helper Function:
+```python
+def calculate_entry_duration(entry: TimeEntry, now: datetime) -> int:
+    """Calculate duration for a time entry, including running timers"""
+    if entry.end_time is None:
+        # Active timer - calculate elapsed time
+        start = entry.start_time
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        return int((now - start).total_seconds())
+    else:
+        return entry.duration_seconds or 0
+```
+
+#### Fixed Endpoints:
+
+1. **`/dashboard`** - Now fetches entries and calculates running timer duration on-the-fly
+2. **`/weekly`** - Same fix for weekly activity chart and daily breakdown
+3. **`/by-project`** - Same fix for project time distribution
+4. **`/by-task`** - Same fix for task time summaries
+
+**Before**: Used SQL `SUM(duration_seconds)` - ignored running timers
+**After**: Fetches all entries and calculates duration for each, including elapsed time for running timers
+
+**Impact**: 
+- Dashboard stats (today/week/month) now include active timer time
+- Weekly Activity chart now shows data even when only running timer exists
+- Time by Project pie chart now includes running timer time
+- All report data is now accurate and real-time
+
+---
+
+### 4. ✅ Code Assessment (Regression Testing)
+
+**Objective**: Verify all fixes don't break existing functionality
 
 **Checks Performed**:
 
@@ -144,9 +187,10 @@ case 'timer_stopped': {
 | Message handler compatibility | ✅ Both formats supported |
 | ActiveTimers component | ✅ Works unchanged |
 | ReportsPage component | ✅ Works unchanged |
-| Other WebSocket consumers | ✅ All compatible |
+| Response schemas | ✅ Unchanged (backward compatible) |
+| Report endpoint queries | ✅ Now include running timers |
 
-**Conclusion**: Fix is safe and doesn't break any existing functionality
+**Conclusion**: All fixes are safe and backward compatible
 
 ---
 
@@ -156,6 +200,8 @@ case 'timer_stopped': {
 |--------|---------|---------------|
 | Previous | Superadmin creation scripts | 3 files |
 | `62f89ed` | WebSocket broadcast fix for real-time updates | 2 files |
+| `8bc430c` | Add session report for December 29, 2025 | 1 file |
+| Pending | Fix reports to include running timers | 1 file |
 
 ---
 
