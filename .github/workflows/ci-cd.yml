@@ -200,6 +200,11 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          DOCKER_CLIENT_TIMEOUT: 120
+          COMPOSE_HTTP_TIMEOUT: 120
+        # Retry on failure (transient network issues)
+        continue-on-error: false
 
       - name: Build and push backend
         uses: docker/build-push-action@v5
