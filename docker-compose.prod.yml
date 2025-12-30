@@ -54,9 +54,9 @@ services:
       JWT_EXPIRE_MINUTES: 60
       # Production domain for CORS + TrustedHostMiddleware
       # NOTE: backend reads ALLOWED_ORIGINS / ALLOWED_HOSTS from env (see backend/app/config.py).
-      # Include localhost for health checks from within container
+      # Include localhost for health checks, timetracker-backend for internal docker networking
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-["https://timetracker.shaemarcus.com"]}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-["timetracker.shaemarcus.com","localhost","127.0.0.1"]}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-["timetracker.shaemarcus.com","localhost","127.0.0.1","timetracker-backend","backend"]}
       # Backwards-compat (older docs); safe to keep
       CORS_ORIGINS: ${CORS_ORIGINS:-https://timetracker.shaemarcus.com}
     depends_on:
