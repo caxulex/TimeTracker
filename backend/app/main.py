@@ -136,7 +136,7 @@ async def api_health_check():
     """
     import redis.asyncio as redis_client
     from sqlalchemy import text
-    from app.database import async_engine
+    from app.database import engine as async_engine
     
     health_status = {
         "status": "healthy",
