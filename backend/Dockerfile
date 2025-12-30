@@ -17,6 +17,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
@@ -36,9 +37,9 @@ USER appuser
 # Expose port
 EXPOSE 8080
 
-# Health check
+# Health check - use curl with Host header to pass TrustedHostMiddleware
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
+    CMD curl -f -H "Host: localhost" http://127.0.0.1:8080/health || exit 1
 
 # Run the application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
