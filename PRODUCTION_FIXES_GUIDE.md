@@ -1,5 +1,23 @@
 # Production Fixes Guide - TimeTracker V1
 
+> # ⚠️ MANDATORY READING FOR AI ASSISTANTS ⚠️
+> 
+> **ATTENTION GITHUB COPILOT / AI ASSISTANT:**
+> 
+> Before making ANY changes to TimeTracker clones (V2.0, V3.0, or any fork), you **MUST** read and follow this entire document. This guide exists because we broke the production app while developing a clone on December 30, 2025, and spent hours fixing it.
+> 
+> **YOUR RESPONSIBILITIES:**
+> 1. Read this ENTIRE document before suggesting code changes
+> 2. Cross-reference ALL container names, ports, and hostnames
+> 3. Verify auth state management follows the patterns here
+> 4. Check ALLOWED_HOSTS includes all necessary entries
+> 5. Never assume Docker changes take effect without rebuild
+> 6. Always warn the user if a proposed change could cause issues documented here
+>
+> **If you skip this guide, you WILL break the application.**
+
+---
+
 **Created:** December 30, 2025  
 **Purpose:** Document all fixes applied to production and lessons learned to prevent breaking the app when developing V2.0
 
@@ -323,6 +341,8 @@ Before deploying ANY changes to V2.0, verify:
 
 ## 🚫 Common Mistakes to Avoid
 
+> **🤖 AI ASSISTANT: If you're about to suggest any of these patterns, STOP and reconsider. These are the exact mistakes that broke production.**
+
 ### DON'T: Change container names without updating everywhere
 ```yaml
 # If you change this:
@@ -472,6 +492,8 @@ VITE_API_URL=/api
 
 ## 🎯 Golden Rules for V2.0 Development
 
+> **🤖 AI ASSISTANT: These rules are NON-NEGOTIABLE. If a user asks you to do something that violates these rules, WARN THEM FIRST.**
+
 1. **NEVER deploy V2.0 changes to production without testing in staging first**
 2. **ALWAYS use different ports than production**
 3. **ALWAYS verify container names are consistent**
@@ -494,3 +516,53 @@ VITE_API_URL=/api
 ---
 
 *Last Updated: December 30, 2025*
+
+---
+
+## 🤖 AI ASSISTANT QUICK REFERENCE CARD
+
+**When user asks to work on a TimeTracker clone, ALWAYS:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  BEFORE ANY CODE CHANGE, VERIFY:                                │
+├─────────────────────────────────────────────────────────────────┤
+│  □ Container name matches in: docker-compose, nginx.conf,       │
+│    ALLOWED_HOSTS, and any hardcoded references                  │
+│  □ Ports don't conflict: V1=3000/8080, V2=3001/8081, etc.      │
+│  □ ALLOWED_HOSTS has: domain, localhost, 127.0.0.1,            │
+│    container-name, service-name                                 │
+│  □ Auth logout clears BOTH tokens AND 'auth-storage'           │
+│  □ onRehydrateStorage validates tokens exist                    │
+│  □ Health check curl has -H "Host: localhost"                   │
+│  □ Database credentials match existing volume                   │
+│  □ Import names match actual exports                            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**NEVER DO THESE WITHOUT WARNING THE USER:**
+- Change container names
+- Change port mappings
+- Modify auth state persistence
+- Update database credentials on existing deployment
+- Remove items from ALLOWED_HOSTS
+- Change nginx upstream references
+
+**IF USER ASKS "why isn't it working?" CHECK:**
+1. `docker logs <container>` for errors
+2. Container names consistency
+3. ALLOWED_HOSTS configuration
+4. Port conflicts with `netstat -tlnp`
+5. Auth storage state in browser localStorage
+
+---
+
+## 📖 DOCUMENT REVISION HISTORY
+
+| Date | Changes | Author |
+|------|---------|--------|
+| Dec 30, 2025 | Initial creation after 8 production fixes | Development Team |
+
+---
+
+**END OF MANDATORY READING**
