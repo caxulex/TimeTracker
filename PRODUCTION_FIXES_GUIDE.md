@@ -17,7 +17,54 @@
 > **If you skip this guide, you WILL break the application.**
 
 ---
+## 🔒 SACRED FILES - NEVER MODIFY IN CLONES WITHOUT FULL UNDERSTANDING
 
+> **🤖 AI ASSISTANT: The following files contain critical configurations that BROKE production when modified incorrectly. Before touching ANY of these files in a clone, you MUST understand their purpose and cross-reference with this guide.**
+
+### CRITICAL CONFIGURATION FILES
+| File | Purpose | Danger Level |
+|------|---------|-------------|
+| `docker-compose.prod.yml` | Container orchestration, ports, networks | 🔴 EXTREME |
+| `frontend/nginx.conf` | Reverse proxy, upstream names | 🔴 EXTREME |
+| `backend/Dockerfile` | Health checks, dependencies | 🔴 EXTREME |
+| `backend/app/main.py` | App initialization, middleware | 🔴 EXTREME |
+| `frontend/src/stores/authStore.ts` | Auth state persistence | 🔴 EXTREME |
+| `frontend/src/api/client.ts` | API interceptors, auth handling | 🔴 EXTREME |
+| `frontend/src/App.tsx` | Route guards, auth validation | 🟠 HIGH |
+| `backend/app/database.py` | DB connection, engine exports | 🟠 HIGH |
+| `backend/app/config.py` | Environment variables | 🟠 HIGH |
+
+### IMMUTABLE VALUES - DO NOT CHANGE THESE IN PRODUCTION V1
+```yaml
+# These values are LOCKED for production. Clones must use DIFFERENT values.
+Container Names:
+  - timetracker-frontend    # Clone: timetracker-v2-frontend
+  - timetracker-backend     # Clone: timetracker-v2-backend
+  - timetracker-db          # Clone: timetracker-v2-db
+  - timetracker-redis       # Clone: timetracker-v2-redis
+
+Ports (Host):
+  - 3000 (frontend)         # Clone: 3001, 3002, etc.
+  - 8080 (backend)          # Clone: 8081, 8082, etc.
+  - 5432 (db - internal)    # Clone: can reuse if isolated network
+  - 6379 (redis - internal) # Clone: can reuse if isolated network
+
+Domains:
+  - timetracker.shaemarcus.com        # PRODUCTION - NEVER USE IN CLONES
+  - timetracker-staging.shaemarcus.com # Reserved for V2.0 staging
+
+Database:
+  - Database Name: time_tracker        # Clone: time_tracker_v2
+  - User: postgres                     # Clone: can differ
+  - Volume: timetracker_postgres_data  # Clone: timetracker_v2_postgres_data
+
+LocalStorage Keys:
+  - 'auth-storage'         # Zustand persistence key
+  - 'access_token'         # JWT access token
+  - 'refresh_token'        # JWT refresh token
+```
+
+---
 **Created:** December 30, 2025  
 **Purpose:** Document all fixes applied to production and lessons learned to prevent breaking the app when developing V2.0
 
@@ -29,7 +76,67 @@ This guide documents every issue we encountered and fixed on December 30, 2025. 
 
 ---
 
-## 📋 Current Tech Stack (Production V1)
+## �️ CLONE DEVELOPMENT PROTOCOL
+
+> **🤖 AI ASSISTANT: Follow this protocol EVERY TIME you work on a TimeTracker clone.**
+
+### Step 1: Identify Which Repository You're In
+```bash
+# ALWAYS run this first
+git remote -v
+```
+| If you see... | You are in... | Be careful of... |
+|---------------|---------------|------------------|
+| `caxulex/TimeTracker` | PRODUCTION V1 | Breaking live users |
+| `shaemarcusconsulting/TimeTrackerV2.0` | Staging Clone | Cross-contamination |
+| Any other fork | Development Clone | Same issues apply |
+
+### Step 2: Verify Isolation Before ANY Changes
+```bash
+# Check current container names won't conflict
+docker ps --format "table {{.Names}}\t{{.Ports}}"
+
+# Check no production containers are running
+docker ps | grep -E "timetracker-(frontend|backend|db|redis)$"
+```
+
+### Step 3: Clone-Specific Naming Convention
+| Component | Production V1 | V2.0 Clone | V3.0+ Clones |
+|-----------|---------------|------------|---------------|
+| Frontend Container | `timetracker-frontend` | `timetracker-v2-frontend` | `timetracker-v3-frontend` |
+| Backend Container | `timetracker-backend` | `timetracker-v2-backend` | `timetracker-v3-backend` |
+| DB Container | `timetracker-db` | `timetracker-v2-db` | `timetracker-v3-db` |
+| Redis Container | `timetracker-redis` | `timetracker-v2-redis` | `timetracker-v3-redis` |
+| Frontend Port | 3000 | 3001 | 3002+ |
+| Backend Port | 8080 | 8081 | 8082+ |
+| Docker Network | `timetracker_default` | `timetracker-v2_default` | `timetracker-v3_default` |
+| DB Volume | `timetracker_postgres_data` | `timetracker-v2_postgres_data` | `timetracker-v3_postgres_data` |
+
+### Step 4: Required Changes When Creating a Clone
+> **These changes MUST be made when forking/cloning. Failure to do so WILL cause conflicts.**
+
+1. **docker-compose.prod.yml** (or docker-compose.staging.yml):
+   - Change ALL `container_name` values
+   - Change ALL port mappings
+   - Change volume names
+   - Change network name
+   - Update ALLOWED_HOSTS with new domain
+
+2. **frontend/nginx.conf**:
+   - Update `proxy_pass` to new backend container name
+
+3. **Caddyfile** (if using Caddy):
+   - Update domain name
+   - Update backend/frontend port references
+
+4. **Environment Variables**:
+   - Update DATABASE_URL with new database name
+   - Update ALLOWED_HOSTS
+   - Generate NEW SECRET_KEY (never share between prod and clone)
+
+---
+
+## �📋 Current Tech Stack (Production V1)
 
 ### Frontend
 | Technology | Version/Details |
@@ -404,7 +511,75 @@ docker builder prune -a -f
 
 ---
 
-## 🔍 Debugging Commands Reference
+## � TROUBLESHOOTING DECISION TREE
+
+> **🤖 AI ASSISTANT: When something breaks, follow this decision tree BEFORE making any code changes.**
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     SOMETHING IS BROKEN - START HERE                     │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+                    ┌───────────────────────────────┐
+                    │ Can you access the website?   │
+                    └───────────────────────────────┘
+                         │                    │
+                        YES                   NO
+                         │                    │
+                         ▼                    ▼
+              ┌──────────────────┐   ┌──────────────────────────┐
+              │ Is it a 400/500  │   │ Check: Is Caddy running? │
+              │ error?           │   │ sudo systemctl status caddy │
+              └──────────────────┘   └──────────────────────────┘
+                   │       │                      │
+                 400      500                     ▼
+                   │       │         ┌─────────────────────────┐
+                   ▼       ▼         │ Check: Are containers   │
+    ┌──────────────────┐ ┌─────────┐ │ running? docker ps      │
+    │ CHECK:           │ │ CHECK:  │ └─────────────────────────┘
+    │ - ALLOWED_HOSTS  │ │ - Logs  │              │
+    │ - Container names│ │ - Import│      ┌───────┴───────┐
+    │ - Host headers   │ │   errors│      │               │
+    └──────────────────┘ └─────────┘    Running      Not Running
+                                          │               │
+                                          ▼               ▼
+                              ┌──────────────┐   ┌──────────────────┐
+                              │ Check logs:  │   │ docker compose   │
+                              │ docker logs  │   │ up -d --build    │
+                              │ <container>  │   └──────────────────┘
+                              └──────────────┘            │
+                                                          ▼
+                                              ┌──────────────────────┐
+                                              │ Still not starting?  │
+                                              │ Check:               │
+                                              │ - Port conflicts     │
+                                              │ - Disk space (df -h) │
+                                              │ - Memory (free -m)   │
+                                              └──────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    INFINITE REFRESH LOOP?                                │
+│  1. Open browser DevTools → Application → Local Storage                 │
+│  2. Check if 'auth-storage' has isAuthenticated: true                   │
+│  3. Check if 'access_token' exists                                      │
+│  4. If mismatch: Clear ALL localStorage and refresh                     │
+│  5. If persists: Check authStore.ts onRehydrateStorage                  │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    CONTAINER CRASH LOOP?                                 │
+│  1. docker logs <container> --tail 200                                  │
+│  2. Look for: "host not found in upstream" → nginx.conf mismatch       │
+│  3. Look for: "ImportError" → Check Python imports                      │
+│  4. Look for: "Connection refused" → Backend not exposed/ready         │
+│  5. Look for: "Permission denied" → Volume permissions                  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## �🔍 Debugging Commands Reference
 
 ### Check Container Status
 ```bash
@@ -479,7 +654,62 @@ VITE_API_URL=/api
 
 ---
 
-## 📈 Production Statistics
+## � API CONTRACT PROTECTION
+
+> **🤖 AI ASSISTANT: These API endpoints and their response structures are CRITICAL. Changing them will break the frontend.**
+
+### Critical Endpoints (Do Not Modify Signatures)
+| Endpoint | Method | Purpose | Breaking Change Risk |
+|----------|--------|---------|---------------------|
+| `/api/health` | GET | Health check, monitoring | 🔴 Breaks Docker health checks |
+| `/api/auth/login` | POST | User authentication | 🔴 Breaks all logins |
+| `/api/auth/refresh` | POST | Token refresh | 🔴 Breaks session management |
+| `/api/auth/logout` | POST | User logout | 🟠 Breaks logout flow |
+| `/api/users/me` | GET | Current user info | 🔴 Breaks dashboard |
+| `/api/time-entries/*` | ALL | Time tracking core | 🔴 Breaks core functionality |
+
+### Authentication Token Structure (Do Not Modify)
+```typescript
+// Access Token Payload - Frontend expects this structure
+{
+  sub: string,      // User ID
+  email: string,    // User email
+  role: string,     // User role
+  exp: number,      // Expiration timestamp
+  iat: number       // Issued at timestamp
+}
+
+// Login Response - Frontend expects this structure
+{
+  access_token: string,
+  refresh_token: string,
+  token_type: "bearer",
+  user: {
+    id: number,
+    email: string,
+    full_name: string,
+    role: string,
+    team_id: number | null
+  }
+}
+```
+
+### Health Check Response (Docker Depends On This)
+```json
+{
+  "status": "healthy",
+  "version": "1.0.0",
+  "environment": "production",
+  "checks": {
+    "database": "healthy",
+    "redis": "healthy"
+  }
+}
+```
+
+---
+
+## �📈 Production Statistics
 
 | Metric | Value |
 |--------|-------|
@@ -502,6 +732,48 @@ VITE_API_URL=/api
 6. **ALWAYS include Host header in health checks**
 7. **ALWAYS backup before making database changes**
 8. **NEVER assume docker-compose changes take effect without rebuild**
+
+---
+
+## ⚡ FILE CHANGE IMPACT MATRIX
+
+> **🤖 AI ASSISTANT: Before modifying ANY file, check this matrix to understand the blast radius of your change.**
+
+| File Changed | Requires Rebuild? | Affects | Must Also Update |
+|--------------|-------------------|---------|------------------|
+| `docker-compose*.yml` | `docker compose up -d --build` | All containers | Caddyfile, nginx.conf |
+| `frontend/nginx.conf` | Frontend rebuild | API routing | docker-compose (container names) |
+| `backend/Dockerfile` | Backend rebuild | Health checks, deps | Nothing |
+| `frontend/Dockerfile` | Frontend rebuild | Build process | Nothing |
+| `backend/app/main.py` | Backend rebuild | All API routes | Nothing |
+| `backend/app/config.py` | Backend rebuild | All settings | .env files |
+| `backend/app/database.py` | Backend rebuild | DB connections | All files importing from it |
+| `frontend/src/stores/authStore.ts` | Frontend rebuild | Auth state | client.ts, App.tsx |
+| `frontend/src/api/client.ts` | Frontend rebuild | All API calls | authStore.ts |
+| `frontend/src/App.tsx` | Frontend rebuild | All routes | authStore.ts |
+| `Caddyfile` | `sudo systemctl reload caddy` | SSL, routing | docker-compose ports |
+| `.env` | Container restart | Runtime config | Nothing |
+| `alembic/versions/*` | Migration run | Database schema | Nothing |
+
+### Dangerous Change Combinations
+```
+🚨 DANGER: These combinations have caused production outages:
+
+1. Changing container_name WITHOUT updating nginx.conf
+   → Frontend crash loop: "host not found in upstream"
+
+2. Changing ports WITHOUT updating Caddyfile
+   → 502 Bad Gateway from Caddy
+
+3. Clearing tokens WITHOUT clearing auth-storage
+   → Infinite refresh loop
+
+4. Adding to ALLOWED_HOSTS WITHOUT rebuilding
+   → 400 Bad Request persists
+
+5. Changing DB credentials on existing volume
+   → Authentication failed, data inaccessible
+```
 
 ---
 
@@ -554,6 +826,131 @@ VITE_API_URL=/api
 3. ALLOWED_HOSTS configuration
 4. Port conflicts with `netstat -tlnp`
 5. Auth storage state in browser localStorage
+
+---
+
+## 🆘 EMERGENCY RECOVERY PROCEDURES
+
+> **🤖 AI ASSISTANT: If you've broken production, follow these procedures IMMEDIATELY.**
+
+### Procedure 1: Complete Rollback
+```bash
+# On the server
+cd ~/timetracker
+
+# Stop everything
+docker compose -f docker-compose.prod.yml down
+
+# Reset to last known good commit
+git fetch origin
+git reset --hard origin/master
+
+# Rebuild and restart
+docker compose -f docker-compose.prod.yml up -d --build
+
+# Verify
+curl -s http://localhost:8080/health
+curl -s http://localhost:3000
+```
+
+### Procedure 2: Fix Infinite Refresh (Client-Side)
+```javascript
+// Run in browser console on affected user's machine
+localStorage.clear();
+sessionStorage.clear();
+window.location.href = '/login';
+```
+
+### Procedure 3: Database Recovery
+```bash
+# If database is corrupted or credentials wrong
+# WARNING: This deletes all data!
+
+# 1. Stop containers
+docker compose -f docker-compose.prod.yml down
+
+# 2. List volumes
+docker volume ls | grep timetracker
+
+# 3. Remove database volume (DELETES DATA!)
+docker volume rm timetracker_postgres_data
+
+# 4. Restore from backup (if available)
+# pg_restore commands here
+
+# 5. Restart
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+### Procedure 4: Quick Health Check Sequence
+```bash
+# Run these in order to diagnose issues
+echo "=== Container Status ==="
+docker ps -a
+
+echo "=== Backend Logs (last 50) ==="
+docker logs timetracker-backend --tail 50
+
+echo "=== Frontend Logs (last 50) ==="
+docker logs timetracker-frontend --tail 50
+
+echo "=== Port Usage ==="
+sudo netstat -tlnp | grep -E '(3000|8080|5432|6379)'
+
+echo "=== Disk Space ==="
+df -h
+
+echo "=== Health Check ==="
+curl -s http://localhost:8080/health | jq
+```
+
+### Procedure 5: Nuclear Option (Complete Reset)
+```bash
+# LAST RESORT - Removes ALL Docker resources
+# WARNING: This affects ALL Docker containers, not just TimeTracker!
+
+# Stop all containers
+docker stop $(docker ps -aq)
+
+# Remove all containers
+docker rm $(docker ps -aq)
+
+# Remove all volumes (DATA LOSS!)
+docker volume prune -f
+
+# Remove all images
+docker image prune -a -f
+
+# Clean build cache
+docker builder prune -a -f
+
+# Restart from scratch
+cd ~/timetracker
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+---
+
+## 🔄 VERSION COMPATIBILITY NOTES
+
+> **🤖 AI ASSISTANT: When upgrading dependencies or changing versions, be aware of these compatibility requirements.**
+
+| Component | Current Version | Min Compatible | Notes |
+|-----------|-----------------|----------------|-------|
+| Python | 3.11+ | 3.10 | async/await syntax |
+| Node.js | 18+ | 16 | For Vite builds |
+| PostgreSQL | 15 | 13 | JSON functions |
+| Redis | 7+ | 6 | Stream support |
+| Docker | 24+ | 20 | Compose V2 |
+| Docker Compose | V2 | V2 | `docker compose` not `docker-compose` |
+
+### Breaking Upgrade Paths
+```
+❌ PostgreSQL 15 → 16: May require dump/restore
+❌ Python 3.11 → 3.12: Check all dependencies
+❌ React 18 → 19: Major breaking changes expected
+❌ FastAPI 0.100+ : Pydantic V2 migration required
+```
 
 ---
 
