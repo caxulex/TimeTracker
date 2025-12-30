@@ -68,6 +68,32 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
+// Redirect loop detection - prevents infinite redirect between dashboard and login
+let authRedirectCount = 0;
+const MAX_AUTH_REDIRECTS = 3;
+const AUTH_REDIRECT_RESET_MS = 5000;
+let authRedirectResetTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Helper to clear all auth state and redirect (used to break redirect loops)
+const forceLogoutAndRedirect = () => {
+  console.warn('[Auth] Forcing logout and redirect to login');
+  localStorage.removeItem('access_token');
+  localStorage.removeItem('refresh_token');
+  // Clear the persisted Zustand auth state to prevent redirect loops
+  const authStorage = localStorage.getItem('auth-storage');
+  if (authStorage) {
+    try {
+      const parsed = JSON.parse(authStorage);
+      parsed.state = { ...parsed.state, isAuthenticated: false, user: null };
+      localStorage.setItem('auth-storage', JSON.stringify(parsed));
+    } catch (e) {
+      // If parsing fails, just remove it entirely
+      localStorage.removeItem('auth-storage');
+    }
+  }
+  window.location.href = '/login';
+};
+
 // Response interceptor for error handling and token refresh
 api.interceptors.response.use(
   (response) => response,
@@ -89,11 +115,25 @@ api.interceptors.response.use(
                              originalRequest.url?.includes('/auth/refresh');
       
       if (isAuthEndpoint) {
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
-        window.location.href = '/login';
+        forceLogoutAndRedirect();
         return Promise.reject(error);
       }
+
+      // Detect redirect loop - if we've redirected too many times, force a clean logout
+      authRedirectCount++;
+      if (authRedirectCount >= MAX_AUTH_REDIRECTS) {
+        console.error('[Auth] Redirect loop detected - forcing clean logout');
+        authRedirectCount = 0;
+        if (authRedirectResetTimer) clearTimeout(authRedirectResetTimer);
+        forceLogoutAndRedirect();
+        return Promise.reject(error);
+      }
+      
+      // Reset redirect counter after timeout
+      if (authRedirectResetTimer) clearTimeout(authRedirectResetTimer);
+      authRedirectResetTimer = setTimeout(() => {
+        authRedirectCount = 0;
+      }, AUTH_REDIRECT_RESET_MS);
 
       originalRequest._retry = true;
 
@@ -109,6 +149,9 @@ api.interceptors.response.use(
             const { access_token, refresh_token } = response.data;
             localStorage.setItem('access_token', access_token);
             localStorage.setItem('refresh_token', refresh_token);
+            
+            // Reset redirect counter on successful refresh
+            authRedirectCount = 0;
 
             if (originalRequest.headers) {
               originalRequest.headers.Authorization = `Bearer ${access_token}`;
@@ -121,10 +164,8 @@ api.interceptors.response.use(
         }
       }
 
-      // Clear tokens and redirect to login (for both 401 after failed refresh, and 403)
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
-      window.location.href = '/login';
+      // Clear tokens AND Zustand auth state, then redirect to login
+      forceLogoutAndRedirect();
       return Promise.reject(error);
     }
 

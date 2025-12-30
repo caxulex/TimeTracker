@@ -36,7 +36,16 @@ import './App.css';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 1,
+      // Don't retry on auth errors - prevents hammering server during logout flow
+      retry: (failureCount, error: unknown) => {
+        const axiosError = error as { response?: { status?: number } };
+        const status = axiosError?.response?.status;
+        // Never retry on auth errors (401, 403) or rate limit (429)
+        if (status === 401 || status === 403 || status === 429) {
+          return false;
+        }
+        return failureCount < 1;
+      },
       staleTime: 5 * 60 * 1000, // 5 minutes - data stays fresh for 5 min
       gcTime: 10 * 60 * 1000, // 10 minutes - cache persists for 10 min
       refetchOnWindowFocus: false,
@@ -54,8 +63,11 @@ const queryClient = new QueryClient({
 // Protected route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore();
+  // Also check for actual token to prevent redirect loops when persisted state is stale
+  const hasToken = !!localStorage.getItem('access_token');
 
-  if (!isAuthenticated) {
+  // Require BOTH conditions - prevents loop when isAuthenticated is stale but token is gone
+  if (!isAuthenticated || !hasToken) {
     return <Navigate to="/login" replace />;
   }
 
@@ -65,8 +77,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 // Admin route wrapper (requires admin role)
 function AdminRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, user } = useAuthStore();
+  // Also check for actual token to prevent redirect loops when persisted state is stale
+  const hasToken = !!localStorage.getItem('access_token');
 
-  if (!isAuthenticated) {
+  // Require BOTH conditions - prevents loop when isAuthenticated is stale but token is gone
+  if (!isAuthenticated || !hasToken) {
     return <Navigate to="/login" replace />;
   }
 
@@ -80,8 +95,11 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 // Public route wrapper (redirect to dashboard if already logged in)
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore();
+  // Also check for actual token - prevents redirect loop when isAuthenticated is stale
+  const hasToken = !!localStorage.getItem('access_token');
 
-  if (isAuthenticated) {
+  // Only redirect if BOTH persisted state AND token exist - prevents redirect loops
+  if (isAuthenticated && hasToken) {
     return <Navigate to="/dashboard" replace />;
   }
 

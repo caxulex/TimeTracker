@@ -1,6 +1,6 @@
 # Time Tracker MVP - Development Tasks
 
-> **Project:** Time Management Application (Everhour-inspired)
+> **Project:** Time Management Application 
 > **Architecture:** Monolithic Full-Stack Application
 > **Target:** Consumer-ready MVP
 > **Customer Build:** Independent standalone deployment

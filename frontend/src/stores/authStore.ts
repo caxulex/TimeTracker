@@ -119,6 +119,23 @@ export const useAuthStore = create<AuthState>()(
         user: state.user,
         isAuthenticated: state.isAuthenticated,
       }),
+      // Validate auth state on rehydration to prevent stale isAuthenticated causing redirect loops
+      onRehydrateStorage: () => (state, error) => {
+        if (error) {
+          console.error('[AuthStore] Error rehydrating:', error);
+          return;
+        }
+        
+        // If persisted as authenticated but no token exists, clear the stale state
+        const hasToken = !!localStorage.getItem('access_token');
+        if (state?.isAuthenticated && !hasToken) {
+          console.warn('[AuthStore] Token missing but isAuthenticated=true - clearing stale auth state');
+          // Use setTimeout to avoid state update during rehydration
+          setTimeout(() => {
+            useAuthStore.setState({ isAuthenticated: false, user: null });
+          }, 0);
+        }
+      },
     }
   )
 );
