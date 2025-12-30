@@ -59,6 +59,8 @@ services:
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-["timetracker.shaemarcus.com","localhost","127.0.0.1","timetracker-backend","backend"]}
       # Backwards-compat (older docs); safe to keep
       CORS_ORIGINS: ${CORS_ORIGINS:-https://timetracker.shaemarcus.com}
+    ports:
+      - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
