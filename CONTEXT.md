@@ -26,6 +26,19 @@ Read CONTEXT.md, AIupgrade.md, PRODUCTION_FIXES_GUIDE.md, and the latest SESSION
 | **Path** | `/home/ubuntu/timetracker` (lowercase!) |
 | **Docker File** | `docker-compose.prod.yml` (⚠️ NOT docker-compose.yml) |
 
+### ⚠️ Before Making ANY Changes
+> **READ [PRODUCTION_FIXES_GUIDE.md](PRODUCTION_FIXES_GUIDE.md) FIRST!**
+> 
+> This guide contains critical lessons learned from breaking production on Dec 30, 2025:
+> - Container naming conventions
+> - Port mappings that CANNOT be changed
+> - ALLOWED_HOSTS requirements
+> - Auth state management rules
+> - Health check configurations
+> - Emergency recovery procedures
+> 
+> **Skipping this guide WILL break the application.**
+
 ---
 
 ## 📁 Project Architecture
