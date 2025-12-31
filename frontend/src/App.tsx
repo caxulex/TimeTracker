@@ -19,6 +19,7 @@ import {
   ReportsPage,
   SettingsPage,
   AdminPage,
+  AdminSettingsPage,
   PayRatesPage,
   PayrollPeriodsPage,
   PayrollReportsPage,
@@ -86,6 +87,22 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (user?.role !== 'admin' && user?.role !== 'super_admin') {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return <Layout>{children}</Layout>;
+}
+
+// Super Admin route wrapper (requires super_admin role only)
+function SuperAdminRoute({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated, user } = useAuthStore();
+  const hasToken = !!localStorage.getItem('access_token');
+
+  if (!isAuthenticated || !hasToken) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (user?.role !== 'super_admin') {
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -277,6 +294,16 @@ function App() {
                 <AdminRoute>
                   <UserDetailPage />
                 </AdminRoute>
+              }
+            />
+
+            {/* Admin Settings - Super Admin Only (API Key Management) */}
+            <Route
+              path="/admin/settings"
+              element={
+                <SuperAdminRoute>
+                  <AdminSettingsPage />
+                </SuperAdminRoute>
               }
             />
 

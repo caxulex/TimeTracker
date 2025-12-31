@@ -407,6 +407,51 @@ class AuditLog(Base):
 
 
 # ============================================
+# API KEY MODEL (for AI integrations)
+# ============================================
+
+class AIProvider(str, enum.Enum):
+    """Supported AI provider enumeration"""
+    GEMINI = "gemini"
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+    AZURE_OPENAI = "azure_openai"
+    OTHER = "other"
+
+
+class APIKey(Base):
+    """
+    API Key model for secure storage of AI provider credentials.
+    Keys are encrypted at rest using AES-256-GCM.
+    SEC-020: Secure API Key Storage
+    """
+    __tablename__ = "api_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    provider: Mapped[str] = mapped_column(String(50), nullable=False, index=True)  # gemini, openai, etc.
+    encrypted_key: Mapped[str] = mapped_column(Text, nullable=False)  # AES-256-GCM encrypted
+    key_preview: Mapped[str] = mapped_column(String(20), nullable=False)  # e.g., "...xxxx" for display
+    label: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Optional friendly name
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    
+    # Tracking
+    created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    usage_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    
+    # Additional metadata
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Relationships
+    creator: Mapped[User] = relationship("User", foreign_keys=[created_by])
+
+    def __repr__(self) -> str:
+        return f"<APIKey(id={self.id}, provider={self.provider}, active={self.is_active})>"
+
+
+# ============================================
 # INDEXES
 # ============================================
 
@@ -424,3 +469,101 @@ Index("ix_tasks_project_id", Task.project_id)
 Index("ix_pay_rates_user_effective", PayRate.user_id, PayRate.effective_from)
 Index("ix_payroll_periods_dates", PayrollPeriod.start_date, PayrollPeriod.end_date)
 Index("ix_payroll_entries_period_user", PayrollEntry.payroll_period_id, PayrollEntry.user_id)
+
+# API Key indexes
+Index("ix_api_keys_provider_active", APIKey.provider, APIKey.is_active)
+
+
+# ============================================
+# AI FEATURE TOGGLE MODELS
+# ============================================
+
+class AIFeatureSetting(Base):
+    """
+    Global AI feature settings controlled by admins.
+    Each feature can be enabled/disabled globally for all users.
+    """
+    __tablename__ = "ai_feature_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    feature_id: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    feature_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    requires_api_key: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    api_provider: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    config: Mapped[Optional[dict]] = mapped_column("config", Text, nullable=True)  # JSON stored as text
+    
+    # Tracking
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    updated_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Relationships
+    updater: Mapped[Optional[User]] = relationship("User", foreign_keys=[updated_by])
+
+    def __repr__(self) -> str:
+        return f"<AIFeatureSetting(feature_id={self.feature_id}, enabled={self.is_enabled})>"
+
+
+class UserAIPreference(Base):
+    """
+    Per-user AI feature preferences.
+    Users can toggle AI features for their own session.
+    Admins can override user preferences.
+    """
+    __tablename__ = "user_ai_preferences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    feature_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    admin_override: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    admin_override_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Tracking
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Relationships
+    user: Mapped[User] = relationship("User", foreign_keys=[user_id])
+    admin: Mapped[Optional[User]] = relationship("User", foreign_keys=[admin_override_by])
+
+    __table_args__ = (
+        Index("ix_user_ai_preferences_user_feature", "user_id", "feature_id", unique=True),
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserAIPreference(user_id={self.user_id}, feature_id={self.feature_id}, enabled={self.is_enabled})>"
+
+
+class AIUsageLog(Base):
+    """
+    AI usage tracking for cost monitoring and analytics.
+    Logs every AI API call with tokens used and estimated cost.
+    """
+    __tablename__ = "ai_usage_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    feature_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    api_provider: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    tokens_used: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    estimated_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6), nullable=True)
+    request_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    response_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    success: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    request_metadata: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON stored as text
+    
+    # Relationships
+    user: Mapped[Optional[User]] = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index("ix_ai_usage_log_user_date", "user_id", "request_timestamp"),
+        Index("ix_ai_usage_log_feature_date", "feature_id", "request_timestamp"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AIUsageLog(id={self.id}, feature_id={self.feature_id}, user_id={self.user_id})>"
+

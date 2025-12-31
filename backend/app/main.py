@@ -19,6 +19,9 @@ from app.routers import pay_rates, payroll, payroll_reports, monitoring
 from app.routers import admin, export, sessions, invitations, approvals, report_templates
 from app.routers import ip_security as ip_security_router
 from app.routers import account_requests
+from app.routers import api_keys  # SEC-020: API Key management
+from app.routers import ai_features  # AI Feature Toggle System
+from app.ai import ai_router  # AI Services (suggestions, anomalies)
 from app.middleware import RateLimitMiddleware, rate_limiter, SecurityHeadersMiddleware, RequestValidationMiddleware
 from app.exceptions import AppException
 
@@ -239,6 +242,15 @@ app.include_router(report_templates.router, prefix="/api/reports", tags=["Report
 
 # Account Request routes (public + admin)
 app.include_router(account_requests.router, prefix="/api/account-requests", tags=["Account Requests"])
+
+# SEC-020: API Key management routes (super admin only)
+app.include_router(api_keys.router, prefix="/api", tags=["API Keys"])
+
+# AI Feature Toggle System routes
+app.include_router(ai_features.router, prefix="/api", tags=["AI Features"])
+
+# AI Services routes (suggestions, anomalies)
+app.include_router(ai_router, prefix="/api", tags=["AI Services"])
 
 
 # SEC-010: Custom exception handler for AppException

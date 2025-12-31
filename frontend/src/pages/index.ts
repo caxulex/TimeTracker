@@ -12,6 +12,7 @@ export { TeamsPage } from './TeamsPage';
 export { ReportsPage } from './ReportsPage';
 export { SettingsPage } from './SettingsPage';
 export { AdminPage } from './AdminPage';
+export { AdminSettingsPage } from './AdminSettingsPage';
 export { UsersPage } from './UsersPage';
 export { StaffPage } from './StaffPage';
 export { AccountRequestsPage } from './AccountRequestsPage';

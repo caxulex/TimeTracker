@@ -122,6 +122,14 @@ class Settings(BaseSettings):
     TRELLO_API_KEY: Optional[str] = None
     TRELLO_TOKEN: Optional[str] = None
 
+    # AI API Key Encryption - SEC-020: Encryption key for storing API keys in database
+    # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+    API_KEY_ENCRYPTION_KEY: str = ""
+    
+    # AI Provider Settings
+    GEMINI_API_KEY: Optional[str] = None  # Legacy env-based (prefer database storage)
+    OPENAI_API_KEY: Optional[str] = None  # Legacy env-based (prefer database storage)
+
     @field_validator('SECRET_KEY')
     @classmethod
     def validate_secret_key(cls, v: str) -> str:

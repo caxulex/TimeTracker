@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Card, CardHeader, Button, Input, PasswordInput } from '../components/common';
+import { AIFeaturePanel } from '../components/ai';
 import { useAuthStore } from '../stores/authStore';
 import { authApi } from '../api/client';
 import { useNotifications } from '../hooks/useNotifications';
@@ -229,6 +230,9 @@ export function SettingsPage() {
           </div>
         </div>
       </Card>
+
+      {/* AI Features section */}
+      <AIFeaturePanel />
 
       {/* Account info */}
       <Card>
