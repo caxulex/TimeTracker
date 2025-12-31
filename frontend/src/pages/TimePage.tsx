@@ -2,12 +2,13 @@
 // TIME TRACKER - TIME ENTRIES PAGE
 // With Manual Entry Creation (TASK-026)
 // With AI Suggestions Integration
+// With NLP Chat Interface
 // ============================================
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, Button, Modal, LoadingOverlay, Input } from '../components/common';
 import { TimerWidget } from '../components/time/TimerWidget';
-import { SuggestionDropdown } from '../components/ai';
+import { SuggestionDropdown, ChatInterface } from '../components/ai';
 import { timeEntriesApi, projectsApi, tasksApi } from '../api/client';
 import { formatDuration, formatDate, formatTimeOnly, cn } from '../utils/helpers';
 import { useAuth } from '../hooks/useAuth';
@@ -23,6 +24,10 @@ export function TimePage() {
   const [showManualModal, setShowManualModal] = useState(false);
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
   const [filterProject, setFilterProject] = useState<number | ''>('');
+  const [showChatInterface, setShowChatInterface] = useState(false);
+
+  // AI Feature flags
+  const { data: nlpEnabled } = useFeatureEnabled('nlp_time_entry');
 
   // Fetch time entries
   const { data: entriesData, isLoading } = useQuery({
@@ -148,6 +153,42 @@ export function TimePage() {
 
       {/* Timer widget */}
       <TimerWidget />
+
+      {/* NLP Chat Interface */}
+      {nlpEnabled && (
+        <Card className="bg-gradient-to-r from-purple-50 to-blue-50 border-purple-200">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">✨</span>
+              <h3 className="font-semibold text-gray-800">Quick Entry with AI</h3>
+            </div>
+            <button
+              onClick={() => setShowChatInterface(!showChatInterface)}
+              className="text-sm text-purple-600 hover:text-purple-800"
+            >
+              {showChatInterface ? 'Hide' : 'Show'}
+            </button>
+          </div>
+          {showChatInterface ? (
+            <ChatInterface 
+              placeholder='Try: "2 hours yesterday on Project Alpha fixing bugs"'
+              onEntryCreated={() => {
+                queryClient.invalidateQueries({ queryKey: ['time-entries'] });
+                queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+                addNotification({
+                  type: 'success',
+                  title: 'Entry Created',
+                  message: 'Time entry created via AI assistant',
+                });
+              }}
+            />
+          ) : (
+            <p className="text-sm text-gray-600">
+              Type naturally to create time entries, e.g., "3 hours on marketing yesterday"
+            </p>
+          )}
+        </Card>
+      )}
 
       {/* Filters */}
       <Card padding="sm">

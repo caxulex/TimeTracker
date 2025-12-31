@@ -10,6 +10,7 @@ import { ActiveTimers } from '../components/ActiveTimers';
 import { AdminAlertsPanel } from '../components/AdminAlertsPanel';
 import { AnomalyAlertPanel } from '../components/ai/AnomalyAlertPanel';
 import WeeklySummaryPanel from '../components/ai/WeeklySummaryPanel';
+import UserInsightsPanel from '../components/ai/UserInsightsPanel';
 import { useFeatureEnabled } from '../hooks/useAIFeatures';
 import { reportsApi } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
@@ -61,6 +62,7 @@ export function DashboardPage() {
   // AI Feature flags
   const { data: anomalyEnabled } = useFeatureEnabled('anomaly_detection');
   const { data: weeklySummaryEnabled } = useFeatureEnabled('weekly_summary');
+  const { data: userInsightsEnabled } = useFeatureEnabled('user_insights');
 
   // User's personal dashboard
   const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
@@ -218,6 +220,16 @@ export function DashboardPage() {
             <span>📊</span> AI Weekly Summary
           </h2>
           <WeeklySummaryPanel collapsible={true} defaultExpanded={false} />
+        </div>
+      )}
+
+      {/* User AI Insights */}
+      {userInsightsEnabled && (
+        <div className="mt-6">
+          <h2 className="text-lg font-semibold text-gray-700 mb-3 flex items-center gap-2">
+            <span>🧠</span> AI Productivity Insights
+          </h2>
+          <UserInsightsPanel periodDays={30} showHeader={false} />
         </div>
       )}
 

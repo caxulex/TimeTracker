@@ -3,6 +3,9 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { PayrollForecastPanel } from '../components/ai/PayrollForecastPanel';
+import { OvertimeRiskPanel } from '../components/ai/OvertimeRiskPanel';
+import { ProjectBudgetPanel } from '../components/ai/ProjectBudgetPanel';
+import { CashFlowChart } from '../components/ai/CashFlowChart';
 import { useFeatureEnabled } from '../hooks/useAIFeatures';
 import {
   ChartBarIcon,
@@ -73,6 +76,9 @@ export default function AdminReportsPage() {
 
   // AI Feature flags
   const { data: payrollForecastEnabled } = useFeatureEnabled('payroll_forecast');
+  const { data: overtimeRiskEnabled } = useFeatureEnabled('overtime_risk');
+  const { data: projectBudgetEnabled } = useFeatureEnabled('project_budget');
+  const { data: cashFlowEnabled } = useFeatureEnabled('cash_flow');
 
   // Fetch admin dashboard data
   const { data: dashboardData, isLoading: isDashboardLoading, isError: isDashboardError } = useQuery<AdminDashboard>({
@@ -309,6 +315,48 @@ export default function AdminReportsPage() {
                 </div>
                 <div className="p-6">
                   <PayrollForecastPanel />
+                </div>
+              </div>
+            )}
+
+            {/* AI Overtime Risk */}
+            {overtimeRiskEnabled && (
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
+                <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                    <span>⏰</span> AI Overtime Risk Analysis
+                  </h2>
+                </div>
+                <div className="p-6">
+                  <OvertimeRiskPanel />
+                </div>
+              </div>
+            )}
+
+            {/* AI Project Budget */}
+            {projectBudgetEnabled && (
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
+                <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                    <span>💰</span> AI Project Budget Forecast
+                  </h2>
+                </div>
+                <div className="p-6">
+                  <ProjectBudgetPanel />
+                </div>
+              </div>
+            )}
+
+            {/* AI Cash Flow Chart */}
+            {cashFlowEnabled && (
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
+                <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                    <span>📈</span> AI Cash Flow Projection
+                  </h2>
+                </div>
+                <div className="p-6">
+                  <CashFlowChart weeksAhead={8} />
                 </div>
               </div>
             )}
