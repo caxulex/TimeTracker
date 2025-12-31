@@ -9,8 +9,14 @@
 
 ### To Continue Development
 ```
-Read this file and the latest SESSION_REPORT file, then help me with [your task]
+Read CONTEXT.md, AIupgrade.md, PRODUCTION_FIXES_GUIDE.md, and the latest SESSION_REPORT file, then help me with [your task]
 ```
+
+### Essential Reading Order
+1. **CONTEXT.md** (this file) - Project overview
+2. **AIupgrade.md** - AI feature specifications and phases
+3. **PRODUCTION_FIXES_GUIDE.md** - ⚠️ MANDATORY before any changes
+4. **Latest SESSION_REPORT** - What was done last session
 
 ### Production Status
 | Item | Value |
@@ -185,10 +191,17 @@ System degrades gracefully without these.
 ## 📚 Key Documentation Files
 
 1. **[CONTEXT.md](CONTEXT.md)** - This file - project overview
-2. **[PRODUCTION_FIXES_GUIDE.md](PRODUCTION_FIXES_GUIDE.md)** - Deployment guide
-3. **[AIupgrade.md](AIupgrade.md)** - AI feature specifications
+2. **[AIupgrade.md](AIupgrade.md)** - AI feature specifications (Phases 0.2-5.2)
+3. **[PRODUCTION_FIXES_GUIDE.md](PRODUCTION_FIXES_GUIDE.md)** - ⚠️ MANDATORY deployment guide
 4. **[README.md](README.md)** - Project readme
 5. **Latest SESSION_REPORT** - Detailed session history
+
+### 🤖 AI Assistant Instructions
+> **When starting a new session, ALWAYS read these files first:**
+> 1. `CONTEXT.md` - Understand the project
+> 2. `AIupgrade.md` - Know the AI features and phases
+> 3. `PRODUCTION_FIXES_GUIDE.md` - Avoid breaking production
+> 4. The most recent `SESSION_REPORT_*.md` - Continue where we left off
 
 ---
 
