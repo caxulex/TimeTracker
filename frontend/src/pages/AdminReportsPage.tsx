@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
+import { PayrollForecastPanel } from '../components/ai/PayrollForecastPanel';
+import { useFeatureEnabled } from '../hooks/useAIFeatures';
 import {
   ChartBarIcon,
   UsersIcon,
@@ -68,6 +70,9 @@ export default function AdminReportsPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'overview' | 'teams' | 'individuals'>('overview');
   const [userPeriod, setUserPeriod] = useState<'today' | 'week' | 'month'>('week');
+
+  // AI Feature flags
+  const { data: payrollForecastEnabled } = useFeatureEnabled('payroll_forecast');
 
   // Fetch admin dashboard data
   const { data: dashboardData, isLoading: isDashboardLoading, isError: isDashboardError } = useQuery<AdminDashboard>({
@@ -293,6 +298,20 @@ export default function AdminReportsPage() {
                 </ResponsiveContainer>
               </div>
             </div>
+
+            {/* AI Payroll Forecast */}
+            {payrollForecastEnabled && (
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
+                <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                    <span>🤖</span> AI Payroll Forecast
+                  </h2>
+                </div>
+                <div className="p-6">
+                  <PayrollForecastPanel />
+                </div>
+              </div>
+            )}
           </div>
         )}
 

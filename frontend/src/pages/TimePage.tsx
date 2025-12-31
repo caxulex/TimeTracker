@@ -1,15 +1,18 @@
 // ============================================
 // TIME TRACKER - TIME ENTRIES PAGE
 // With Manual Entry Creation (TASK-026)
+// With AI Suggestions Integration
 // ============================================
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, Button, Modal, LoadingOverlay, Input } from '../components/common';
 import { TimerWidget } from '../components/time/TimerWidget';
+import { SuggestionDropdown } from '../components/ai';
 import { timeEntriesApi, projectsApi, tasksApi } from '../api/client';
 import { formatDuration, formatDate, formatTimeOnly, cn } from '../utils/helpers';
 import { useAuth } from '../hooks/useAuth';
 import { useNotifications } from '../hooks/useNotifications';
+import { useFeatureEnabled } from '../hooks/useAIFeatures';
 import type { TimeEntry, TimeEntryCreate, Project, Task } from '../types';
 
 export function TimePage() {
@@ -455,6 +458,10 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('17:00');
   const [error, setError] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // Check if AI suggestions are enabled
+  const { data: suggestionsEnabled } = useFeatureEnabled('ai_suggestions');
 
   // Fetch tasks for selected project
   const { data: tasksData } = useQuery({
@@ -464,6 +471,41 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
   });
 
   const tasks = tasksData?.items || [];
+
+  // Reset form when modal closes
+  React.useEffect(() => {
+    if (!isOpen) {
+      setDescription('');
+      setProjectId('');
+      setTaskId('');
+      setDate(new Date().toISOString().split('T')[0]);
+      setStartTime('09:00');
+      setEndTime('17:00');
+      setError('');
+      setShowSuggestions(false);
+    } else if (suggestionsEnabled) {
+      // Show suggestions when modal opens if enabled
+      setShowSuggestions(true);
+    }
+  }, [isOpen, suggestionsEnabled]);
+
+  // Handle suggestion selection
+  const handleSuggestionSelect = (suggestion: {
+    projectId: number;
+    projectName: string;
+    taskId?: number | null;
+    taskName?: string | null;
+    description?: string;
+  }) => {
+    setProjectId(suggestion.projectId);
+    if (suggestion.taskId) {
+      setTaskId(suggestion.taskId);
+    }
+    if (suggestion.description) {
+      setDescription(suggestion.description);
+    }
+    setShowSuggestions(false);
+  };
 
   // Reset form when modal closes
   React.useEffect(() => {
@@ -523,6 +565,31 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
           </div>
         )}
 
+        {/* AI Suggestions Panel */}
+        {suggestionsEnabled && showSuggestions && !projectId && (
+          <div className="relative">
+            <SuggestionDropdown
+              onSelect={handleSuggestionSelect}
+              partialDescription={description}
+              isOpen={showSuggestions}
+              onClose={() => setShowSuggestions(false)}
+              autoFetch={true}
+              className="relative static shadow-none border-blue-200 bg-blue-50"
+            />
+          </div>
+        )}
+
+        {/* Toggle suggestions button if hidden */}
+        {suggestionsEnabled && !showSuggestions && !projectId && (
+          <button
+            type="button"
+            onClick={() => setShowSuggestions(true)}
+            className="w-full p-2 text-sm text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"
+          >
+            <span>✨</span> Show AI Suggestions
+          </button>
+        )}
+
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Description
@@ -531,6 +598,7 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
+            onFocus={() => suggestionsEnabled && !projectId && setShowSuggestions(true)}
             placeholder="What did you work on?"
             className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
@@ -545,6 +613,7 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
             onChange={(e) => {
               setProjectId(e.target.value ? Number(e.target.value) : '');
               setTaskId('');
+              setShowSuggestions(false);
             }}
             className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             required

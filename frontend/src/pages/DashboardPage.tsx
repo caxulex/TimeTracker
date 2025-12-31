@@ -8,6 +8,9 @@ import { Card, CardHeader, LoadingOverlay } from '../components/common';
 import { TimerWidget } from '../components/time/TimerWidget';
 import { ActiveTimers } from '../components/ActiveTimers';
 import { AdminAlertsPanel } from '../components/AdminAlertsPanel';
+import { AnomalyAlertPanel } from '../components/ai/AnomalyAlertPanel';
+import WeeklySummaryPanel from '../components/ai/WeeklySummaryPanel';
+import { useFeatureEnabled } from '../hooks/useAIFeatures';
 import { reportsApi } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import { useWebSocketContext } from '../contexts/WebSocketContext';
@@ -54,6 +57,10 @@ export function DashboardPage() {
 
   // Get WebSocket context - connection is managed by WebSocketProvider
   const { isConnected } = useWebSocketContext();
+
+  // AI Feature flags
+  const { data: anomalyEnabled } = useFeatureEnabled('anomaly_detection');
+  const { data: weeklySummaryEnabled } = useFeatureEnabled('weekly_summary');
 
   // User's personal dashboard
   const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
@@ -188,6 +195,30 @@ export function DashboardPage() {
         </div>
       ) : (
         <ActiveTimers />
+      )}
+
+      {/* AI Features Section */}
+      {isAdmin && anomalyEnabled && (
+        <div className="mt-6">
+          <h2 className="text-lg font-semibold text-gray-700 mb-3 flex items-center gap-2">
+            <span>🤖</span> AI Anomaly Detection
+          </h2>
+          <AnomalyAlertPanel 
+            isAdmin={true}
+            periodDays={7}
+            maxItems={5}
+          />
+        </div>
+      )}
+
+      {/* Weekly AI Summary for all users */}
+      {weeklySummaryEnabled && (
+        <div className="mt-6">
+          <h2 className="text-lg font-semibold text-gray-700 mb-3 flex items-center gap-2">
+            <span>📊</span> AI Weekly Summary
+          </h2>
+          <WeeklySummaryPanel collapsible={true} defaultExpanded={false} />
+        </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
