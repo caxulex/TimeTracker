@@ -39,9 +39,53 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Time Tracker API...")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info(f"Debug mode: {settings.DEBUG}")
+    
+    # Auto-seed AI features if not present
+    try:
+        await seed_ai_features_on_startup()
+    except Exception as e:
+        logger.warning(f"Could not auto-seed AI features: {e}")
+    
     logger.info("Time Tracker API started successfully")
     yield
     logger.info("Shutting down Time Tracker API...")
+
+
+async def seed_ai_features_on_startup():
+    """Automatically seed AI features if the table is empty"""
+    from sqlalchemy import text
+    from app.database import async_session
+    
+    async with async_session() as db:
+        result = await db.execute(text("SELECT COUNT(*) FROM ai_feature_settings"))
+        count = result.scalar()
+        
+        if count == 0:
+            logger.info("Seeding AI features...")
+            features = [
+                ("ai_suggestions", "Time Entry Suggestions", "AI-powered suggestions for projects and tasks based on your work patterns", True, True, "gemini"),
+                ("ai_anomaly_alerts", "Anomaly Detection", "Automatic detection of unusual work patterns like overtime or missing entries", True, True, "gemini"),
+                ("ai_payroll_forecast", "Payroll Forecasting", "Predictive analytics for payroll and budget planning", False, True, "gemini"),
+                ("ai_nlp_entry", "Natural Language Entry", "Create time entries using natural language", False, True, "gemini"),
+                ("ai_report_summaries", "AI Report Summaries", "AI-generated insights and summaries in your reports", False, True, "gemini"),
+                ("ai_task_estimation", "Task Duration Estimation", "AI-powered estimates for how long tasks will take", False, True, "gemini"),
+            ]
+            
+            for f in features:
+                await db.execute(
+                    text("""
+                        INSERT INTO ai_feature_settings 
+                        (feature_id, feature_name, description, is_enabled, requires_api_key, api_provider)
+                        VALUES (:fid, :fname, :desc, :enabled, :req_key, :provider)
+                        ON CONFLICT (feature_id) DO NOTHING
+                    """),
+                    {"fid": f[0], "fname": f[1], "desc": f[2], "enabled": f[3], "req_key": f[4], "provider": f[5]}
+                )
+            
+            await db.commit()
+            logger.info(f"Seeded {len(features)} AI features")
+        else:
+            logger.info(f"AI features already exist ({count} features)")
 
 
 # SEC-009: Disable docs in production
