@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, '/app')
 
 from sqlalchemy import text
-from app.database import AsyncSessionLocal
+from app.database import async_session
 
 
 FEATURES = [
@@ -67,7 +67,7 @@ FEATURES = [
 
 
 async def seed_features():
-    async with AsyncSessionLocal() as db:
+    async with async_session() as db:
         # Check if features already exist
         result = await db.execute(text("SELECT COUNT(*) FROM ai_feature_settings"))
         count = result.scalar()
