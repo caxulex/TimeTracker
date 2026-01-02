@@ -77,7 +77,7 @@ export const apiKeysApi = {
    * Check encryption configuration status (Super Admin only)
    */
   async getEncryptionStatus(): Promise<EncryptionStatusResponse> {
-    const response = await apiClient.get(`${BASE_URL}/encryption-status`);
+    const response = await apiClient.get(`${BASE_URL}/status/encryption`);
     return response.data;
   },
 
