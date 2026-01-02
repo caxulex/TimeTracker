@@ -53,6 +53,29 @@ Read CONTEXT.md, AIupgrade.md, PRODUCTION_FIXES_GUIDE.md, and the latest SESSION
 > 
 > **Skipping this guide WILL break the application.**
 
+### 🚨 CRITICAL: Server Resource Limits
+> **NEVER run commands that may overload the server!**
+> 
+> The AWS Lightsail instance has LIMITED resources. These commands can CRASH the server:
+> - ❌ `docker compose build --no-cache` (rebuilds everything from scratch - TOO HEAVY)
+> - ❌ Running multiple heavy processes simultaneously
+> - ❌ Large npm installs or pip installs without cache
+> 
+> **SAFE deployment commands:**
+> ```bash
+> cd ~/timetracker
+> git pull origin master
+> docker compose -f docker-compose.prod.yml up -d --build
+> ```
+> 
+> The `--build` flag uses Docker layer caching which is SAFE.
+> Only use `--no-cache` if absolutely necessary AND the server is idle.
+> 
+> **If server becomes unresponsive:**
+> 1. Wait 5-10 minutes for it to recover
+> 2. Or reboot from AWS Lightsail Console
+> 3. Then run: `docker compose -f docker-compose.prod.yml up -d`
+
 ---
 
 ## 📁 Project Architecture
