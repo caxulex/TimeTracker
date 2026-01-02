@@ -52,6 +52,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
       JWT_ALGORITHM: HS256
       JWT_EXPIRE_MINUTES: 60
+      # AI Features - API Key Encryption
+      API_KEY_ENCRYPTION_KEY: ${API_KEY_ENCRYPTION_KEY:-}
       # Production domain for CORS + TrustedHostMiddleware
       # NOTE: backend reads ALLOWED_ORIGINS / ALLOWED_HOSTS from env (see backend/app/config.py).
       # Include localhost for health checks, timetracker-backend for internal docker networking
