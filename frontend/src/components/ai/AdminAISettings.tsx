@@ -111,6 +111,15 @@ export const AdminAISettings: React.FC<AdminAISettingsProps> = ({
           </p>
         </div>
         <div className="p-6">
+          {features.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-gray-500 mb-4">No AI features found in database.</p>
+              <p className="text-sm text-gray-400">Run the seed script on the server:</p>
+              <code className="text-xs bg-gray-100 px-2 py-1 rounded mt-2 block">
+                docker-compose exec backend python seed_ai_features.py
+              </code>
+            </div>
+          ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {features.map((feature: AdminFeatureSummary) => {
               const config = FEATURE_UI_CONFIG[feature.feature_id] || {
@@ -172,6 +181,7 @@ export const AdminAISettings: React.FC<AdminAISettingsProps> = ({
               );
             })}
           </div>
+          )}
         </div>
       </div>
 
@@ -252,7 +262,7 @@ export const AdminAISettings: React.FC<AdminAISettingsProps> = ({
                     </button>
                   </div>
                   <div className="space-y-3">
-                    {selectedUserPrefs.preferences.map((pref: FeatureStatus) => {
+                    {(selectedUserPrefs.preferences || []).map((pref: FeatureStatus) => {
                       const config = FEATURE_UI_CONFIG[pref.feature_id] || {
                         icon: '🤖',
                         color: 'text-gray-600',
