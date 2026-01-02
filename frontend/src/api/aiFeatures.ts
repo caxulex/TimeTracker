@@ -19,7 +19,7 @@ import type {
   UserAIPreferenceUpdate,
 } from '../types/aiFeatures';
 
-const BASE_URL = '/ai/features';
+const BASE_URL = '/api/ai/features';
 
 // ============================================
 // USER ENDPOINTS
