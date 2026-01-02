@@ -1,4 +1,4 @@
-# TimeTracker Project Context
+
 
 > **Last Updated**: December 31, 2025
 > **Latest Session Report**: [SESSION_REPORT_DEC_31_2025.md](SESSION_REPORT_DEC_31_2025.md)
@@ -23,8 +23,22 @@ Read CONTEXT.md, AIupgrade.md, PRODUCTION_FIXES_GUIDE.md, and the latest SESSION
 |------|-------|
 | **URL** | https://timetracker.shaemarcus.com |
 | **Server** | AWS Lightsail |
+| **Server IP** | `100.52.110.180` (use browser SSH from AWS Console) |
 | **Path** | `/home/ubuntu/timetracker` (lowercase!) |
 | **Docker File** | `docker-compose.prod.yml` (⚠️ NOT docker-compose.yml) |
+
+### 🚀 How to Deploy (Browser SSH)
+1. Go to **AWS Lightsail Console**: https://lightsail.aws.amazon.com/
+2. Click on the **TimeTracker** instance
+3. Click **"Connect using SSH"** (opens terminal in browser)
+4. Run these commands:
+   ```bash
+   cd ~/timetracker
+   git pull origin master
+   docker compose -f docker-compose.prod.yml up -d --build
+   ```
+5. Wait ~2-3 minutes for containers to rebuild
+6. Verify: `curl http://localhost:8000/health`
 
 ### ⚠️ Before Making ANY Changes
 > **READ [PRODUCTION_FIXES_GUIDE.md](PRODUCTION_FIXES_GUIDE.md) FIRST!**
@@ -93,17 +107,20 @@ npm run dev
 
 ### Production Deployment
 ```bash
-# SSH to server
-ssh ubuntu@<lightsail-ip>
+# Option 1: Browser SSH (Recommended - no local key needed)
+# 1. Go to AWS Lightsail Console: https://lightsail.aws.amazon.com/
+# 2. Click TimeTracker instance → "Connect using SSH"
+# 3. Run the commands below in the browser terminal
+
+# Option 2: Local SSH (requires .pem key)
+ssh -i ~/Downloads/LightsailDefaultKey-us-east-1.pem ubuntu@100.52.110.180
+
+# Deploy commands (run on server)
 cd /home/ubuntu/timetracker
-
-# Pull changes
 git pull origin master
-
-# Rebuild & deploy
 docker compose -f docker-compose.prod.yml up -d --build
 
-# Run migrations
+# Run migrations (if needed)
 docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 
 # Check health
