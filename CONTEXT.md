@@ -54,27 +54,35 @@ Read CONTEXT.md, AIupgrade.md, PRODUCTION_FIXES_GUIDE.md, and the latest SESSION
 > **Skipping this guide WILL break the application.**
 
 ### 🚨 CRITICAL: Server Resource Limits
-> **NEVER run commands that may overload the server!**
+> **⛔ THE SERVER IS EXTREMELY LIMITED - READ THIS CAREFULLY!**
 > 
-> The AWS Lightsail instance has LIMITED resources. These commands can CRASH the server:
-> - ❌ `docker compose build --no-cache` (rebuilds everything from scratch - TOO HEAVY)
-> - ❌ Running multiple heavy processes simultaneously
-> - ❌ Large npm installs or pip installs without cache
+> **DANGEROUS commands that WILL CRASH the server:**
+> - ❌ `docker compose build --no-cache` - NEVER USE
+> - ❌ `docker compose up -d --build` - TOO HEAVY, CRASHES SERVER
+> - ❌ Any command that rebuilds Docker images
 > 
-> **SAFE deployment commands:**
+> **SAFE deployment - Use ONLY these commands:**
 > ```bash
 > cd ~/timetracker
 > git pull origin master
-> docker compose -f docker-compose.prod.yml up -d --build
+> docker compose -f docker-compose.prod.yml up -d
 > ```
 > 
-> The `--build` flag uses Docker layer caching which is SAFE.
-> Only use `--no-cache` if absolutely necessary AND the server is idle.
+> **If code changes require a rebuild:**
+> 1. WAIT for server to be completely idle (check with `htop`)
+> 2. Rebuild ONE container at a time:
+>    ```bash
+>    docker compose -f docker-compose.prod.yml build backend
+>    docker compose -f docker-compose.prod.yml up -d backend
+>    ```
+> 3. Wait 5 minutes, then rebuild frontend separately
 > 
 > **If server becomes unresponsive:**
-> 1. Wait 5-10 minutes for it to recover
-> 2. Or reboot from AWS Lightsail Console
-> 3. Then run: `docker compose -f docker-compose.prod.yml up -d`
+> 1. Wait 10-15 minutes for recovery, OR
+> 2. Reboot from AWS Lightsail Console
+> 3. After reboot: `docker compose -f docker-compose.prod.yml up -d`
+> 
+> **🔴 AI ASSISTANTS: NEVER suggest `--build` flag without explicit user approval!**
 
 ---
 
