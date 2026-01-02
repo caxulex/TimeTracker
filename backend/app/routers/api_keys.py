@@ -32,6 +32,17 @@ from app.services.audit_log import AuditLogService
 router = APIRouter(prefix="/admin/api-keys", tags=["admin-api-keys"])
 
 
+def require_admin(current_user: User = Depends(get_current_active_user)):
+    """Dependency to require admin or super_admin role for API key management"""
+    if current_user.role not in ["admin", "super_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required for API key management"
+        )
+    return current_user
+
+
+# Keep for backwards compatibility but not used
 def require_super_admin(current_user: User = Depends(get_current_active_user)):
     """Dependency to require super_admin role for API key management"""
     if current_user.role != "super_admin":
@@ -57,7 +68,7 @@ def get_user_agent(request: Request) -> Optional[str]:
 
 @router.get("/providers", response_model=SupportedProvidersResponse)
 async def get_supported_providers(
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(require_admin)
 ):
     """
     Get list of supported AI providers.
@@ -78,7 +89,7 @@ async def list_api_keys(
     provider: Optional[str] = Query(None, description="Filter by provider"),
     active_only: bool = Query(False, description="Only show active keys"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(require_admin)
 ):
     """
     List all API keys (without exposing actual key values).
@@ -111,7 +122,7 @@ async def create_api_key(
     data: APIKeyCreate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(require_admin)
 ):
     """
     Create a new API key.
@@ -148,7 +159,7 @@ async def create_api_key(
 async def get_api_key(
     key_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(require_admin)
 ):
     """
     Get details of a specific API key (without exposing actual value).
@@ -171,7 +182,7 @@ async def update_api_key(
     data: APIKeyUpdate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(require_admin)
 ):
     """
     Update an existing API key.
@@ -215,7 +226,7 @@ async def delete_api_key(
     key_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(require_admin)
 ):
     """
     Delete an API key.
@@ -244,7 +255,7 @@ async def delete_api_key(
 async def test_api_key(
     key_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(require_admin)
 ):
     """
     Test an API key's connectivity with its provider.
@@ -274,7 +285,7 @@ async def test_api_key(
 
 @router.get("/status/encryption", response_model=dict)
 async def get_encryption_status(
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(require_admin)
 ):
     """
     Check if the encryption service is properly configured.

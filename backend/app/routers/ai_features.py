@@ -242,10 +242,10 @@ async def toggle_global_feature(
     feature_id: str,
     update: AIFeatureSettingUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_super_admin)
+    current_user: User = Depends(require_admin)
 ):
     """
-    Toggle a feature globally (super admin only).
+    Toggle a feature globally (admin or super admin).
     
     When disabled globally, no user can access the feature.
     """
