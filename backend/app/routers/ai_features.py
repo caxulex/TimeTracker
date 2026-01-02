@@ -420,6 +420,70 @@ async def batch_set_user_overrides(
 
 
 # ============================================
+# ADMIN SEED ENDPOINT
+# ============================================
+
+@router.post("/admin/seed")
+async def seed_ai_features(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Seed default AI features into the database.
+    
+    Run this if the ai_feature_settings table is empty.
+    Only admins can run this endpoint.
+    """
+    from sqlalchemy import text
+    
+    # Check if features already exist
+    result = await db.execute(text("SELECT COUNT(*) FROM ai_feature_settings"))
+    count = result.scalar()
+    
+    if count > 0:
+        return {
+            "status": "already_seeded",
+            "message": f"AI features already exist ({count} features found)",
+            "count": count
+        }
+    
+    features = [
+        ("ai_suggestions", "Time Entry Suggestions", "AI-powered suggestions for projects and tasks based on your work patterns", True, True, "gemini"),
+        ("ai_anomaly_alerts", "Anomaly Detection", "Automatic detection of unusual work patterns like overtime or missing entries", True, True, "gemini"),
+        ("ai_payroll_forecast", "Payroll Forecasting", "Predictive analytics for payroll and budget planning", False, True, "gemini"),
+        ("ai_nlp_entry", "Natural Language Entry", "Create time entries using natural language like 'Log 2 hours on Project Alpha'", False, True, "gemini"),
+        ("ai_report_summaries", "AI Report Summaries", "AI-generated insights and summaries in your reports", False, True, "gemini"),
+        ("ai_task_estimation", "Task Duration Estimation", "AI-powered estimates for how long tasks will take", False, True, "gemini"),
+    ]
+    
+    for feature in features:
+        await db.execute(
+            text("""
+                INSERT INTO ai_feature_settings 
+                (feature_id, feature_name, description, is_enabled, requires_api_key, api_provider)
+                VALUES (:fid, :fname, :desc, :enabled, :req_key, :provider)
+                ON CONFLICT (feature_id) DO NOTHING
+            """),
+            {
+                "fid": feature[0],
+                "fname": feature[1],
+                "desc": feature[2],
+                "enabled": feature[3],
+                "req_key": feature[4],
+                "provider": feature[5]
+            }
+        )
+    
+    await db.commit()
+    
+    return {
+        "status": "success",
+        "message": f"Seeded {len(features)} AI features",
+        "features": [f[0] for f in features]
+    }
+
+
+# ============================================
 # USAGE STATISTICS ENDPOINTS
 # ============================================
 

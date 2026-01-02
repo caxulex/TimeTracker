@@ -244,6 +244,23 @@ export function useMyUsage(days: number = 30) {
   });
 }
 
+/**
+ * Hook to seed AI features (admin only)
+ */
+export function useSeedAIFeatures() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => aiFeaturesApi.seedFeatures(),
+    onSuccess: () => {
+      // Invalidate all feature queries to refresh the UI
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.features });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.adminFeatures });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.myFeatures });
+    },
+  });
+}
+
 // ============================================
 // UTILITY HOOKS
 // ============================================

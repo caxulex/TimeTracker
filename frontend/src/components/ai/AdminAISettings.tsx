@@ -12,6 +12,7 @@ import {
   useUserPreferencesAdmin,
   useSetUserOverride,
   useRemoveUserOverride,
+  useSeedAIFeatures,
 } from '../../hooks/useAIFeatures';
 import { FEATURE_UI_CONFIG } from '../../types/aiFeatures';
 import type { AdminFeatureSummary, FeatureStatus } from '../../types/aiFeatures';
@@ -35,6 +36,7 @@ export const AdminAISettings: React.FC<AdminAISettingsProps> = ({
   const toggleGlobalMutation = useToggleGlobalFeature();
   const setOverrideMutation = useSetUserOverride();
   const removeOverrideMutation = useRemoveUserOverride();
+  const seedMutation = useSeedAIFeatures();
 
   const handleGlobalToggle = (featureId: string, enabled: boolean) => {
     toggleGlobalMutation.mutate({ featureId, isEnabled: enabled });
@@ -114,10 +116,23 @@ export const AdminAISettings: React.FC<AdminAISettingsProps> = ({
           {features.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-gray-500 mb-4">No AI features found in database.</p>
-              <p className="text-sm text-gray-400">Run the seed script on the server:</p>
-              <code className="text-xs bg-gray-100 px-2 py-1 rounded mt-2 block">
-                docker-compose exec backend python seed_ai_features.py
-              </code>
+              <button
+                onClick={() => seedMutation.mutate()}
+                disabled={seedMutation.isPending}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {seedMutation.isPending ? 'Seeding Features...' : '🌱 Seed AI Features'}
+              </button>
+              {seedMutation.isError && (
+                <p className="text-red-500 text-sm mt-2">
+                  Error: {(seedMutation.error as Error)?.message || 'Failed to seed features'}
+                </p>
+              )}
+              {seedMutation.isSuccess && (
+                <p className="text-green-500 text-sm mt-2">
+                  Features seeded successfully! Refreshing...
+                </p>
+              )}
             </div>
           ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

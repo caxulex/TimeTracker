@@ -174,6 +174,25 @@ export const getMyUsage = async (days: number = 30): Promise<UserUsageSummary> =
 };
 
 // ============================================
+// ADMIN SEED ENDPOINT
+// ============================================
+
+interface SeedResponse {
+  status: string;
+  message: string;
+  features?: string[];
+  count?: number;
+}
+
+/**
+ * Seed AI features into the database (admin only)
+ */
+export const seedFeatures = async (): Promise<SeedResponse> => {
+  const response = await api.post<SeedResponse>(`${BASE_URL}/admin/seed`);
+  return response.data;
+};
+
+// ============================================
 // EXPORT ALL
 // ============================================
 
@@ -199,6 +218,9 @@ export const aiFeaturesApi = {
   getUsageSummary,
   getUserUsage,
   getMyUsage,
+  
+  // Admin seed
+  seedFeatures,
 };
 
 export default aiFeaturesApi;
