@@ -82,19 +82,19 @@ export const AdminAISettings: React.FC<AdminAISettingsProps> = ({
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <p className="text-purple-200 text-sm">Total Requests</p>
-              <p className="text-2xl font-bold">{usageData.total_requests.toLocaleString()}</p>
+              <p className="text-2xl font-bold">{(usageData.total_requests ?? 0).toLocaleString()}</p>
             </div>
             <div>
               <p className="text-purple-200 text-sm">Tokens Used</p>
-              <p className="text-2xl font-bold">{usageData.total_tokens.toLocaleString()}</p>
+              <p className="text-2xl font-bold">{(usageData.total_tokens ?? 0).toLocaleString()}</p>
             </div>
             <div>
               <p className="text-purple-200 text-sm">Estimated Cost</p>
-              <p className="text-2xl font-bold">${usageData.total_cost.toFixed(2)}</p>
+              <p className="text-2xl font-bold">${(usageData.total_cost ?? 0).toFixed(2)}</p>
             </div>
             <div>
               <p className="text-purple-200 text-sm">Unique Users</p>
-              <p className="text-2xl font-bold">{usageData.unique_users}</p>
+              <p className="text-2xl font-bold">{usageData.unique_users ?? 0}</p>
             </div>
           </div>
         </div>

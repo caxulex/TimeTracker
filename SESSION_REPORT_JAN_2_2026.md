@@ -66,8 +66,8 @@
 #### Deployment
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 18 | Deploy latest changes to production | ⬜ Not Started | |
-| 19 | Run migrations on server | ⬜ Not Started | |
+| 18 | Deploy latest changes to production | ✅ Complete | Health check passed |
+| 19 | Run migrations on server | ✅ Complete | Ran with deployment |
 | 20 | Enable AI features via Admin Settings | ⬜ Not Started | |
 
 ---
