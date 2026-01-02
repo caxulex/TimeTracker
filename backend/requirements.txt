@@ -23,6 +23,10 @@ aioredis==2.0.1
 # HTTP client for external APIs
 httpx==0.25.2
 
+# AI Providers
+google-generativeai==0.8.3
+openai==1.58.1
+
 # System monitoring
 psutil==5.9.8
 
