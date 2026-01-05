@@ -1,0 +1,97 @@
+# ============================================
+# TIME TRACKER - Production Docker Compose (Pre-built Images)
+# Uses images from GitHub Container Registry - NO BUILD ON SERVER
+# ============================================
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: timetracker-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-timetracker}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-timetracker_secure_password}
+      POSTGRES_DB: ${DB_NAME:-time_tracker}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-timetracker} -d ${DB_NAME:-time_tracker}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - timetracker-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: timetracker-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - timetracker-network
+
+  # Backend API - PRE-BUILT FROM GHCR
+  backend:
+    image: ghcr.io/caxulex/timetracker-backend:latest
+    container_name: timetracker-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:-timetracker}:${DB_PASSWORD:-timetracker_secure_password}@postgres:5432/${DB_NAME:-time_tracker}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRE_MINUTES: 60
+      API_KEY_ENCRYPTION_KEY: ${API_KEY_ENCRYPTION_KEY:-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-["https://timetracker.shaemarcus.com"]}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-["timetracker.shaemarcus.com","localhost","127.0.0.1","timetracker-backend","backend"]}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://timetracker.shaemarcus.com}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-H", "Host: localhost", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - timetracker-network
+
+  # Frontend Application - PRE-BUILT FROM GHCR
+  frontend:
+    image: ghcr.io/caxulex/timetracker-frontend:latest
+    container_name: timetracker-frontend
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - timetracker-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  timetracker-network:
+    driver: bridge

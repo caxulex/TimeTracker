@@ -210,19 +210,24 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./backend
-          file: ./backend/Dockerfile
+          file: ./backend/Dockerfile.prod
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/timetracker-backend:latest
-          no-cache: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Build and push frontend
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
-          file: ./frontend/Dockerfile
+          file: ./frontend/Dockerfile.prod
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/timetracker-frontend:latest
-          no-cache: true
+          build-args: |
+            VITE_API_URL=${{ vars.VITE_API_URL || 'https://timetracker.shaemarcus.com/api' }}
+            VITE_WS_URL=${{ vars.VITE_WS_URL || 'wss://timetracker.shaemarcus.com/ws' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   # ============================================
   # Deploy Note: Run ~/deploy.sh manually on Lightsail
