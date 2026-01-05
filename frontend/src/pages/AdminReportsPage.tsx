@@ -6,6 +6,7 @@ import { PayrollForecastPanel } from '../components/ai/PayrollForecastPanel';
 import { OvertimeRiskPanel } from '../components/ai/OvertimeRiskPanel';
 import { ProjectBudgetPanel } from '../components/ai/ProjectBudgetPanel';
 import { CashFlowChart } from '../components/ai/CashFlowChart';
+import BurnoutRiskPanel from '../components/ai/BurnoutRiskPanel';
 import { useFeatureEnabled } from '../hooks/useAIFeatures';
 import {
   ChartBarIcon,
@@ -79,6 +80,7 @@ export default function AdminReportsPage() {
   const { data: overtimeRiskEnabled } = useFeatureEnabled('overtime_risk');
   const { data: projectBudgetEnabled } = useFeatureEnabled('project_budget');
   const { data: cashFlowEnabled } = useFeatureEnabled('cash_flow');
+  const { data: burnoutRiskEnabled } = useFeatureEnabled('burnout_risk');
 
   // Fetch admin dashboard data
   const { data: dashboardData, isLoading: isDashboardLoading, isError: isDashboardError } = useQuery<AdminDashboard>({
@@ -357,6 +359,23 @@ export default function AdminReportsPage() {
                 </div>
                 <div className="p-6">
                   <CashFlowChart weeksAhead={8} />
+                </div>
+              </div>
+            )}
+
+            {/* AI Burnout Risk Assessment */}
+            {burnoutRiskEnabled && (
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow" role="region" aria-label="AI Burnout Risk Assessment">
+                <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                    <span>💚</span> AI Burnout Risk Assessment
+                  </h2>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    Monitor employee wellbeing and identify burnout risks early
+                  </p>
+                </div>
+                <div className="p-6">
+                  <BurnoutRiskPanel periodDays={30} />
                 </div>
               </div>
             )}

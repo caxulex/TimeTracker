@@ -4,8 +4,10 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, Button, Input, Modal, LoadingOverlay, Select } from '../components/common';
+import { TaskEstimationCard } from '../components/ai';
 import { tasksApi, projectsApi } from '../api/client';
 import { formatDate, cn } from '../utils/helpers';
+import { useFeatureEnabled } from '../hooks/useAIFeatures';
 import type { Task, TaskCreate, TaskStatus, Project } from '../types';
 
 const STATUS_OPTIONS = [
@@ -26,6 +28,9 @@ export function TasksPage() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [filterProject, setFilterProject] = useState<number | ''>('');
   const [filterStatus, setFilterStatus] = useState<TaskStatus | ''>('');
+
+  // AI Feature flag
+  const { data: taskEstimationEnabled } = useFeatureEnabled('task_estimation');
 
   // Fetch tasks
   const { data: tasksData, isLoading } = useQuery({
@@ -118,6 +123,23 @@ export function TasksPage() {
           New Task
         </Button>
       </div>
+
+      {/* AI Task Estimation */}
+      {taskEstimationEnabled && (
+        <Card className="bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-200" role="region" aria-label="AI Task Time Estimation">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-lg">🤖</span>
+            <h3 className="font-semibold text-gray-800">AI Task Estimation</h3>
+          </div>
+          <p className="text-sm text-gray-600 mb-3">
+            Get AI-powered time estimates for your tasks based on historical data and project patterns.
+          </p>
+          <TaskEstimationCard 
+            projectId={filterProject || undefined}
+            compact={false}
+          />
+        </Card>
+      )}
 
       {/* Filters */}
       <Card padding="sm">

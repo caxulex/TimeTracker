@@ -5,6 +5,7 @@ import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '../../utils/helpers';
 import { useAuthStore } from '../../stores/authStore';
+import { useFeatureEnabled } from '../../hooks/useFeatureEnabled';
 
 interface NavItem {
   path: string;
@@ -99,6 +100,47 @@ const analyticsGroup: NavGroup = {
   ],
 };
 
+// AI Insights navigation items - links to pages with AI features
+const aiInsightsItems: NavItem[] = [
+  {
+    path: '/time',
+    label: 'AI Chat Assistant',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+      </svg>
+    ),
+  },
+  {
+    path: '/tasks',
+    label: 'Task Estimation',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    ),
+  },
+  {
+    path: '/projects',
+    label: 'Project Health',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+      </svg>
+    ),
+  },
+  {
+    path: '/admin/reports',
+    label: 'Burnout Analysis',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
+      </svg>
+    ),
+    adminOnly: true,
+  },
+];
+
 const payrollGroup: NavGroup = {
   label: 'Payroll',
   adminOnly: true,
@@ -181,6 +223,14 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const [payrollExpanded, setPayrollExpanded] = useState(false);
   const [analyticsExpanded, setAnalyticsExpanded] = useState(true);
+  const [aiInsightsExpanded, setAiInsightsExpanded] = useState(false);
+  
+  // Check if any AI features are enabled
+  const nlpEnabled = useFeatureEnabled('nlp_time_entry');
+  const taskEstimationEnabled = useFeatureEnabled('task_estimation');
+  const projectHealthEnabled = useFeatureEnabled('project_health');
+  const burnoutRiskEnabled = useFeatureEnabled('burnout_risk');
+  const hasAnyAiFeature = nlpEnabled || taskEstimationEnabled || projectHealthEnabled || burnoutRiskEnabled;
 
   return (
     <>
@@ -332,6 +382,92 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                       <span>{item.label}</span>
                     </NavLink>
                   ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* AI Insights Section - Shows when any AI feature is enabled */}
+          {hasAnyAiFeature && (
+            <div className="pt-2">
+              <button
+                onClick={() => setAiInsightsExpanded(!aiInsightsExpanded)}
+                className={cn(
+                  'w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                  aiInsightsExpanded ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700 hover:bg-gray-100'
+                )}
+                aria-expanded={aiInsightsExpanded}
+                aria-label="AI Insights section"
+              >
+                <div className="flex items-center space-x-3">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                  <span>AI Insights</span>
+                </div>
+                <svg
+                  className={cn('w-4 h-4 transition-transform', aiInsightsExpanded && 'rotate-180')}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {aiInsightsExpanded && (
+                <div className="ml-4 mt-1 space-y-1">
+                  {nlpEnabled && (
+                    <NavLink
+                      to="/time"
+                      onClick={onClose}
+                      className="flex items-center space-x-3 px-3 py-2 rounded-lg text-sm transition-colors text-gray-600 hover:bg-indigo-50 hover:text-indigo-600"
+                      aria-label="AI Chat Assistant on Time Tracker page"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                      </svg>
+                      <span>AI Chat Assistant</span>
+                    </NavLink>
+                  )}
+                  {taskEstimationEnabled && (
+                    <NavLink
+                      to="/tasks"
+                      onClick={onClose}
+                      className="flex items-center space-x-3 px-3 py-2 rounded-lg text-sm transition-colors text-gray-600 hover:bg-indigo-50 hover:text-indigo-600"
+                      aria-label="Task Estimation AI on Tasks page"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span>Task Estimation</span>
+                    </NavLink>
+                  )}
+                  {projectHealthEnabled && (
+                    <NavLink
+                      to="/projects"
+                      onClick={onClose}
+                      className="flex items-center space-x-3 px-3 py-2 rounded-lg text-sm transition-colors text-gray-600 hover:bg-indigo-50 hover:text-indigo-600"
+                      aria-label="Project Health AI on Projects page"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                      </svg>
+                      <span>Project Health</span>
+                    </NavLink>
+                  )}
+                  {burnoutRiskEnabled && isAdmin && (
+                    <NavLink
+                      to="/admin/reports"
+                      onClick={onClose}
+                      className="flex items-center space-x-3 px-3 py-2 rounded-lg text-sm transition-colors text-gray-600 hover:bg-indigo-50 hover:text-indigo-600"
+                      aria-label="Burnout Risk Analysis on Admin Reports page"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
+                      </svg>
+                      <span>Burnout Analysis</span>
+                    </NavLink>
+                  )}
                 </div>
               )}
             </div>

@@ -80,9 +80,13 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
   // Not enabled
   if (data && !data.enabled) {
     return (
-      <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 ${className}`}>
+      <div 
+        className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 ${className}`}
+        role="region"
+        aria-label="Project Health - Feature disabled"
+      >
         <div className="text-center text-gray-500 dark:text-gray-400">
-          <Heart size={24} className="mx-auto mb-2 opacity-50" />
+          <Heart size={24} className="mx-auto mb-2 opacity-50" aria-hidden="true" />
           <p className="text-sm">Project Health not enabled</p>
         </div>
       </div>
@@ -92,11 +96,16 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
   // Loading
   if (isLoading) {
     return (
-      <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 ${className}`}>
+      <div 
+        className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 ${className}`}
+        role="status"
+        aria-label="Loading project health analysis"
+      >
         <div className="flex items-center justify-center gap-2">
-          <Loader2 className="animate-spin text-blue-500" size={20} />
+          <Loader2 className="animate-spin text-blue-500" size={20} aria-hidden="true" />
           <span className="text-sm text-gray-500">Analyzing...</span>
         </div>
+        <span className="sr-only">Analyzing project health data, please wait...</span>
       </div>
     );
   }
@@ -104,12 +113,17 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
   // Error
   if (isError || !data?.success) {
     return (
-      <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 ${className}`}>
+      <div 
+        className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 ${className}`}
+        role="alert"
+        aria-label="Project health analysis error"
+      >
         <div className="text-center text-red-500">
-          <AlertTriangle size={20} className="mx-auto mb-1" />
+          <AlertTriangle size={20} className="mx-auto mb-1" aria-hidden="true" />
           <p className="text-sm">Failed to load health data</p>
           <button
             onClick={() => refetch()}
+            aria-label="Retry loading project health data"
             className="mt-2 text-xs text-blue-500 hover:underline"
           >
             Retry
@@ -125,7 +139,11 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
   // Compact mode
   if (compact) {
     return (
-      <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 ${className}`}>
+      <div 
+        className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 ${className}`}
+        role="region"
+        aria-label={`Project health for ${health.project_name || projectName}: score ${health.health_score} out of 100, status ${health.status}`}
+      >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             {getStatusIcon(health.status)}
@@ -142,7 +160,11 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
   }
   
   return (
-    <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden ${className}`}>
+    <div 
+      className={`bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden ${className}`}
+      role="region"
+      aria-label={`AI Project Health Analysis for ${health.project_name || projectName}`}
+    >
       {/* Header */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between">
@@ -158,8 +180,11 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="text-center">
-              <div className={`text-3xl font-bold ${getHealthColor(health.health_score)}`}>
+            <div className="text-center" role="status" aria-live="polite">
+              <div 
+                className={`text-3xl font-bold ${getHealthColor(health.health_score)}`}
+                aria-label={`Health score: ${health.health_score} out of 100`}
+              >
                 {health.health_score}
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400">Health Score</p>
@@ -169,11 +194,13 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
               disabled={refreshMutation.isPending}
               className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300
                 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
-              title="Refresh"
+              title="Refresh project health analysis"
+              aria-label={refreshMutation.isPending ? 'Refreshing project health data...' : 'Refresh project health analysis'}
             >
               <RefreshCw 
                 size={18} 
                 className={refreshMutation.isPending ? 'animate-spin' : ''} 
+                aria-hidden="true"
               />
             </button>
           </div>

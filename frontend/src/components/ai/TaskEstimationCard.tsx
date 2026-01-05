@@ -110,7 +110,7 @@ export const TaskEstimationCard: React.FC<TaskEstimationCardProps> = ({
 
   if (compact) {
     return (
-      <div className="bg-white rounded-lg shadow p-3">
+      <div className="bg-white rounded-lg shadow p-3" role="region" aria-label="Task duration estimator">
         <div className="flex gap-2">
           <input
             type="text"
@@ -118,25 +118,27 @@ export const TaskEstimationCard: React.FC<TaskEstimationCardProps> = ({
             onChange={(e) => setDescription(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder="Enter task description..."
+            aria-label="Task description for time estimation"
             className="flex-1 px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <button
             onClick={handleEstimate}
             disabled={!description.trim() || mutation.isPending}
+            aria-label={mutation.isPending ? 'Estimating task duration...' : 'Estimate task duration'}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 text-sm"
           >
             {mutation.isPending ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
             ) : (
               <>
-                <Clock className="w-4 h-4" />
+                <Clock className="w-4 h-4" aria-hidden="true" />
                 Estimate
               </>
             )}
           </button>
         </div>
         {result?.success && result.estimated_minutes && (
-          <div className="mt-2 flex items-center justify-between text-sm">
+          <div className="mt-2 flex items-center justify-between text-sm" role="status" aria-live="polite">
             <span className="text-gray-600">
               Estimated: <span className="font-semibold text-gray-900">{formatDuration(result.estimated_minutes)}</span>
             </span>
@@ -150,11 +152,11 @@ export const TaskEstimationCard: React.FC<TaskEstimationCardProps> = ({
   }
 
   return (
-    <div className="bg-white rounded-lg shadow">
+    <div className="bg-white rounded-lg shadow" role="region" aria-label="AI Task Duration Estimator">
       {/* Header */}
       <div className="px-4 py-3 border-b bg-gradient-to-r from-blue-50 to-purple-50 rounded-t-lg">
         <div className="flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-purple-600" />
+          <Sparkles className="w-5 h-5 text-purple-600" aria-hidden="true" />
           <h3 className="font-semibold text-gray-800">Task Duration Estimator</h3>
         </div>
         <p className="text-sm text-gray-500 mt-0.5">Get AI-powered time estimates for your tasks</p>

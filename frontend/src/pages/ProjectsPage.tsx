@@ -8,6 +8,8 @@ import { projectsApi, teamsApi } from '../api/client';
 import { formatDate, cn, generateRandomColor } from '../utils/helpers';
 import { useAuth } from '../hooks/useAuth';
 import { useNotifications } from '../hooks/useNotifications';
+import { useFeatureEnabled } from '../hooks/useFeatureEnabled';
+import { ProjectHealthCard } from '../components/ai/ProjectHealthCard';
 import type { Project, ProjectCreate, Team } from '../types';
 
 export function ProjectsPage() {
@@ -15,6 +17,8 @@ export function ProjectsPage() {
   const { user } = useAuth();
   const { addNotification } = useNotifications();
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const projectHealthEnabled = useFeatureEnabled('project_health');
+  const [selectedProjectForHealth, setSelectedProjectForHealth] = useState<Project | null>(null);
 
   const [showModal, setShowModal] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
@@ -204,12 +208,42 @@ export function ProjectsPage() {
               key={project.id}
               project={project}
               isAdmin={isAdmin}
+              showHealthButton={projectHealthEnabled}
+              onViewHealth={() => setSelectedProjectForHealth(project)}
               onEdit={() => handleEdit(project)}
               onArchive={() => setConfirmAction({ type: 'archive', project })}
               onRestore={() => setConfirmAction({ type: 'restore', project })}
               onDelete={() => setConfirmAction({ type: 'delete', project })}
             />
           ))}
+        </div>
+      )}
+
+      {/* AI Project Health Panel */}
+      {projectHealthEnabled && selectedProjectForHealth && (
+        <div className="mt-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <svg className="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
+              AI Health Analysis: {selectedProjectForHealth.name}
+            </h2>
+            <button 
+              onClick={() => setSelectedProjectForHealth(null)}
+              className="text-gray-400 hover:text-gray-600 p-1"
+              aria-label="Close health panel"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <ProjectHealthCard 
+            projectId={selectedProjectForHealth.id} 
+            projectName={selectedProjectForHealth.name}
+            includeTeamMetrics={isAdmin}
+          />
         </div>
       )}
 
@@ -275,13 +309,15 @@ export function ProjectsPage() {
 interface ProjectCardProps {
   project: Project;
   isAdmin: boolean;
+  showHealthButton?: boolean;
+  onViewHealth?: () => void;
   onEdit: () => void;
   onArchive: () => void;
   onRestore: () => void;
   onDelete: () => void;
 }
 
-function ProjectCard({ project, isAdmin, onEdit, onArchive, onRestore, onDelete }: ProjectCardProps) {
+function ProjectCard({ project, isAdmin, showHealthButton, onViewHealth, onEdit, onArchive, onRestore, onDelete }: ProjectCardProps) {
   return (
     <Card className="hover:shadow-md transition-shadow">
       <div className="flex items-start justify-between">
@@ -345,11 +381,26 @@ function ProjectCard({ project, isAdmin, onEdit, onArchive, onRestore, onDelete 
       </div>
       <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between text-sm text-gray-500">
         <span>Created {formatDate(project.created_at)}</span>
-        {project.is_archived && (
-          <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
-            Archived
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {showHealthButton && (
+            <button
+              onClick={onViewHealth}
+              className="px-2 py-1 text-xs bg-purple-50 text-purple-600 hover:bg-purple-100 rounded-md flex items-center gap-1 transition-colors"
+              title="View AI health analysis"
+              aria-label={`View AI health analysis for ${project.name}`}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
+              AI Health
+            </button>
+          )}
+          {project.is_archived && (
+            <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
+              Archived
+            </span>
+          )}
+        </div>
       </div>
     </Card>
   );

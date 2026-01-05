@@ -101,30 +101,40 @@ export const BurnoutRiskPanel: React.FC<BurnoutRiskPanelProps> = ({
 
   if (isLoading) {
     return (
-      <div className="bg-white rounded-lg shadow p-4 animate-pulse">
+      <div 
+        className="bg-white rounded-lg shadow p-4 animate-pulse"
+        role="status"
+        aria-label="Loading burnout risk assessment"
+      >
         <div className="h-6 bg-gray-200 rounded w-1/3 mb-4"></div>
         <div className="h-24 bg-gray-200 rounded mb-4"></div>
         <div className="space-y-2">
           <div className="h-4 bg-gray-200 rounded w-full"></div>
           <div className="h-4 bg-gray-200 rounded w-3/4"></div>
         </div>
+        <span className="sr-only">Loading burnout assessment data...</span>
       </div>
     );
   }
 
   if (error || !data?.success) {
     return (
-      <div className="bg-white rounded-lg shadow p-4 border-l-4 border-red-400">
+      <div 
+        className="bg-white rounded-lg shadow p-4 border-l-4 border-red-400"
+        role="alert"
+        aria-label="Burnout assessment error"
+      >
         <div className="flex items-center gap-2 text-red-600">
-          <AlertTriangle className="w-5 h-5" />
+          <AlertTriangle className="w-5 h-5" aria-hidden="true" />
           <span className="font-medium">Unable to load burnout assessment</span>
         </div>
         <p className="text-sm text-gray-500 mt-1">{data?.error || 'An error occurred'}</p>
         <button
           onClick={handleRefresh}
+          aria-label="Retry loading burnout assessment"
           className="mt-2 text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
         >
-          <RefreshCw className="w-3 h-3" /> Try again
+          <RefreshCw className="w-3 h-3" aria-hidden="true" /> Try again
         </button>
       </div>
     );
@@ -136,10 +146,14 @@ export const BurnoutRiskPanel: React.FC<BurnoutRiskPanelProps> = ({
 
   if (compact) {
     return (
-      <div className={`rounded-lg p-3 ${colors.bg} ${colors.border} border`}>
+      <div 
+        className={`rounded-lg p-3 ${colors.bg} ${colors.border} border`}
+        role="region"
+        aria-label={`Burnout risk assessment: ${riskLabels[riskLevel]}, score ${data.risk_score?.toFixed(0)} out of 100`}
+      >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Heart className={`w-5 h-5 ${colors.text}`} />
+            <Heart className={`w-5 h-5 ${colors.text}`} aria-hidden="true" />
             <span className={`font-medium ${colors.text}`}>{riskLabels[riskLevel]}</span>
           </div>
           <div className="flex items-center gap-1">
@@ -149,7 +163,7 @@ export const BurnoutRiskPanel: React.FC<BurnoutRiskPanelProps> = ({
         </div>
         {data.trend && (
           <div className={`flex items-center gap-1 mt-1 text-sm ${trendColors[data.trend]}`}>
-            <TrendIcon className="w-3 h-3" />
+            <TrendIcon className="w-3 h-3" aria-hidden="true" />
             <span className="capitalize">{data.trend}</span>
           </div>
         )}
@@ -158,25 +172,30 @@ export const BurnoutRiskPanel: React.FC<BurnoutRiskPanelProps> = ({
   }
 
   return (
-    <div className="bg-white rounded-lg shadow">
+    <div 
+      className="bg-white rounded-lg shadow"
+      role="region"
+      aria-label="Burnout Risk Assessment Panel"
+    >
       {/* Header */}
       <div className={`px-4 py-3 rounded-t-lg ${colors.bg} ${colors.border} border-b flex justify-between items-center`}>
         <div className="flex items-center gap-2">
-          <Heart className={`w-5 h-5 ${colors.text}`} />
+          <Heart className={`w-5 h-5 ${colors.text}`} aria-hidden="true" />
           <h3 className={`font-semibold ${colors.text}`}>Burnout Risk Assessment</h3>
         </div>
         <button
           onClick={handleRefresh}
           className={`p-1 rounded hover:bg-white/50 ${colors.text}`}
-          title="Refresh"
+          title="Refresh assessment"
+          aria-label="Refresh burnout risk assessment"
         >
-          <RefreshCw className="w-4 h-4" />
+          <RefreshCw className="w-4 h-4" aria-hidden="true" />
         </button>
       </div>
 
       <div className="p-4 space-y-4">
         {/* Risk Score */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between" role="status" aria-live="polite">
           <div>
             <p className={`text-2xl font-bold ${colors.text}`}>{riskLabels[riskLevel]}</p>
             {data.user_name && (
@@ -184,7 +203,7 @@ export const BurnoutRiskPanel: React.FC<BurnoutRiskPanelProps> = ({
             )}
           </div>
           <div className="text-right">
-            <p className={`text-3xl font-bold ${colors.text}`}>{data.risk_score?.toFixed(0)}</p>
+            <p className={`text-3xl font-bold ${colors.text}`} aria-label={`Risk score: ${data.risk_score?.toFixed(0)} out of 100`}>{data.risk_score?.toFixed(0)}</p>
             <p className="text-sm text-gray-500">out of 100</p>
           </div>
         </div>
@@ -195,7 +214,7 @@ export const BurnoutRiskPanel: React.FC<BurnoutRiskPanelProps> = ({
             <div className="flex items-center gap-2">
               {data.trend && (
                 <span className={`flex items-center gap-1 text-sm ${trendColors[data.trend]}`}>
-                  <TrendIcon className="w-4 h-4" />
+                  <TrendIcon className="w-4 h-4" aria-hidden="true" />
                   <span className="capitalize">{data.trend}</span> trend
                 </span>
               )}

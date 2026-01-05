@@ -147,9 +147,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
   
   return (
-    <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md ${className}`}>
+    <div 
+      className={`bg-white dark:bg-gray-800 rounded-lg shadow-md ${className}`}
+      role="region"
+      aria-label="AI Time Entry Assistant"
+    >
       {/* Input Area */}
-      <form onSubmit={handleSubmit} className="p-4">
+      <form onSubmit={handleSubmit} className="p-4" aria-label="Natural language time entry form">
         <div className="flex gap-2">
           <div className="flex-1 relative">
             <input
@@ -159,6 +163,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               onChange={(e) => setInput(e.target.value)}
               placeholder={placeholder}
               disabled={isLoading || showConfirmation}
+              aria-label="Enter time entry in natural language"
+              aria-describedby="chat-help-text"
               className="w-full px-4 py-3 border border-gray-200 dark:border-gray-600 
                 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent
                 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100
@@ -168,6 +174,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               <button
                 type="button"
                 onClick={() => setInput('')}
+                aria-label="Clear input"
                 className="absolute right-3 top-1/2 -translate-y-1/2 
                   text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
               >
@@ -178,23 +185,31 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           <button
             type="submit"
             disabled={!input.trim() || isLoading || showConfirmation}
+            aria-label={isLoading ? 'Processing entry...' : 'Parse time entry'}
             className="px-4 py-3 bg-blue-600 text-white rounded-lg
               hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed
               transition-colors flex items-center gap-2"
           >
             {isLoading ? (
-              <Loader2 size={20} className="animate-spin" />
+              <Loader2 size={20} className="animate-spin" aria-hidden="true" />
             ) : (
-              <Send size={20} />
+              <Send size={20} aria-hidden="true" />
             )}
           </button>
         </div>
+        <p id="chat-help-text" className="sr-only">
+          Enter a time entry in natural language, for example: 2 hours on Project Alpha yesterday fixing bugs
+        </p>
         
         {/* Error Display */}
         {error && (
-          <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 text-red-600 
-            dark:text-red-400 rounded flex items-center gap-2 text-sm">
-            <AlertCircle size={16} />
+          <div 
+            className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 text-red-600 
+              dark:text-red-400 rounded flex items-center gap-2 text-sm"
+            role="alert"
+            aria-live="polite"
+          >
+            <AlertCircle size={16} aria-hidden="true" />
             {error.message}
           </div>
         )}
@@ -202,7 +217,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       
       {/* Parsed Result Confirmation */}
       {showConfirmation && parsedResult && (
-        <div className="border-t border-gray-200 dark:border-gray-700 p-4">
+        <div 
+          className="border-t border-gray-200 dark:border-gray-700 p-4"
+          role="region"
+          aria-label="Parsed time entry confirmation"
+        >
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-gray-900 dark:text-gray-100">
               Parsed Time Entry
