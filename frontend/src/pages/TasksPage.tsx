@@ -126,7 +126,7 @@ export function TasksPage() {
 
       {/* AI Task Estimation */}
       {taskEstimationEnabled && (
-        <Card className="bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-200" role="region" aria-label="AI Task Time Estimation">
+        <div className="bg-white rounded-xl shadow-sm border border-indigo-200 p-4 bg-gradient-to-r from-indigo-50 to-purple-50" role="region" aria-label="AI Task Time Estimation">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-lg">🤖</span>
             <h3 className="font-semibold text-gray-800">AI Task Estimation</h3>
@@ -138,7 +138,7 @@ export function TasksPage() {
             projectId={filterProject || undefined}
             compact={false}
           />
-        </Card>
+        </div>
       )}
 
       {/* Filters */}

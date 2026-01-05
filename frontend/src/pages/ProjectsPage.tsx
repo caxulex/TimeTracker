@@ -8,8 +8,8 @@ import { projectsApi, teamsApi } from '../api/client';
 import { formatDate, cn, generateRandomColor } from '../utils/helpers';
 import { useAuth } from '../hooks/useAuth';
 import { useNotifications } from '../hooks/useNotifications';
-import { useFeatureEnabled } from '../hooks/useFeatureEnabled';
-import { ProjectHealthCard } from '../components/ai/ProjectHealthCard';
+import { useFeatureEnabled } from '../hooks/useAIFeatures';
+import ProjectHealthCard from '../components/ai/ProjectHealthCard';
 import type { Project, ProjectCreate, Team } from '../types';
 
 export function ProjectsPage() {
@@ -17,7 +17,7 @@ export function ProjectsPage() {
   const { user } = useAuth();
   const { addNotification } = useNotifications();
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
-  const projectHealthEnabled = useFeatureEnabled('project_health');
+  const { data: projectHealthEnabled } = useFeatureEnabled('project_health');
   const [selectedProjectForHealth, setSelectedProjectForHealth] = useState<Project | null>(null);
 
   const [showModal, setShowModal] = useState(false);

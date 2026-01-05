@@ -5,7 +5,7 @@ import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '../../utils/helpers';
 import { useAuthStore } from '../../stores/authStore';
-import { useFeatureEnabled } from '../../hooks/useFeatureEnabled';
+import { useFeatureEnabled } from '../../hooks/useAIFeatures';
 
 interface NavItem {
   path: string;
