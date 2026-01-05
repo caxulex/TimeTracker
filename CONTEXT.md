@@ -1,7 +1,7 @@
 
 
-> **Last Updated**: December 31, 2025
-> **Latest Session Report**: [SESSION_REPORT_DEC_31_2025.md](SESSION_REPORT_DEC_31_2025.md)
+> **Last Updated**: January 5, 2026
+> **Latest Session Report**: [SESSION_REPORT_JAN_5_2026.md](SESSION_REPORT_JAN_5_2026.md)
 
 ---
 
@@ -59,23 +59,46 @@ Read CONTEXT.md, AIupgrade.md, PRODUCTION_FIXES_GUIDE.md, and the latest SESSION
 > **DANGEROUS commands that WILL CRASH the server:**
 > - ❌ `docker compose build --no-cache` - NEVER USE
 > - ❌ `docker compose up -d --build` - TOO HEAVY, CRASHES SERVER
-> - ❌ Any command that rebuilds Docker images
+> - ❌ Building both containers simultaneously
 > 
-> **SAFE deployment - Use ONLY these commands:**
+> ### ✅ RECOMMENDED: Sequential Build Deployment
+> **Use the sequential build script that builds ONE container at a time:**
+> ```bash
+> cd ~/timetracker
+> git pull origin master
+> chmod +x scripts/deploy-sequential.sh
+> ./scripts/deploy-sequential.sh
+> ```
+> 
+> **What the script does (in order):**
+> 1. `docker system prune -f` - Frees memory
+> 2. Builds **backend** first (~130s)
+> 3. `docker builder prune -f` - Clears cache, frees RAM
+> 4. Builds **frontend** (~70s) - gets all the freed memory
+> 5. Restarts all containers
+> 6. Final cleanup
+> 
+> **This was tested on Jan 5, 2026 and completed successfully without crashing!**
+> 
+> ### Alternative: No-code-change deployment
+> If no code changes require rebuild:
 > ```bash
 > cd ~/timetracker
 > git pull origin master
 > docker compose -f docker-compose.prod.yml up -d
 > ```
 > 
-> **If code changes require a rebuild:**
-> 1. WAIT for server to be completely idle (check with `htop`)
-> 2. Rebuild ONE container at a time:
->    ```bash
->    docker compose -f docker-compose.prod.yml build backend
->    docker compose -f docker-compose.prod.yml up -d backend
->    ```
-> 3. Wait 5 minutes, then rebuild frontend separately
+> ### Manual Sequential Build (if script fails)
+> ```bash
+> cd ~/timetracker
+> git pull origin master
+> docker system prune -f
+> docker compose -f docker-compose.prod.yml build backend
+> docker builder prune -f
+> docker compose -f docker-compose.prod.yml build frontend
+> docker compose -f docker-compose.prod.yml down
+> docker compose -f docker-compose.prod.yml up -d
+> ```
 > 
 > **If server becomes unresponsive:**
 > 1. Wait 10-15 minutes for recovery, OR
