@@ -30,7 +30,7 @@ export function TasksPage() {
   const [filterStatus, setFilterStatus] = useState<TaskStatus | ''>('');
 
   // AI Feature flag
-  const { data: taskEstimationEnabled } = useFeatureEnabled('task_estimation');
+  const { data: taskEstimationEnabled } = useFeatureEnabled('ai_task_estimation');
 
   // Fetch tasks
   const { data: tasksData, isLoading } = useQuery({

@@ -27,7 +27,7 @@ export function TimePage() {
   const [showChatInterface, setShowChatInterface] = useState(false);
 
   // AI Feature flags
-  const { data: nlpEnabled } = useFeatureEnabled('nlp_time_entry');
+  const { data: nlpEnabled } = useFeatureEnabled('ai_nlp_entry');
 
   // Fetch time entries
   const { data: entriesData, isLoading } = useQuery({

@@ -17,7 +17,7 @@ export function ProjectsPage() {
   const { user } = useAuth();
   const { addNotification } = useNotifications();
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
-  const { data: projectHealthEnabled } = useFeatureEnabled('project_health');
+  const { data: projectHealthEnabled } = useFeatureEnabled('ai_report_summaries');
   const [selectedProjectForHealth, setSelectedProjectForHealth] = useState<Project | null>(null);
 
   const [showModal, setShowModal] = useState(false);

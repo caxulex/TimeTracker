@@ -76,11 +76,11 @@ export default function AdminReportsPage() {
   const [userPeriod, setUserPeriod] = useState<'today' | 'week' | 'month'>('week');
 
   // AI Feature flags
-  const { data: payrollForecastEnabled } = useFeatureEnabled('payroll_forecast');
-  const { data: overtimeRiskEnabled } = useFeatureEnabled('overtime_risk');
-  const { data: projectBudgetEnabled } = useFeatureEnabled('project_budget');
-  const { data: cashFlowEnabled } = useFeatureEnabled('cash_flow');
-  const { data: burnoutRiskEnabled } = useFeatureEnabled('burnout_risk');
+  const { data: payrollForecastEnabled } = useFeatureEnabled('ai_payroll_forecast');
+  const { data: overtimeRiskEnabled } = useFeatureEnabled('ai_payroll_forecast');
+  const { data: projectBudgetEnabled } = useFeatureEnabled('ai_payroll_forecast');
+  const { data: cashFlowEnabled } = useFeatureEnabled('ai_payroll_forecast');
+  const { data: burnoutRiskEnabled } = useFeatureEnabled('ai_anomaly_alerts');
 
   // Fetch admin dashboard data
   const { data: dashboardData, isLoading: isDashboardLoading, isError: isDashboardError } = useQuery<AdminDashboard>({

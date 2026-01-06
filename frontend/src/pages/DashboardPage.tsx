@@ -60,9 +60,9 @@ export function DashboardPage() {
   const { isConnected } = useWebSocketContext();
 
   // AI Feature flags
-  const { data: anomalyEnabled } = useFeatureEnabled('anomaly_detection');
-  const { data: weeklySummaryEnabled } = useFeatureEnabled('weekly_summary');
-  const { data: userInsightsEnabled } = useFeatureEnabled('user_insights');
+  const { data: anomalyEnabled } = useFeatureEnabled('ai_anomaly_alerts');
+  const { data: weeklySummaryEnabled } = useFeatureEnabled('ai_report_summaries');
+  const { data: userInsightsEnabled } = useFeatureEnabled('ai_report_summaries');
 
   // User's personal dashboard
   const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({

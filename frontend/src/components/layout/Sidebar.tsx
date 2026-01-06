@@ -226,12 +226,13 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const [analyticsExpanded, setAnalyticsExpanded] = useState(true);
   const [aiInsightsExpanded, setAiInsightsExpanded] = useState(false);
   
-  // Check if any AI features are enabled
-  const nlpEnabled = useFeatureEnabled('nlp_time_entry');
-  const taskEstimationEnabled = useFeatureEnabled('task_estimation');
-  const projectHealthEnabled = useFeatureEnabled('project_health');
-  const burnoutRiskEnabled = useFeatureEnabled('burnout_risk');
-  const hasAnyAiFeature = nlpEnabled || taskEstimationEnabled || projectHealthEnabled || burnoutRiskEnabled;
+  // Check if any AI features are enabled (using correct feature_id from database)
+  const { data: nlpEnabled } = useFeatureEnabled('ai_nlp_entry');
+  const { data: taskEstimationEnabled } = useFeatureEnabled('ai_task_estimation');
+  const { data: suggestionsEnabled } = useFeatureEnabled('ai_suggestions');
+  const { data: anomalyEnabled } = useFeatureEnabled('ai_anomaly_alerts');
+  const { data: reportSummariesEnabled } = useFeatureEnabled('ai_report_summaries');
+  const hasAnyAiFeature = nlpEnabled || taskEstimationEnabled || suggestionsEnabled || anomalyEnabled || reportSummariesEnabled;
 
   return (
     <>
@@ -428,6 +429,19 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               </button>
               {aiInsightsExpanded && (
                 <div className="ml-4 mt-1 space-y-1">
+                  {suggestionsEnabled && (
+                    <NavLink
+                      to="/time"
+                      onClick={onClose}
+                      className="flex items-center space-x-3 px-3 py-2 rounded-lg text-sm transition-colors text-gray-600 hover:bg-indigo-50 hover:text-indigo-600"
+                      aria-label="AI Suggestions on Time Tracker page"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                      </svg>
+                      <span>Smart Suggestions</span>
+                    </NavLink>
+                  )}
                   {nlpEnabled && (
                     <NavLink
                       to="/time"
@@ -438,7 +452,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
                       </svg>
-                      <span>AI Chat Assistant</span>
+                      <span>Natural Language Entry</span>
                     </NavLink>
                   )}
                   {taskEstimationEnabled && (
@@ -454,30 +468,30 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                       <span>Task Estimation</span>
                     </NavLink>
                   )}
-                  {projectHealthEnabled && (
-                    <NavLink
-                      to="/projects"
-                      onClick={onClose}
-                      className="flex items-center space-x-3 px-3 py-2 rounded-lg text-sm transition-colors text-gray-600 hover:bg-indigo-50 hover:text-indigo-600"
-                      aria-label="Project Health AI on Projects page"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                      </svg>
-                      <span>Project Health</span>
-                    </NavLink>
-                  )}
-                  {burnoutRiskEnabled && isAdmin && (
+                  {anomalyEnabled && isAdmin && (
                     <NavLink
                       to="/admin/reports"
                       onClick={onClose}
                       className="flex items-center space-x-3 px-3 py-2 rounded-lg text-sm transition-colors text-gray-600 hover:bg-indigo-50 hover:text-indigo-600"
-                      aria-label="Burnout Risk Analysis on Admin Reports page"
+                      aria-label="Anomaly Detection on Admin Reports page"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                       </svg>
-                      <span>Burnout Analysis</span>
+                      <span>Anomaly Detection</span>
+                    </NavLink>
+                  )}
+                  {reportSummariesEnabled && (
+                    <NavLink
+                      to="/reports"
+                      onClick={onClose}
+                      className="flex items-center space-x-3 px-3 py-2 rounded-lg text-sm transition-colors text-gray-600 hover:bg-indigo-50 hover:text-indigo-600"
+                      aria-label="AI Report Summaries"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <span>AI Report Summaries</span>
                     </NavLink>
                   )}
                 </div>
