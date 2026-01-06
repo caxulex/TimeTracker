@@ -1,60 +1,87 @@
 #!/bin/bash
 # ============================================
-# Sequential Build Script for Limited RAM Servers
-# Builds frontend and backend ONE AT A TIME to avoid OOM
+# Sequential Build Script for Limited RAM Servers (1GB)
+# ============================================
+# ⚠️  CRITICAL: This script builds ONE container at a time
+#     to prevent Out-Of-Memory crashes on 1GB RAM servers.
+#
+# ❌ NEVER USE: docker compose up -d --build
+# ❌ NEVER USE: docker compose build --no-cache
+# ❌ NEVER USE: docker compose build (without specifying service)
 # ============================================
 
 set -e
 
 cd /home/ubuntu/timetracker
 
-echo "🚀 Sequential Build Deployment"
-echo "==============================="
+echo "============================================"
+echo "🚀 Sequential Build Deployment (RAM-Safe)"
+echo "============================================"
+echo "⚠️  Building ONE container at a time to prevent OOM"
 echo ""
 
-# Step 1: Pull latest code
-echo "📥 Pulling latest code..."
-git pull origin master
+# Step 1: Stop running containers first to free RAM
+echo "📦 Step 1/8: Stopping containers to free RAM..."
+docker compose -f docker-compose.prod.yml down || true
+echo "✅ Containers stopped"
 
-# Step 2: Free up memory first
+# Step 2: Aggressive cleanup to maximize available RAM
 echo ""
-echo "🧹 Cleaning up to free memory..."
+echo "🧹 Step 2/8: Freeing memory (aggressive cleanup)..."
 docker system prune -f
-docker builder prune -f
+docker builder prune -f -a
+echo "✅ Memory freed"
 
-# Step 3: Build BACKEND first (lighter build)
+# Step 3: Check available memory
 echo ""
-echo "🔧 Building BACKEND..."
+echo "📊 Step 3/8: Checking available memory..."
+free -m
+echo ""
+
+# Step 4: Build BACKEND only (no --no-cache, no parallel builds!)
+echo ""
+echo "🔧 Step 4/8: Building BACKEND only..."
+echo "   This may take 2-3 minutes..."
 docker compose -f docker-compose.prod.yml build backend
 echo "✅ Backend built!"
 
-# Step 4: Clear build cache before frontend
+# Step 5: Clear build cache AGAIN before frontend
 echo ""
-echo "🧹 Clearing build cache..."
+echo "🧹 Step 5/8: Clearing build cache before frontend..."
 docker builder prune -f
+echo "✅ Cache cleared"
 
-# Step 5: Build FRONTEND (heavier build - needs the RAM we just freed)
+# Step 6: Build FRONTEND only (this is the heavy one)
 echo ""
-echo "🔧 Building FRONTEND (this takes a while)..."
+echo "🔧 Step 6/8: Building FRONTEND only..."
+echo "   This may take 3-5 minutes..."
 docker compose -f docker-compose.prod.yml build frontend
 echo "✅ Frontend built!"
 
-# Step 6: Restart services
+# Step 7: Start all services
 echo ""
-echo "🔄 Restarting services..."
-docker compose -f docker-compose.prod.yml down
+echo "🚀 Step 7/8: Starting all services..."
 docker compose -f docker-compose.prod.yml up -d
+echo "✅ Services started!"
 
-# Step 7: Final cleanup
+# Step 8: Final cleanup and status
 echo ""
-echo "🧹 Final cleanup..."
+echo "🧹 Step 8/8: Final cleanup..."
 docker system prune -f
 
-# Step 8: Check status
 echo ""
-echo "📊 Service Status:"
+echo "============================================"
+echo "📊 Deployment Status:"
+echo "============================================"
 docker compose -f docker-compose.prod.yml ps
 
 echo ""
+echo "🏥 Health Check:"
+sleep 5
+curl -s http://localhost:8080/health || echo "⚠️  Backend still starting..."
+
+echo ""
+echo "============================================"
 echo "✅ Deployment complete!"
 echo "🌐 https://timetracker.shaemarcus.com"
+echo "============================================"
