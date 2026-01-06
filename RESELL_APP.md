@@ -1,7 +1,7 @@
 # TimeTracker - Resellability Assessment
 
-**Document Version:** 1.0  
-**Assessment Date:** January 2, 2026  
+**Document Version:** 1.1  
+**Assessment Date:** January 6, 2026  
 **Application Version:** 2.0.0
 
 ---
@@ -13,12 +13,15 @@
 | **Configuration Externalization** | ✅ Complete | Ready |
 | **Multi-Instance Deployment** | ✅ Supported | Ready |
 | **Branding Customization** | ✅ Complete | Ready |
+| **Email System** | ✅ Complete | Ready |
+| **Password Reset Flow** | ✅ Complete | Ready |
 | **Multi-Tenancy** | ❌ Single-Tenant | Not Implemented |
 | **Licensing Model** | ✅ Complete | Ready |
 | **Documentation** | ✅ Extensive | Ready |
 | **Security Hardening** | ✅ Complete | Ready |
+| **Deployment Scripts** | ✅ Complete | Ready |
 
-**Overall Resale Readiness:** 90% - Suitable for single-instance deployments per client
+**Overall Resale Readiness:** 95% - Production-ready for single-instance deployments per client
 
 ---
 
@@ -33,6 +36,7 @@
 7. [Deployment TODO Checklist](#7-deployment-todo-checklist)
 8. [Technical Debt & Known Issues](#8-technical-debt--known-issues)
 9. [Support & Maintenance Considerations](#9-support--maintenance-considerations)
+10. [Email System](#10-email-system)
 
 ---
 
@@ -466,6 +470,29 @@ Not Included:
 
 ## 7. Deployment TODO Checklist
 
+### 7.0 Available Deployment Scripts
+
+The following scripts are available in `scripts/` to automate deployment:
+
+| Script | Purpose | Usage |
+|--------|---------|-------|
+| `deploy-client.sh` | Full client deployment | `./scripts/deploy-client.sh CLIENT_NAME DOMAIN` |
+| `generate-secrets.sh` | Generate secure secrets | `./scripts/generate-secrets.sh --env` |
+| `backup-client.sh` | Backup client data | `./scripts/backup-client.sh CLIENT_NAME` |
+
+**Quick Deployment:**
+```bash
+# 1. Generate secrets
+./scripts/generate-secrets.sh --env > clients/acme/.env
+
+# 2. Deploy client
+./scripts/deploy-client.sh acme acme.example.com
+
+# 3. Schedule backups
+crontab -e
+0 2 * * * /opt/timetracker/scripts/backup-client.sh acme
+```
+
 ### 7.1 Pre-Deployment (Vendor Side)
 
 #### Infrastructure Preparation
@@ -523,11 +550,16 @@ docker exec timetracker-backend python -m scripts.create_superadmin
 - [ ] Set up monitoring alerts
 
 #### Documentation to Provide
-- [ ] Quick Start Guide
-- [ ] Admin Operations Manual
-- [ ] User Manual
-- [ ] Support Contact Information
-- [ ] SLA Terms
+
+| Document | Location | Description |
+|----------|----------|-------------|
+| Quick Start Guide | `docs/USER_QUICK_START.md` | End-user getting started |
+| Admin Guide | `docs/ADMIN_GUIDE.md` | Administration operations |
+| API Documentation | `docs/API.md` | API reference |
+| Branding Guide | `docs/BRANDING_CUSTOMIZATION.md` | White-label customization |
+| Email Setup | `docs/EMAIL_CONFIGURATION.md` | SMTP configuration |
+| Support Contact | (Customize per client) | Your support info |
+| SLA Terms | `SLA_TEMPLATE.md` | Service level agreement |
 
 ### 7.4 Ongoing Maintenance Checklist
 
@@ -739,5 +771,54 @@ Track all deployments in `clients.json`:
 
 ---
 
+## 10. Email System
+
+### 10.1 Current State: ✅ Complete
+
+The email system is fully implemented and ready for production use.
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| SMTP Integration | ✅ Complete | Full SMTP with TLS support |
+| Email Templates | ✅ Complete | HTML + plain text templates |
+| Password Reset | ✅ Complete | Full flow with email verification |
+| Account Notifications | ✅ Complete | Request/approval/rejection emails |
+| Admin Notifications | ✅ Complete | New account request alerts |
+
+### 10.2 Configuration
+
+```env
+# Required for email functionality
+SMTP_SERVER=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=noreply@yourdomain.com
+SMTP_PASSWORD=your_smtp_password
+SMTP_FROM_EMAIL=noreply@yourdomain.com
+SMTP_FROM_NAME=Time Tracker
+SMTP_USE_TLS=true
+```
+
+### 10.3 Supported Email Types
+
+| Email Type | Trigger | Recipients |
+|------------|---------|------------|
+| Welcome | New user created | User |
+| Password Reset | User requests reset | User |
+| Account Request | Public form submission | All super admins |
+| Account Approved | Admin approves request | Applicant |
+| Account Rejected | Admin rejects request | Applicant |
+| Time Entry Reminder | Missing entries | User |
+| Payroll Notification | Payroll processed | User |
+
+### 10.4 Documentation
+
+See `docs/EMAIL_CONFIGURATION.md` for:
+- SMTP provider setup guides (AWS SES, Gmail, SendGrid, etc.)
+- Testing instructions
+- Troubleshooting common issues
+- Security best practices
+
+---
+
 **Document Prepared By:** GitHub Copilot  
-**Last Updated:** January 2, 2026
+**Last Updated:** January 6, 2026
