@@ -181,10 +181,28 @@ For complete API documentation, see:
 
 ## 📖 Documentation
 
-- **[PHASE13_ACCOUNT_REQUESTS.md](PHASE13_ACCOUNT_REQUESTS.md)** - Account request system (Phase 13)
-- **[Update3.md](Update3.md)** - Staff management & payroll features (Phase 2)
-- **[DOCUMENTATION.md](DOCUMENTATION.md)** - General system documentation
-- **[SECURITY_ASSESSMENT.md](SECURITY_ASSESSMENT.md)** - Security audit and findings
+Complete documentation is available in the `docs/` folder:
+
+### Getting Started
+- **[docs/INSTALLATION.md](docs/INSTALLATION.md)** - First-time setup guide
+- **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** - Production deployment guide
+- **[docs/USER_QUICK_START.md](docs/USER_QUICK_START.md)** - End-user getting started
+
+### Configuration
+- **[docs/BRANDING_CUSTOMIZATION.md](docs/BRANDING_CUSTOMIZATION.md)** - White-label customization
+- **[docs/EMAIL_CONFIGURATION.md](docs/EMAIL_CONFIGURATION.md)** - SMTP and email setup
+
+### Administration
+- **[docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md)** - System administration tasks
+- **[docs/API.md](docs/API.md)** - API reference documentation
+
+### For Resellers
+- **[RESELL_APP.md](RESELL_APP.md)** - Resellability assessment (95% ready)
+- **[DEPLOYMENT_RESALE_GUIDE.md](DEPLOYMENT_RESALE_GUIDE.md)** - Detailed deployment guide
+
+### Other Documents
+- **[CONTEXT.md](CONTEXT.md)** - Critical deployment rules and context
+- **[CHANGELOG.md](CHANGELOG.md)** - Version history and changes
 
 ## 🤝 Contributing
 
