@@ -142,13 +142,13 @@ export function LoginPage() {
             </div>
 
             <div className="text-sm">
-              <a 
-                href="#" 
+              <Link 
+                to="/forgot-password" 
                 className="font-medium hover:opacity-80"
                 style={{ color: branding.primaryColor }}
               >
                 Forgot your password?
-              </a>
+              </Link>
             </div>
           </div>
 
