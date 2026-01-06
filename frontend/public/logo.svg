@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 
+  Time Tracker - Default Logo
+  This is a placeholder logo that can be replaced per client deployment.
+  Set VITE_LOGO_URL environment variable to use a custom logo.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="brandGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2563eb;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1d4ed8;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background rounded square -->
+  <rect width="64" height="64" rx="14" fill="url(#brandGradient)"/>
+  
+  <!-- Clock outer ring -->
+  <circle cx="32" cy="32" r="18" stroke="white" stroke-width="4" fill="none"/>
+  
+  <!-- Clock center dot -->
+  <circle cx="32" cy="32" r="2" fill="white"/>
+  
+  <!-- Hour hand -->
+  <line x1="32" y1="32" x2="32" y2="22" stroke="white" stroke-width="3" stroke-linecap="round"/>
+  
+  <!-- Minute hand -->
+  <line x1="32" y1="32" x2="42" y2="38" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+  
+  <!-- Hour markers -->
+  <circle cx="32" cy="18" r="1.5" fill="white"/>
+  <circle cx="46" cy="32" r="1.5" fill="white"/>
+  <circle cx="32" cy="46" r="1.5" fill="white"/>
+  <circle cx="18" cy="32" r="1.5" fill="white"/>
+</svg>
