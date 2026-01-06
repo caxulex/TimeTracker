@@ -24,6 +24,25 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    // Chunk splitting for optimal caching
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Core React libraries (rarely changes)
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          // Data fetching (rarely changes)
+          'vendor-query': ['@tanstack/react-query', 'axios'],
+          // UI utilities
+          'vendor-utils': ['date-fns', 'zod', 'zustand'],
+          // Charts (large, lazy loaded when needed)
+          'vendor-charts': ['recharts'],
+          // Icons (loaded on demand)
+          'vendor-icons': ['lucide-react'],
+        },
+      },
+    },
+    // Increase chunk size warning limit slightly
+    chunkSizeWarningLimit: 600,
   },
   resolve: {
     alias: {

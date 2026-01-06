@@ -1,40 +1,66 @@
 // ============================================
 // TIME TRACKER - APP COMPONENT WITH ROUTING
 // ============================================
+// Lazy loading enabled for optimal bundle splitting
+// ============================================
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Suspense, lazy } from 'react';
 import { Layout } from './components/layout/Layout';
 import { NotificationProvider } from './components/Notifications';
 import { WebSocketProvider } from './contexts/WebSocketContext';
 import { ThemeProvider } from './contexts/ThemeContext';
-import {
-  LoginPage,
-  RegisterPage,
-  ForgotPasswordPage,
-  ResetPasswordPage,
-  AccountRequestPage,
-  DashboardPage,
-  ProjectsPage,
-  TasksPage,
-  TimePage,
-  TeamsPage,
-  ReportsPage,
-  SettingsPage,
-  AdminPage,
-  AdminSettingsPage,
-  PayRatesPage,
-  PayrollPeriodsPage,
-  PayrollReportsPage,
-  UsersPage,
-  StaffPage,
-  AccountRequestsPage,
-  NotFoundPage,
-} from './pages';
-import { StaffDetailPage } from './pages/StaffDetailPage';
-import AdminReportsPage from './pages/AdminReportsPage';
-import UserDetailPage from './pages/UserDetailPage';
 import { useAuthStore } from './stores/authStore';
 import './App.css';
+
+// ============================================
+// LAZY LOADED PAGES - Code Splitting
+// ============================================
+// Public pages (load immediately for fast initial load)
+import { LoginPage } from './pages/LoginPage';
+import { RegisterPage } from './pages/RegisterPage';
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
+import { AccountRequestPage } from './pages/AccountRequestPage';
+import { NotFoundPage } from './pages/NotFoundPage';
+
+// Core pages - lazy loaded
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then(m => ({ default: m.DashboardPage })));
+const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then(m => ({ default: m.ProjectsPage })));
+const TasksPage = lazy(() => import('./pages/TasksPage').then(m => ({ default: m.TasksPage })));
+const TimePage = lazy(() => import('./pages/TimePage').then(m => ({ default: m.TimePage })));
+const TeamsPage = lazy(() => import('./pages/TeamsPage').then(m => ({ default: m.TeamsPage })));
+const ReportsPage = lazy(() => import('./pages/ReportsPage').then(m => ({ default: m.ReportsPage })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
+
+// Admin pages - lazy loaded (separate chunk)
+const AdminPage = lazy(() => import('./pages/AdminPage').then(m => ({ default: m.AdminPage })));
+const AdminSettingsPage = lazy(() => import('./pages/AdminSettingsPage').then(m => ({ default: m.AdminSettingsPage })));
+const UsersPage = lazy(() => import('./pages/UsersPage').then(m => ({ default: m.UsersPage })));
+const StaffPage = lazy(() => import('./pages/StaffPage').then(m => ({ default: m.StaffPage })));
+const StaffDetailPage = lazy(() => import('./pages/StaffDetailPage').then(m => ({ default: m.StaffDetailPage })));
+const AccountRequestsPage = lazy(() => import('./pages/AccountRequestsPage').then(m => ({ default: m.AccountRequestsPage })));
+const AdminReportsPage = lazy(() => import('./pages/AdminReportsPage'));
+const UserDetailPage = lazy(() => import('./pages/UserDetailPage'));
+
+// Payroll pages - lazy loaded (separate chunk)
+const PayRatesPage = lazy(() => import('./pages/PayRatesPage').then(m => ({ default: m.PayRatesPage })));
+const PayrollPeriodsPage = lazy(() => import('./pages/PayrollPeriodsPage').then(m => ({ default: m.PayrollPeriodsPage })));
+const PayrollReportsPage = lazy(() => import('./pages/PayrollReportsPage').then(m => ({ default: m.PayrollReportsPage })));
+
+// ============================================
+// LOADING FALLBACK COMPONENT
+// ============================================
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center min-h-[400px]">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+        <span className="text-gray-500 dark:text-gray-400">Loading...</span>
+      </div>
+    </div>
+  );
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -134,6 +160,7 @@ function App() {
         <NotificationProvider>
           <WebSocketProvider>
           <BrowserRouter>
+          <Suspense fallback={<PageLoader />}>
           <Routes>
             {/* Public routes */}
             <Route
@@ -336,6 +363,7 @@ function App() {
             {/* 404 Not Found */}
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
+          </Suspense>
         </BrowserRouter>
         </WebSocketProvider>
       </NotificationProvider>
