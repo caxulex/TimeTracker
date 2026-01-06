@@ -1,0 +1,18 @@
+{
+  "$schema": "./clients.schema.json",
+  "version": "1.0",
+  "last_updated": "2026-01-06",
+  "clients": [
+    {
+      "client_id": "demo",
+      "company_name": "Demo Company",
+      "domain": "demo.timetracker.app",
+      "plan": "starter",
+      "deployed_at": "2026-01-06",
+      "status": "active",
+      "server_ip": "100.52.110.180",
+      "admin_email": "admin@demo.com",
+      "notes": "Internal demo instance"
+    }
+  ]
+}
