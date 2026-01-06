@@ -204,7 +204,7 @@ async def scan_anomalies(
         service = await get_anomaly_service(db)
         
         # Permission checks
-        is_admin = current_user.role in ["admin", "superadmin"]
+        is_admin = current_user.role in ["admin", "super_admin"]
         is_manager = current_user.role == "manager"
         
         if request.scan_all:
@@ -282,7 +282,7 @@ async def get_anomalies(
 async def get_all_anomalies(
     period_days: int = 7,
     team_id: Optional[int] = None,
-    current_user: User = Depends(require_role(["admin", "superadmin", "manager"])),
+    current_user: User = Depends(require_role(["admin", "super_admin", "manager"])),
     db: AsyncSession = Depends(get_db)
 ):
     """Get anomalies for all users (admin/manager only)."""
@@ -308,7 +308,7 @@ async def get_all_anomalies(
 )
 async def dismiss_anomaly(
     request: AnomalyDismissRequest,
-    current_user: User = Depends(require_role(["admin", "superadmin", "manager"])),
+    current_user: User = Depends(require_role(["admin", "super_admin", "manager"])),
     db: AsyncSession = Depends(get_db)
 ):
     """Dismiss/acknowledge an anomaly."""
@@ -359,7 +359,7 @@ async def get_ai_status(
         
         # Get cache stats (admin only)
         cache_stats = None
-        if current_user.role in ["admin", "superadmin"]:
+        if current_user.role in ["admin", "super_admin"]:
             cache = await get_cache_manager()
             cache_stats = await cache.get_cache_stats()
         
@@ -382,7 +382,7 @@ async def get_ai_status(
     description="Reset AI client to reload API keys. Admin only."
 )
 async def reset_ai_client_endpoint(
-    current_user: User = Depends(require_role(["admin", "superadmin"])),
+    current_user: User = Depends(require_role(["admin", "super_admin"])),
     db: AsyncSession = Depends(get_db)
 ):
     """Reset AI client to reload API keys."""
@@ -429,7 +429,7 @@ async def reset_ai_client_endpoint(
 )
 async def forecast_payroll(
     request: PayrollForecastRequest,
-    current_user: User = Depends(require_role(["admin", "superadmin", "manager"])),
+    current_user: User = Depends(require_role(["admin", "super_admin", "manager"])),
     db: AsyncSession = Depends(get_db)
 ):
     """Get payroll forecast."""
@@ -468,7 +468,7 @@ async def forecast_payroll(
 )
 async def assess_overtime_risk(
     request: OvertimeRiskRequest,
-    current_user: User = Depends(require_role(["admin", "superadmin", "manager"])),
+    current_user: User = Depends(require_role(["admin", "super_admin", "manager"])),
     db: AsyncSession = Depends(get_db)
 ):
     """Assess overtime risk for employees."""
@@ -506,7 +506,7 @@ async def assess_overtime_risk(
 )
 async def forecast_project_budget(
     request: ProjectBudgetRequest,
-    current_user: User = Depends(require_role(["admin", "superadmin", "manager"])),
+    current_user: User = Depends(require_role(["admin", "super_admin", "manager"])),
     db: AsyncSession = Depends(get_db)
 ):
     """Get project budget forecast."""
@@ -541,7 +541,7 @@ async def forecast_project_budget(
 )
 async def forecast_cash_flow(
     weeks_ahead: int = 4,
-    current_user: User = Depends(require_role(["admin", "superadmin", "manager"])),
+    current_user: User = Depends(require_role(["admin", "super_admin", "manager"])),
     db: AsyncSession = Depends(get_db)
 ):
     """Get cash flow forecast."""
@@ -738,7 +738,7 @@ async def generate_user_insights(
     try:
         # Permission check for viewing other users
         target_id = request.target_user_id or current_user.id
-        if target_id != current_user.id and current_user.role not in ["admin", "superadmin"]:
+        if target_id != current_user.id and current_user.role not in ["admin", "super_admin"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot view other users' insights"
@@ -793,7 +793,7 @@ async def scan_ml_anomalies(
         
         # Permission check
         target_id = request.user_id or current_user.id
-        if target_id != current_user.id and current_user.role not in ["admin", "superadmin", "manager"]:
+        if target_id != current_user.id and current_user.role not in ["admin", "super_admin", "manager"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot scan other users"
@@ -849,7 +849,7 @@ async def assess_burnout_risk(
         
         # Permission check
         target_id = request.user_id or current_user.id
-        if target_id != current_user.id and current_user.role not in ["admin", "superadmin", "manager"]:
+        if target_id != current_user.id and current_user.role not in ["admin", "super_admin", "manager"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot assess other users' burnout risk"
@@ -894,7 +894,7 @@ async def assess_burnout_risk(
 )
 async def scan_team_burnout(
     request: TeamBurnoutScanRequest,
-    current_user: User = Depends(require_role(["admin", "superadmin", "manager"])),
+    current_user: User = Depends(require_role(["admin", "super_admin", "manager"])),
     db: AsyncSession = Depends(get_db)
 ):
     """Scan team for burnout risk."""
@@ -943,7 +943,7 @@ async def calculate_user_baseline(
         
         # Permission check
         target_id = request.user_id or current_user.id
-        if target_id != current_user.id and current_user.role not in ["admin", "superadmin"]:
+        if target_id != current_user.id and current_user.role not in ["admin", "super_admin"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot calculate baseline for other users"
@@ -1104,7 +1104,7 @@ async def estimate_batch_tasks(
 )
 async def train_estimation_model(
     request: ModelTrainingRequest,
-    current_user: User = Depends(require_role(["admin", "superadmin"])),
+    current_user: User = Depends(require_role(["admin", "super_admin"])),
     db: AsyncSession = Depends(get_db)
 ):
     """Train the estimation model."""
@@ -1158,7 +1158,7 @@ async def get_user_performance_profile(
         
         # Permission check
         target_id = user_id or current_user.id
-        if target_id != current_user.id and current_user.role not in ["admin", "superadmin"]:
+        if target_id != current_user.id and current_user.role not in ["admin", "super_admin"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot view other users' profiles"
