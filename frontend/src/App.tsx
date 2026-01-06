@@ -95,7 +95,8 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   return <Layout>{children}</Layout>;
 }
 
-// Super Admin route wrapper (requires super_admin role only)
+// Super Admin route wrapper - Now allows both admin and super_admin
+// (All admins have full capabilities)
 function SuperAdminRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, user } = useAuthStore();
   const hasToken = !!localStorage.getItem('access_token');
@@ -104,7 +105,8 @@ function SuperAdminRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to="/login" replace />;
   }
 
-  if (user?.role !== 'super_admin') {
+  // Allow both admin and super_admin (they have the same capabilities now)
+  if (user?.role !== 'admin' && user?.role !== 'super_admin') {
     return <Navigate to="/dashboard" replace />;
   }
 

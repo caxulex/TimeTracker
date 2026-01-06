@@ -27,10 +27,8 @@ export function AdminSettingsPage() {
   const { addNotification } = useNotifications();
   const queryClient = useQueryClient();
   
-  // Active tab state - default to AI features for non-super admins
-  const [activeTab, setActiveTab] = useState<'api-keys' | 'ai-features'>(
-    user?.role === 'super_admin' ? 'api-keys' : 'ai-features'
-  );
+  // Active tab state - default to api-keys for all admins
+  const [activeTab, setActiveTab] = useState<'api-keys' | 'ai-features'>('api-keys');
   
   // Form state
   const [showAddForm, setShowAddForm] = useState(false);
@@ -42,8 +40,7 @@ export function AdminSettingsPage() {
   });
   const [testingId, setTestingId] = useState<number | null>(null);
 
-  // Check if super admin
-  const isSuperAdmin = user?.role === 'super_admin';
+  // All admins now have full access (admin = super_admin)
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
 
   // Fetch users for AI settings (admin only)
@@ -60,14 +57,14 @@ export function AdminSettingsPage() {
   const { data: encryptionStatus } = useQuery({
     queryKey: ['encryption-status'],
     queryFn: () => apiKeysApi.getEncryptionStatus(),
-    enabled: isSuperAdmin,
+    enabled: isAdmin,
   });
 
   // Fetch API keys
   const { data: keysData, isLoading } = useQuery({
     queryKey: ['api-keys'],
     queryFn: () => apiKeysApi.getAll(),
-    enabled: isSuperAdmin,
+    enabled: isAdmin,
   });
 
   // Create mutation
@@ -233,21 +230,19 @@ export function AdminSettingsPage() {
       {/* Tab Navigation */}
       <div className="border-b border-gray-200 dark:border-gray-700">
         <nav className="-mb-px flex space-x-8">
-          {isSuperAdmin && (
-            <button
-              onClick={() => setActiveTab('api-keys')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === 'api-keys'
-                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400'
-              }`}
-            >
-              <span className="flex items-center gap-2">
-                <span>🔑</span>
-                API Keys
-              </span>
-            </button>
-          )}
+          <button
+            onClick={() => setActiveTab('api-keys')}
+            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+              activeTab === 'api-keys'
+                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <span>🔑</span>
+              API Keys
+            </span>
+          </button>
           <button
             onClick={() => setActiveTab('ai-features')}
             className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
@@ -271,8 +266,8 @@ export function AdminSettingsPage() {
         />
       )}
 
-      {/* API Keys Tab - Super Admin Only */}
-      {activeTab === 'api-keys' && isSuperAdmin && (
+      {/* API Keys Tab - All Admins */}
+      {activeTab === 'api-keys' && (
         <>
       {/* Encryption Status Warning */}
       {encryptionStatus && !encryptionStatus.configured && (

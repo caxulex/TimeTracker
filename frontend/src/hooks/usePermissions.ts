@@ -34,31 +34,31 @@ export function usePermissions() {
   };
 
   /**
-   * Check if user can manage staff (super_admin only)
+   * Check if user can manage staff (admin or super_admin)
    */
   const canManageStaff = (): boolean => {
-    return checkPermission('super_admin', 'manage_staff');
+    return checkPermission('admin', 'manage_staff');
   };
 
   /**
-   * Check if user can view payroll (super_admin only)
+   * Check if user can view payroll (admin or super_admin)
    */
   const canViewPayroll = (): boolean => {
-    return checkPermission('super_admin', 'view_payroll');
+    return checkPermission('admin', 'view_payroll');
   };
 
   /**
-   * Check if user can manage teams (super_admin or team admin)
+   * Check if user can manage teams (admin or super_admin)
    */
   const canManageTeams = (): boolean => {
-    return checkPermission('super_admin', 'manage_teams');
+    return checkPermission('admin', 'manage_teams');
   };
 
   /**
-   * Check if user can export data
+   * Check if user can export data (admin or super_admin)
    */
   const canExportData = (): boolean => {
-    return checkPermission('super_admin', 'export_data');
+    return checkPermission('admin', 'export_data');
   };
 
   /**
@@ -109,24 +109,24 @@ export function usePermissions() {
   };
 
   /**
-   * Check if user can set pay rates
+   * Check if user can set pay rates (admin or super_admin)
    */
   const canSetPayRates = (): boolean => {
-    return checkPermission('super_admin', 'set_pay_rates');
+    return checkPermission('admin', 'set_pay_rates');
   };
 
   /**
-   * Check if user can view analytics
+   * Check if user can view analytics (admin or super_admin)
    */
   const canViewAnalytics = (): boolean => {
-    return checkPermission('super_admin', 'view_analytics');
+    return checkPermission('admin', 'view_analytics');
   };
 
   /**
-   * Check if user can perform bulk operations
+   * Check if user can perform bulk operations (admin or super_admin)
    */
   const canPerformBulkOperations = (): boolean => {
-    return checkPermission('super_admin', 'bulk_operations');
+    return checkPermission('admin', 'bulk_operations');
   };
 
   /**
