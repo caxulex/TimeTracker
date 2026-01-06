@@ -121,7 +121,10 @@ class AnomalyService:
                 return {
                     "anomalies": [],
                     "enabled": False,
-                    "message": "Anomaly detection is disabled"
+                    "message": "Anomaly detection is disabled",
+                    "scan_date": datetime.now().isoformat(),
+                    "period_days": period_days,
+                    "user_id": user_id
                 }
 
             # Check cache
@@ -174,7 +177,10 @@ class AnomalyService:
             return {
                 "anomalies": [],
                 "error": str(e),
-                "enabled": True
+                "enabled": True,
+                "scan_date": datetime.now().isoformat(),
+                "period_days": period_days,
+                "user_id": user_id
             }
 
     async def scan_all_users(
@@ -202,7 +208,10 @@ class AnomalyService:
             if not global_setting or not global_setting.is_enabled:
                 return {
                     "anomalies": [],
-                    "enabled": False
+                    "enabled": False,
+                    "scan_date": datetime.now().isoformat(),
+                    "period_days": period_days,
+                    "message": "Anomaly detection is disabled"
                 }
 
             # Get users to scan
@@ -258,7 +267,9 @@ class AnomalyService:
             return {
                 "anomalies": [],
                 "error": str(e),
-                "enabled": True
+                "enabled": True,
+                "scan_date": datetime.now().isoformat(),
+                "period_days": period_days
             }
 
     async def _build_features(
