@@ -394,7 +394,6 @@ class AIFeatureManager:
         metadata: Optional[Dict[str, Any]] = None
     ) -> AIUsageLog:
         """Log an AI feature usage event."""
-        import json
         
         log = AIUsageLog(
             user_id=user_id,
@@ -405,7 +404,7 @@ class AIFeatureManager:
             response_time_ms=response_time_ms,
             success=success,
             error_message=error_message,
-            request_metadata=json.dumps(metadata) if metadata else None
+            request_metadata=metadata  # Pass dict directly - column is JSON type
         )
         
         self.db.add(log)

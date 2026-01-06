@@ -4,8 +4,8 @@ SQLAlchemy models for Time Tracker
 
 from datetime import datetime, date, timezone
 from decimal import Decimal
-from typing import Optional
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Index, Date, Numeric, Enum as SQLEnum
+from typing import Optional, Dict, Any
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Index, Date, Numeric, Enum as SQLEnum, JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 import enum
@@ -554,7 +554,7 @@ class AIUsageLog(Base):
     response_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     success: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    request_metadata: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON stored as text
+    request_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)  # JSON column for metadata
     
     # Relationships
     user: Mapped[Optional[User]] = relationship("User", foreign_keys=[user_id])
