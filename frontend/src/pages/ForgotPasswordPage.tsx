@@ -6,7 +6,7 @@ import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { Button, Input } from '../components/common';
 import { branding } from '../config/branding';
-import api from '../api/axios';
+import api from '../api/client';
 
 interface ForgotPasswordForm {
   email: string;
