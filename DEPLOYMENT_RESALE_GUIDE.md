@@ -186,144 +186,92 @@ docker exec time-tracker-backend python -m scripts.create_superadmin
 
 ---
 
-## 4. Automated Deployment Script
+## 4. Automated Deployment Scripts
 
-Save as `deploy-client.sh`:
+TimeTracker includes production-ready deployment scripts in the `scripts/` directory:
+
+### Available Scripts
+
+| Script | Purpose | Usage |
+|--------|---------|-------|
+| `deploy-client.sh` | Full client deployment | `./scripts/deploy-client.sh <domain> <email>` |
+| `deploy-sequential.sh` | Safe build (low RAM servers) | `./scripts/deploy-sequential.sh` |
+| `generate-secrets.sh` | Generate secure credentials | `./scripts/generate-secrets.sh --env` |
+| `backup-client.sh` | Create full backups | `./scripts/backup-client.sh` |
+| `restore-backup.sh` | Disaster recovery | `./scripts/restore-backup.sh <file>` |
+| `health-check.sh` | Monitor system health | `./scripts/health-check.sh` |
+
+### Quick Deployment (Recommended)
 
 ```bash
-#!/bin/bash
+# 1. Generate secrets
+./scripts/generate-secrets.sh --env > backend/.env
 
-# ============================================
-# TimeTracker Client Deployment Script
-# Usage: ./deploy-client.sh <domain> <admin_email>
-# ============================================
+# 2. Edit configuration
+nano backend/.env  # Set domain, admin email, etc.
 
-set -e
-
-DOMAIN=$1
-ADMIN_EMAIL=$2
-
-if [ -z "$DOMAIN" ] || [ -z "$ADMIN_EMAIL" ]; then
-    echo "Usage: ./deploy-client.sh <domain> <admin_email>"
-    echo "Example: ./deploy-client.sh timetracker.acme.com admin@acme.com"
-    exit 1
-fi
-
-# Generate secure credentials
-ADMIN_PASSWORD=$(openssl rand -base64 12)
-JWT_SECRET=$(openssl rand -base64 64 | tr -d '\n')
-DB_PASSWORD=$(openssl rand -base64 32 | tr -d '\n')
-
-echo "🚀 Deploying TimeTracker for $DOMAIN..."
-echo ""
-
-# Create deployment directory
-DEPLOY_DIR="/opt/timetracker-$DOMAIN"
-sudo mkdir -p $DEPLOY_DIR
-cd $DEPLOY_DIR
-
-# Clone repository
-echo "📦 Cloning repository..."
-git clone https://github.com/caxulex/TimeTracker.git .
-
-# Create environment file
-echo "⚙️ Creating configuration..."
-cat > .env << EOF
-# Database
-DATABASE_URL=postgresql://postgres:${DB_PASSWORD}@db:5432/timetracker
-POSTGRES_PASSWORD=${DB_PASSWORD}
-
-# Redis
-REDIS_URL=redis://redis:6379
-
-# Security
-JWT_SECRET_KEY=${JWT_SECRET}
-JWT_ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-REFRESH_TOKEN_EXPIRE_DAYS=7
-
-# Domain
-DOMAIN=${DOMAIN}
-VITE_API_URL=https://${DOMAIN}
-
-# Rate Limiting
-RATE_LIMIT_PER_MINUTE=60
-AUTH_RATE_LIMIT_PER_MINUTE=5
-EOF
-
-# Deploy
-echo "🐳 Starting Docker containers..."
-docker compose -f docker-compose.prod.yml up -d
-
-# Wait for services to be ready
-echo "⏳ Waiting for services to start..."
-sleep 30
-
-# Create admin user
-echo "👤 Creating admin user..."
-docker exec time-tracker-backend python -c "
-import asyncio
-from app.database import async_engine, AsyncSessionLocal
-from app.models import User
-from app.services.auth_service import auth_service
-from sqlalchemy import select
-
-async def create_admin():
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(User).where(User.email == '${ADMIN_EMAIL}'))
-        if result.scalar_one_or_none():
-            print('Admin user already exists')
-            return
-        
-        hashed = auth_service.hash_password('${ADMIN_PASSWORD}')
-        admin = User(
-            email='${ADMIN_EMAIL}',
-            hashed_password=hashed,
-            name='Administrator',
-            role='super_admin',
-            is_active=True
-        )
-        db.add(admin)
-        await db.commit()
-        print('Admin user created successfully')
-
-asyncio.run(create_admin())
-"
-
-# Print summary
-echo ""
-echo "============================================"
-echo "✅ DEPLOYMENT COMPLETE!"
-echo "============================================"
-echo ""
-echo "🌐 URL: https://${DOMAIN}"
-echo ""
-echo "👤 Admin Credentials:"
-echo "   Email: ${ADMIN_EMAIL}"
-echo "   Password: ${ADMIN_PASSWORD}"
-echo ""
-echo "⚠️  IMPORTANT: Save these credentials securely!"
-echo "   Change the password after first login."
-echo ""
-echo "📁 Deployment directory: ${DEPLOY_DIR}"
-echo "============================================"
+# 3. Deploy (use sequential build for <2GB RAM servers)
+./scripts/deploy-sequential.sh
 ```
 
-**Make executable:**
+### Full Deployment Script
+
+The `deploy-client.sh` script handles everything automatically:
+
 ```bash
-chmod +x deploy-client.sh
+# Usage
+./scripts/deploy-client.sh <domain> <admin_email>
+
+# Example
+./scripts/deploy-client.sh timetracker.acme.com admin@acme.com
 ```
 
-**Usage:**
+This script will:
+1. ✅ Generate secure secrets (JWT, DB password)
+2. ✅ Create environment configuration
+3. ✅ Build and deploy containers
+4. ✅ Set up SSL via Caddy
+5. ✅ Create admin user
+6. ✅ Print credentials to save
+
+### Health Monitoring
+
 ```bash
-./deploy-client.sh timetracker.acme.com admin@acme.com
+# Full system check
+./scripts/health-check.sh
+
+# Quick API check only
+./scripts/health-check.sh --quick
+
+# JSON output for monitoring systems
+./scripts/health-check.sh --json
+
+# Continuous monitoring (every 30s)
+./scripts/health-check.sh --watch
+```
+
+### Backup & Recovery
+
+```bash
+# Create backup
+./scripts/backup-client.sh
+
+# List available backups
+./scripts/restore-backup.sh --list
+
+# Verify backup integrity
+./scripts/restore-backup.sh --verify <backup-file>
+
+# Restore (full or database only)
+./scripts/restore-backup.sh <backup-file>
+./scripts/restore-backup.sh --db-only <backup-file>
 ```
 
 ---
 
 ## 5. Client Configuration Template
 
-Save as `client-config-template.env`:
+Use the template in `clients/template/.env.template` or generate with:
 
 ```env
 # ============================================
@@ -466,28 +414,63 @@ cd /opt/timetracker-clientdomain.com
 # Pull latest changes
 git pull origin master
 
-# Rebuild and restart containers
-docker compose -f docker-compose.prod.yml up -d --build
+# Safe rebuild (prevents RAM crashes on small servers)
+./scripts/deploy-sequential.sh
 
 # Run any database migrations
-docker exec time-tracker-backend alembic upgrade head
+docker exec timetracker-backend alembic upgrade head
 ```
 
 ### Backup Client Data
 
-```bash
-# Backup database
-docker exec time-tracker-postgres pg_dump -U postgres timetracker > backup_$(date +%Y%m%d).sql
+Use the provided backup script:
 
-# Backup entire deployment
-tar -czvf timetracker-backup-$(date +%Y%m%d).tar.gz /opt/timetracker-clientdomain.com
+```bash
+# Full backup (database + uploads + config)
+./scripts/backup-client.sh
+
+# Backup to specific directory
+./scripts/backup-client.sh --output /backups/
+
+# With --restore flag creates timestamped restore point
+./scripts/backup-client.sh --restore
 ```
+
+Backups are saved to `backups/` directory by default.
 
 ### Restore from Backup
 
 ```bash
-# Restore database
-cat backup_20251229.sql | docker exec -i time-tracker-postgres psql -U postgres timetracker
+# List available backups
+./scripts/restore-backup.sh --list
+
+# Verify backup before restore
+./scripts/restore-backup.sh --verify backup_20260106.tar.gz
+
+# Full restore
+./scripts/restore-backup.sh backup_20260106.tar.gz
+
+# Database only restore
+./scripts/restore-backup.sh --db-only backup_20260106.sql.gz
+
+# Dry run (preview what would happen)
+./scripts/restore-backup.sh --dry-run backup_20260106.tar.gz
+```
+
+### Health Monitoring
+
+```bash
+# Quick health check
+./scripts/health-check.sh --quick
+
+# Full system check (containers, DB, Redis, disk, logs)
+./scripts/health-check.sh
+
+# JSON output for monitoring integration
+./scripts/health-check.sh --json
+
+# Continuous monitoring
+./scripts/health-check.sh --watch 60  # Check every 60 seconds
 ```
 
 ---
