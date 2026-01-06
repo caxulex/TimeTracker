@@ -2,6 +2,7 @@
 User invitations and password reset router
 """
 
+import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,8 +15,11 @@ from app.models import User
 from app.dependencies import get_current_active_user, get_current_admin_user
 from app.services.invitation_service import invitation_service
 from app.services.auth_service import auth_service
+from app.services.email_service import email_service
 from app.schemas.auth import Message
+from app.config import settings
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -175,6 +179,7 @@ async def accept_invitation(
 @router.post("/forgot-password", response_model=Message)
 async def request_password_reset(
     data: PasswordResetRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """Request a password reset"""
@@ -189,10 +194,33 @@ async def request_password_reset(
     # Create reset token
     token = await invitation_service.create_reset_token(user.id, user.email)
     
-    # In a real app, send email here
-    # For now, we log the token (remove in production)
-    import logging
-    logging.info(f"Password reset token for {user.email}: {token}")
+    # Build reset URL
+    # Try to get the origin from request headers, fall back to settings
+    origin = request.headers.get("origin", "")
+    if not origin:
+        # Fall back to first allowed origin or localhost
+        allowed_origins = getattr(settings, 'ALLOWED_ORIGINS', [])
+        if allowed_origins and isinstance(allowed_origins, list) and len(allowed_origins) > 0:
+            origin = allowed_origins[0]
+        else:
+            origin = "http://localhost:5173"
+    
+    reset_url = f"{origin}/reset-password?token={token}"
+    
+    # Send password reset email
+    try:
+        await email_service.send_password_reset_email(
+            to_email=user.email,
+            user_name=user.name or user.email,
+            reset_url=reset_url,
+            expires_in_hours=24
+        )
+        logger.info(f"Password reset email sent to {user.email}")
+    except Exception as e:
+        # Log error but don't expose it to user
+        logger.error(f"Failed to send password reset email to {user.email}: {e}")
+        # Still log the token for development debugging
+        logger.debug(f"Password reset token for {user.email}: {token}")
     
     return Message(message="If the email exists, a reset link has been sent")
 

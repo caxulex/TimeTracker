@@ -81,11 +81,14 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: EnvList = ["http://localhost:5173", "http://localhost:3000"]
     ALLOWED_HOSTS: EnvList = ["localhost", "127.0.0.1"]
 
-    # Email (for future use)
+    # Email Configuration
     SMTP_SERVER: Optional[str] = None
-    SMTP_PORT: Optional[int] = None
+    SMTP_PORT: Optional[int] = 587
     SMTP_USERNAME: Optional[str] = None
     SMTP_PASSWORD: Optional[str] = None
+    SMTP_FROM_EMAIL: Optional[str] = None  # Defaults to SMTP_USERNAME if not set
+    SMTP_FROM_NAME: str = "Time Tracker"   # Display name for email sender
+    SMTP_USE_TLS: bool = True
 
     # Admin - SEC-012: No default credentials
     FIRST_SUPER_ADMIN_EMAIL: str = ""

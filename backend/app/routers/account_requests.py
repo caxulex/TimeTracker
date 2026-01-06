@@ -2,6 +2,7 @@
 Account request router - Public and admin endpoints
 """
 
+import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +21,9 @@ from app.dependencies import get_current_admin_user
 from app.utils.sanitize import sanitize_string, get_client_ip
 from app.middleware.rate_limit import rate_limiter
 from app.services.audit_logger import AuditLogger, AuditAction
+from app.services.email_service import email_service
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -97,15 +100,25 @@ async def submit_account_request(
     await db.commit()
     await db.refresh(account_request)
     
-    # TODO: Send WebSocket notification to admins
-    # await websocket_manager.broadcast_to_admins({
-    #     "type": "account_request.new",
-    #     "data": {
-    #         "request_id": account_request.id,
-    #         "name": account_request.name,
-    #         "email": account_request.email
-    #     }
-    # })
+    # Send email notification to admins (non-blocking)
+    try:
+        # Get super admin emails for notification
+        admin_result = await db.execute(
+            select(User.email).where(User.is_super_admin == True, User.is_active == True)
+        )
+        admin_emails = [row[0] for row in admin_result.fetchall()]
+        
+        for admin_email in admin_emails:
+            try:
+                await email_service.send_account_request_notification(
+                    admin_email=admin_email,
+                    requester_name=account_request.name,
+                    requester_email=account_request.email
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send notification to {admin_email}: {e}")
+    except Exception as e:
+        logger.warning(f"Failed to notify admins of new account request: {e}")
     
     return account_request
 
@@ -306,7 +319,15 @@ async def reject_account_request(
     await db.commit()
     await db.refresh(account_request)
     
-    # TODO: Send notification (future enhancement)
+    # Send rejection email to applicant (non-blocking)
+    try:
+        await email_service.send_account_rejected_email(
+            to_email=account_request.email,
+            user_name=account_request.name,
+            reason=decision.admin_notes
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send rejection email to {account_request.email}: {e}")
     
     return account_request
 
