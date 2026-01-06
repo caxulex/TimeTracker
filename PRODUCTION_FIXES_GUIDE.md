@@ -845,8 +845,13 @@ docker compose -f docker-compose.prod.yml down
 git fetch origin
 git reset --hard origin/master
 
-# Rebuild and restart
-docker compose -f docker-compose.prod.yml up -d --build
+# Rebuild using SEQUENTIAL build (prevents RAM crash)
+./scripts/deploy-sequential.sh
+
+# Or manually:
+# docker compose -f docker-compose.prod.yml build backend
+# docker compose -f docker-compose.prod.yml build frontend
+# docker compose -f docker-compose.prod.yml up -d
 
 # Verify
 curl -s http://localhost:8080/health
@@ -878,8 +883,8 @@ docker volume rm timetracker_postgres_data
 # 4. Restore from backup (if available)
 # pg_restore commands here
 
-# 5. Restart
-docker compose -f docker-compose.prod.yml up -d --build
+# 5. Restart with sequential build
+./scripts/deploy-sequential.sh
 ```
 
 ### Procedure 4: Quick Health Check Sequence
@@ -924,9 +929,9 @@ docker image prune -a -f
 # Clean build cache
 docker builder prune -a -f
 
-# Restart from scratch
+# Restart from scratch using SEQUENTIAL build
 cd ~/timetracker
-docker compose -f docker-compose.prod.yml up -d --build
+./scripts/deploy-sequential.sh
 ```
 
 ---

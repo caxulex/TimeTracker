@@ -25,7 +25,7 @@ docker builder prune -f
 # Step 3: Build BACKEND first (lighter build)
 echo ""
 echo "🔧 Building BACKEND..."
-docker compose -f docker-compose.prod.yml build --no-cache backend
+docker compose -f docker-compose.prod.yml build backend
 echo "✅ Backend built!"
 
 # Step 4: Clear build cache before frontend
@@ -36,7 +36,7 @@ docker builder prune -f
 # Step 5: Build FRONTEND (heavier build - needs the RAM we just freed)
 echo ""
 echo "🔧 Building FRONTEND (this takes a while)..."
-docker compose -f docker-compose.prod.yml build --no-cache frontend
+docker compose -f docker-compose.prod.yml build frontend
 echo "✅ Frontend built!"
 
 # Step 6: Restart services

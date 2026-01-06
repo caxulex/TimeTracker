@@ -1,7 +1,7 @@
 
 
-> **Last Updated**: January 5, 2026
-> **Latest Session Report**: [SESSION_REPORT_JAN_5_2026.md](SESSION_REPORT_JAN_5_2026.md)
+> **Last Updated**: January 6, 2026
+> **Latest Session Report**: [SESSION_REPORT_JAN_6_2026.md](SESSION_REPORT_JAN_6_2026.md)
 
 ---
 
@@ -35,10 +35,12 @@ Read CONTEXT.md, AIupgrade.md, PRODUCTION_FIXES_GUIDE.md, and the latest SESSION
    ```bash
    cd ~/timetracker
    git pull origin master
-   docker compose -f docker-compose.prod.yml up -d --build
+   ./scripts/deploy-sequential.sh
    ```
-5. Wait ~2-3 minutes for containers to rebuild
+5. Wait ~5-7 minutes for sequential build
 6. Verify: `curl http://localhost:8000/health`
+
+> ⚠️ **NEVER** use `docker compose up -d --build` - it crashes the 1GB RAM server!
 
 ### ⚠️ Before Making ANY Changes
 > **READ [PRODUCTION_FIXES_GUIDE.md](PRODUCTION_FIXES_GUIDE.md) FIRST!**
@@ -169,10 +171,16 @@ npm run dev
 # Option 2: Local SSH (requires .pem key)
 ssh -i ~/Downloads/LightsailDefaultKey-us-east-1.pem ubuntu@100.52.110.180
 
-# Deploy commands (run on server)
-cd /home/ubuntu/timetracker
+# Deploy commands (run on server) - USE SEQUENTIAL BUILD!
+cd ~/timetracker
 git pull origin master
-docker compose -f docker-compose.prod.yml up -d --build
+./scripts/deploy-sequential.sh
+
+# Or manual sequential (if script fails):
+# docker compose -f docker-compose.prod.yml build backend
+# docker compose -f docker-compose.prod.yml build frontend
+# docker compose -f docker-compose.prod.yml down
+# docker compose -f docker-compose.prod.yml up -d
 
 # Run migrations (if needed)
 docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
@@ -258,9 +266,10 @@ System degrades gracefully without these.
 
 | Date | Report | Focus |
 |------|--------|-------|
+| Jan 6, 2026 | [SESSION_REPORT_JAN_6_2026.md](SESSION_REPORT_JAN_6_2026.md) | Resellability: Branding, Email, Docs |
+| Jan 5, 2026 | [SESSION_REPORT_JAN_5_2026.md](SESSION_REPORT_JAN_5_2026.md) | Resellability Phase 1 |
 | Dec 31, 2025 | [SESSION_REPORT_DEC_31_2025.md](SESSION_REPORT_DEC_31_2025.md) | AI Phases 0.2-5.2, Full deployment |
 | Dec 30, 2025 | [SESSION_REPORT_DEC_30_2025.md](SESSION_REPORT_DEC_30_2025.md) | Previous work |
-| Dec 29, 2025 | [SESSION_REPORT_DEC_29_2025.md](SESSION_REPORT_DEC_29_2025.md) | Previous work |
 
 ---
 
@@ -278,7 +287,12 @@ System degrades gracefully without these.
 2. **[AIupgrade.md](AIupgrade.md)** - AI feature specifications (Phases 0.2-5.2)
 3. **[PRODUCTION_FIXES_GUIDE.md](PRODUCTION_FIXES_GUIDE.md)** - ⚠️ MANDATORY deployment guide
 4. **[README.md](README.md)** - Project readme
-5. **Latest SESSION_REPORT** - Detailed session history
+5. **[docs/](docs/)** - Full documentation suite:
+   - [DEPLOYMENT.md](docs/DEPLOYMENT.md) - Production deployment
+   - [INSTALLATION.md](docs/INSTALLATION.md) - Setup guide
+   - [BRANDING_CUSTOMIZATION.md](docs/BRANDING_CUSTOMIZATION.md) - White-label
+   - [EMAIL_CONFIGURATION.md](docs/EMAIL_CONFIGURATION.md) - SMTP setup
+6. **Latest SESSION_REPORT** - Detailed session history
 
 ### 🤖 AI Assistant Instructions
 > **When starting a new session, ALWAYS read these files first:**
