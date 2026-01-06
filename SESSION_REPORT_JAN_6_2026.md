@@ -302,8 +302,92 @@ chmod +x scripts/deploy-sequential.sh
 
 ---
 
+## 🔧 Evening Session: AI Endpoint Bug Fixes
+
+### Issue Chain Resolved
+
+**1. AI Features Not Visible** *(Earlier Fix)*
+- **Problem:** AI Insights menu showed nothing
+- **Root Cause:** Frontend feature IDs didn't match database values
+  - Code used: `nlp_time_entry`, `anomaly_alerts`, etc.
+  - Database has: `ai_nlp_entry`, `ai_anomaly_alerts`, etc.
+- **Solution:** Fixed all feature ID references in 6 frontend files
+- **Commit:** `6321679`
+
+**2. 403 Forbidden on `/api/ai/anomalies/all`**
+- **Problem:** Admin users got 403 error accessing AI anomaly scans
+- **Root Cause:** Role name mismatch in `backend/app/ai/router.py`
+  - Code checked: `"superadmin"` (no underscore)
+  - Database stores: `"super_admin"` (with underscore)
+- **Solution:** Changed all 16 instances of `"superadmin"` → `"super_admin"`
+- **Commit:** `e46cde8`
+
+**3. 500 Internal Server Error on `/api/ai/anomalies/all`**
+- **Problem:** After fixing 403, endpoint returned 500 error
+- **Root Cause:** `AnomalyScanResponse` schema requires `scan_date` and `period_days`, but error/disabled responses omitted them
+- **Solution:** Added required fields to all response paths in `anomaly_service.py`:
+  - `scan_user()` disabled response
+  - `scan_user()` error response  
+  - `scan_all_users()` disabled response
+  - `scan_all_users()` error response
+- **Commit:** `3e0e3f0`
+
+**4. Admin Permissions Expansion**
+- **Problem:** User wanted all admins to have super_admin capabilities
+- **Solution:** Modified 3 frontend files:
+  - `App.tsx`: SuperAdminRoute allows both `admin` and `super_admin`
+  - `usePermissions.ts`: All permission checks use `admin` instead of `super_admin`
+  - `AdminSettingsPage.tsx`: Removed isSuperAdmin restrictions for API keys
+- **Commit:** `95886b2`
+
+### Files Modified This Evening
+
+| File | Changes |
+|------|---------|
+| `backend/app/ai/router.py` | 16 role name fixes |
+| `backend/app/ai/services/anomaly_service.py` | Added required schema fields |
+| `frontend/src/App.tsx` | Admin can access super_admin routes |
+| `frontend/src/hooks/usePermissions.ts` | Expanded permission checks |
+| `frontend/src/pages/AdminSettingsPage.tsx` | API keys accessible to all admins |
+| `frontend/src/components/layout/Sidebar.tsx` | Fixed AI feature IDs |
+| 5 other AI-related pages | Fixed feature ID references |
+
+### Deployment Issue
+
+- **Problem:** Server RAM burst during simultaneous Docker builds
+- **Solution:** Sequential build script (`scripts/deploy-sequential.sh`)
+  - Builds backend first, then frontend
+  - Prunes cache between builds
+  - Prevents memory exhaustion
+
+### Recovery Commands (For Future Reference)
+
+```bash
+# If server freezes during build:
+sudo pkill -9 -f "npm\|node\|vite"
+docker system prune -a -f
+sudo sync && echo 3 | sudo tee /proc/sys/vm/drop_caches
+
+# Safe deployment:
+cd ~/timetracker
+git stash && git pull origin master
+chmod +x scripts/deploy-sequential.sh
+./scripts/deploy-sequential.sh
+```
+
+### Evening Git Commits
+
+| Commit | Description |
+|--------|-------------|
+| `6321679` | fix(ai): Correct feature IDs in frontend |
+| `95886b2` | feat(auth): Expand admin permissions |
+| `e46cde8` | fix(ai): Role name mismatch (superadmin → super_admin) |
+| `3e0e3f0` | fix(ai): Add missing schema fields to anomaly responses |
+
+---
+
 *Session Plan Created: January 5, 2026*  
 *Session Completed: January 6, 2026*  
-*Last Updated: January 6, 2026 - All goals achieved!*  
+*Last Updated: January 6, 2026 - Evening fixes for AI endpoints*  
 *Target Completion: January 6, 2026*  
-*Document Version: 1.0*
+*Document Version: 1.1*

@@ -68,15 +68,24 @@ export function useMyFeatureStatus(featureId: string) {
 
 /**
  * Hook to quickly check if a feature is enabled
+ * OPTIMIZED: Uses the batched /me endpoint to avoid N+1 API calls
  */
 export function useFeatureEnabled(featureId: string) {
-  return useQuery({
-    queryKey: QUERY_KEYS.featureCheck(featureId),
-    queryFn: () => aiFeaturesApi.checkFeatureEnabled(featureId),
-    staleTime: 30 * 1000, // 30 seconds
-    enabled: !!featureId,
-    select: (data) => data.is_enabled,
+  // Use the batched myFeatures query instead of individual calls
+  const { data: myFeatures, isLoading, error } = useQuery<UserFeaturesResponse, Error>({
+    queryKey: QUERY_KEYS.myFeatures,
+    queryFn: aiFeaturesApi.getMyFeatures,
+    staleTime: 2 * 60 * 1000, // 2 minutes - longer cache for performance
   });
+
+  // Extract the specific feature's enabled status from the batched response
+  const isEnabled = myFeatures?.features?.find(f => f.feature_id === featureId)?.is_enabled ?? false;
+
+  return {
+    data: isEnabled,
+    isLoading,
+    error,
+  };
 }
 
 /**
