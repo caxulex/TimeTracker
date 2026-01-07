@@ -1,160 +1,144 @@
 # ============================================
 # TIME TRACKER - AI FEATURES API TESTS
 # Phase 7: Testing - AI endpoint tests
+# Tests for /api/ai/features/* endpoints
 # ============================================
 import pytest
 from httpx import AsyncClient
 
 
-class TestAISettings:
-    """Test AI settings endpoints (admin only)."""
+class TestAIFeaturesList:
+    """Test AI features list endpoints."""
     
     @pytest.mark.asyncio
-    async def test_get_ai_settings_as_admin(
+    async def test_list_all_features_as_user(
+        self, client: AsyncClient, auth_headers: dict
+    ):
+        """Test getting all AI features as authenticated user."""
+        response = await client.get(
+            "/api/ai/features",
+            headers=auth_headers,
+        )
+        # Should return list of features
+        assert response.status_code == 200
+        assert isinstance(response.json(), list)
+    
+    @pytest.mark.asyncio
+    async def test_list_all_features_unauthenticated(
+        self, client: AsyncClient
+    ):
+        """Test that listing features requires authentication."""
+        response = await client.get("/api/ai/features")
+        # Should require auth
+        assert response.status_code in [401, 403]
+
+
+class TestUserAIFeatures:
+    """Test user AI feature endpoints."""
+    
+    @pytest.mark.asyncio
+    async def test_get_my_features(
+        self, client: AsyncClient, auth_headers: dict
+    ):
+        """Test getting user's AI features status."""
+        response = await client.get(
+            "/api/ai/features/me",
+            headers=auth_headers,
+        )
+        # Should return user's features
+        assert response.status_code == 200
+        data = response.json()
+        assert "features" in data
+    
+    @pytest.mark.asyncio
+    async def test_get_my_features_unauthenticated(
+        self, client: AsyncClient
+    ):
+        """Test that user features require authentication."""
+        response = await client.get("/api/ai/features/me")
+        assert response.status_code in [401, 403]
+    
+    @pytest.mark.asyncio
+    async def test_get_specific_feature_status(
+        self, client: AsyncClient, auth_headers: dict
+    ):
+        """Test getting status of a specific feature."""
+        # First get list of features
+        list_response = await client.get(
+            "/api/ai/features",
+            headers=auth_headers,
+        )
+        if list_response.status_code == 200:
+            features = list_response.json()
+            if features:
+                # Get first feature's status
+                feature_id = features[0].get("feature_id")
+                if feature_id:
+                    response = await client.get(
+                        f"/api/ai/features/me/{feature_id}",
+                        headers=auth_headers,
+                    )
+                    assert response.status_code == 200
+    
+    @pytest.mark.asyncio
+    async def test_get_nonexistent_feature(
+        self, client: AsyncClient, auth_headers: dict
+    ):
+        """Test getting a feature that doesn't exist."""
+        response = await client.get(
+            "/api/ai/features/me/nonexistent-feature-xyz",
+            headers=auth_headers,
+        )
+        assert response.status_code == 404
+
+
+class TestAdminAIFeatures:
+    """Test admin AI feature management endpoints."""
+    
+    @pytest.mark.asyncio
+    async def test_get_global_settings_as_admin(
         self, client: AsyncClient, admin_auth_headers: dict
     ):
-        """Test getting AI settings as admin."""
+        """Test getting global AI settings as admin."""
         response = await client.get(
-            "/api/ai/settings/global",
+            "/api/ai/features/admin/global",
             headers=admin_auth_headers,
         )
         # Should work for admin
-        assert response.status_code in [200, 404]  # 404 if not configured yet
+        assert response.status_code in [200, 404]
     
     @pytest.mark.asyncio
-    async def test_get_ai_settings_as_user_fails(
+    async def test_get_global_settings_as_user_fails(
         self, client: AsyncClient, auth_headers: dict
     ):
         """Test that regular users cannot access admin AI settings."""
         response = await client.get(
-            "/api/ai/settings/global",
+            "/api/ai/features/admin/global",
             headers=auth_headers,
         )
         # Should be forbidden for regular users
-        assert response.status_code in [403, 401]
-
-
-class TestUserAIPreferences:
-    """Test user AI preferences endpoints."""
-    
-    @pytest.mark.asyncio
-    async def test_get_user_preferences(
-        self, client: AsyncClient, auth_headers: dict
-    ):
-        """Test getting user's AI preferences."""
-        response = await client.get(
-            "/api/ai/preferences",
-            headers=auth_headers,
-        )
-        # Should return preferences or empty defaults
-        assert response.status_code in [200, 404]
-    
-    @pytest.mark.asyncio
-    async def test_update_user_preferences(
-        self, client: AsyncClient, auth_headers: dict
-    ):
-        """Test updating user's AI preferences."""
-        response = await client.put(
-            "/api/ai/preferences",
-            json={
-                "enable_smart_descriptions": True,
-                "enable_task_categorization": True,
-            },
-            headers=auth_headers,
-        )
-        # Should succeed or indicate preferences not set up
-        assert response.status_code in [200, 201, 400, 404]
-
-
-class TestAIAssistFeatures:
-    """Test AI assist endpoints."""
-    
-    @pytest.mark.asyncio
-    async def test_smart_description_unauthenticated(
-        self, client: AsyncClient
-    ):
-        """Test that AI assist requires authentication."""
-        response = await client.post(
-            "/api/ai/assist/smart-description",
-            json={"text": "working on project"},
-        )
         assert response.status_code == 403
     
     @pytest.mark.asyncio
-    async def test_task_categorization_authenticated(
-        self, client: AsyncClient, auth_headers: dict
+    async def test_get_all_users_preferences_as_admin(
+        self, client: AsyncClient, admin_auth_headers: dict
     ):
-        """Test task categorization endpoint."""
-        response = await client.post(
-            "/api/ai/assist/categorize",
-            json={"description": "Meeting with client about Q4 budget"},
-            headers=auth_headers,
-        )
-        # May fail if AI not configured, but should be valid endpoint
-        assert response.status_code in [200, 400, 503]
-
-
-class TestAIValidation:
-    """Test AI validation endpoints."""
-    
-    @pytest.mark.asyncio
-    async def test_validate_time_entry(
-        self, client: AsyncClient, auth_headers: dict
-    ):
-        """Test time entry validation endpoint."""
-        response = await client.post(
-            "/api/ai/validate/time-entry",
-            json={
-                "description": "Working on feature X",
-                "duration_seconds": 3600,
-                "project_name": "Test Project"
-            },
-            headers=auth_headers,
-        )
-        # May fail if AI not configured
-        assert response.status_code in [200, 400, 503]
-
-
-class TestAISearch:
-    """Test AI semantic search endpoints."""
-    
-    @pytest.mark.asyncio
-    async def test_semantic_search(
-        self, client: AsyncClient, auth_headers: dict
-    ):
-        """Test semantic search endpoint."""
-        response = await client.post(
-            "/api/ai/search",
-            json={"query": "budget meetings"},
-            headers=auth_headers,
-        )
-        # May fail if AI not configured
-        assert response.status_code in [200, 400, 503]
-
-
-class TestAIReports:
-    """Test AI report generation endpoints."""
-    
-    @pytest.mark.asyncio
-    async def test_generate_daily_summary(
-        self, client: AsyncClient, auth_headers: dict
-    ):
-        """Test daily summary generation endpoint."""
+        """Test getting all users' AI preferences as admin."""
         response = await client.get(
-            "/api/ai/reports/daily-summary",
-            headers=auth_headers,
+            "/api/ai/features/admin/users",
+            headers=admin_auth_headers,
         )
-        # May fail if AI not configured or no data
-        assert response.status_code in [200, 400, 404, 503]
+        # Should work for admin
+        assert response.status_code in [200, 404]
     
     @pytest.mark.asyncio
-    async def test_generate_weekly_summary(
+    async def test_get_all_users_preferences_as_user_fails(
         self, client: AsyncClient, auth_headers: dict
     ):
-        """Test weekly summary generation endpoint."""
+        """Test that regular users cannot access admin user preferences."""
         response = await client.get(
-            "/api/ai/reports/weekly-summary",
+            "/api/ai/features/admin/users",
             headers=auth_headers,
         )
-        # May fail if AI not configured or no data
-        assert response.status_code in [200, 400, 404, 503]
+        # Should be forbidden for regular users
+        assert response.status_code == 403
