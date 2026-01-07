@@ -21,6 +21,7 @@ from app.routers import ip_security as ip_security_router
 from app.routers import account_requests
 from app.routers import api_keys  # SEC-020: API Key management
 from app.routers import ai_features  # AI Feature Toggle System
+from app.routers import companies  # Multi-tenancy / White-label support
 from app.ai import ai_router  # AI Services (suggestions, anomalies)
 from app.middleware import RateLimitMiddleware, rate_limiter, SecurityHeadersMiddleware, RequestValidationMiddleware
 from app.exceptions import AppException
@@ -295,6 +296,9 @@ app.include_router(ai_features.router, prefix="/api", tags=["AI Features"])
 
 # AI Services routes (suggestions, anomalies)
 app.include_router(ai_router, prefix="/api", tags=["AI Services"])
+
+# Company / Multi-tenancy routes (White-label support)
+app.include_router(companies.router, prefix="/api/companies", tags=["Companies"])
 
 
 # SEC-010: Custom exception handler for AppException

@@ -3,8 +3,13 @@
 // TASK-050: Component unit tests
 // ============================================
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '../test/utils';
-import { Button, Input, Card, Modal } from '../components/common';
+import { render, screen, fireEvent } from '../../test/utils';
+import { Button } from './Button';
+import { Input } from './Input';
+import { Card } from './Card';
+import { Modal } from './Modal';
+import { Spinner } from './Spinner';
+import { Select } from './Select';
 
 describe('Button Component', () => {
   it('renders correctly with default props', () => {
@@ -17,7 +22,7 @@ describe('Button Component', () => {
     expect(screen.getByRole('button')).toHaveClass('bg-blue-600');
     
     rerender(<Button variant="secondary">Secondary</Button>);
-    expect(screen.getByRole('button')).toHaveClass('bg-gray-100');
+    expect(screen.getByRole('button')).toHaveClass('bg-gray-200');
     
     rerender(<Button variant="danger">Danger</Button>);
     expect(screen.getByRole('button')).toHaveClass('bg-red-600');

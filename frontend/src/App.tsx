@@ -10,6 +10,7 @@ import { Layout } from './components/layout/Layout';
 import { NotificationProvider } from './components/Notifications';
 import { WebSocketProvider } from './contexts/WebSocketContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { BrandingProvider } from './contexts/BrandingContext';
 import { useAuthStore } from './stores/authStore';
 import './App.css';
 
@@ -156,6 +157,7 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 function App() {
   return (
     <ThemeProvider>
+      <BrandingProvider>
       <QueryClientProvider client={queryClient}>
         <NotificationProvider>
           <WebSocketProvider>
@@ -368,6 +370,7 @@ function App() {
         </WebSocketProvider>
       </NotificationProvider>
     </QueryClientProvider>
+    </BrandingProvider>
     </ThemeProvider>
   );
 }

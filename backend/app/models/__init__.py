@@ -68,6 +68,122 @@ class AdjustmentType(str, enum.Enum):
     OTHER = "other"
 
 
+class SubscriptionTier(str, enum.Enum):
+    """Company subscription tier enumeration"""
+    FREE = "free"
+    STARTER = "starter"
+    PROFESSIONAL = "professional"
+    ENTERPRISE = "enterprise"
+
+
+class CompanyStatus(str, enum.Enum):
+    """Company status enumeration"""
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    TRIAL = "trial"
+    CANCELLED = "cancelled"
+
+
+# ============================================
+# COMPANY / MULTI-TENANT MODELS
+# ============================================
+
+class Company(Base):
+    """
+    Company/Tenant model for multi-tenant support.
+    Each company is a separate tenant with their own users, teams, and data.
+    """
+    __tablename__ = "companies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)  # URL-safe identifier
+    email: Mapped[str] = mapped_column(String(255), nullable=False)  # Primary contact email
+    phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    
+    # Subscription
+    subscription_tier: Mapped[str] = mapped_column(String(50), default="trial", nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="trial", nullable=False)
+    trial_ends_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    subscription_ends_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    # Limits (based on tier)
+    max_users: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    max_projects: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
+    
+    # Settings
+    timezone: Mapped[str] = mapped_column(String(50), default="UTC", nullable=False)
+    date_format: Mapped[str] = mapped_column(String(20), default="YYYY-MM-DD", nullable=False)
+    time_format: Mapped[str] = mapped_column(String(20), default="HH:mm", nullable=False)
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Relationships
+    white_label_config: Mapped[Optional["WhiteLabelConfig"]] = relationship("WhiteLabelConfig", back_populates="company", uselist=False)
+
+    def __repr__(self) -> str:
+        return f"<Company(id={self.id}, name={self.name}, slug={self.slug})>"
+
+
+class WhiteLabelConfig(Base):
+    """
+    White-label configuration for company branding.
+    Allows each company to customize the look and feel of the application.
+    """
+    __tablename__ = "white_label_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    company_id: Mapped[int] = mapped_column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), unique=True, nullable=False)
+    
+    # Domain Configuration
+    custom_domain: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True, index=True)
+    subdomain: Mapped[Optional[str]] = mapped_column(String(100), unique=True, nullable=True, index=True)  # xyz-corp.timetracker.com
+    
+    # Branding - Application Identity
+    app_name: Mapped[str] = mapped_column(String(100), default="Time Tracker", nullable=False)
+    company_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    tagline: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    
+    # Branding - Visual Assets
+    logo_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    favicon_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    login_background_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    
+    # Branding - Colors (hex format)
+    primary_color: Mapped[str] = mapped_column(String(7), default="#2563eb", nullable=False)
+    secondary_color: Mapped[Optional[str]] = mapped_column(String(7), nullable=True)
+    accent_color: Mapped[Optional[str]] = mapped_column(String(7), nullable=True)
+    
+    # Contact & Support
+    support_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    support_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    
+    # Legal Links
+    terms_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    privacy_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    
+    # Display Options
+    show_powered_by: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    custom_css: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Custom CSS overrides
+    custom_js: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Custom JS (careful with security)
+    
+    # Email Customization
+    email_from_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    email_from_address: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Relationships
+    company: Mapped["Company"] = relationship("Company", back_populates="white_label_config")
+
+    def __repr__(self) -> str:
+        return f"<WhiteLabelConfig(company_id={self.company_id}, app_name={self.app_name})>"
+
+
 # ============================================
 # EXISTING MODELS
 # ============================================
@@ -81,8 +197,11 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[str] = mapped_column(String(50), nullable=False, default="regular_user")  # super_admin, regular_user
+    role: Mapped[str] = mapped_column(String(50), nullable=False, default="regular_user")  # super_admin, company_admin, team_lead, regular_user
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    
+    # Multi-tenant: Company association (nullable for platform super_admins)
+    company_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True)
     
     # Contact Information
     phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
@@ -103,6 +222,7 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
+    company: Mapped[Optional["Company"]] = relationship("Company", foreign_keys=[company_id])
     teams: Mapped[list["TeamMember"]] = relationship("TeamMember", back_populates="user")
     time_entries: Mapped[list["TimeEntry"]] = relationship("TimeEntry", back_populates="user")
     pay_rates: Mapped[list["PayRate"]] = relationship("PayRate", back_populates="user", foreign_keys="PayRate.user_id")
@@ -110,7 +230,7 @@ class User(Base):
     manager: Mapped[Optional["User"]] = relationship("User", remote_side=[id], foreign_keys=[manager_id])
 
     def __repr__(self) -> str:
-        return f"<User(id={self.id}, email={self.email}, role={self.role})>"
+        return f"<User(id={self.id}, email={self.email}, role={self.role}, company_id={self.company_id})>"
 
 
 class Team(Base):

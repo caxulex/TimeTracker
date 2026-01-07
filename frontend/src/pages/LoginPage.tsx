@@ -1,20 +1,30 @@
 // ============================================
 // TIME TRACKER - LOGIN PAGE
 // ============================================
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { useAuthStore } from '../stores/authStore';
 import { Button, Input } from '../components/common';
 import { useNotifications } from '../hooks/useNotifications';
-import { branding } from '../config/branding';
+import { useBranding } from '../contexts/BrandingContext';
 import type { UserLogin } from '../types';
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { login, isLoading, error, clearError } = useAuthStore();
   const { addNotification } = useNotifications();
   const [showPassword, setShowPassword] = useState(false);
+  const { branding, setCompany, isWhiteLabeled } = useBranding();
+
+  // Check for company slug in URL and load branding
+  useEffect(() => {
+    const companySlug = searchParams.get('company');
+    if (companySlug) {
+      setCompany(companySlug);
+    }
+  }, [searchParams, setCompany]);
 
   const {
     register,
@@ -38,20 +48,27 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
+    <div 
+      className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8"
+      style={branding.login_background_url ? { 
+        backgroundImage: `url(${branding.login_background_url})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center'
+      } : undefined}
+    >
+      <div className="max-w-md w-full space-y-8 bg-white/95 p-8 rounded-xl shadow-lg backdrop-blur-sm">
         {/* Logo */}
         <div className="text-center">
-          {branding.logoUrl.endsWith('.svg') || branding.logoUrl.startsWith('http') ? (
+          {branding.logo_url ? (
             <img 
-              src={branding.logoUrl} 
-              alt={branding.logoAlt}
-              className="mx-auto w-16 h-16 rounded-xl"
+              src={branding.logo_url} 
+              alt={`${branding.app_name} Logo`}
+              className="mx-auto w-16 h-16 rounded-xl object-contain"
             />
           ) : (
             <div 
               className="mx-auto w-16 h-16 rounded-xl flex items-center justify-center"
-              style={{ backgroundColor: branding.primaryColor }}
+              style={{ backgroundColor: branding.primary_color }}
             >
               <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -62,8 +79,11 @@ export function LoginPage() {
             Welcome back
           </h2>
           <p className="mt-2 text-sm text-gray-600">
-            Sign in to your {branding.appName} account
+            Sign in to your {branding.app_name} account
           </p>
+          {branding.tagline && (
+            <p className="mt-1 text-xs text-gray-500 italic">{branding.tagline}</p>
+          )}
         </div>
 
         {/* Form */}
@@ -134,7 +154,7 @@ export function LoginPage() {
                 name="remember-me"
                 type="checkbox"
                 className="h-4 w-4 border-gray-300 rounded"
-                style={{ accentColor: branding.primaryColor }}
+                style={{ accentColor: branding.primary_color }}
               />
               <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-900">
                 Remember me
@@ -145,7 +165,7 @@ export function LoginPage() {
               <Link 
                 to="/forgot-password" 
                 className="font-medium hover:opacity-80"
-                style={{ color: branding.primaryColor }}
+                style={{ color: branding.primary_color }}
               >
                 Forgot your password?
               </Link>
@@ -157,7 +177,7 @@ export function LoginPage() {
             className="w-full"
             size="lg"
             isLoading={isLoading}
-            style={{ backgroundColor: branding.primaryColor }}
+            style={{ backgroundColor: branding.primary_color }}
           >
             Sign in
           </Button>
@@ -167,7 +187,7 @@ export function LoginPage() {
             <Link 
               to="/request-account" 
               className="font-medium hover:opacity-80"
-              style={{ color: branding.primaryColor }}
+              style={{ color: branding.primary_color }}
             >
               Request Access
             </Link>
@@ -176,17 +196,24 @@ export function LoginPage() {
 
         {/* Footer with support info */}
         <div className="text-center text-xs text-gray-500 space-y-1">
-          <p>© {branding.copyrightYear} {branding.companyName}</p>
-          <p>
-            Need help?{' '}
-            <a 
-              href={`mailto:${branding.supportEmail}`}
-              className="hover:underline"
-              style={{ color: branding.primaryColor }}
-            >
-              Contact Support
-            </a>
-          </p>
+          <p>© {new Date().getFullYear()} {branding.company_name}</p>
+          {branding.support_email && (
+            <p>
+              Need help?{' '}
+              <a 
+                href={`mailto:${branding.support_email}`}
+                className="hover:underline"
+                style={{ color: branding.primary_color }}
+              >
+                Contact Support
+              </a>
+            </p>
+          )}
+          {branding.show_powered_by && (
+            <p className="text-gray-400 text-[10px] mt-2">
+              Powered by Time Tracker
+            </p>
+          )}
         </div>
       </div>
     </div>

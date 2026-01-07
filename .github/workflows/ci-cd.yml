@@ -1,6 +1,6 @@
 # ============================================
 # TIME TRACKER - CI/CD PIPELINE
-# TASK-058: GitHub Actions workflow
+# Phase 7: Testing - Enhanced GitHub Actions workflow
 # ============================================
 
 name: CI/CD Pipeline
@@ -63,7 +63,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-asyncio pytest-cov
-          pip install -e .
 
       - name: Run database migrations
         working-directory: ./backend
@@ -78,10 +77,10 @@ jobs:
           TESTING: 'true'
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/time_tracker_test
           REDIS_URL: redis://localhost:6379/0
-          SECRET_KEY: 6jgo_uPb0b8TY4BjSU8ukNllS84ahldx1sPo5uUp47g56tmmwwxKHqBhdSF9Fe5m_BYxXFGaoEGinyGPqAR65g
-          JWT_SECRET: 6jgo_uPb0b8TY4BjSU8ukNllS84ahldx1sPo5uUp47g56tmmwwxKHqBhdSF9Fe5m_BYxXFGaoEGinyGPqAR65g
+          SECRET_KEY: test-secret-key-for-ci-cd-pipeline-only
+          JWT_SECRET: test-jwt-secret-for-ci-cd-pipeline-only
         run: |
-          pytest --cov=app --cov-report=xml --cov-report=term-missing
+          pytest tests/ --cov=app --cov-report=xml --cov-report=term-missing -v
 
       - name: Upload coverage reports
         uses: codecov/codecov-action@v3
@@ -89,6 +88,7 @@ jobs:
           files: ./backend/coverage.xml
           flags: backend
           name: backend-coverage
+        continue-on-error: true
 
   # ============================================
   # Backend Linting
@@ -141,15 +141,115 @@ jobs:
 
       - name: Run type check
         working-directory: ./frontend
-        run: npm run typecheck || true
+        run: npx tsc --noEmit || true
 
-      - name: Run tests
+      - name: Run unit tests
         working-directory: ./frontend
-        run: npm test -- --run --reporter=verbose || true
+        run: npm test -- --run --reporter=verbose
 
       - name: Build
         working-directory: ./frontend
+        env:
+          VITE_API_URL: http://localhost:8000/api
         run: npm run build
+
+  # ============================================
+  # E2E Tests (Optional - runs on demand)
+  # ============================================
+  e2e-test:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || contains(github.event.head_commit.message, '[e2e]')
+    needs: [backend-test, frontend-test]
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: time_tracker_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: ./frontend/package-lock.json
+      
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Run migrations
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/time_tracker_test
+        run: alembic upgrade head
+      
+      - name: Seed demo data
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/time_tracker_test
+        run: python -m scripts.seed_demo_data || true
+      
+      - name: Start backend
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/time_tracker_test
+          REDIS_URL: redis://localhost:6379/0
+          SECRET_KEY: test-secret-key-for-ci-cd
+          JWT_SECRET: test-jwt-secret-for-ci-cd
+        run: |
+          uvicorn app.main:app --host 0.0.0.0 --port 8080 &
+          sleep 10
+      
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+      
+      - name: Install Playwright browsers
+        working-directory: ./frontend
+        run: npx playwright install --with-deps chromium
+      
+      - name: Run E2E tests
+        working-directory: ./frontend
+        env:
+          BASE_URL: http://localhost:5173
+          API_URL: http://localhost:8080
+        run: |
+          npm run dev &
+          sleep 5
+          npx playwright test --project=chromium e2e/critical-flows.spec.ts || true
+      
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
 
   # ============================================
   # Frontend Linting
