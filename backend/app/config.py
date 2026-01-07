@@ -78,8 +78,13 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # CORS - SEC-008: Explicit configuration
+    # For multi-tenancy: Include *.timetracker.shaemarcus.com pattern
     ALLOWED_ORIGINS: EnvList = ["http://localhost:5173", "http://localhost:3000"]
     ALLOWED_HOSTS: EnvList = ["localhost", "127.0.0.1"]
+    
+    # Multi-tenancy: Base domains that support wildcard subdomain CORS
+    # Format: domain.com (will allow *.domain.com and domain.com)
+    CORS_WILDCARD_DOMAINS: EnvList = []
 
     # Email Configuration
     SMTP_SERVER: Optional[str] = None

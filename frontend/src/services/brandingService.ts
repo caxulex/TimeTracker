@@ -54,10 +54,65 @@ const BRANDING_CACHE_KEY = 'tt_branding_config';
 const COMPANY_SLUG_KEY = 'tt_company_slug';
 
 /**
- * Get company slug from URL parameter or storage
+ * Known base domains - requests from these domains are NOT white-labeled
+ * Add your production domain(s) here
+ */
+const BASE_DOMAINS = [
+  'timetracker.shaemarcus.com',
+  'localhost',
+  '127.0.0.1',
+];
+
+/**
+ * Extract company slug from subdomain
+ * e.g., xyz-corp.timetracker.shaemarcus.com -> xyz-corp
+ */
+function getSlugFromSubdomain(): string | null {
+  const hostname = window.location.hostname;
+  
+  // Skip if localhost or IP address
+  if (hostname === 'localhost' || /^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
+    return null;
+  }
+  
+  // Check if this is a subdomain of any base domain
+  for (const baseDomain of BASE_DOMAINS) {
+    if (hostname === baseDomain) {
+      // This is the base domain, no subdomain
+      return null;
+    }
+    
+    if (hostname.endsWith(`.${baseDomain}`)) {
+      // Extract subdomain: xyz-corp.timetracker.shaemarcus.com -> xyz-corp
+      const subdomain = hostname.slice(0, -(baseDomain.length + 1));
+      
+      // Ignore common subdomains like www, api, staging
+      if (['www', 'api', 'staging', 'admin', 'app'].includes(subdomain)) {
+        return null;
+      }
+      
+      return subdomain;
+    }
+  }
+  
+  // Custom domain - look up by full hostname
+  return `domain:${hostname}`;
+}
+
+/**
+ * Get company slug from subdomain, URL parameter, or storage
+ * Priority: subdomain > URL param > stored
  */
 export function getCompanySlug(): string | null {
-  // First check URL parameters
+  // First priority: subdomain detection
+  const subdomainSlug = getSlugFromSubdomain();
+  if (subdomainSlug) {
+    // Store for future use within this session
+    localStorage.setItem(COMPANY_SLUG_KEY, subdomainSlug);
+    return subdomainSlug;
+  }
+  
+  // Second priority: URL parameters (for testing)
   const urlParams = new URLSearchParams(window.location.search);
   const slugFromUrl = urlParams.get('company');
   
@@ -67,8 +122,16 @@ export function getCompanySlug(): string | null {
     return slugFromUrl;
   }
   
-  // Check stored slug
-  return localStorage.getItem(COMPANY_SLUG_KEY);
+  // Third: Check stored slug (only if not on base domain)
+  // This prevents slug "sticking" when navigating from subdomain to main site
+  const hostname = window.location.hostname;
+  const isBaseDomain = BASE_DOMAINS.some(d => hostname === d || hostname.startsWith('localhost'));
+  
+  if (!isBaseDomain) {
+    return localStorage.getItem(COMPANY_SLUG_KEY);
+  }
+  
+  return null;
 }
 
 /**
@@ -88,13 +151,24 @@ export function clearCompanySlug(): void {
 
 /**
  * Fetch branding configuration for a company
+ * Supports both slug lookup and custom domain lookup
  */
-export async function fetchBranding(slug: string): Promise<WhiteLabelConfig | null> {
+export async function fetchBranding(slugOrDomain: string): Promise<WhiteLabelConfig | null> {
   try {
-    const response = await fetch(`${API_URL}/companies/branding/${slug}`);
+    let endpoint: string;
+    
+    // Check if this is a custom domain lookup (domain:hostname format)
+    if (slugOrDomain.startsWith('domain:')) {
+      const domain = slugOrDomain.slice(7); // Remove 'domain:' prefix
+      endpoint = `${API_URL}/companies/branding/by-domain/${encodeURIComponent(domain)}`;
+    } else {
+      endpoint = `${API_URL}/companies/branding/${slugOrDomain}`;
+    }
+    
+    const response = await fetch(endpoint);
     
     if (!response.ok) {
-      console.warn(`Could not fetch branding for ${slug}: ${response.status}`);
+      console.warn(`Could not fetch branding for ${slugOrDomain}: ${response.status}`);
       return null;
     }
     

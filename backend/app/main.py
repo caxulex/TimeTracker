@@ -114,10 +114,76 @@ app.add_middleware(SecurityHeadersMiddleware)
 # SEC-004: Add rate limiting middleware
 app.add_middleware(RateLimitMiddleware, limiter=rate_limiter)
 
-# SEC-008: Tightened CORS configuration
+# SEC-008: CORS origin validator for multi-tenant wildcard subdomain support
+def is_origin_allowed(origin: str) -> bool:
+    """
+    Check if an origin is allowed for CORS.
+    Supports:
+    - Exact matches from ALLOWED_ORIGINS
+    - Wildcard subdomain matches from CORS_WILDCARD_DOMAINS (e.g., *.example.com)
+    """
+    if not origin:
+        return False
+    
+    # Exact match
+    if origin in settings.ALLOWED_ORIGINS:
+        return True
+    
+    # Parse origin to get hostname
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(origin)
+        hostname = parsed.hostname or ''
+        scheme = parsed.scheme or 'https'
+    except Exception:
+        return False
+    
+    # Check wildcard domains
+    for base_domain in settings.CORS_WILDCARD_DOMAINS:
+        # Allow exact base domain
+        if hostname == base_domain:
+            return True
+        # Allow any subdomain of base domain (e.g., xyz-corp.timetracker.shaemarcus.com)
+        if hostname.endswith(f'.{base_domain}'):
+            return True
+    
+    return False
+
+
+# SEC-008: Build complete origins list for CORS middleware
+def get_all_cors_origins() -> list:
+    """
+    Get all allowed origins including wildcard domain expansions.
+    Note: FastAPI CORSMiddleware doesn't support regex, so we use allow_origin_regex
+    or handle dynamically with a custom middleware for full wildcard support.
+    """
+    origins = list(settings.ALLOWED_ORIGINS)
+    # For non-wildcard usage, return exact list
+    return origins
+
+
+# SEC-008: Build CORS origin regex for wildcard subdomain support
+def build_cors_origin_regex() -> str | None:
+    """
+    Build a regex pattern to match wildcard subdomains.
+    Returns regex for CORS or None if no wildcard domains configured.
+    """
+    if not settings.CORS_WILDCARD_DOMAINS:
+        return None
+    
+    # Build regex pattern for all wildcard domains
+    # e.g., ["example.com", "test.com"] -> r"https?://.*\.(example\.com|test\.com)"
+    escaped_domains = [domain.replace('.', r'\.') for domain in settings.CORS_WILDCARD_DOMAINS]
+    domain_pattern = '|'.join(escaped_domains)
+    return rf"https?://[a-zA-Z0-9-]+\.({domain_pattern})"
+
+
+# SEC-008: Tightened CORS configuration with multi-tenant support
+cors_origin_regex = build_cors_origin_regex()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=get_all_cors_origins(),
+    allow_origin_regex=cors_origin_regex,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=[
@@ -138,11 +204,32 @@ app.add_middleware(
     max_age=600,
 )
 
-# SEC-009: TrustedHostMiddleware always enabled (not just non-DEBUG)
+# SEC-008: Build allowed hosts list including wildcard subdomains
+def get_all_allowed_hosts() -> list:
+    """
+    Get all allowed hosts including wildcard patterns for subdomains.
+    TrustedHostMiddleware supports wildcard patterns like *.example.com
+    """
+    hosts = list(settings.ALLOWED_HOSTS)
+    
+    # Add wildcard patterns for each base domain
+    for base_domain in settings.CORS_WILDCARD_DOMAINS:
+        wildcard_pattern = f"*.{base_domain}"
+        if wildcard_pattern not in hosts:
+            hosts.append(wildcard_pattern)
+        # Also ensure base domain itself is allowed
+        if base_domain not in hosts:
+            hosts.append(base_domain)
+    
+    return hosts
+
+
+# SEC-009: TrustedHostMiddleware with wildcard subdomain support
 # Allow any host in DEBUG or TESTING mode
+allowed_hosts_list = get_all_allowed_hosts() + ["*"] if (settings.DEBUG or settings.TESTING) else get_all_allowed_hosts()
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=settings.ALLOWED_HOSTS + ["*"] if (settings.DEBUG or settings.TESTING) else settings.ALLOWED_HOSTS,
+    allowed_hosts=allowed_hosts_list,
 )
 
 

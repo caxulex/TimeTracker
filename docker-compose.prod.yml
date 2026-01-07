@@ -59,6 +59,9 @@ services:
       # Include localhost for health checks, timetracker-backend for internal docker networking
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-["https://timetracker.shaemarcus.com"]}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-["timetracker.shaemarcus.com","localhost","127.0.0.1","timetracker-backend","backend"]}
+      # Multi-tenancy: Wildcard subdomain support for white-label CORS
+      # Any subdomain of these domains will be allowed (e.g., xyz-corp.timetracker.shaemarcus.com)
+      CORS_WILDCARD_DOMAINS: ${CORS_WILDCARD_DOMAINS:-["timetracker.shaemarcus.com"]}
       # Backwards-compat (older docs); safe to keep
       CORS_ORIGINS: ${CORS_ORIGINS:-https://timetracker.shaemarcus.com}
     ports:

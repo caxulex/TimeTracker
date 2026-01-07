@@ -165,3 +165,77 @@ frontend/
 - Company admins can only see/modify their company's data
 - All filter checks happen at the API level (defense in depth)
 - Frontend branding is informational only - security is backend-enforced
+
+---
+
+## Subdomain Routing Implementation (Updated)
+
+### Changes Made
+
+#### 1. Frontend Subdomain Detection (`brandingService.ts`)
+- Added `getSlugFromSubdomain()` function to extract company slug from hostname
+- Supports pattern: `{company-slug}.timetracker.shaemarcus.com`
+- Priority order: subdomain > URL parameter > localStorage
+- Prevents slug "sticking" when navigating to base domain
+- Supports custom domain lookup via `domain:{hostname}` pattern
+
+#### 2. Backend CORS Wildcard Support (`main.py`)
+- Added `CORS_WILDCARD_DOMAINS` configuration setting
+- Implemented `is_origin_allowed()` validator for dynamic CORS
+- Uses `allow_origin_regex` for `*.timetracker.shaemarcus.com` pattern
+- Updated TrustedHostMiddleware with `get_all_allowed_hosts()`
+- Supports wildcard patterns like `*.timetracker.shaemarcus.com`
+
+#### 3. Docker Compose Updates (`docker-compose.prod.yml`)
+- Added `CORS_WILDCARD_DOMAINS` environment variable
+- Default value: `["timetracker.shaemarcus.com"]`
+- Enables any subdomain for white-label tenants
+
+### Server Configuration Required
+
+To enable wildcard subdomains, configure your reverse proxy (Caddy recommended):
+
+```caddyfile
+# Wildcard subdomain routing for white-label
+*.timetracker.shaemarcus.com {
+    reverse_proxy localhost:3000
+}
+
+# Main site
+timetracker.shaemarcus.com {
+    reverse_proxy localhost:3000
+}
+```
+
+Or for Nginx:
+```nginx
+server {
+    server_name ~^(?<subdomain>.+)\.timetracker\.shaemarcus\.com$ timetracker.shaemarcus.com;
+    
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+### DNS Configuration Required
+
+Add a wildcard DNS record:
+```
+*.timetracker.shaemarcus.com -> your-server-ip
+```
+
+### Testing Subdomains
+
+1. **Without real DNS** - Use local hosts file:
+   ```
+   # /etc/hosts or C:\Windows\System32\drivers\etc\hosts
+   127.0.0.1 xyz-corp.timetracker.shaemarcus.com
+   ```
+
+2. **Or use URL parameter for testing**:
+   ```
+   https://timetracker.shaemarcus.com/login?company=xyz-corp
+   ```
