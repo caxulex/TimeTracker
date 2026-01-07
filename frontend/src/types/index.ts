@@ -7,7 +7,7 @@ export interface User {
   id: number;
   email: string;
   name: string;
-  role: 'super_admin' | 'admin' | 'regular_user' | 'member';
+  role: 'super_admin' | 'admin' | 'company_admin' | 'regular_user' | 'member';
   is_active: boolean;
   created_at: string;
   
