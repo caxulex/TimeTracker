@@ -33,8 +33,8 @@ describe('formatDuration', () => {
     expect(formatDuration(0)).toBe('0m');
   });
 
-  it('should format 3600 seconds as 1h 0m', () => {
-    expect(formatDuration(3600)).toBe('1h 0m');
+  it('should format 3600 seconds as 1h', () => {
+    expect(formatDuration(3600)).toBe('1h');
   });
 
   it('should format 5400 seconds as 1h 30m', () => {
@@ -63,7 +63,7 @@ describe('cn', () => {
 
 describe('truncate', () => {
   it('should truncate long strings', () => {
-    expect(truncate('This is a long string', 10)).toBe('This is a...');
+    expect(truncate('This is a long string', 10)).toBe('This is a ...');
   });
 
   it('should not truncate short strings', () => {

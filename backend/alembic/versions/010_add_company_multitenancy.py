@@ -1,7 +1,7 @@
 """Add company and white label tables for multi-tenancy
 
-Revision ID: 010_add_company_multitenancy
-Revises: 009_add_ai_feature_settings
+Revision ID: 010
+Revises: 009
 Create Date: 2026-01-07 12:00:00.000000
 
 """
@@ -11,8 +11,8 @@ from datetime import datetime, timezone, timedelta
 
 
 # revision identifiers, used by Alembic.
-revision = '010_add_company_multitenancy'
-down_revision = '009_add_ai_feature_settings'
+revision = '010'
+down_revision = '009'
 branch_labels = None
 depends_on = None
 
