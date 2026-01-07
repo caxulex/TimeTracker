@@ -94,6 +94,21 @@ const forceLogoutAndRedirect = () => {
   window.location.href = '/login';
 };
 
+// Token refresh mutex to prevent multiple simultaneous refresh attempts
+let isRefreshing = false;
+let refreshSubscribers: ((token: string) => void)[] = [];
+
+// Subscribe to token refresh
+function subscribeTokenRefresh(callback: (token: string) => void) {
+  refreshSubscribers.push(callback);
+}
+
+// Notify all subscribers when token is refreshed
+function onTokenRefreshed(token: string) {
+  refreshSubscribers.forEach(callback => callback(token));
+  refreshSubscribers = [];
+}
+
 // Response interceptor for error handling and token refresh
 api.interceptors.response.use(
   (response) => response,
@@ -139,6 +154,20 @@ api.interceptors.response.use(
 
       // Try to refresh the token first (only for 401)
       if (status === 401) {
+        // If already refreshing, wait for the refresh to complete
+        if (isRefreshing) {
+          return new Promise((resolve) => {
+            subscribeTokenRefresh((newToken: string) => {
+              if (originalRequest.headers) {
+                originalRequest.headers.Authorization = `Bearer ${newToken}`;
+              }
+              resolve(api(originalRequest));
+            });
+          });
+        }
+
+        isRefreshing = true;
+
         try {
           const refreshToken = localStorage.getItem('refresh_token');
           if (refreshToken) {
@@ -152,6 +181,10 @@ api.interceptors.response.use(
             
             // Reset redirect counter on successful refresh
             authRedirectCount = 0;
+            isRefreshing = false;
+
+            // Notify all waiting requests
+            onTokenRefreshed(access_token);
 
             if (originalRequest.headers) {
               originalRequest.headers.Authorization = `Bearer ${access_token}`;
@@ -161,6 +194,8 @@ api.interceptors.response.use(
         } catch (refreshError) {
           // Refresh failed, clear tokens and redirect to login
           console.error('Token refresh failed:', refreshError);
+          isRefreshing = false;
+          refreshSubscribers = [];
         }
       }
 
