@@ -229,7 +229,10 @@ export const authApi = {
   },
 
   getMe: async (): Promise<User> => {
+    console.log('[AuthAPI] getMe() called');
+    console.trace('[AuthAPI] getMe call stack');
     const response = await api.get<User>('/api/auth/me');
+    console.log('[AuthAPI] getMe() response:', response.data?.email);
     return response.data;
   },
 

@@ -30,6 +30,7 @@ export const useAuthStore = create<AuthState>()(
       error: null,
 
       login: async (credentials: UserLogin) => {
+        console.log('[AuthStore] login() called');
         set({ isLoading: true, error: null });
         try {
           const tokens: AuthToken = await authApi.login(credentials);
@@ -37,7 +38,9 @@ export const useAuthStore = create<AuthState>()(
           localStorage.setItem('refresh_token', tokens.refresh_token);
 
           // Fetch user data after login
+          console.log('[AuthStore] login() -> calling getMe()');
           const user = await authApi.getMe();
+          console.log('[AuthStore] login() -> getMe() returned:', user?.email);
           set({ user, isAuthenticated: true, isLoading: false });
         } catch (error: any) {
           const detail = error.response?.data?.detail;
@@ -91,17 +94,23 @@ export const useAuthStore = create<AuthState>()(
       },
 
       fetchUser: async () => {
+        console.log('[AuthStore] fetchUser() called');
+        console.trace('[AuthStore] fetchUser call stack');
         const token = localStorage.getItem('access_token');
         if (!token) {
+          console.log('[AuthStore] fetchUser() - no token, setting unauthenticated');
           set({ isAuthenticated: false, user: null });
           return;
         }
 
         set({ isLoading: true });
         try {
+          console.log('[AuthStore] fetchUser() -> calling getMe()');
           const user = await authApi.getMe();
+          console.log('[AuthStore] fetchUser() -> getMe() returned:', user?.email);
           set({ user, isAuthenticated: true, isLoading: false });
         } catch (error) {
+          console.error('[AuthStore] fetchUser() -> getMe() failed:', error);
           localStorage.removeItem('access_token');
           localStorage.removeItem('refresh_token');
           set({ user: null, isAuthenticated: false, isLoading: false });
