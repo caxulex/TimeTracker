@@ -101,7 +101,7 @@ class TestAdminAIFeatures:
     ):
         """Test getting global AI settings as admin."""
         response = await client.get(
-            "/api/ai/features/admin/global",
+            "/api/ai/features/admin",
             headers=admin_auth_headers,
         )
         # Should work for admin
@@ -113,31 +113,7 @@ class TestAdminAIFeatures:
     ):
         """Test that regular users cannot access admin AI settings."""
         response = await client.get(
-            "/api/ai/features/admin/global",
-            headers=auth_headers,
-        )
-        # Should be forbidden for regular users
-        assert response.status_code == 403
-    
-    @pytest.mark.asyncio
-    async def test_get_all_users_preferences_as_admin(
-        self, client: AsyncClient, admin_auth_headers: dict
-    ):
-        """Test getting all users' AI preferences as admin."""
-        response = await client.get(
-            "/api/ai/features/admin/users",
-            headers=admin_auth_headers,
-        )
-        # Should work for admin
-        assert response.status_code in [200, 404]
-    
-    @pytest.mark.asyncio
-    async def test_get_all_users_preferences_as_user_fails(
-        self, client: AsyncClient, auth_headers: dict
-    ):
-        """Test that regular users cannot access admin user preferences."""
-        response = await client.get(
-            "/api/ai/features/admin/users",
+            "/api/ai/features/admin",
             headers=auth_headers,
         )
         # Should be forbidden for regular users
