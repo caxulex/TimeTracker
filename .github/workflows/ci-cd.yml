@@ -79,6 +79,7 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
           SECRET_KEY: test-secret-key-for-ci-cd-pipeline-only
           JWT_SECRET: test-jwt-secret-for-ci-cd-pipeline-only
+          PYTHONPATH: .
         run: |
           pytest tests/ --cov=app --cov-report=xml --cov-report=term-missing -v
 
