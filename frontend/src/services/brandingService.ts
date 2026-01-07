@@ -91,7 +91,7 @@ export function clearCompanySlug(): void {
  */
 export async function fetchBranding(slug: string): Promise<WhiteLabelConfig | null> {
   try {
-    const response = await fetch(`${API_URL}/api/companies/branding/${slug}`);
+    const response = await fetch(`${API_URL}/companies/branding/${slug}`);
     
     if (!response.ok) {
       console.warn(`Could not fetch branding for ${slug}: ${response.status}`);
@@ -127,7 +127,7 @@ export function getCachedBranding(): WhiteLabelConfig | null {
  */
 export async function fetchCompanyInfo(slug: string): Promise<CompanyInfo | null> {
   try {
-    const response = await fetch(`${API_URL}/api/companies/by-slug/${slug}`);
+    const response = await fetch(`${API_URL}/companies/by-slug/${slug}`);
     
     if (!response.ok) {
       console.warn(`Could not fetch company info for ${slug}: ${response.status}`);
