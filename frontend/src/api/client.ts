@@ -91,7 +91,13 @@ const forceLogoutAndRedirect = () => {
       localStorage.removeItem('auth-storage');
     }
   }
-  window.location.href = '/login';
+  // Preserve company slug for white-label portals
+  const companySlug = localStorage.getItem('tt_company_slug');
+  if (companySlug && !companySlug.startsWith('domain:')) {
+    window.location.href = `/${companySlug}/login`;
+  } else {
+    window.location.href = '/login';
+  }
 };
 
 // Token refresh mutex to prevent multiple simultaneous refresh attempts

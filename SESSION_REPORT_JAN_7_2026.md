@@ -7,6 +7,109 @@
 2. ✅ Multi-tenancy/White-label feature for XYZ Corp
 3. ✅ CI/CD pipeline fixes
 4. ✅ Production auth race condition fix
+5. ✅ Active timers data isolation fix for multi-tenancy
+6. ✅ XYZ Corp admin user created
+
+---
+
+## 🔒 Session 3: Active Timers Data Isolation Fix
+
+### Issue Identified
+XYZ Corp users logged in at `https://timetracker.sytes.net/xyz-corp` were seeing production staff (Katrina, etc.) in the "Who's Working Now" widget, violating multi-tenant data isolation.
+
+### Root Cause
+The `/api/time/active` endpoint and WebSocket `get_active_timers()` method were returning ALL active timers without filtering by `company_id`.
+
+### Changes Made
+
+#### 1. Time Entries Router (`routers/time_entries.py`)
+**Fixed `get_active_timers()` endpoint (line 182):**
+- Added `company_filter = get_company_filter(current_user)`
+- Modified query to filter `User.company_id == company_filter` when user has a company
+- Platform super_admins (company_id=NULL) still see all data
+
+```python
+# Before: No company filtering
+result = await db.execute(
+    select(TimeEntry, User, Project, Task)...
+    .where(TimeEntry.end_time == None)
+)
+
+# After: Company-scoped filtering
+company_filter = get_company_filter(current_user)
+query = select(TimeEntry, User, Project, Task)...
+if company_filter is not None:
+    query = query.where(User.company_id == company_filter)
+```
+
+**Updated `set_active_timer()` call in `start_timer()`:**
+- Added `company_id: current_user.company_id` to timer info cache
+
+#### 2. WebSocket Router (`routers/websocket.py`)
+
+**Updated `get_active_timers()` method:**
+- Added `company_id` parameter for multi-tenant filtering
+- Filters cached timers by `company_id` when specified
+
+```python
+def get_active_timers(self, team_id: int = None, company_id: int = None) -> list[dict]:
+    timers = list(self.active_timers.values())
+    if company_id is not None:
+        timers = [t for t in timers if t.get("company_id") == company_id]
+    # ... team filtering
+    return timers
+```
+
+**Updated WebSocket message handler:**
+- `get_active_timers` message now applies company filter based on user's company_id
+
+**Updated HTTP endpoint `/ws/active-timers`:**
+- Now filters by `current_user.company_id`
+
+**Updated `load_active_timers_from_db()`:**
+- Added `company_id: user.company_id` to preloaded timer info
+
+**Updated `timer_start` message handler:**
+- Added `company_id: user.company_id` to timer_info cache
+
+### XYZ Corp Admin User Created
+
+Created admin user for XYZ Corp via production database:
+- **Email:** adminXYZ@xyz.com
+- **Password:** adminXYZ
+- **Role:** company_admin
+- **Company:** XYZ Corp (company_id: 1)
+
+```sql
+INSERT INTO users (email, password_hash, name, role, company_id, is_active, created_at, updated_at) 
+VALUES ('adminXYZ@xyz.com', '$2b$12$...', 'XYZ Admin', 'company_admin', 1, true, NOW(), NOW());
+```
+
+### Git Commit
+```
+fix(multi-tenancy): Add company_id filtering to active timers for data isolation
+- Filter /api/time/active endpoint by user's company_id
+- Add company_id to WebSocket active timers cache
+- Filter WebSocket get_active_timers by company_id
+- Update load_active_timers_from_db to include company_id
+- Platform super_admins (company_id=NULL) still see all data
+Fixes #186 - XYZ Corp users no longer see production staff
+```
+
+### Deployment
+Deployed via:
+```bash
+cd ~/timetracker
+git stash && git pull origin master
+chmod +x scripts/deploy-sequential.sh
+./scripts/deploy-sequential.sh
+```
+
+### Testing Verification
+- [ ] Login as `adminXYZ@xyz.com` at `https://timetracker.sytes.net/xyz-corp`
+- [ ] "Who's Working Now" shows only XYZ Corp staff (if any are tracking)
+- [ ] No production users (Katrina, Macarena, etc.) visible
+- [ ] Branding displays correctly (purple theme)
 
 ---
 

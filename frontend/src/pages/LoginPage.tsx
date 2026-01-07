@@ -2,7 +2,7 @@
 // TIME TRACKER - LOGIN PAGE
 // ============================================
 import { useState, useEffect } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { useAuthStore } from '../stores/authStore';
 import { Button, Input } from '../components/common';
@@ -13,18 +13,22 @@ import type { UserLogin } from '../types';
 export function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { companySlug: urlCompanySlug } = useParams<{ companySlug?: string }>();
   const { login, isLoading, error, clearError } = useAuthStore();
   const { addNotification } = useNotifications();
   const [showPassword, setShowPassword] = useState(false);
   const { branding, setCompany, isWhiteLabeled } = useBranding();
 
-  // Check for company slug in URL and load branding
+  // Check for company slug in URL path or query params and load branding
   useEffect(() => {
-    const companySlug = searchParams.get('company');
+    // Priority: URL path param > query param
+    const companySlug = urlCompanySlug || searchParams.get('company');
     if (companySlug) {
       setCompany(companySlug);
+      // Store for logout redirect
+      localStorage.setItem('tt_company_slug', companySlug);
     }
-  }, [searchParams, setCompany]);
+  }, [urlCompanySlug, searchParams, setCompany]);
 
   const {
     register,

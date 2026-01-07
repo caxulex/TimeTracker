@@ -3,7 +3,7 @@
 // ============================================
 // Lazy loading enabled for optimal bundle splitting
 // ============================================
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Suspense, lazy } from 'react';
 import { Layout } from './components/layout/Layout';
@@ -13,6 +13,15 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { BrandingProvider } from './contexts/BrandingContext';
 import { useAuthStore } from './stores/authStore';
 import './App.css';
+
+// Helper to get login path with company slug preserved
+function getLoginPath(): string {
+  const companySlug = localStorage.getItem('tt_company_slug');
+  if (companySlug && !companySlug.startsWith('domain:')) {
+    return `/${companySlug}/login`;
+  }
+  return '/login';
+}
 
 // ============================================
 // LAZY LOADED PAGES - Code Splitting
@@ -98,7 +107,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   // Require BOTH conditions - prevents loop when isAuthenticated is stale but token is gone
   if (!isAuthenticated || !hasToken) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to={getLoginPath()} replace />;
   }
 
   return <Layout>{children}</Layout>;
@@ -112,10 +121,10 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 
   // Require BOTH conditions - prevents loop when isAuthenticated is stale but token is gone
   if (!isAuthenticated || !hasToken) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to={getLoginPath()} replace />;
   }
 
-  if (user?.role !== 'admin' && user?.role !== 'super_admin') {
+  if (user?.role !== 'admin' && user?.role !== 'super_admin' && user?.role !== 'company_admin') {
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -129,7 +138,7 @@ function SuperAdminRoute({ children }: { children: React.ReactNode }) {
   const hasToken = !!localStorage.getItem('access_token');
 
   if (!isAuthenticated || !hasToken) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to={getLoginPath()} replace />;
   }
 
   // Allow both admin and super_admin (they have the same capabilities now)
@@ -164,6 +173,28 @@ function App() {
           <BrowserRouter>
           <Suspense fallback={<PageLoader />}>
           <Routes>
+            {/* White-label company routes - handles /:companySlug/login etc */}
+            <Route
+              path="/:companySlug/login"
+              element={
+                <PublicRoute>
+                  <LoginPage />
+                </PublicRoute>
+              }
+            />
+            <Route
+              path="/:companySlug/register"
+              element={
+                <PublicRoute>
+                  <RegisterPage />
+                </PublicRoute>
+              }
+            />
+            <Route
+              path="/:companySlug"
+              element={<Navigate to={`${window.location.pathname}/login`} replace />}
+            />
+            
             {/* Public routes */}
             <Route
               path="/login"
