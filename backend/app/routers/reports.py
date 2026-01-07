@@ -13,7 +13,7 @@ from datetime import datetime, date, timedelta, timezone, time
 
 from app.database import get_db
 from app.models import User, Team, TeamMember, Project, Task, TimeEntry
-from app.dependencies import get_current_active_user
+from app.dependencies import get_current_active_user, get_company_filter
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -102,17 +102,25 @@ async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Get dashboard statistics for current user"""
+    """Get dashboard statistics for current user (filtered by company for multi-tenancy)"""
     now = datetime.now(timezone.utc)
     today_start = datetime.combine(now.date(), datetime.min.time()).replace(tzinfo=timezone.utc)
     week_start = today_start - timedelta(days=now.weekday())
     month_start = today_start.replace(day=1)
     
-    # Base filter: admins see all, regular users see team data
+    # Multi-tenancy: get company filter
+    company_id = get_company_filter(current_user)
+    
+    # Base filter: admins see all in company, regular users see team data
     if current_user.role in ["super_admin", "admin"]:
-        user_filter = True  # No filter, see all entries
+        if company_id is not None:
+            # Admin within a company sees all company entries
+            company_users = select(User.id).where(User.company_id == company_id)
+            user_filter = TimeEntry.user_id.in_(company_users)
+        else:
+            user_filter = True  # Platform super_admin sees all
     else:
-        # Get all team members from user's teams
+        # Get all team members from user's teams (within company)
         user_teams_query = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
         team_members = select(TeamMember.user_id).where(TeamMember.team_id.in_(user_teams_query))
         user_filter = TimeEntry.user_id.in_(team_members)
@@ -141,13 +149,15 @@ async def get_dashboard_stats(
     month_entries = month_result.scalars().all()
     month_seconds = sum(calculate_entry_duration(e, now) for e in month_entries)
     
-    # Active projects (user has access to)
+    # Active projects (user has access to, within company)
     user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
-    project_filter = Project.team_id.in_(user_teams)
-    active_projects_result = await db.execute(
-        select(func.count(Project.id))
-        .where(project_filter, Project.is_archived == False)
+    project_query = select(func.count(Project.id)).join(Team, Project.team_id == Team.id).where(
+        Project.team_id.in_(user_teams), 
+        Project.is_archived == False
     )
+    if company_id is not None:
+        project_query = project_query.where(Team.company_id == company_id)
+    active_projects_result = await db.execute(project_query)
     active_projects = active_projects_result.scalar() or 0
     
     # Pending tasks assigned to user
@@ -176,7 +186,7 @@ async def get_weekly_summary(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Get weekly time summary"""
+    """Get weekly time summary (filtered by company for multi-tenancy)"""
     now = datetime.now(timezone.utc)
     
     # Use start_date if provided, otherwise calculate from week_offset
@@ -190,9 +200,16 @@ async def get_weekly_summary(
     start_datetime = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
     end_datetime = datetime.combine(week_end, datetime.max.time()).replace(tzinfo=timezone.utc)
     
-    # Build user filter: admins see all, regular users see team data
+    # Multi-tenancy: get company filter
+    company_id = get_company_filter(current_user)
+    
+    # Build user filter: admins see all in company, regular users see team data
     if current_user.role in ["super_admin", "admin"]:
-        user_filter = True  # No filter, see all entries
+        if company_id is not None:
+            company_users = select(User.id).where(User.company_id == company_id)
+            user_filter = TimeEntry.user_id.in_(company_users)
+        else:
+            user_filter = True  # Platform super_admin sees all
     else:
         # Get all team members from user's teams
         user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
@@ -384,7 +401,17 @@ async def get_team_report(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Get team time report (team admin/owner only)"""
+    """Get team time report (team admin/owner only, filtered by company for multi-tenancy)"""
+    # Multi-tenancy: verify team belongs to user's company
+    company_id = get_company_filter(current_user)
+    team_query = select(Team).where(Team.id == team_id)
+    if company_id is not None:
+        team_query = team_query.where(Team.company_id == company_id)
+    team_result = await db.execute(team_query)
+    team = team_result.scalar_one_or_none()
+    if not team:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    
     # Check team access
     if current_user.role not in ["super_admin", "admin"]:
         member_check = await db.execute(
@@ -682,7 +709,7 @@ async def get_admin_dashboard(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    '''Get admin dashboard with all team members time (admin and super_admin)'''
+    '''Get admin dashboard with all team members time (admin and super_admin, filtered by company)'''
     if current_user.role not in ["super_admin", "admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -694,11 +721,21 @@ async def get_admin_dashboard(
     week_start = (today_start - timedelta(days=now.weekday()))
     month_start = today_start.replace(day=1)
 
-    # Total time today (all users) - including active timers
-    today_entries_result = await db.execute(
-        select(TimeEntry)
-        .where(TimeEntry.start_time >= today_start)
-    )
+    # Multi-tenancy: get company filter
+    company_id = get_company_filter(current_user)
+    
+    # Build company user filter
+    if company_id is not None:
+        company_users_subq = select(User.id).where(User.company_id == company_id)
+        user_filter = TimeEntry.user_id.in_(company_users_subq)
+    else:
+        user_filter = True  # Platform super_admin sees all
+
+    # Total time today (all users in company) - including active timers
+    today_query = select(TimeEntry).where(TimeEntry.start_time >= today_start)
+    if user_filter is not True:
+        today_query = today_query.where(user_filter)
+    today_entries_result = await db.execute(today_query)
     today_entries = today_entries_result.scalars().all()
     
     logger.info(f"Found {len(today_entries)} time entries for today")
@@ -719,11 +756,11 @@ async def get_admin_dashboard(
     
     logger.info(f"FINAL total_today={total_today}")
 
-    # Total time this week (all users) - including active timers
-    week_entries_result = await db.execute(
-        select(TimeEntry)
-        .where(TimeEntry.start_time >= week_start)
-    )
+    # Total time this week (all users in company) - including active timers
+    week_query = select(TimeEntry).where(TimeEntry.start_time >= week_start)
+    if user_filter is not True:
+        week_query = week_query.where(user_filter)
+    week_entries_result = await db.execute(week_query)
     week_entries = week_entries_result.scalars().all()
     
     total_week = 0
@@ -737,11 +774,11 @@ async def get_admin_dashboard(
         else:
             total_week += (entry.duration_seconds or 0)
 
-    # Total time this month (all users) - including active timers
-    month_entries_result = await db.execute(
-        select(TimeEntry)
-        .where(TimeEntry.start_time >= month_start)
-    )
+    # Total time this month (all users in company) - including active timers
+    month_query = select(TimeEntry).where(TimeEntry.start_time >= month_start)
+    if user_filter is not True:
+        month_query = month_query.where(user_filter)
+    month_entries_result = await db.execute(month_query)
     month_entries = month_entries_result.scalars().all()
     
     total_month = 0
@@ -755,41 +792,40 @@ async def get_admin_dashboard(
         else:
             total_month += (entry.duration_seconds or 0)
 
-    # Active users today
-    active_users_result = await db.execute(
-        select(func.count(func.distinct(TimeEntry.user_id)))
-        .where(TimeEntry.start_time >= today_start)
-    )
+    # Active users today (within company)
+    active_users_query = select(func.count(func.distinct(TimeEntry.user_id))).where(TimeEntry.start_time >= today_start)
+    if user_filter is not True:
+        active_users_query = active_users_query.where(user_filter)
+    active_users_result = await db.execute(active_users_query)
     active_users = active_users_result.scalar() or 0
 
-    # Active projects
-    active_projects_result = await db.execute(
-        select(func.count(Project.id))
-        .where(Project.is_archived == False)
-    )
+    # Active projects (within company)
+    project_query = select(func.count(Project.id)).join(Team, Project.team_id == Team.id).where(Project.is_archived == False)
+    if company_id is not None:
+        project_query = project_query.where(Team.company_id == company_id)
+    active_projects_result = await db.execute(project_query)
     active_projects = active_projects_result.scalar() or 0
 
-    # Running timers count
-    running_result = await db.execute(
-        select(func.count(TimeEntry.id))
-        .where(TimeEntry.end_time == None)
-    )
+    # Running timers count (within company)
+    running_query = select(func.count(TimeEntry.id)).where(TimeEntry.end_time.is_(None))
+    if user_filter is not True:
+        running_query = running_query.where(user_filter)
+    running_result = await db.execute(running_query)
     running_timers = running_result.scalar() or 0
 
-    # Time by user today (including active timers)
-    user_result = await db.execute(
-        select(
-            TimeEntry.user_id,
-            User.name,
-            TimeEntry.duration_seconds,
-            TimeEntry.start_time,
-            TimeEntry.end_time,
-            TimeEntry.id
-        )
-        .join(User, TimeEntry.user_id == User.id)
-        .where(TimeEntry.start_time >= today_start)
-        .order_by(User.name)
-    )
+    # Time by user today (including active timers, within company)
+    user_query = select(
+        TimeEntry.user_id,
+        User.name,
+        TimeEntry.duration_seconds,
+        TimeEntry.start_time,
+        TimeEntry.end_time,
+        TimeEntry.id
+    ).join(User, TimeEntry.user_id == User.id).where(TimeEntry.start_time >= today_start)
+    if user_filter is not True:
+        user_query = user_query.where(user_filter)
+    user_query = user_query.order_by(User.name)
+    user_result = await db.execute(user_query)
 
     # Aggregate by user, calculating elapsed time for active timers
     user_totals = {}
@@ -847,7 +883,7 @@ async def get_team_analytics(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    '''Get analytics for all teams (admin and super_admin only)'''
+    '''Get analytics for all teams (admin and super_admin only, filtered by company)'''
     if current_user.role not in ["super_admin", "admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -859,8 +895,12 @@ async def get_team_analytics(
     week_start = (today_start - timedelta(days=now.weekday()))
     month_start = today_start.replace(day=1)
 
-    # Get all teams
-    teams_result = await db.execute(select(Team))
+    # Multi-tenancy: filter teams by company
+    company_id = get_company_filter(current_user)
+    teams_query = select(Team)
+    if company_id is not None:
+        teams_query = teams_query.where(Team.company_id == company_id)
+    teams_result = await db.execute(teams_query)
     teams = teams_result.scalars().all()
 
     team_analytics = []
@@ -1045,17 +1085,20 @@ async def get_user_metrics(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    '''Get detailed metrics for a specific user (admin and super_admin only)'''
+    '''Get detailed metrics for a specific user (admin and super_admin only, filtered by company)'''
     if current_user.role not in ["super_admin", "admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
         )
     
-    # Get user
-    user_result = await db.execute(
-        select(User).where(User.id == user_id)
-    )
+    # Multi-tenancy: filter user by company
+    company_id = get_company_filter(current_user)
+    user_query = select(User).where(User.id == user_id)
+    if company_id is not None:
+        user_query = user_query.where(User.company_id == company_id)
+    
+    user_result = await db.execute(user_query)
     user = user_result.scalar_one_or_none()
     if not user:
         raise HTTPException(
@@ -1262,7 +1305,7 @@ async def get_all_users_summary(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    '''Get summary of all users sorted by time tracked (admin and super_admin only)'''
+    '''Get summary of all users sorted by time tracked (admin and super_admin only, filtered by company)'''
     if current_user.role not in ["super_admin", "admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1282,18 +1325,22 @@ async def get_all_users_summary(
     else:  # month
         start_time = month_start
 
-    # Get all users' time entries for the period
-    entries_result = await db.execute(
-        select(
-            TimeEntry.user_id,
-            User.name,
-            TimeEntry.duration_seconds,
-            TimeEntry.start_time,
-            TimeEntry.end_time
-        )
-        .join(User, TimeEntry.user_id == User.id)
-        .where(TimeEntry.start_time >= start_time)
-    )
+    # Multi-tenancy: filter by company
+    company_id = get_company_filter(current_user)
+
+    # Get all users' time entries for the period (filtered by company)
+    entries_query = select(
+        TimeEntry.user_id,
+        User.name,
+        TimeEntry.duration_seconds,
+        TimeEntry.start_time,
+        TimeEntry.end_time
+    ).join(User, TimeEntry.user_id == User.id).where(TimeEntry.start_time >= start_time)
+    
+    if company_id is not None:
+        entries_query = entries_query.where(User.company_id == company_id)
+    
+    entries_result = await db.execute(entries_query)
 
     user_totals = {}
     for row in entries_result.all():

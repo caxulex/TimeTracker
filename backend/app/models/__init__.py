@@ -122,6 +122,7 @@ class Company(Base):
     
     # Relationships
     white_label_config: Mapped[Optional["WhiteLabelConfig"]] = relationship("WhiteLabelConfig", back_populates="company", uselist=False)
+    teams: Mapped[list["Team"]] = relationship("Team", back_populates="company")
 
     def __repr__(self) -> str:
         return f"<Company(id={self.id}, name={self.name}, slug={self.slug})>"
@@ -240,16 +241,19 @@ class Team(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     owner_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    # Multi-tenancy: company isolation
+    company_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
     owner: Mapped[User] = relationship("User")
+    company: Mapped[Optional["Company"]] = relationship("Company", back_populates="teams")
     members: Mapped[list["TeamMember"]] = relationship("TeamMember", back_populates="team", cascade="all, delete-orphan")
     projects: Mapped[list["Project"]] = relationship("Project", back_populates="team", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
-        return f"<Team(id={self.id}, name={self.name})>"
+        return f"<Team(id={self.id}, name={self.name}, company_id={self.company_id})>"
 
 
 class TeamMember(Base):

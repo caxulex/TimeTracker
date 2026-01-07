@@ -11,7 +11,7 @@ from datetime import datetime, date, timedelta, timezone
 
 from app.database import get_db
 from app.models import User, Team, TeamMember, Project, Task, TimeEntry
-from app.dependencies import get_current_active_user
+from app.dependencies import get_current_active_user, get_company_filter
 from app.schemas.auth import Message
 from app.routers.websocket import manager as ws_manager
 
@@ -77,8 +77,14 @@ class TimerStatus(BaseModel):
 
 
 async def check_project_access(db: AsyncSession, project_id: int, user: User) -> Optional[Project]:
-    """Check if user has access to project and return it"""
-    result = await db.execute(select(Project).where(Project.id == project_id))
+    """Check if user has access to project (within their company) and return it"""
+    # Multi-tenancy: join with team to filter by company
+    query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
+    company_id = get_company_filter(user)
+    if company_id is not None:
+        query = query.where(Team.company_id == company_id)
+    
+    result = await db.execute(query)
     project = result.scalar_one_or_none()
 
     if not project:
@@ -453,12 +459,20 @@ async def list_time_entries(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """List time entries"""
-    base_query = select(TimeEntry)
-    count_query = select(func.count(TimeEntry.id))
-    sum_query = select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0))
+    """List time entries (filtered by company for multi-tenancy)"""
+    # Multi-tenancy: join with user to filter by company
+    base_query = select(TimeEntry).join(User, TimeEntry.user_id == User.id)
+    count_query = select(func.count(TimeEntry.id)).join(User, TimeEntry.user_id == User.id)
+    sum_query = select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0)).join(User, TimeEntry.user_id == User.id)
     
-    # Filter by user (regular users see only their entries, admin sees all)
+    # Multi-tenancy: filter by company
+    company_id = get_company_filter(current_user)
+    if company_id is not None:
+        base_query = base_query.where(User.company_id == company_id)
+        count_query = count_query.where(User.company_id == company_id)
+        sum_query = sum_query.where(User.company_id == company_id)
+    
+    # Filter by user (regular users see only their entries, admin sees all in company)
     if current_user.role not in ["super_admin", "admin"]:
         if user_id and user_id != current_user.id:
             # Can only see team members' entries

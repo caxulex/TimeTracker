@@ -12,7 +12,7 @@ from datetime import datetime
 
 from app.database import get_db
 from app.models import User, Team, TeamMember
-from app.dependencies import get_current_active_user
+from app.dependencies import get_current_active_user, get_company_filter
 from app.schemas.auth import Message
 from app.routers.websocket import manager as ws_manager
 from app.services.audit_logger import AuditLogger, AuditAction
@@ -91,12 +91,18 @@ async def list_teams(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """List teams (user sees their teams, admin sees all)"""
+    """List teams (user sees their teams, admin sees all within company)"""
     base_query = select(Team)
     count_query = select(func.count(Team.id))
 
+    # Multi-tenancy: filter by company
+    company_id = get_company_filter(current_user)
+    if company_id is not None:
+        base_query = base_query.where(Team.company_id == company_id)
+        count_query = count_query.where(Team.company_id == company_id)
+
     # Non-admin users only see teams they're members of
-    if current_user.role != "super_admin":
+    if current_user.role not in ["super_admin", "admin"]:
         member_subquery = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
         base_query = base_query.where(Team.id.in_(member_subquery))
         count_query = count_query.where(Team.id.in_(member_subquery))
@@ -154,7 +160,14 @@ async def get_team(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get team details with members"""
-    result = await db.execute(select(Team).where(Team.id == team_id))
+    query = select(Team).where(Team.id == team_id)
+    
+    # Multi-tenancy: filter by company
+    company_id = get_company_filter(current_user)
+    if company_id is not None:
+        query = query.where(Team.company_id == company_id)
+    
+    result = await db.execute(query)
     team = result.scalar_one_or_none()
 
     if not team:
@@ -212,9 +225,11 @@ async def create_team(
     current_user: User = Depends(get_current_active_user)
 ):
     """Create a new team"""
+    # Multi-tenancy: new teams inherit the company of the creating user
     team = Team(
         name=team_data.name,
-        owner_id=current_user.id
+        owner_id=current_user.id,
+        company_id=current_user.company_id
     )
 
     db.add(team)
@@ -261,7 +276,14 @@ async def update_team(
     current_user: User = Depends(get_current_active_user)
 ):
     """Update team (owner/admin only)"""
-    result = await db.execute(select(Team).where(Team.id == team_id))
+    query = select(Team).where(Team.id == team_id)
+    
+    # Multi-tenancy: filter by company
+    company_id = get_company_filter(current_user)
+    if company_id is not None:
+        query = query.where(Team.company_id == company_id)
+    
+    result = await db.execute(query)
     team = result.scalar_one_or_none()
 
     if not team:
@@ -326,7 +348,14 @@ async def delete_team(
     current_user: User = Depends(get_current_active_user)
 ):
     """Delete team (owner only)"""
-    result = await db.execute(select(Team).where(Team.id == team_id))
+    query = select(Team).where(Team.id == team_id)
+    
+    # Multi-tenancy: filter by company
+    company_id = get_company_filter(current_user)
+    if company_id is not None:
+        query = query.where(Team.company_id == company_id)
+    
+    result = await db.execute(query)
     team = result.scalar_one_or_none()
 
     if not team:
@@ -370,9 +399,16 @@ async def add_member(
     current_user: User = Depends(get_current_active_user)
 ):
     """Add member to team (owner/admin only)"""
-    # Verify team exists
-    team = await db.execute(select(Team).where(Team.id == team_id))
-    if not team.scalar_one_or_none():
+    # Multi-tenancy: filter by company
+    company_id = get_company_filter(current_user)
+    
+    # Verify team exists and belongs to company
+    team_query = select(Team).where(Team.id == team_id)
+    if company_id is not None:
+        team_query = team_query.where(Team.company_id == company_id)
+    team_result = await db.execute(team_query)
+    team = team_result.scalar_one_or_none()
+    if not team:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
 
     # Check permission
@@ -387,8 +423,11 @@ async def add_member(
         if not member.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
-    # Check user exists
-    user_result = await db.execute(select(User).where(User.id == member_data.user_id))
+    # Check user exists and belongs to same company
+    user_query = select(User).where(User.id == member_data.user_id)
+    if company_id is not None:
+        user_query = user_query.where(User.company_id == company_id)
+    user_result = await db.execute(user_query)
     user = user_result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -411,10 +450,6 @@ async def add_member(
     db.add(new_member)
     await db.commit()
     await db.refresh(new_member)
-
-    # Get team info for notification
-    team_result = await db.execute(select(Team).where(Team.id == team_id))
-    team = team_result.scalar_one()
 
     # Send real-time notification to the new member
     await ws_manager.send_personal_message(

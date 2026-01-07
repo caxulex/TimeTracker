@@ -11,7 +11,7 @@ from datetime import datetime
 
 from app.database import get_db
 from app.models import User, Team, TeamMember, Project, Task
-from app.dependencies import get_current_active_user
+from app.dependencies import get_current_active_user, get_company_filter
 from app.schemas.auth import Message
 from app.routers.websocket import manager as ws_manager
 from app.services.audit_logger import AuditLogger, AuditAction
@@ -58,7 +58,16 @@ class PaginatedProjects(BaseModel):
 
 
 async def check_team_access(db: AsyncSession, team_id: int, user: User, require_admin: bool = False) -> bool:
-    """Check if user has access to team"""
+    """Check if user has access to team (within their company)"""
+    # Multi-tenancy: first verify team belongs to user's company
+    company_id = get_company_filter(user)
+    if company_id is not None:
+        team_result = await db.execute(
+            select(Team).where(Team.id == team_id, Team.company_id == company_id)
+        )
+        if not team_result.scalar_one_or_none():
+            return False
+    
     if user.role in ["super_admin", "admin"]:
         return True
     
@@ -81,12 +90,18 @@ async def list_projects(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """List projects (user sees projects from their teams)"""
-    base_query = select(Project)
-    count_query = select(func.count(Project.id))
+    """List projects (user sees projects from their teams within their company)"""
+    base_query = select(Project).join(Team, Project.team_id == Team.id)
+    count_query = select(func.count(Project.id)).join(Team, Project.team_id == Team.id)
     
-    # Filter by accessible teams
-    if current_user.role != "super_admin":
+    # Multi-tenancy: filter by company through team
+    company_id = get_company_filter(current_user)
+    if company_id is not None:
+        base_query = base_query.where(Team.company_id == company_id)
+        count_query = count_query.where(Team.company_id == company_id)
+    
+    # Filter by accessible teams for non-admin users
+    if current_user.role not in ["super_admin", "admin"]:
         user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
         access_filter = Project.team_id.in_(user_teams)
         base_query = base_query.where(access_filter)
@@ -165,14 +180,20 @@ async def get_project(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get project details"""
-    result = await db.execute(select(Project).where(Project.id == project_id))
+    # Multi-tenancy: join with team to filter by company
+    query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
+    company_id = get_company_filter(current_user)
+    if company_id is not None:
+        query = query.where(Team.company_id == company_id)
+    
+    result = await db.execute(query)
     project = result.scalar_one_or_none()
     
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     
-    # Check access
-    if current_user.role != "super_admin":
+    # Check access (team membership for non-admins)
+    if current_user.role not in ["super_admin", "admin"]:
         has_access = await check_team_access(db, project.team_id, current_user)
         if not has_access:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
@@ -279,16 +300,23 @@ async def update_project(
     current_user: User = Depends(get_current_active_user)
 ):
     """Update a project"""
-    result = await db.execute(select(Project).where(Project.id == project_id))
+    # Multi-tenancy: join with team to filter by company
+    query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
+    company_id = get_company_filter(current_user)
+    if company_id is not None:
+        query = query.where(Team.company_id == company_id)
+    
+    result = await db.execute(query)
     project = result.scalar_one_or_none()
     
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     
-    # Check access
-    has_access = await check_team_access(db, project.team_id, current_user)
-    if not has_access:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    # Check access (team membership for non-admins)
+    if current_user.role not in ["super_admin", "admin"]:
+        has_access = await check_team_access(db, project.team_id, current_user)
+        if not has_access:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     
     # Track old values
     old_values = {"name": project.name, "color": project.color, "is_archived": project.is_archived}
@@ -347,16 +375,23 @@ async def delete_project(
     current_user: User = Depends(get_current_active_user)
 ):
     """Delete a project (archive it)"""
-    result = await db.execute(select(Project).where(Project.id == project_id))
+    # Multi-tenancy: join with team to filter by company
+    query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
+    company_id = get_company_filter(current_user)
+    if company_id is not None:
+        query = query.where(Team.company_id == company_id)
+    
+    result = await db.execute(query)
     project = result.scalar_one_or_none()
     
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     
-    # Check access
-    has_access = await check_team_access(db, project.team_id, current_user)
-    if not has_access:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    # Check access (team membership for non-admins)
+    if current_user.role not in ["super_admin", "admin"]:
+        has_access = await check_team_access(db, project.team_id, current_user)
+        if not has_access:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     
     # Archive instead of hard delete
     project.is_archived = True
@@ -386,16 +421,23 @@ async def restore_project(
     current_user: User = Depends(get_current_active_user)
 ):
     """Restore an archived project"""
-    result = await db.execute(select(Project).where(Project.id == project_id))
+    # Multi-tenancy: join with team to filter by company
+    query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
+    company_id = get_company_filter(current_user)
+    if company_id is not None:
+        query = query.where(Team.company_id == company_id)
+    
+    result = await db.execute(query)
     project = result.scalar_one_or_none()
     
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     
-    # Check access
-    has_access = await check_team_access(db, project.team_id, current_user)
-    if not has_access:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    # Check access (team membership for non-admins)
+    if current_user.role not in ["super_admin", "admin"]:
+        has_access = await check_team_access(db, project.team_id, current_user)
+        if not has_access:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     
     project.is_archived = False
     await db.commit()

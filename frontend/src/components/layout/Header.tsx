@@ -6,6 +6,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { getInitials } from '../../utils/helpers';
 import { NotificationBell } from '../Notifications';
 import { ThemeToggle } from '../common';
+import { useBranding } from '../../contexts/BrandingContext';
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -13,6 +14,7 @@ interface HeaderProps {
 
 export function Header({ onMenuClick }: HeaderProps) {
   const { user, logout } = useAuthStore();
+  const { branding } = useBranding();
   const [showDropdown, setShowDropdown] = React.useState(false);
 
   const handleLogout = async () => {
@@ -49,7 +51,10 @@ export function Header({ onMenuClick }: HeaderProps) {
               onClick={() => setShowDropdown(!showDropdown)}
               className="flex items-center space-x-3 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
             >
-              <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-sm font-medium">
+              <div 
+                className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium"
+                style={{ backgroundColor: branding.primary_color }}
+              >
                 {user ? getInitials(user.name) : '?'}
               </div>
               <span className="hidden md:block text-sm font-medium text-gray-700 dark:text-gray-200">

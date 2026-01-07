@@ -11,7 +11,7 @@ from app.database import get_db
 from app.models import User
 from app.schemas.auth import UserResponse, Message
 from app.services.auth_service import auth_service
-from app.dependencies import get_current_admin_user
+from app.dependencies import get_current_admin_user, get_company_filter, is_platform_admin
 from app.utils.password_validator import validate_password_strength
 from app.services.audit_logger import AuditLogger, AuditAction
 from pydantic import BaseModel, EmailStr, Field
@@ -77,9 +77,15 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    """List all users (admin only)"""
+    """List all users (admin only) - filtered by company"""
     query = select(User)
     count_query = select(func.count(User.id))
+    
+    # Multi-tenant filtering: Only show users from same company
+    company_id = get_company_filter(current_user)
+    if company_id is not None:
+        query = query.where(User.company_id == company_id)
+        count_query = count_query.where(User.company_id == company_id)
     
     if search:
         search_filter = f"%{search}%"
@@ -115,8 +121,15 @@ async def get_user(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    """Get user by ID (admin only)"""
-    result = await db.execute(select(User).where(User.id == user_id))
+    """Get user by ID (admin only) - filtered by company"""
+    query = select(User).where(User.id == user_id)
+    
+    # Multi-tenant filtering
+    company_id = get_company_filter(current_user)
+    if company_id is not None:
+        query = query.where(User.company_id == company_id)
+    
+    result = await db.execute(query)
     user = result.scalar_one_or_none()
     
     if not user:
@@ -166,6 +179,7 @@ async def create_user(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid start_date format. Use YYYY-MM-DD")
     
     # Create user with all fields
+    # Multi-tenancy: new users inherit the company of the admin creating them
     new_user = User(
         # Basic Info
         email=user_data.email,
@@ -173,6 +187,9 @@ async def create_user(
         name=user_data.name,
         role=user_data.role,
         is_active=True,
+        
+        # Multi-tenancy: assign to same company as creating admin
+        company_id=current_user.company_id,
         
         # Contact Information
         phone=user_data.phone,
@@ -260,7 +277,14 @@ async def update_user(
     current_user: User = Depends(get_current_admin_user)
 ):
     """Update user (admin only)"""
-    result = await db.execute(select(User).where(User.id == user_id))
+    query = select(User).where(User.id == user_id)
+    
+    # Multi-tenancy: filter by company
+    company_id = get_company_filter(current_user)
+    if company_id is not None:
+        query = query.where(User.company_id == company_id)
+    
+    result = await db.execute(query)
     user = result.scalar_one_or_none()
     
     if not user:
@@ -322,7 +346,14 @@ async def deactivate_user(
     if user_id == current_user.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot deactivate yourself")
     
-    result = await db.execute(select(User).where(User.id == user_id))
+    query = select(User).where(User.id == user_id)
+    
+    # Multi-tenancy: filter by company
+    company_id = get_company_filter(current_user)
+    if company_id is not None:
+        query = query.where(User.company_id == company_id)
+    
+    result = await db.execute(query)
     user = result.scalar_one_or_none()
     
     if not user:
@@ -373,7 +404,14 @@ async def permanently_delete_user(
             detail="Cannot delete yourself"
         )
     
-    result = await db.execute(select(User).where(User.id == user_id))
+    query = select(User).where(User.id == user_id)
+    
+    # Multi-tenancy: filter by company
+    company_filter = get_company_filter(current_user)
+    if company_filter is not None:
+        query = query.where(User.company_id == company_filter)
+    
+    result = await db.execute(query)
     user = result.scalar_one_or_none()
     
     if not user:

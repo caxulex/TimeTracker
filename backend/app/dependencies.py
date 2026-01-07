@@ -154,3 +154,25 @@ async def get_current_user_ws(token: str) -> Optional[User]:
 
 # Aliases for common admin checks
 require_admin = get_current_admin_user
+
+def get_company_filter(user: User):
+    """
+    Get company filter for multi-tenant data isolation.
+    
+    - Super admins (company_id=None) see ALL data
+    - Company admins/users only see their company's data
+    
+    Returns:
+        company_id to filter by, or None for platform admins
+    """
+    # Platform super_admins (no company) can see everything
+    if user.company_id is None and user.role == 'super_admin':
+        return None
+    
+    # Everyone else is scoped to their company
+    return user.company_id
+
+
+def is_platform_admin(user: User) -> bool:
+    """Check if user is a platform-level super admin (not company-bound)"""
+    return user.company_id is None and user.role == 'super_admin'
