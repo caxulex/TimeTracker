@@ -3,8 +3,8 @@
  * Fetches and applies dynamic branding based on company slug/domain
  */
 
-// Get API URL from environment or use relative path
-const API_URL = import.meta.env.VITE_API_URL || '';
+// Get API URL from environment or use /api as default
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 /**
  * White-label configuration from API
