@@ -184,15 +184,24 @@ async def get_active_timers(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get all currently active timers (for admin/team view)"""
-    # Query all active time entries with user, project, and task info
-    result = await db.execute(
+    # Get company filter for multi-tenant data isolation
+    company_filter = get_company_filter(current_user)
+    
+    # Build base query for active time entries with user, project, and task info
+    query = (
         select(TimeEntry, User, Project, Task)
         .join(User, TimeEntry.user_id == User.id)
         .join(Project, TimeEntry.project_id == Project.id)
         .outerjoin(Task, TimeEntry.task_id == Task.id)
         .where(TimeEntry.end_time == None)
-        .order_by(TimeEntry.start_time.desc())
     )
+    
+    # Apply company filter for non-platform admins
+    if company_filter is not None:
+        query = query.where(User.company_id == company_filter)
+    
+    query = query.order_by(TimeEntry.start_time.desc())
+    result = await db.execute(query)
     
     rows = result.all()
     active_timers = []
@@ -288,6 +297,7 @@ async def start_timer(
     # Update the WebSocket manager's active timers cache
     ws_manager.set_active_timer(current_user.id, {
         "user_name": current_user.name,
+        "company_id": current_user.company_id,  # For multi-tenant filtering
         "project_id": entry.project_id,
         "project_name": project.name,
         "task_id": entry.task_id,

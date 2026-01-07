@@ -98,15 +98,20 @@ class ConnectionManager:
         if user_id in self.active_timers:
             del self.active_timers[user_id]
     
-    def get_active_timers(self, team_id: int = None) -> list[dict]:
-        """Get all active timers, optionally filtered by team"""
+    def get_active_timers(self, team_id: int = None, company_id: int = None) -> list[dict]:
+        """Get all active timers, optionally filtered by team or company"""
+        timers = list(self.active_timers.values())
+        
+        # Filter by company if specified (multi-tenant isolation)
+        if company_id is not None:
+            timers = [t for t in timers if t.get("company_id") == company_id]
+        
+        # Filter by team if specified
         if team_id and team_id in self.team_members:
-            return [
-                self.active_timers[uid] 
-                for uid in self.team_members[team_id] 
-                if uid in self.active_timers
-            ]
-        return list(self.active_timers.values())
+            team_user_ids = self.team_members[team_id]
+            timers = [t for t in timers if t.get("user_id") in team_user_ids]
+        
+        return timers
     
     def get_online_users(self, team_id: int = None) -> list[int]:
         """Get list of online user IDs"""
@@ -152,6 +157,7 @@ async def load_active_timers_from_db():
                 timer_info = {
                     "user_id": user.id,
                     "user_name": user.name,
+                    "company_id": user.company_id,  # For multi-tenant filtering
                     "project_id": project.id,
                     "project_name": project.name,
                     "task_id": task.id if task else None,
@@ -248,6 +254,7 @@ async def handle_message(websocket: WebSocket, user: User, data: dict):
         # User started a timer
         timer_info = {
             "user_name": user.name,
+            "company_id": user.company_id,  # For multi-tenant filtering
             "project_id": data.get("project_id"),
             "project_name": data.get("project_name"),
             "task_id": data.get("task_id"),
@@ -296,9 +303,11 @@ async def handle_message(websocket: WebSocket, user: User, data: dict):
             manager.active_timers[user.id]["elapsed_seconds"] = data.get("elapsed_seconds", 0)
     
     elif msg_type == "get_active_timers":
-        # Request list of active timers
+        # Request list of active timers with company filtering
         team_id = data.get("team_id")
-        active_timers = manager.get_active_timers(team_id)
+        # Apply company filter for multi-tenant isolation
+        company_id = user.company_id if (user.company_id is not None or user.role != 'super_admin') else None
+        active_timers = manager.get_active_timers(team_id, company_id)
         await websocket.send_json({
             "type": "active_timers",
             "timers": active_timers
@@ -327,10 +336,13 @@ async def get_active_timers(
     team_id: Optional[int] = None,
     current_user: User = Depends(get_current_user_ws)
 ):
-    """Get list of currently active timers"""
+    """Get list of currently active timers with company filtering"""
+    # Apply company filter for multi-tenant isolation
+    company_id = current_user.company_id if (current_user.company_id is not None or current_user.role != 'super_admin') else None
+    timers = manager.get_active_timers(team_id, company_id)
     return {
-        "timers": manager.get_active_timers(team_id),
-        "count": len(manager.get_active_timers(team_id))
+        "timers": timers,
+        "count": len(timers)
     }
 
 
