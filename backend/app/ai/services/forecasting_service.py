@@ -425,7 +425,8 @@ class ForecastingService:
         self,
         user_id: int,
         days_ahead: int = 7,
-        team_id: Optional[int] = None
+        team_id: Optional[int] = None,
+        company_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Assess overtime risk for employees.
@@ -437,6 +438,7 @@ class ForecastingService:
             user_id: User requesting assessment
             days_ahead: Days to project
             team_id: Optional team filter
+            company_id: Optional company filter for multi-tenancy
             
         Returns:
             Dict with risk assessments per user
@@ -462,6 +464,10 @@ class ForecastingService:
                 )
             else:
                 query = select(User).where(User.is_active == True)
+            
+            # Filter by company_id if provided (multi-tenancy)
+            if company_id is not None:
+                query = query.where(User.company_id == company_id)
             
             result = await self.db.execute(query)
             users = result.scalars().all()

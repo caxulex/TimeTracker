@@ -186,7 +186,8 @@ class AnomalyService:
     async def scan_all_users(
         self,
         period_days: int = 7,
-        team_id: Optional[int] = None
+        team_id: Optional[int] = None,
+        company_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Scan all users (or team) for anomalies.
@@ -195,6 +196,7 @@ class AnomalyService:
         Args:
             period_days: Days to look back
             team_id: Optional team filter
+            company_id: Optional company filter for multi-tenancy
             
         Returns:
             Dict with all anomalies and statistics
@@ -225,6 +227,10 @@ class AnomalyService:
                 )
             else:
                 query = select(User).where(User.is_active == True)
+            
+            # Filter by company_id if provided (multi-tenancy)
+            if company_id is not None:
+                query = query.where(User.company_id == company_id)
             
             result = await self.db.execute(query)
             users = result.scalars().all()

@@ -245,10 +245,19 @@ async def toggle_global_feature(
     current_user: User = Depends(require_admin)
 ):
     """
-    Toggle a feature globally (admin or super admin).
+    Toggle a feature globally (super_admin or platform admin only).
     
     When disabled globally, no user can access the feature.
+    Note: Company admins cannot modify global settings - they can only
+    set user overrides for their company's users.
     """
+    # Only super_admin or platform admin can toggle global settings
+    if current_user.role not in ["super_admin", "admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only platform administrators can modify global AI feature settings. Company admins can set user overrides instead."
+        )
+    
     manager = AIFeatureManager(db)
     
     setting = await manager.update_global_setting(
@@ -278,6 +287,7 @@ async def get_user_preferences_admin(
 ):
     """
     Get a specific user's AI preferences (admin view).
+    Company admins can only view users from their own company.
     """
     # Verify user exists
     query = select(User).where(User.id == user_id)
@@ -288,6 +298,13 @@ async def get_user_preferences_admin(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User {user_id} not found"
+        )
+    
+    # Multi-tenancy: company_admin can only see users from their company
+    if current_user.role == "company_admin" and user.company_id != current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only view users from your own company"
         )
     
     manager = AIFeatureManager(db)
@@ -313,6 +330,7 @@ async def set_user_override(
     Set admin override for a user's feature (admin only).
     
     This locks the setting so the user cannot change it.
+    Company admins can only set overrides for users in their company.
     """
     # Verify user exists
     query = select(User).where(User.id == user_id)
@@ -323,6 +341,13 @@ async def set_user_override(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User {user_id} not found"
+        )
+    
+    # Multi-tenancy: company_admin can only modify users from their company
+    if current_user.role == "company_admin" and user.company_id != current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only modify AI settings for users in your own company"
         )
     
     manager = AIFeatureManager(db)
@@ -363,7 +388,26 @@ async def remove_user_override(
     Remove admin override for a user's feature.
     
     This restores the user's ability to control the setting.
+    Company admins can only remove overrides for users in their company.
     """
+    # Verify user exists and check company access
+    query = select(User).where(User.id == user_id)
+    result = await db.execute(query)
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User {user_id} not found"
+        )
+    
+    # Multi-tenancy: company_admin can only modify users from their company
+    if current_user.role == "company_admin" and user.company_id != current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only modify AI settings for users in your own company"
+        )
+    
     manager = AIFeatureManager(db)
     
     pref = await manager.remove_admin_override(user_id, feature_id)
@@ -385,6 +429,7 @@ async def batch_set_user_overrides(
 ):
     """
     Set admin override for multiple users at once.
+    Company admins can only set overrides for users in their company.
     """
     manager = AIFeatureManager(db)
     
@@ -395,6 +440,20 @@ async def batch_set_user_overrides(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Feature '{request.feature_id}' not found"
         )
+    
+    # Multi-tenancy: verify all users belong to company_admin's company
+    if current_user.role == "company_admin":
+        # Fetch all users to check their company
+        user_query = select(User).where(User.id.in_(request.user_ids))
+        result = await db.execute(user_query)
+        users = result.scalars().all()
+        
+        for user in users:
+            if user.company_id != current_user.company_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"You can only modify AI settings for users in your own company (user {user.id} is in a different company)"
+                )
     
     updated = 0
     failed = 0

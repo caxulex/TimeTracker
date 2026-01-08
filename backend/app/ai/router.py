@@ -204,8 +204,9 @@ async def scan_anomalies(
         service = await get_anomaly_service(db)
         
         # Permission checks
-        is_admin = current_user.role in ["admin", "super_admin"]
+        is_admin = current_user.role in ["admin", "super_admin", "company_admin"]
         is_manager = current_user.role == "manager"
+        is_super_admin = current_user.role == "super_admin"
         
         if request.scan_all:
             if not is_admin:
@@ -213,9 +214,12 @@ async def scan_anomalies(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Only admins can scan all users"
                 )
+            # Multi-tenancy: non-super admins only see their company's users
+            company_id = None if is_super_admin else current_user.company_id
             result = await service.scan_all_users(
                 period_days=request.period_days,
-                team_id=request.team_id
+                team_id=request.team_id,
+                company_id=company_id
             )
         elif request.user_id and request.user_id != current_user.id:
             if not (is_admin or is_manager):
@@ -288,9 +292,14 @@ async def get_all_anomalies(
     """Get anomalies for all users (admin/manager only)."""
     try:
         service = await get_anomaly_service(db)
+        
+        # Multi-tenancy: non-super admins only see their company's users
+        company_id = None if current_user.role == "super_admin" else current_user.company_id
+        
         result = await service.scan_all_users(
             period_days=period_days,
-            team_id=team_id
+            team_id=team_id,
+            company_id=company_id
         )
         return result
     except Exception as e:
@@ -474,10 +483,15 @@ async def assess_overtime_risk(
     """Assess overtime risk for employees."""
     try:
         service = await get_forecasting_service(db)
+        
+        # Multi-tenancy: non-super admins only see their company's users
+        company_id = None if current_user.role == "super_admin" else current_user.company_id
+        
         result = await service.assess_overtime_risk(
             user_id=current_user.id,
             days_ahead=request.days_ahead,
-            team_id=request.team_id
+            team_id=request.team_id,
+            company_id=company_id
         )
         return result
     except Exception as e:
@@ -900,7 +914,14 @@ async def scan_team_burnout(
     """Scan team for burnout risk."""
     try:
         service = await get_ml_anomaly_service(db)
-        result = await service.scan_team_burnout(team_id=request.team_id)
+        
+        # Multi-tenancy: non-super admins only see their company's users
+        company_id = None if current_user.role == "super_admin" else current_user.company_id
+        
+        result = await service.scan_team_burnout(
+            team_id=request.team_id,
+            company_id=company_id
+        )
         
         return TeamBurnoutResponse(
             success=True,

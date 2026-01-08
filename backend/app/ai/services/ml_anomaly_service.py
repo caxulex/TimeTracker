@@ -866,7 +866,8 @@ class MLAnomalyService:
 
     async def scan_team_burnout(
         self,
-        team_id: Optional[int] = None
+        team_id: Optional[int] = None,
+        company_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """Scan all users for burnout risk."""
         from app.models import User, TeamMember
@@ -885,6 +886,10 @@ class MLAnomalyService:
             )
         else:
             query = select(User).where(User.is_active == True)
+        
+        # Filter by company_id if provided (multi-tenancy)
+        if company_id is not None:
+            query = query.where(User.company_id == company_id)
         
         result = await self.db.execute(query)
         users = result.scalars().all()
