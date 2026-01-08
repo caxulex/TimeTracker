@@ -11,6 +11,7 @@ import { apiKeysApi } from '../api/apiKeys';
 import { usersApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import { useNotifications } from '../hooks/useNotifications';
+import { isAdminUser } from '../utils/helpers';
 import type { APIKey, APIKeyCreate, AIProvider } from '../types/apiKey';
 
 // Provider options with display info
@@ -41,7 +42,7 @@ export function AdminSettingsPage() {
   const [testingId, setTestingId] = useState<number | null>(null);
 
   // All admins now have full access (admin = super_admin)
-  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const isAdmin = isAdminUser(user);
 
   // Fetch users for AI settings (admin only)
   const { data: usersData } = useQuery({

@@ -10,6 +10,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useStaffNotifications } from '../hooks/useStaffNotifications';
 import { usePermissions } from '../hooks/usePermissions';
 import { useStaffFormValidation } from '../hooks/useStaffFormValidation';
+import { isAdminUser } from '../utils/helpers';
 import type { User, TeamMember, PayRate, TimeEntry, Project } from '../types';
 
 export function StaffDetailPage() {
@@ -35,7 +36,7 @@ export function StaffDetailPage() {
     emergency_contact_phone: '',
   });
 
-  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+  const isAdmin = isAdminUser(currentUser);
   const staffId = parseInt(id || '0', 10);
 
   // Fetch staff details

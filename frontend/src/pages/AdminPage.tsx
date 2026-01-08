@@ -7,6 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
 import { usersApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
+import { isAdminUser } from '../utils/helpers';
 import type { User } from '../types';
 
 
@@ -20,7 +21,7 @@ export function AdminPage() {
   const [editingUser, setEditingUser] = useState<User | null>(null);
 
   // Check if current user is admin
-  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+  const isAdmin = isAdminUser(currentUser);
 
   // Fetch users
   const { data: usersData, isLoading } = useQuery({

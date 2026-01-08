@@ -12,6 +12,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { useStaffFormValidation } from '../hooks/useStaffFormValidation';
 import { useDebounce } from '../hooks/useDebounce';
 import { rateLimiter } from '../utils/security';
+import { isAdminUser } from '../utils/helpers';
 import type { User, UserCreate, Team, TeamMember, PayRate, TimeEntry, Project } from '../types';
 
 export function StaffPage() {
@@ -153,7 +154,7 @@ export function StaffPage() {
     overtime_multiplier: 1.5,
   });
 
-  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+  const isAdmin = isAdminUser(currentUser);
 
   // Fetch staff members
   const { data: usersData, isLoading } = useQuery({

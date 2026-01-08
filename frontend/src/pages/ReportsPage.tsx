@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
 import { reportsApi, exportApi } from '../api/client';
-import { formatDuration, toISODateString, getStartOfWeek, secondsToHours } from '../utils/helpers';
+import { formatDuration, toISODateString, getStartOfWeek, secondsToHours, isAdminUser } from '../utils/helpers';
 import { useAuth } from '../hooks/useAuth';
 import { useWebSocketContext } from '../contexts/WebSocketContext';
 import { useStaffNotifications } from '../hooks/useStaffNotifications';
@@ -42,7 +42,7 @@ function downloadBlob(blob: Blob, filename: string) {
 
 export function ReportsPage() {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const isAdmin = isAdminUser(user);
   const queryClient = useQueryClient();
   const { lastMessage } = useWebSocketContext();
   const notifications = useStaffNotifications();

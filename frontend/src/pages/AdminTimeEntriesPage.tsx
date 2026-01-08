@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
 import { reportsApi, teamsApi, usersApi } from '../api/client';
-import { formatDuration, formatDate, toISODateString, getStartOfWeek } from '../utils/helpers';
+import { formatDuration, formatDate, toISODateString, getStartOfWeek, isAdminUser } from '../utils/helpers';
 import { useAuth } from '../hooks/useAuth';
 import type { User, Team } from '../types';
 
@@ -34,7 +34,7 @@ type DatePreset = 'today' | 'yesterday' | 'this-week' | 'last-week' | 'this-mont
 
 export function AdminTimeEntriesPage() {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const isAdmin = isAdminUser(user);
 
   const [datePreset, setDatePreset] = useState<DatePreset>('today');
   const [customStartDate, setCustomStartDate] = useState('');

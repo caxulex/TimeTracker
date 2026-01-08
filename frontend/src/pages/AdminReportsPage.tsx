@@ -95,7 +95,7 @@ export default function AdminReportsPage() {
       return response.json();
     },
     refetchInterval: 30000, // Refresh every 30 seconds
-    enabled: user?.role === 'admin' || user?.role === 'super_admin', // Only fetch if admin
+    enabled: isAdminUser(user), // Only fetch if admin
   });
 
   // Fetch team analytics
@@ -111,7 +111,7 @@ export default function AdminReportsPage() {
       return response.json();
     },
     refetchInterval: 30000,
-    enabled: user?.role === 'admin' || user?.role === 'super_admin', // Only fetch if admin
+    enabled: isAdminUser(user), // Only fetch if admin
   });
 
   // Fetch all users summary
@@ -127,11 +127,11 @@ export default function AdminReportsPage() {
       return response.json();
     },
     refetchInterval: 30000,
-    enabled: user?.role === 'admin' || user?.role === 'super_admin', // Only fetch if admin
+    enabled: isAdminUser(user), // Only fetch if admin
   });
 
   // Redirect if not admin
-  if (user?.role !== 'admin' && user?.role !== 'super_admin') {
+  if (!isAdminUser(user)) {
     navigate('/reports');
     return null;
   }

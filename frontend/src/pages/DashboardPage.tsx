@@ -15,7 +15,7 @@ import { useFeatureEnabled } from '../hooks/useAIFeatures';
 import { reportsApi } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import { useWebSocketContext } from '../contexts/WebSocketContext';
-import { formatDuration } from '../utils/helpers';
+import { formatDuration, isAdminUser } from '../utils/helpers';
 import type { DashboardStats, WeeklySummary } from '../types';
 import {
   BarChart,
@@ -54,7 +54,7 @@ interface AdminDashboardStats {
 export function DashboardPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const isAdmin = isAdminUser(user);
 
   // Get WebSocket context - connection is managed by WebSocketProvider
   const { isConnected } = useWebSocketContext();
