@@ -40,14 +40,31 @@ vi.stubGlobal('import', {
   },
 });
 
+// Simple mock storage for testing
+const createMockStorage = () => {
+  let store: Record<string, string> = {};
+  return {
+    getItem: (key: string) => store[key] || null,
+    setItem: (key: string, value: string) => { store[key] = value; },
+    removeItem: (key: string) => { delete store[key]; },
+    clear: () => { store = {}; },
+    get length() { return Object.keys(store).length; },
+    key: (index: number) => Object.keys(store)[index] || null,
+  };
+};
+
 describe('API Client', () => {
+  let mockStorage: ReturnType<typeof createMockStorage>;
+
   beforeEach(() => {
     vi.clearAllMocks();
-    localStorage.clear();
+    mockStorage = createMockStorage();
+    // Override global localStorage for these tests
+    Object.defineProperty(window, 'localStorage', { value: mockStorage, writable: true });
   });
 
   afterEach(() => {
-    localStorage.clear();
+    mockStorage.clear();
   });
 
   describe('URL Normalization', () => {

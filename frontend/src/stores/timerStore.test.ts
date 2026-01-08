@@ -34,10 +34,29 @@ const createMockEntry = (overrides: Partial<TimeEntry> = {}): TimeEntry => ({
   ...overrides,
 });
 
+// Simple mock storage for testing
+const createMockStorage = () => {
+  let store: Record<string, string> = {};
+  return {
+    getItem: (key: string) => store[key] || null,
+    setItem: (key: string, value: string) => { store[key] = value; },
+    removeItem: (key: string) => { delete store[key]; },
+    clear: () => { store = {}; },
+    get length() { return Object.keys(store).length; },
+    key: (index: number) => Object.keys(store)[index] || null,
+  };
+};
+
 describe('Timer Store', () => {
+  let mockStorage: ReturnType<typeof createMockStorage>;
+
   beforeEach(() => {
     vi.clearAllMocks();
-    localStorage.clear();
+    mockStorage = createMockStorage();
+    // Override global localStorage for these tests
+    Object.defineProperty(window, 'localStorage', { value: mockStorage, writable: true });
+    // Set up authentication for timer tests
+    mockStorage.setItem('access_token', 'test-token');
     // Reset store state
     useTimerStore.setState({
       currentEntry: null,
@@ -50,7 +69,7 @@ describe('Timer Store', () => {
   });
 
   afterEach(() => {
-    localStorage.clear();
+    mockStorage.clear();
   });
 
   describe('Initial State', () => {
@@ -266,7 +285,8 @@ describe('Timer Store', () => {
     });
 
     it('should not fetch when not authenticated', async () => {
-      // No token set
+      // Remove token to simulate unauthenticated state
+      mockStorage.removeItem('access_token');
 
       await act(async () => {
         await useTimerStore.getState().fetchTimer();

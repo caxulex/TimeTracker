@@ -84,6 +84,9 @@ vi.mock('../api/client', () => ({
     })),
     update: vi.fn(() => Promise.resolve({})),
     delete: vi.fn(() => Promise.resolve()),
+    getTimer: vi.fn(() => Promise.resolve({ is_running: false, current_entry: null })),
+    startTimer: vi.fn(() => Promise.resolve({ id: 1, is_running: true })),
+    stopTimer: vi.fn(() => Promise.resolve({ id: 1, duration_seconds: 3600 })),
   },
   projectsApi: {
     getAll: vi.fn(() => Promise.resolve({
@@ -178,8 +181,12 @@ describe('TimePage', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('Project A')).toBeInTheDocument();
-        expect(screen.getByText('Project B')).toBeInTheDocument();
+        // Use getAllByText since project names may appear multiple times
+        // (in entry list and possibly in filter dropdown)
+        const projectAElements = screen.getAllByText('Project A');
+        const projectBElements = screen.getAllByText('Project B');
+        expect(projectAElements.length).toBeGreaterThan(0);
+        expect(projectBElements.length).toBeGreaterThan(0);
       });
     });
   });

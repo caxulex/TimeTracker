@@ -5,27 +5,81 @@
 """
 Tests for multi-tenancy data isolation.
 Ensures users can only see data from their own company.
+Note: These tests require a PostgreSQL database connection.
 """
 
 import pytest
+import pytest_asyncio
 import uuid
+import os
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.models import User, Team, Project, TimeEntry
+from app.models import User, Team, Project, TimeEntry, Company
 from app.services.auth_service import AuthService
 
 
-@pytest.fixture
-async def company1_user(db_session: AsyncSession) -> User:
+# Check if database is available (for local development without DB)
+def database_available():
+    """Check if test database is accessible."""
+    db_url = os.getenv("DATABASE_URL", "")
+    if not db_url or "postgresql" not in db_url:
+        return False
+    try:
+        import asyncpg
+        # Can't do async check in sync function, assume available if URL is set
+        return True
+    except ImportError:
+        return False
+
+
+# Most tests require database - mark entire module
+pytestmark = pytest.mark.skipif(
+    not database_available(),
+    reason="PostgreSQL database not available"
+)
+
+
+@pytest_asyncio.fixture
+async def company1(db_session: AsyncSession) -> Company:
+    """Create company 1 for multi-tenancy tests."""
+    company = Company(
+        name="Test Company 1",
+        slug="test-company-1",
+        email="company1@example.com",
+        is_active=True,
+    )
+    db_session.add(company)
+    await db_session.flush()
+    await db_session.refresh(company)
+    return company
+
+
+@pytest_asyncio.fixture
+async def company2(db_session: AsyncSession) -> Company:
+    """Create company 2 for multi-tenancy tests."""
+    company = Company(
+        name="Test Company 2",
+        slug="test-company-2",
+        email="company2@example.com",
+        is_active=True,
+    )
+    db_session.add(company)
+    await db_session.flush()
+    await db_session.refresh(company)
+    return company
+
+
+@pytest_asyncio.fixture
+async def company1_user(db_session: AsyncSession, company1: Company) -> User:
     """Create a user for company 1."""
     user = User(
         email=f"company1-{uuid.uuid4().hex[:8]}@example.com",
         name="Company 1 User",
         password_hash=AuthService.hash_password("TestPass123!"),
         role="regular_user",
-        company_id=1,
+        company_id=company1.id,
         is_active=True,
     )
     db_session.add(user)
@@ -34,15 +88,15 @@ async def company1_user(db_session: AsyncSession) -> User:
     return user
 
 
-@pytest.fixture
-async def company2_user(db_session: AsyncSession) -> User:
+@pytest_asyncio.fixture
+async def company2_user(db_session: AsyncSession, company2: Company) -> User:
     """Create a user for company 2."""
     user = User(
         email=f"company2-{uuid.uuid4().hex[:8]}@example.com",
         name="Company 2 User",
         password_hash=AuthService.hash_password("TestPass123!"),
         role="regular_user",
-        company_id=2,
+        company_id=company2.id,
         is_active=True,
     )
     db_session.add(user)
@@ -51,7 +105,7 @@ async def company2_user(db_session: AsyncSession) -> User:
     return user
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def platform_admin(db_session: AsyncSession) -> User:
     """Create a platform super admin (no company_id)."""
     user = User(
@@ -147,7 +201,7 @@ class TestActiveTimersIsolation:
         self, client: AsyncClient, company1_headers: dict
     ):
         """Active timers endpoint should only return company's timers."""
-        response = await client.get("/ws/active-timers", headers=company1_headers)
+        response = await client.get("/api/ws/active-timers", headers=company1_headers)
         
         assert response.status_code == 200
         timers = response.json()
@@ -196,7 +250,7 @@ class TestPlatformAdminAccess:
         self, client: AsyncClient, platform_admin_headers: dict
     ):
         """Platform admin should see active timers from all companies."""
-        response = await client.get("/ws/active-timers", headers=platform_admin_headers)
+        response = await client.get("/api/ws/active-timers", headers=platform_admin_headers)
         
         assert response.status_code == 200
         timers = response.json()

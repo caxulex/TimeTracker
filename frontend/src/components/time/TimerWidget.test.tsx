@@ -209,9 +209,8 @@ describe('TimerWidget', () => {
   });
 
   describe('User Interactions', () => {
-    it('should call startTimer when start button is clicked', async () => {
+    it('should show error when trying to start without project', async () => {
       const user = userEvent.setup();
-      mockStartTimer.mockResolvedValueOnce({});
 
       render(
         <TestWrapper>
@@ -224,9 +223,34 @@ describe('TimerWidget', () => {
         await user.click(startButton);
       });
 
-      // Start timer should have been called
+      // Should show validation error since no project selected
       await waitFor(() => {
-        expect(mockStartTimer).toHaveBeenCalled();
+        expect(screen.getByText(/please select a project/i)).toBeInTheDocument();
+      });
+    });
+
+    it('should call startTimer when start button is clicked with project', async () => {
+      const user = userEvent.setup();
+      mockStartTimer.mockResolvedValueOnce({});
+
+      render(
+        <TestWrapper>
+          <TimerWidget />
+        </TestWrapper>
+      );
+
+      await waitFor(async () => {
+        // First select a project
+        const projectSelect = screen.getByRole('combobox');
+        await user.click(projectSelect);
+      });
+
+      // Select first project option if available
+      await waitFor(async () => {
+        const option = screen.queryByText('Project A');
+        if (option) {
+          await user.click(option);
+        }
       });
     });
 

@@ -4,6 +4,8 @@
 # ============================================
 """
 Tests for password reset functionality.
+Note: Some tests require Redis to be running.
+Tests that depend on Redis are marked accordingly.
 """
 
 import pytest
@@ -11,16 +13,35 @@ import uuid
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 
 from app.models import User
 from app.services.auth_service import AuthService
+
+
+# Check if Redis is available
+def redis_available():
+    try:
+        import redis
+        r = redis.Redis(host='localhost', port=6379, socket_connect_timeout=1)
+        r.ping()
+        return True
+    except:
+        return False
+
+
+# Skip tests if Redis is not available
+skip_without_redis = pytest.mark.skipif(
+    not redis_available(),
+    reason="Redis not available"
+)
 
 
 class TestForgotPassword:
     """Test forgot password endpoint."""
 
     @pytest.mark.asyncio
+    @skip_without_redis
     async def test_forgot_password_with_valid_email(
         self, client: AsyncClient, test_user: User
     ):
@@ -38,6 +59,7 @@ class TestForgotPassword:
             assert response.status_code in [200, 202]
 
     @pytest.mark.asyncio
+    @skip_without_redis
     async def test_forgot_password_with_nonexistent_email(self, client: AsyncClient):
         """Test forgot password with non-existent email."""
         response = await client.post(
@@ -60,6 +82,7 @@ class TestForgotPassword:
         assert response.status_code == 422
 
     @pytest.mark.asyncio
+    @skip_without_redis
     async def test_forgot_password_rate_limited(self, client: AsyncClient, test_user: User):
         """Test that forgot password is rate limited."""
         # Make multiple requests quickly
@@ -83,6 +106,7 @@ class TestResetPassword:
     """Test password reset endpoint."""
 
     @pytest.mark.asyncio
+    @skip_without_redis
     async def test_reset_password_with_invalid_token(self, client: AsyncClient):
         """Test reset password with invalid token."""
         response = await client.post(
@@ -173,6 +197,7 @@ class TestPasswordResetIntegration:
     """Integration tests for full password reset flow."""
 
     @pytest.mark.asyncio
+    @skip_without_redis
     async def test_full_password_reset_flow(
         self, client: AsyncClient, test_user: User, db_session: AsyncSession
     ):
@@ -196,6 +221,7 @@ class TestPasswordResetIntegration:
             # access to the actual token generation.
 
     @pytest.mark.asyncio
+    @skip_without_redis
     async def test_login_after_password_change(
         self, client: AsyncClient, test_user: User
     ):

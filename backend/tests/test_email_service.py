@@ -28,6 +28,8 @@ class TestEmailServiceConfiguration:
             mock_settings.SMTP_PORT = 587
             mock_settings.SMTP_USERNAME = None
             mock_settings.SMTP_PASSWORD = None
+            mock_settings.SMTP_FROM_NAME = "Test App"
+            mock_settings.SMTP_FROM_EMAIL = "noreply@example.com"
             
             service = EmailService()
             assert service.is_configured is False
@@ -39,6 +41,8 @@ class TestEmailServiceConfiguration:
             mock_settings.SMTP_PORT = 587
             mock_settings.SMTP_USERNAME = "user@example.com"
             mock_settings.SMTP_PASSWORD = "password"
+            mock_settings.SMTP_FROM_NAME = "Test App"
+            mock_settings.SMTP_FROM_EMAIL = "noreply@example.com"
             
             service = EmailService()
             assert service.is_configured is True
@@ -54,6 +58,8 @@ class TestEmailMessageCreation:
             mock_settings.SMTP_PORT = 587
             mock_settings.SMTP_USERNAME = "sender@example.com"
             mock_settings.SMTP_PASSWORD = "password"
+            mock_settings.SMTP_FROM_NAME = "Test App"
+            mock_settings.SMTP_FROM_EMAIL = "noreply@example.com"
             
             service = EmailService()
             msg = service._create_message(
@@ -74,6 +80,8 @@ class TestEmailMessageCreation:
             mock_settings.SMTP_PORT = 587
             mock_settings.SMTP_USERNAME = "sender@example.com"
             mock_settings.SMTP_PASSWORD = "password"
+            mock_settings.SMTP_FROM_NAME = "Test App"
+            mock_settings.SMTP_FROM_EMAIL = "noreply@example.com"
             
             service = EmailService()
             msg = service._create_message(
@@ -96,6 +104,8 @@ class TestEmailSending:
             mock_settings.SMTP_PORT = 587
             mock_settings.SMTP_USERNAME = None
             mock_settings.SMTP_PASSWORD = None
+            mock_settings.SMTP_FROM_NAME = "Test App"
+            mock_settings.SMTP_FROM_EMAIL = "noreply@example.com"
             
             service = EmailService()
             result = await service.send_email(
@@ -114,6 +124,8 @@ class TestEmailSending:
             mock_settings.SMTP_PORT = 587
             mock_settings.SMTP_USERNAME = "sender@example.com"
             mock_settings.SMTP_PASSWORD = "password"
+            mock_settings.SMTP_FROM_NAME = "Test App"
+            mock_settings.SMTP_FROM_EMAIL = "noreply@example.com"
             
             service = EmailService()
             
@@ -137,6 +149,8 @@ class TestEmailSending:
             mock_settings.SMTP_PORT = 587
             mock_settings.SMTP_USERNAME = "sender@example.com"
             mock_settings.SMTP_PASSWORD = "password"
+            mock_settings.SMTP_FROM_NAME = "Test App"
+            mock_settings.SMTP_FROM_EMAIL = "noreply@example.com"
             
             service = EmailService()
             
@@ -162,6 +176,8 @@ class TestTemplatedEmails:
             mock_settings.SMTP_PORT = 587
             mock_settings.SMTP_USERNAME = "sender@example.com"
             mock_settings.SMTP_PASSWORD = "password"
+            mock_settings.SMTP_FROM_NAME = "Test App"
+            mock_settings.SMTP_FROM_EMAIL = "noreply@example.com"
             
             service = EmailService()
             
@@ -189,6 +205,8 @@ class TestTemplatedEmails:
             mock_settings.SMTP_PORT = 587
             mock_settings.SMTP_USERNAME = "sender@example.com"
             mock_settings.SMTP_PASSWORD = "password"
+            mock_settings.SMTP_FROM_NAME = "Test App"
+            mock_settings.SMTP_FROM_EMAIL = "noreply@example.com"
             
             service = EmailService()
             
@@ -222,6 +240,8 @@ class TestBulkEmail:
             mock_settings.SMTP_PORT = 587
             mock_settings.SMTP_USERNAME = "sender@example.com"
             mock_settings.SMTP_PASSWORD = "password"
+            mock_settings.SMTP_FROM_NAME = "Test App"
+            mock_settings.SMTP_FROM_EMAIL = "noreply@example.com"
             
             service = EmailService()
             
