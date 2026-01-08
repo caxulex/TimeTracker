@@ -714,7 +714,68 @@ After all fixes:
 
 ---
 
+## 🤖 EVENING SESSION - AI MULTI-TENANCY FIXES
+
+### Issue: AI Features Showing All Companies' Data
+**Problem:** XYZ Corp admin could see staff from the production company in:
+- Anomaly Detection scans
+- Burnout Risk assessments  
+- Overtime Risk assessments
+- AI Feature user overrides
+
+### Solution: Company Isolation for All AI Services
+
+#### Backend Service Updates
+**Files Modified:**
+
+1. **`backend/app/ai/services/anomaly_service.py`**
+   - Added `company_id` parameter to `scan_all_users()`
+   - Users filtered by company when `company_id` is provided
+
+2. **`backend/app/ai/services/ml_anomaly_service.py`**
+   - Added `company_id` parameter to `scan_team_burnout()`
+   - Team scans now respect company boundaries
+
+3. **`backend/app/ai/services/forecasting_service.py`**
+   - Added `company_id` parameter to `assess_overtime_risk()`
+   - Overtime risk only assesses company's employees
+
+#### AI Router Updates
+**File Modified:** `backend/app/ai/router.py`
+
+| Endpoint | Change |
+|----------|--------|
+| `GET /anomalies/all` | Passes `company_id` for non-super_admins |
+| `POST /anomalies/scan` (scan_all=true) | Passes `company_id` for non-super_admins |
+| `POST /ml/burnout/team-scan` | Passes `company_id` for non-super_admins |
+| `POST /forecast/overtime-risk` | Passes `company_id` for non-super_admins |
+
+#### AI Feature Settings Access Control
+**File Modified:** `backend/app/routers/ai_features.py`
+
+| Change | Description |
+|--------|-------------|
+| **Global Feature Toggle** | Restricted to `super_admin` and `admin` only (not `company_admin`) |
+| **User Override View** | Company admins can only view users from their company |
+| **User Override Set** | Company admins can only modify users from their company |
+| **User Override Remove** | Company admins can only remove overrides for their company |
+| **Batch Override** | Validates all users belong to company_admin's company |
+
+### Commit
+| Commit | Description |
+|--------|-------------|
+| `c09d829` | fix: AI multi-tenancy - isolate anomaly detection and feature settings by company |
+
+### Result
+- ✅ XYZ Corp Anomaly Detection shows **only XYZ staff**
+- ✅ Burnout Risk scans **only XYZ employees**
+- ✅ Overtime Risk **only analyzes XYZ staff**
+- ✅ AI Settings user overrides **restricted to own company**
+- ✅ Global AI toggles **protected from company_admin modification**
+
+---
+
 *Assessment Created: January 8, 2026*  
-*Assessment Updated: January 8, 2026 (Late Evening) - XYZ White-Label Fixes*  
-*Assessment Version: 4.0*  
+*Assessment Updated: January 8, 2026 (Evening) - AI Multi-Tenancy Fixes*  
+*Assessment Version: 5.0*  
 *Reviewer: GitHub Copilot*
