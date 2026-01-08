@@ -28,7 +28,8 @@ export function LoginPage() {
       // Store for logout redirect
       localStorage.setItem('tt_company_slug', companySlug);
     }
-  }, [urlCompanySlug, searchParams, setCompany]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlCompanySlug, searchParams]);
 
   const {
     register,

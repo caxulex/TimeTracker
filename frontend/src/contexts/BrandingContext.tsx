@@ -3,7 +3,7 @@
  * Provides dynamic white-label branding throughout the app
  */
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import {
   WhiteLabelConfig,
   DEFAULT_BRANDING,
@@ -37,6 +37,7 @@ export function BrandingProvider({ children }: BrandingProviderProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [isWhiteLabeled, setIsWhiteLabeled] = useState(false);
   const [loadAttempted, setLoadAttempted] = useState(false);
+  const lastFetchedSlugRef = useRef<string | null>(null);
 
   // Initialize branding on mount
   useEffect(() => {
@@ -65,8 +66,14 @@ export function BrandingProvider({ children }: BrandingProviderProps) {
     loadBranding();
   }, [loadAttempted]);
 
-  // Set company and fetch branding
-  const setCompany = async (slug: string) => {
+  // Set company and fetch branding - memoized to prevent infinite loops
+  const setCompany = useCallback(async (slug: string) => {
+    // Prevent duplicate fetches for the same slug
+    if (lastFetchedSlugRef.current === slug) {
+      return;
+    }
+    lastFetchedSlugRef.current = slug;
+
     setIsLoading(true);
     setCompanySlug(slug);
     setSlug(slug);
@@ -89,10 +96,11 @@ export function BrandingProvider({ children }: BrandingProviderProps) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  // Clear branding and reset to default
-  const clearBranding = () => {
+  // Clear branding and reset to default - memoized
+  const clearBranding = useCallback(() => {
+    lastFetchedSlugRef.current = null;
     clearCompanySlug();
     setBranding(DEFAULT_BRANDING);
     setSlug(null);
@@ -104,15 +112,17 @@ export function BrandingProvider({ children }: BrandingProviderProps) {
     root.style.setProperty('--color-primary', DEFAULT_BRANDING.primary_color);
     root.style.setProperty('--color-primary-hover', '#1d4ed8');
     root.style.setProperty('--color-primary-light', '#dbeafe');
-  };
+  }, []);
 
-  // Refresh branding from API
-  const refreshBranding = async () => {
+  // Refresh branding from API - memoized
+  const refreshBranding = useCallback(async () => {
     const slug = getCompanySlug();
     if (slug) {
+      // Reset the ref to allow re-fetch
+      lastFetchedSlugRef.current = null;
       await setCompany(slug);
     }
-  };
+  }, [setCompany]);
 
   return (
     <BrandingContext.Provider
