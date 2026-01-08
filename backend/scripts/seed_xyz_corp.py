@@ -25,7 +25,7 @@ async def seed_xyz_corp():
     """Seed XYZ Corp company with white-label branding"""
     from sqlalchemy import select
     from app.database import async_session
-    from app.models import User, Company, WhiteLabelConfig
+    from app.models import User, Company, WhiteLabelConfig, Team, TeamMember
     from app.services.auth_service import AuthService
     
     print("=" * 60)
@@ -173,6 +173,72 @@ async def seed_xyz_corp():
             else:
                 existing_employee.company_id = company.id
                 print(f"   ✓ Updated existing employee")
+            
+            # Create default team
+            print("\n🏢 Creating default team...")
+            
+            result = await db.execute(
+                select(Team).where(
+                    Team.company_id == company.id,
+                    Team.name == "XYZ Default Team"
+                )
+            )
+            existing_team = result.scalar_one_or_none()
+            
+            if not existing_team:
+                team = Team(
+                    name="XYZ Default Team",
+                    company_id=company.id,
+                    description="Default team for XYZ Corp projects",
+                )
+                db.add(team)
+                await db.flush()
+                print(f"   ✓ Default team created")
+            else:
+                team = existing_team
+                print(f"   ✓ Using existing team")
+            
+            # Add admin and employee to team
+            print("\n👥 Adding users to team...")
+            
+            # Check if admin is already in team
+            result = await db.execute(
+                select(TeamMember).where(
+                    TeamMember.team_id == team.id,
+                    TeamMember.user_id == admin.id
+                )
+            )
+            if not result.scalar_one_or_none():
+                admin_member = TeamMember(
+                    team_id=team.id,
+                    user_id=admin.id,
+                    role="admin",
+                )
+                db.add(admin_member)
+                print(f"   ✓ Admin added to team")
+            
+            # Add employee if exists
+            if not existing_employee:
+                result = await db.execute(
+                    select(User).where(User.email == "employee@xyzcorp.com")
+                )
+                existing_employee = result.scalar_one_or_none()
+            
+            if existing_employee:
+                result = await db.execute(
+                    select(TeamMember).where(
+                        TeamMember.team_id == team.id,
+                        TeamMember.user_id == existing_employee.id
+                    )
+                )
+                if not result.scalar_one_or_none():
+                    employee_member = TeamMember(
+                        team_id=team.id,
+                        user_id=existing_employee.id,
+                        role="member",
+                    )
+                    db.add(employee_member)
+                    print(f"   ✓ Employee added to team")
             
             await db.commit()
             

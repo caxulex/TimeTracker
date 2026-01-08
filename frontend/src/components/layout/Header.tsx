@@ -19,7 +19,13 @@ export function Header({ onMenuClick }: HeaderProps) {
 
   const handleLogout = async () => {
     await logout();
-    window.location.href = '/login';
+    // Preserve company slug for white-label instances
+    const companySlug = localStorage.getItem('tt_company_slug');
+    if (companySlug) {
+      window.location.href = `/login?company=${companySlug}`;
+    } else {
+      window.location.href = '/login';
+    }
   };
 
   return (
