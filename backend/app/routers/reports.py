@@ -413,7 +413,7 @@ async def get_team_report(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
     
     # Check team access
-    if current_user.role not in ["super_admin", "admin"]:
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
         member_check = await db.execute(
             select(TeamMember).where(
                 TeamMember.team_id == team_id,
@@ -710,7 +710,7 @@ async def get_admin_dashboard(
     current_user: User = Depends(get_current_active_user)
 ):
     '''Get admin dashboard with all team members time (admin and super_admin, filtered by company)'''
-    if current_user.role not in ["super_admin", "admin"]:
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
@@ -884,7 +884,7 @@ async def get_team_analytics(
     current_user: User = Depends(get_current_active_user)
 ):
     '''Get analytics for all teams (admin and super_admin only, filtered by company)'''
-    if current_user.role not in ["super_admin", "admin"]:
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
@@ -1086,7 +1086,7 @@ async def get_user_metrics(
     current_user: User = Depends(get_current_active_user)
 ):
     '''Get detailed metrics for a specific user (admin and super_admin only, filtered by company)'''
-    if current_user.role not in ["super_admin", "admin"]:
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
@@ -1306,7 +1306,7 @@ async def get_all_users_summary(
     current_user: User = Depends(get_current_active_user)
 ):
     '''Get summary of all users sorted by time tracked (admin and super_admin only, filtered by company)'''
-    if current_user.role not in ["super_admin", "admin"]:
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
@@ -1376,3 +1376,4 @@ async def get_all_users_summary(
         ))
 
     return users_summary
+

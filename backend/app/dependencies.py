@@ -93,8 +93,8 @@ async def get_current_active_user(
 async def get_current_admin_user(
     current_user: User = Depends(get_current_user)
 ) -> User:
-    """Get current user and verify they are an admin"""
-    if current_user.role not in ["super_admin", "admin"]:
+    """Get current user and verify they are an admin (includes company_admin)"""
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
@@ -176,3 +176,11 @@ def get_company_filter(user: User):
 def is_platform_admin(user: User) -> bool:
     """Check if user is a platform-level super admin (not company-bound)"""
     return user.company_id is None and user.role == 'super_admin'
+
+
+def is_admin_user(user: User) -> bool:
+    """
+    Check if user has admin privileges.
+    Includes: super_admin, admin, company_admin
+    """
+    return user.role in ["super_admin", "admin", "company_admin"]

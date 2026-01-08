@@ -101,7 +101,7 @@ async def list_projects(
         count_query = count_query.where(Team.company_id == company_id)
     
     # Filter by accessible teams for non-admin users
-    if current_user.role not in ["super_admin", "admin"]:
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
         user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
         access_filter = Project.team_id.in_(user_teams)
         base_query = base_query.where(access_filter)
@@ -193,7 +193,7 @@ async def get_project(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     
     # Check access (team membership for non-admins)
-    if current_user.role not in ["super_admin", "admin"]:
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
         has_access = await check_team_access(db, project.team_id, current_user)
         if not has_access:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
@@ -313,7 +313,7 @@ async def update_project(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     
     # Check access (team membership for non-admins)
-    if current_user.role not in ["super_admin", "admin"]:
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
         has_access = await check_team_access(db, project.team_id, current_user)
         if not has_access:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
@@ -388,7 +388,7 @@ async def delete_project(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     
     # Check access (team membership for non-admins)
-    if current_user.role not in ["super_admin", "admin"]:
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
         has_access = await check_team_access(db, project.team_id, current_user)
         if not has_access:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
@@ -434,7 +434,7 @@ async def restore_project(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     
     # Check access (team membership for non-admins)
-    if current_user.role not in ["super_admin", "admin"]:
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
         has_access = await check_team_access(db, project.team_id, current_user)
         if not has_access:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
@@ -459,3 +459,4 @@ async def restore_project(
         updated_at=project.updated_at,
         task_count=0
     )
+

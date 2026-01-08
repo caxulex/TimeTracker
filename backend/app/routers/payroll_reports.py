@@ -59,7 +59,7 @@ async def get_user_report(
     Get payroll report for a specific user.
     Users can view their own report, admins can view anyone's.
     """
-    if current_user.role not in ["super_admin", "admin"] and current_user.id != user_id:
+    if current_user.role not in ["super_admin", "admin", "company_admin"] and current_user.id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Can only view your own payroll report"
@@ -214,6 +214,7 @@ async def get_my_payroll_report(
     service = PayrollReportService(db)
     reports = await service.get_user_payroll_report(current_user.id, period_id, start_date, end_date)
     return reports
+
 
 
 

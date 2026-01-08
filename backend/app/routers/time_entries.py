@@ -483,7 +483,7 @@ async def list_time_entries(
         sum_query = sum_query.where(User.company_id == company_id)
     
     # Filter by user (regular users see only their entries, admin sees all in company)
-    if current_user.role not in ["super_admin", "admin"]:
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
         if user_id and user_id != current_user.id:
             # Can only see team members' entries
             user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
@@ -597,7 +597,7 @@ async def get_time_entry(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time entry not found")
     
     # Check access
-    if current_user.role not in ["super_admin", "admin"] and entry.user_id != current_user.id:
+    if current_user.role not in ["super_admin", "admin", "company_admin"] and entry.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     
     # Get names
@@ -715,3 +715,4 @@ async def delete_time_entry(
     })
     
     return {"message": "Time entry deleted successfully"}
+

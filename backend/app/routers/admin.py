@@ -63,7 +63,7 @@ class AdminWorkersReportResponse(BaseModel):
 
 def require_admin(current_user: User = Depends(get_current_active_user)):
     """Dependency to require admin role"""
-    if current_user.role not in ["super_admin", "admin"]:
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
@@ -356,3 +356,4 @@ async def get_activity_alerts(
             "inactive_users": len([a for a in alerts if a["type"] == "no_activity"])
         }
     }
+

@@ -102,7 +102,7 @@ async def list_teams(
         count_query = count_query.where(Team.company_id == company_id)
 
     # Non-admin users only see teams they're members of
-    if current_user.role not in ["super_admin", "admin"]:
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
         member_subquery = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
         base_query = base_query.where(Team.id.in_(member_subquery))
         count_query = count_query.where(Team.id.in_(member_subquery))
@@ -558,7 +558,7 @@ async def remove_member(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
 
     # Self-removal allowed, otherwise need admin
-    if user_id != current_user.id and current_user.role not in ["super_admin", "admin"]:
+    if user_id != current_user.id and current_user.role not in ["super_admin", "admin", "company_admin"]:
         admin_check = await db.execute(
             select(TeamMember).where(
                 TeamMember.team_id == team_id,
@@ -584,3 +584,4 @@ async def remove_member(
     await db.commit()
 
     return Message(message="Member removed successfully")
+

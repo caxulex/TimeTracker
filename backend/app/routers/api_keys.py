@@ -34,7 +34,7 @@ router = APIRouter(prefix="/admin/api-keys", tags=["admin-api-keys"])
 
 def require_admin(current_user: User = Depends(get_current_active_user)):
     """Dependency to require admin or super_admin role for API key management"""
-    if current_user.role not in ["admin", "super_admin"]:
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required for API key management"
@@ -302,3 +302,4 @@ async def get_encryption_status(
         "configured": is_configured,
         "message": "Encryption service is ready" if is_configured else "API_KEY_ENCRYPTION_KEY not configured or too short"
     }
+

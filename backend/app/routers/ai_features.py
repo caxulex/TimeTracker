@@ -44,7 +44,7 @@ router = APIRouter(prefix="/ai/features", tags=["ai-features"])
 
 def require_admin(current_user: User = Depends(get_current_active_user)):
     """Dependency to require admin or super_admin role."""
-    if current_user.role not in ["admin", "super_admin"]:
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
@@ -528,3 +528,4 @@ async def get_my_usage(
     manager = AIFeatureManager(db)
     summary = await manager.get_user_usage_stats(current_user.id, days)
     return UserUsageSummaryResponse(**summary)
+
