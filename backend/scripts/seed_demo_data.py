@@ -19,7 +19,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 from app.models import User, Team, TeamMember, Project, Task, TimeEntry
@@ -88,12 +88,12 @@ async def clear_demo_data(session: AsyncSession):
     """Clear existing demo data (optional, for fresh seeding)."""
     print("Clearing existing demo data...")
     
-    # Delete in order due to foreign keys
-    await session.execute(TimeEntry.__table__.delete())
-    await session.execute(Task.__table__.delete())
-    await session.execute(Project.__table__.delete())
-    await session.execute(TeamMember.__table__.delete())
-    await session.execute(Team.__table__.delete())
+    # Delete in order due to foreign keys (using SQLAlchemy 2.0 delete syntax)
+    await session.execute(delete(TimeEntry))
+    await session.execute(delete(Task))
+    await session.execute(delete(Project))
+    await session.execute(delete(TeamMember))
+    await session.execute(delete(Team))
     
     # Delete demo users (keep non-demo users)
     demo_emails = [u["email"] for u in DEMO_USERS]

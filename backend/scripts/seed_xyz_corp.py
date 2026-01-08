@@ -32,7 +32,9 @@ async def seed_xyz_corp():
     print("XYZ Corp Seed Script")
     print("=" * 60)
     
-    async with async_session() as db:
+    # Note: async_session is properly typed as async_sessionmaker in database.py
+    # Pylance may show false positive errors due to sessionmaker type inference
+    async with async_session() as db:  # type: ignore[attr-defined]
         try:
             # Check if XYZ Corp already exists
             result = await db.execute(

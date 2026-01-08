@@ -2,6 +2,7 @@
 // TIME TRACKER - VITEST SETUP
 // TASK-049: Frontend unit tests configuration
 // ============================================
+/// <reference types="@testing-library/jest-dom" />
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';

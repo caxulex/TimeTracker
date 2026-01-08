@@ -86,7 +86,10 @@ class EmailService:
         """Create a MIME message with HTML and optional text fallback"""
         msg = MIMEMultipart('alternative')
         msg['Subject'] = subject
-        msg['From'] = formataddr((self.from_name, self.from_email))
+        # Ensure from_name and from_email are strings for formataddr
+        from_name = self.from_name or 'Time Tracker'
+        from_email = self.from_email or ''
+        msg['From'] = formataddr((from_name, from_email))
         msg['To'] = to_email
         
         # Add plain text version (fallback)
@@ -156,10 +159,20 @@ class EmailService:
     
     def _send_smtp(self, msg: MIMEMultipart, to_email: str) -> None:
         """Synchronous SMTP send (called from thread pool)"""
+        # Type guards for SMTP configuration
+        if not self.smtp_server:
+            raise EmailConfigurationError("SMTP_SERVER not configured")
+        if not self.smtp_username:
+            raise EmailConfigurationError("SMTP_USERNAME not configured")
+        if not self.smtp_password:
+            raise EmailConfigurationError("SMTP_PASSWORD not configured")
+        
+        from_email = self.from_email or self.smtp_username
+        
         with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
             server.starttls()
             server.login(self.smtp_username, self.smtp_password)
-            server.sendmail(self.from_email, to_email, msg.as_string())
+            server.sendmail(from_email, to_email, msg.as_string())
     
     async def send_bulk_email(
         self,

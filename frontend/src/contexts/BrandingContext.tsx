@@ -120,28 +120,15 @@ export function BrandingProvider({ children }: BrandingProviderProps) {
 
 /**
  * Hook to access branding context
+ * Note: Hooks are allowed exports with Fast Refresh
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useBranding() {
   const context = useContext(BrandingContext);
   if (context === undefined) {
     throw new Error('useBranding must be used within a BrandingProvider');
   }
   return context;
-}
-
-/**
- * Get current branding values (for use outside React components)
- */
-export function getCurrentBranding(): WhiteLabelConfig {
-  const cached = localStorage.getItem('tt_branding_config');
-  if (cached) {
-    try {
-      return JSON.parse(cached);
-    } catch {
-      return DEFAULT_BRANDING;
-    }
-  }
-  return DEFAULT_BRANDING;
 }
 
 export default BrandingContext;

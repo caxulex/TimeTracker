@@ -8,7 +8,72 @@
 3. ✅ CI/CD pipeline fixes
 4. ✅ Production auth race condition fix
 5. ✅ Active timers data isolation fix for multi-tenancy
-6. ✅ XYZ Corp admin user created
+6. ✅ XYZ Corp admin user & team setup
+7. ✅ Database migration for teams.company_id
+8. ✅ White-label logout redirect fix (preserves company slug)
+
+---
+
+## 🔐 Session 4: White-Label Logout Redirect Fix
+
+### Issue Identified
+When signing out from XYZ Corp portal (`/xyz-corp`), users were redirected to `/login` (production login) instead of `/xyz-corp/login` (XYZ Corp login).
+
+### Changes Made
+
+#### 1. Frontend Routes (`App.tsx`)
+- Added `/:companySlug/login` route for white-label portals
+- Added `/:companySlug/register` route
+- Added `/:companySlug` redirect to `/:companySlug/login`
+- Created `getLoginPath()` helper to preserve company slug
+- Updated `ProtectedRoute`, `AdminRoute`, `SuperAdminRoute` to use `getLoginPath()`
+- Fixed: `company_admin` role now has access to `AdminRoute`
+
+#### 2. API Client (`api/client.ts`)
+- Updated `forceLogoutAndRedirect()` to check localStorage for company slug
+- Redirects to `/${companySlug}/login` when white-labeled
+
+#### 3. Login Page (`LoginPage.tsx`)
+- Added `useParams` to read `companySlug` from URL path
+- Priority: URL path param > query param > localStorage
+- Stores company slug in localStorage for logout redirect
+
+### Git Commit
+```
+fix(white-label): Preserve company slug on logout redirect
+- Add /:companySlug/login route for white-label portals
+- Update ProtectedRoute/AdminRoute to redirect to company-specific login
+- Update forceLogoutAndRedirect to preserve company slug
+- LoginPage now reads companySlug from URL path param
+- Store company slug in localStorage for logout redirect
+- Also allow company_admin role in AdminRoute
+```
+
+---
+
+## 🗄️ Session 3.5: Database Setup for XYZ Corp
+
+### Migration Run
+Ran pending migration on production to add `company_id` column to teams:
+```bash
+docker exec timetracker-backend alembic upgrade head
+# INFO: Running upgrade 010 -> 011, Add company_id to teams for multi-tenancy isolation
+```
+
+### XYZ Corp Team Created
+```sql
+INSERT INTO teams (name, company_id, owner_id, created_at, updated_at) 
+VALUES ('XYZ Team', 1, (SELECT id FROM users WHERE email = 'adminXYZ@xyz.com'), NOW(), NOW());
+```
+
+### Admin Added to Team
+```sql
+INSERT INTO team_members (team_id, user_id, role) 
+VALUES ((SELECT id FROM teams WHERE company_id = 1 LIMIT 1), 
+        (SELECT id FROM users WHERE email = 'adminXYZ@xyz.com'), 'admin');
+```
+
+**Result:** XYZ Corp users can now create projects (team dropdown shows "XYZ Team")
 
 ---
 
@@ -324,22 +389,27 @@ bc691ce fix: Add PYTHONPATH for backend tests in CI/CD
 |------|---------|
 | `backend/app/models/__init__.py` | Export new models |
 | `backend/app/main.py` | Register companies router |
-| `frontend/src/App.tsx` | Added BrandingProvider |
-| `frontend/src/pages/LoginPage.tsx` | Dynamic branding |
-| `frontend/src/api/client.ts` | Token refresh mutex |
+| `backend/app/routers/time_entries.py` | Company filtering for active timers |
+| `backend/app/routers/websocket.py` | Company filtering for WebSocket timers |
+| `frontend/src/App.tsx` | BrandingProvider + white-label routes + getLoginPath() |
+| `frontend/src/pages/LoginPage.tsx` | Dynamic branding + URL path param support |
+| `frontend/src/api/client.ts` | Token refresh mutex + company-aware logout redirect |
 | `.github/workflows/ci-cd.yml` | Enhanced pipeline |
 
 ---
 
 ## 🚀 Deployment
 
-**Production URL:** https://timetracker.shaemarcus.com  
-**Server:** AWS Lightsail (100.52.110.180)
+**Production URL:** https://timetracker.sytes.net  
+**XYZ Corp Portal:** https://timetracker.sytes.net/xyz-corp  
+**Server:** AWS Lightsail
 
 **Deploy Commands:**
 ```bash
-ssh ubuntu@100.52.110.180
-cd ~/timetracker && git pull && ./start-app.sh
+cd ~/timetracker
+git stash && git pull origin master
+chmod +x scripts/deploy-sequential.sh
+./scripts/deploy-sequential.sh
 ```
 
 ---
@@ -356,14 +426,27 @@ cd ~/timetracker && git pull && ./start-app.sh
 | CI/CD Pipeline | ✅ Passing |
 | Production Deploy | ✅ Working |
 | Auth Bug Fix | ✅ Resolved |
+| Active Timers Isolation | ✅ Complete |
+| XYZ Corp Team Setup | ✅ Complete |
+| White-label Logout Fix | ✅ Complete |
+
+---
+
+## 👥 XYZ Corp Test Accounts
+
+| Email | Password | Role |
+|-------|----------|------|
+| adminXYZ@xyz.com | adminXYZ | company_admin |
+| shaeadam@gmail.com | (unknown) | company_admin |
 
 ---
 
 ## 📝 Notes
 
-- **XYZ Corp Testing:** Visit `/login?company=xyz-corp` to test white-label branding
+- **XYZ Corp Portal:** Visit `https://timetracker.sytes.net/xyz-corp` for white-label login
 - **Auth Race Condition:** Fixed with mutex pattern - prevents multiple simultaneous token refreshes
-- **Debug Logs:** Temporarily added then removed after confirming fix
+- **Data Isolation:** XYZ Corp users only see XYZ Corp data (users, teams, projects, timers)
+- **Logout Redirect:** Now preserves company slug - XYZ users return to `/xyz-corp/login`
 - **All phases now complete** - TimeTracker is fully resale-ready
 
 ---
