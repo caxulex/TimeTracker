@@ -613,7 +613,108 @@ Deployment:   ✅ DEPLOYED TO PRODUCTION
 
 ---
 
+## 🛠️ LATE SESSION - XYZ WHITE-LABEL FIXES
+
+### Critical Bugs Fixed During Manual Testing
+
+#### Bug 1: XYZ Admin Role Access Blocked (Frontend)
+**Issue:** Company admin users (like `xyzcorp_admin`) were blocked from accessing admin features because frontend only checked for `role === 'admin'` or `role === 'super_admin'`, not `company_admin`.
+
+**Solution:** Created unified role checking helpers in `frontend/src/utils/helpers.ts`:
+```typescript
+export function isAdminUser(user: User | null): boolean {
+  return user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'company_admin';
+}
+
+export function isSuperAdmin(user: User | null): boolean {
+  return user?.role === 'super_admin';
+}
+```
+
+**Files Updated (16+ pages):**
+- `Sidebar.tsx` (line 225)
+- `AdminPage.tsx`, `StaffPage.tsx`, `StaffDetailPage.tsx`
+- `AdminTimeEntriesPage.tsx`, `TeamsPage.tsx`, `AdminSettingsPage.tsx`
+- `AdminReportsPage.tsx`, `ReportsPage.tsx`, `DashboardPage.tsx`
+- And 7 more pages
+
+#### Bug 2: Backend `require_role()` Blocking company_admin
+**Issue:** Backend dependency `require_role("admin")` didn't recognize `company_admin` as admin-equivalent.
+
+**Solution:** Updated `backend/app/dependencies.py`:
+```python
+def require_role(*allowed_roles):
+    async def dependency(current_user: User = Depends(get_current_user)):
+        # Treat company_admin as equivalent to admin for role checks
+        effective_role = current_user.role
+        if "admin" in allowed_roles and current_user.role == "company_admin":
+            effective_role = "admin"
+        # ... role check logic
+```
+
+**Backend Routers Updated (11 files):**
+- `anomalies.py`, `ai.py`, `users.py`, `teams.py`
+- `projects.py`, `tasks.py`, `admin.py`
+- `pay_rates.py`, `payroll.py`, `payroll_reports.py`
+- `time_entries.py`
+
+#### Bug 3: Infinite Branding Loop (HTTP 429)
+**Issue:** BrandingContext caused infinite re-renders due to `setCompany` function reference changing on every render, triggering useEffect endlessly. This caused HTTP 429 (Too Many Requests).
+
+**Root Cause:** `setCompany` was in useEffect dependencies but wasn't memoized with useCallback.
+
+**Solution (Multi-layered):**
+1. **Rate Limiting:** Added to `brandingService.ts`:
+   ```typescript
+   const RATE_LIMIT = { maxRequests: 5, windowMs: 60000 };
+   ```
+
+2. **Memoized Functions:** In `BrandingContext.tsx`:
+   ```typescript
+   const setCompany = useCallback((company: Company | null) => { ... }, []);
+   const clearBranding = useCallback(() => { ... }, []);
+   const refreshBranding = useCallback(async (slug: string) => { ... }, []);
+   ```
+
+3. **Fetch Tracking:** Added `lastFetchedSlugRef` and `loadAttempted` flag to prevent duplicate fetches.
+
+4. **Fixed useEffect Dependencies:** Removed `setCompany` from dependencies in `LoginPage.tsx`.
+
+#### Bug 4: Payroll Data Leaking Between Companies
+**Issue:** XYZ Corp admin could see production company's payroll data (Staff names from main company).
+
+**Solution:** Added company_id filtering throughout payroll system:
+
+**Files Modified:**
+- `backend/app/services/payroll_service.py` - `get_all_pay_rates()` and `get_periods()` filter by company_id
+- `backend/app/services/payroll_report_service.py` - `get_payables_report()` filters by company_id
+- `backend/app/schemas/payroll.py` - Added `company_id` to `PayrollReportFilters`
+- `backend/app/routers/pay_rates.py` - Passes company_id for non-super admins
+- `backend/app/routers/payroll.py` - Passes company_id for non-super admins
+- `backend/app/routers/payroll_reports.py` - All 4 endpoints pass company_id filter
+
+### Commits Made (Late Session)
+
+| Commit | Description |
+|--------|-------------|
+| `c3b39f0` | fix: add isAdminUser helper and update pages for company_admin role |
+| `a1f2e8c` | fix: update backend require_role to treat company_admin as admin |
+| `d5e4b3a` | fix: infinite branding loop with useCallback and rate limiting |
+| `7d56331` | fix: payroll multi-tenancy - filter data by company_id |
+
+### Testing Verification
+
+After all fixes:
+- ✅ XYZ admin can access all admin pages
+- ✅ Sidebar shows all admin menu items
+- ✅ No more HTTP 429 errors
+- ✅ Payroll pages only show XYZ Corp staff
+- ✅ AI features accessible to company_admin
+- ✅ Logout redirects correctly to white-label login
+
+---
+
 *Assessment Created: January 8, 2026*  
-*Assessment Updated: January 8, 2026 (Evening) - Post Test Fixes*  
-*Assessment Version: 3.0*  
+*Assessment Updated: January 8, 2026 (Late Evening) - XYZ White-Label Fixes*  
+*Assessment Version: 4.0*  
 *Reviewer: GitHub Copilot*
