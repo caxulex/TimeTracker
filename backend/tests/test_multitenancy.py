@@ -161,14 +161,18 @@ class TestUserDataIsolation:
         
         # Should succeed
         assert response.status_code == 200
-        users = response.json()
+        data = response.json()
+        
+        # Handle both wrapped (dict with items) and unwrapped (list) responses
+        users = data.get("items", data) if isinstance(data, dict) else data
         
         # All returned users should be from company 1 (or no company filter if endpoint doesn't filter)
         # This depends on implementation - check if any users from other companies
-        for user in users:
-            if user.get("company_id") is not None:
-                # If company_id is returned and not null, should match user's company
-                pass  # Implementation-specific
+        if isinstance(users, list):
+            for user in users:
+                if user.get("company_id") is not None:
+                    # If company_id is returned and not null, should match user's company
+                    pass  # Implementation-specific
 
 
 class TestTeamDataIsolation:
@@ -180,7 +184,7 @@ class TestTeamDataIsolation:
     ):
         """Creating a team should assign the user's company_id."""
         response = await client.post(
-            "/api/teams/",
+            "/api/teams",
             headers=company1_headers,
             json={"name": f"Company 1 Team {uuid.uuid4().hex[:6]}"}
         )
@@ -204,7 +208,10 @@ class TestActiveTimersIsolation:
         response = await client.get("/api/ws/active-timers", headers=company1_headers)
         
         assert response.status_code == 200
-        timers = response.json()
+        data = response.json()
+        
+        # Handle wrapped response (dict with timers key) or raw list
+        timers = data.get("timers", data) if isinstance(data, dict) else data
         
         # All returned timers should be from the user's company
         assert isinstance(timers, list)
@@ -219,10 +226,13 @@ class TestProjectDataIsolation:
         self, client: AsyncClient, company1_headers: dict
     ):
         """Projects list should only show projects from company's teams."""
-        response = await client.get("/api/projects/", headers=company1_headers)
+        response = await client.get("/api/projects", headers=company1_headers)
         
         assert response.status_code == 200
-        projects = response.json()
+        data = response.json()
+        
+        # Handle wrapped response (dict with items) or raw list
+        projects = data.get("items", data) if isinstance(data, dict) else data
         
         # Should be a list (even if empty)
         assert isinstance(projects, list)
@@ -240,7 +250,10 @@ class TestPlatformAdminAccess:
         
         # Should succeed
         assert response.status_code == 200
-        users = response.json()
+        data = response.json()
+        
+        # Handle wrapped response (dict with items) or raw list
+        users = data.get("items", data) if isinstance(data, dict) else data
         
         # Should be a list
         assert isinstance(users, list)
@@ -253,7 +266,10 @@ class TestPlatformAdminAccess:
         response = await client.get("/api/ws/active-timers", headers=platform_admin_headers)
         
         assert response.status_code == 200
-        timers = response.json()
+        data = response.json()
+        
+        # Handle wrapped response (dict with timers) or raw list
+        timers = data.get("timers", data) if isinstance(data, dict) else data
         
         # Should be a list
         assert isinstance(timers, list)
@@ -273,7 +289,7 @@ class TestCompanyCrossAccess:
         """User from company 1 should not access company 2's team details."""
         # Create a team for company 2
         response = await client.post(
-            "/api/teams/",
+            "/api/teams",
             headers=company2_headers,
             json={"name": f"Company 2 Private Team {uuid.uuid4().hex[:6]}"}
         )

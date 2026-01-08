@@ -82,12 +82,13 @@ class TestForgotPassword:
         assert response.status_code == 422
 
     @pytest.mark.asyncio
-    @skip_without_redis
     async def test_forgot_password_rate_limited(self, client: AsyncClient, test_user: User):
         """Test that forgot password is rate limited."""
         # Mock both email service and invitation service to avoid Redis issues
-        with patch('app.services.email_service.EmailService.send_password_reset_email', new_callable=AsyncMock) as mock_email:
+        with patch('app.services.email_service.EmailService.send_password_reset_email', new_callable=AsyncMock) as mock_email, \
+             patch('app.services.invitation_service.InvitationService.create_reset_token', new_callable=AsyncMock) as mock_token:
             mock_email.return_value = True
+            mock_token.return_value = "mock-reset-token-12345"
             
             # Make multiple requests quickly
             for _ in range(10):
@@ -201,16 +202,17 @@ class TestPasswordResetIntegration:
     """Integration tests for full password reset flow."""
 
     @pytest.mark.asyncio
-    @skip_without_redis
     async def test_full_password_reset_flow(
         self, client: AsyncClient, test_user: User, db_session: AsyncSession
     ):
         """Test complete password reset flow if endpoints exist."""
         original_email = test_user.email
         
-        # Step 1: Request password reset
-        with patch('app.services.email_service.EmailService.send_password_reset_email', new_callable=AsyncMock) as mock_email:
+        # Step 1: Request password reset - mock both email and invitation service
+        with patch('app.services.email_service.EmailService.send_password_reset_email', new_callable=AsyncMock) as mock_email, \
+             patch('app.services.invitation_service.InvitationService.create_reset_token', new_callable=AsyncMock) as mock_token:
             mock_email.return_value = True
+            mock_token.return_value = "mock-reset-token-12345"
             
             forgot_response = await client.post(
                 "/api/auth/forgot-password",
@@ -225,7 +227,6 @@ class TestPasswordResetIntegration:
             # access to the actual token generation.
 
     @pytest.mark.asyncio
-    @skip_without_redis
     async def test_login_after_password_change(
         self, client: AsyncClient, test_user: User
     ):
