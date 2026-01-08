@@ -9,7 +9,7 @@ import logging
 import asyncio
 from datetime import datetime
 
-from app.dependencies import get_current_user_ws
+from app.dependencies import get_current_user_ws, get_current_user
 from app.models import User
 
 logger = logging.getLogger(__name__)
@@ -334,7 +334,7 @@ async def handle_message(websocket: WebSocket, user: User, data: dict):
 @router.get("/active-timers")
 async def get_active_timers(
     team_id: Optional[int] = None,
-    current_user: User = Depends(get_current_user_ws)
+    current_user: User = Depends(get_current_user)
 ):
     """Get list of currently active timers with company filtering"""
     # Apply company filter for multi-tenant isolation
@@ -349,7 +349,7 @@ async def get_active_timers(
 @router.get("/online-users")
 async def get_online_users(
     team_id: Optional[int] = None,
-    current_user: User = Depends(get_current_user_ws)
+    current_user: User = Depends(get_current_user)
 ):
     """Get list of currently online users"""
     return {

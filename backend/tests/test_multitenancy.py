@@ -48,7 +48,7 @@ async def company1(db_session: AsyncSession) -> Company:
         name="Test Company 1",
         slug="test-company-1",
         email="company1@example.com",
-        is_active=True,
+        status="active",
     )
     db_session.add(company)
     await db_session.flush()
@@ -63,7 +63,7 @@ async def company2(db_session: AsyncSession) -> Company:
         name="Test Company 2",
         slug="test-company-2",
         email="company2@example.com",
-        is_active=True,
+        status="active",
     )
     db_session.add(company)
     await db_session.flush()
@@ -157,7 +157,7 @@ class TestUserDataIsolation:
         self, client: AsyncClient, company1_headers: dict, company1_user: User
     ):
         """Company 1 user should only see company 1 users."""
-        response = await client.get("/api/users/", headers=company1_headers)
+        response = await client.get("/api/users", headers=company1_headers)
         
         # Should succeed
         assert response.status_code == 200
@@ -236,7 +236,7 @@ class TestPlatformAdminAccess:
         self, client: AsyncClient, platform_admin_headers: dict
     ):
         """Platform super admin should see users from all companies."""
-        response = await client.get("/api/users/", headers=platform_admin_headers)
+        response = await client.get("/api/users", headers=platform_admin_headers)
         
         # Should succeed
         assert response.status_code == 200

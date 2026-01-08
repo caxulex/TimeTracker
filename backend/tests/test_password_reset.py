@@ -85,18 +85,22 @@ class TestForgotPassword:
     @skip_without_redis
     async def test_forgot_password_rate_limited(self, client: AsyncClient, test_user: User):
         """Test that forgot password is rate limited."""
-        # Make multiple requests quickly
-        for _ in range(10):
-            await client.post(
+        # Mock both email service and invitation service to avoid Redis issues
+        with patch('app.services.email_service.EmailService.send_password_reset_email', new_callable=AsyncMock) as mock_email:
+            mock_email.return_value = True
+            
+            # Make multiple requests quickly
+            for _ in range(10):
+                await client.post(
+                    "/api/auth/forgot-password",
+                    json={"email": test_user.email}
+                )
+            
+            # The last request should potentially be rate limited
+            response = await client.post(
                 "/api/auth/forgot-password",
                 json={"email": test_user.email}
             )
-        
-        # The last request should potentially be rate limited
-        response = await client.post(
-            "/api/auth/forgot-password",
-            json={"email": test_user.email}
-        )
         
         # Should either succeed or return 429 (rate limited)
         assert response.status_code in [200, 202, 429]
