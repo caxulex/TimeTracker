@@ -319,6 +319,7 @@ class PayrollReportFilters(BaseModel):
     user_id: Optional[int] = None
     status: Optional[PeriodStatusEnum] = None
     period_type: Optional[PeriodTypeEnum] = None
+    company_id: Optional[int] = None  # For multi-tenancy filtering
 
 
 class PayablesDepartmentReport(BaseModel):

@@ -78,8 +78,12 @@ async def get_payables_report(
 ):
     """
     Generate comprehensive report for payables department.
-    Admin only.
+    Admin only. Filtered by company for non-super admins.
     """
+    # Set company_id filter for non-super admins
+    if current_user.role != 'super_admin':
+        filters.company_id = current_user.company_id
+    
     service = PayrollReportService(db)
     report = await service.get_payables_report(filters)
     return report
@@ -98,15 +102,19 @@ async def get_payables_report_query(
 ):
     """
     Generate comprehensive report for payables department using query parameters.
-    Admin only.
+    Admin only. Filtered by company for non-super admins.
     """
+    # Set company_id filter for non-super admins
+    company_id = None if current_user.role == 'super_admin' else current_user.company_id
+    
     filters = PayrollReportFilters(
         period_id=period_id,
         user_id=user_id,
         status=status,
         period_type=period_type,
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
+        company_id=company_id
     )
     
     service = PayrollReportService(db)
@@ -127,15 +135,19 @@ async def export_payables_csv(
 ):
     """
     Export payables report as CSV.
-    Admin only.
+    Admin only. Filtered by company for non-super admins.
     """
+    # Set company_id filter for non-super admins
+    company_id = None if current_user.role == 'super_admin' else current_user.company_id
+    
     filters = PayrollReportFilters(
         period_id=period_id,
         user_id=user_id,
         status=status,
         period_type=period_type,
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
+        company_id=company_id
     )
     
     service = PayrollReportService(db)
@@ -166,15 +178,19 @@ async def export_payables_excel(
 ):
     """
     Export payables report as Excel file.
-    Admin only.
+    Admin only. Filtered by company for non-super admins.
     """
+    # Set company_id filter for non-super admins
+    company_id = None if current_user.role == 'super_admin' else current_user.company_id
+    
     filters = PayrollReportFilters(
         period_id=period_id,
         user_id=user_id,
         status=status,
         period_type=period_type,
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
+        company_id=company_id
     )
     
     service = PayrollReportService(db)

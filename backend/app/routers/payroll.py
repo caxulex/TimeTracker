@@ -76,10 +76,12 @@ async def list_payroll_periods(
 ):
     """
     List all payroll periods with pagination.
-    Admin only.
+    Admin only. Filtered by company for non-super admins.
     """
     service = PayrollPeriodService(db)
-    periods, total = await service.get_periods(skip, limit, status)
+    # Filter by company_id for non-super admins
+    company_id = None if current_user.role == 'super_admin' else current_user.company_id
+    periods, total = await service.get_periods(skip, limit, status, company_id)
     
     return {
         "items": [

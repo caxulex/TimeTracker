@@ -47,10 +47,12 @@ async def list_pay_rates(
 ):
     """
     List all pay rates with pagination.
-    Admin only.
+    Admin only. Filtered by company for non-super admins.
     """
     service = PayRateService(db)
-    pay_rates, total = await service.get_all_pay_rates(skip, limit, active_only)
+    # Filter by company_id for non-super admins
+    company_id = None if current_user.role == 'super_admin' else current_user.company_id
+    pay_rates, total = await service.get_all_pay_rates(skip, limit, active_only, company_id)
     
     return {
         "items": [

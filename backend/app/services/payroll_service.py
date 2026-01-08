@@ -109,21 +109,31 @@ class PayRateService:
         self, 
         skip: int = 0, 
         limit: int = 100,
-        active_only: bool = True
+        active_only: bool = True,
+        company_id: Optional[int] = None
     ) -> Tuple[List[PayRate], int]:
-        """Get all pay rates with pagination"""
+        """Get all pay rates with pagination, optionally filtered by company_id"""
         conditions = []
         if active_only:
             conditions.append(PayRate.is_active == True)
         
-        # Get total count
-        count_stmt = select(func.count(PayRate.id))
+        # Filter by company_id via User relationship
+        if company_id is not None:
+            conditions.append(User.company_id == company_id)
+        
+        # Get total count with User join for company filtering
+        if company_id is not None:
+            count_stmt = select(func.count(PayRate.id)).join(User, PayRate.user_id == User.id)
+        else:
+            count_stmt = select(func.count(PayRate.id))
         if conditions:
             count_stmt = count_stmt.where(and_(*conditions))
         total = (await self.db.execute(count_stmt)).scalar() or 0
         
-        # Get paginated results
+        # Get paginated results with User join
         stmt = select(PayRate).options(selectinload(PayRate.user))
+        if company_id is not None:
+            stmt = stmt.join(User, PayRate.user_id == User.id)
         if conditions:
             stmt = stmt.where(and_(*conditions))
         stmt = stmt.order_by(PayRate.created_at.desc()).offset(skip).limit(limit)
@@ -241,12 +251,24 @@ class PayrollPeriodService:
         self,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[PeriodStatusEnum] = None
+        status: Optional[PeriodStatusEnum] = None,
+        company_id: Optional[int] = None
     ) -> Tuple[List[PayrollPeriod], int]:
-        """Get all payroll periods with pagination"""
+        """Get all payroll periods with pagination, optionally filtered by company_id"""
         conditions = []
         if status:
             conditions.append(PayrollPeriod.status == status.value)
+        
+        # Filter by company_id via PayrollEntry -> User relationship
+        if company_id is not None:
+            # Get period IDs that have at least one entry for a user in this company
+            subquery = (
+                select(PayrollEntry.payroll_period_id)
+                .join(User, PayrollEntry.user_id == User.id)
+                .where(User.company_id == company_id)
+                .distinct()
+            )
+            conditions.append(PayrollPeriod.id.in_(subquery))
         
         # Get total count
         count_stmt = select(func.count(PayrollPeriod.id))

@@ -164,6 +164,9 @@ class PayrollReportService:
             for entry in period.entries:
                 if filters.user_id and entry.user_id != filters.user_id:
                     continue
+                # Filter by company_id if specified
+                if filters.company_id is not None and entry.user and entry.user.company_id != filters.company_id:
+                    continue
                 
                 # Get user's rate type from their active pay rate
                 rate_type = None
