@@ -111,19 +111,22 @@ class TestResetPassword:
     """Test password reset endpoint."""
 
     @pytest.mark.asyncio
-    @skip_without_redis
     async def test_reset_password_with_invalid_token(self, client: AsyncClient):
         """Test reset password with invalid token."""
-        response = await client.post(
-            "/api/auth/reset-password",
-            json={
-                "token": "invalid-token-12345",
-                "new_password": "NewSecurePass123!"
-            }
-        )
-        
-        # Should return error for invalid token
-        assert response.status_code in [400, 401, 404]
+        # Mock invitation service to avoid Redis event loop issues
+        with patch('app.services.invitation_service.InvitationService.get_reset_token', new_callable=AsyncMock) as mock_get_token:
+            mock_get_token.return_value = None  # Invalid token returns None
+            
+            response = await client.post(
+                "/api/auth/reset-password",
+                json={
+                    "token": "invalid-token-12345",
+                    "new_password": "NewSecurePass123!"
+                }
+            )
+            
+            # Should return error for invalid token
+            assert response.status_code in [400, 401, 404]
 
     @pytest.mark.asyncio
     async def test_reset_password_with_weak_password(self, client: AsyncClient):
