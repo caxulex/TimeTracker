@@ -54,6 +54,13 @@ const BRANDING_CACHE_KEY = 'tt_branding_config';
 const COMPANY_SLUG_KEY = 'tt_company_slug';
 
 /**
+ * Rate limiting for branding requests
+ */
+const RATE_LIMIT_KEY = 'tt_branding_rate_limit';
+const RATE_LIMIT_WINDOW = 60000; // 1 minute
+const MAX_REQUESTS_PER_WINDOW = 5;
+
+/**
  * Known base domains - requests from these domains are NOT white-labeled
  * Add your production domain(s) here
  */
@@ -155,6 +162,28 @@ export function clearCompanySlug(): void {
  */
 export async function fetchBranding(slugOrDomain: string): Promise<WhiteLabelConfig | null> {
   try {
+    // Rate limiting check
+    const rateLimitData = localStorage.getItem(RATE_LIMIT_KEY);
+    if (rateLimitData) {
+      const { timestamp, count } = JSON.parse(rateLimitData);
+      const now = Date.now();
+      
+      if (now - timestamp < RATE_LIMIT_WINDOW) {
+        if (count >= MAX_REQUESTS_PER_WINDOW) {
+          console.warn(`Rate limit exceeded for branding requests. Try again in ${Math.ceil((RATE_LIMIT_WINDOW - (now - timestamp)) / 1000)}s`);
+          return getCachedBranding();
+        }
+        // Increment count
+        localStorage.setItem(RATE_LIMIT_KEY, JSON.stringify({ timestamp, count: count + 1 }));
+      } else {
+        // Reset window
+        localStorage.setItem(RATE_LIMIT_KEY, JSON.stringify({ timestamp: now, count: 1 }));
+      }
+    } else {
+      // Initialize rate limit tracking
+      localStorage.setItem(RATE_LIMIT_KEY, JSON.stringify({ timestamp: Date.now(), count: 1 }));
+    }
+
     let endpoint: string;
     
     // Check if this is a custom domain lookup (domain:hostname format)

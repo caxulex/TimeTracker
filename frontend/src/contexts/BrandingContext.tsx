@@ -36,11 +36,16 @@ export function BrandingProvider({ children }: BrandingProviderProps) {
   const [companySlug, setSlug] = useState<string | null>(getCompanySlug());
   const [isLoading, setIsLoading] = useState(true);
   const [isWhiteLabeled, setIsWhiteLabeled] = useState(false);
+  const [loadAttempted, setLoadAttempted] = useState(false);
 
   // Initialize branding on mount
   useEffect(() => {
+    // Only attempt to load branding once to prevent infinite loops
+    if (loadAttempted) return;
+
     async function loadBranding() {
       setIsLoading(true);
+      setLoadAttempted(true);
       try {
         const config = await initializeBranding();
         if (config) {
@@ -50,13 +55,15 @@ export function BrandingProvider({ children }: BrandingProviderProps) {
         }
       } catch (error) {
         console.error('Failed to load branding:', error);
+        // Use default branding on error - don't retry
+        setBranding(DEFAULT_BRANDING);
       } finally {
         setIsLoading(false);
       }
     }
     
     loadBranding();
-  }, []);
+  }, [loadAttempted]);
 
   // Set company and fetch branding
   const setCompany = async (slug: string) => {
@@ -70,9 +77,15 @@ export function BrandingProvider({ children }: BrandingProviderProps) {
         setBranding(config);
         applyBrandingToDocument(config);
         setIsWhiteLabeled(true);
+      } else {
+        // If fetch failed, try to use default branding
+        console.warn('Using default branding due to fetch failure');
+        setBranding(DEFAULT_BRANDING);
       }
     } catch (error) {
       console.error('Failed to fetch branding:', error);
+      // Use default branding on error
+      setBranding(DEFAULT_BRANDING);
     } finally {
       setIsLoading(false);
     }
