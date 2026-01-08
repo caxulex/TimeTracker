@@ -103,9 +103,17 @@ async def get_current_admin_user(
 
 
 def require_role(allowed_roles: list[str]):
-    """Dependency factory for role-based access control"""
+    """Dependency factory for role-based access control.
+    
+    Note: company_admin is treated as equivalent to admin for permission checks.
+    """
     async def role_checker(current_user: User = Depends(get_current_user)) -> User:
-        if current_user.role not in allowed_roles:
+        user_role = current_user.role
+        # Treat company_admin as equivalent to admin for permission purposes
+        effective_role = 'admin' if user_role == 'company_admin' else user_role
+        
+        # Check both the actual role and effective role
+        if user_role not in allowed_roles and effective_role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not enough permissions"
