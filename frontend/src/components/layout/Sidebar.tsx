@@ -222,7 +222,7 @@ interface SidebarProps {
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { user } = useAuthStore();
   const { branding } = useBranding();
-  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const isAdmin = isAdminUser(user);
   const [payrollExpanded, setPayrollExpanded] = useState(false);
   const [analyticsExpanded, setAnalyticsExpanded] = useState(true);
   const [aiInsightsExpanded, setAiInsightsExpanded] = useState(false);
