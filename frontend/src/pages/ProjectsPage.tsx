@@ -5,7 +5,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, Button, Input, Modal, LoadingOverlay } from '../components/common';
 import { projectsApi, teamsApi } from '../api/client';
-import { formatDate, cn, generateRandomColor } from '../utils/helpers';
+import { formatDate, cn, generateRandomColor, isAdminUser } from '../utils/helpers';
 import { useAuth } from '../hooks/useAuth';
 import { useNotifications } from '../hooks/useNotifications';
 import { useFeatureEnabled } from '../hooks/useAIFeatures';
@@ -16,7 +16,7 @@ export function ProjectsPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const { addNotification } = useNotifications();
-  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const isAdmin = isAdminUser(user);
   const { data: projectHealthEnabled } = useFeatureEnabled('ai_report_summaries');
   const [selectedProjectForHealth, setSelectedProjectForHealth] = useState<Project | null>(null);
 

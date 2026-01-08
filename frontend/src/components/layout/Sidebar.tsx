@@ -3,7 +3,7 @@
 // ============================================
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { cn } from '../../utils/helpers';
+import { cn, isAdminUser, isSuperAdmin } from '../../utils/helpers';
 import { useAuthStore } from '../../stores/authStore';
 import { useFeatureEnabled } from '../../hooks/useAIFeatures';
 import { useBranding } from '../../contexts/BrandingContext';
@@ -558,7 +558,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           )}
 
           {/* Admin Settings (Super Admin only - API Keys) */}
-          {user?.role === 'super_admin' && (
+          {isSuperAdmin(user) && (
             <NavLink
               to="/admin/settings"
               onClick={onClose}

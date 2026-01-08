@@ -317,3 +317,4 @@ function StatCard({ title, value, icon, color }: StatCardProps) {
     </Card>
   );
 }
+

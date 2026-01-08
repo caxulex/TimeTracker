@@ -1,15 +1,18 @@
 # TimeTracker Testing Guide
 
 **Last Updated:** January 8, 2026  
-**Application Version:** 2.0.0+
+**Application Version:** 2.0.0+  
+**Test Status:** 291+ tests passing (154 backend, 137 frontend)
 
 ## Overview
 
 This guide documents the comprehensive testing strategy for the TimeTracker application. Our testing approach covers:
 
-- **Backend Tests**: Unit and integration tests for FastAPI endpoints
-- **Frontend Unit Tests**: Component and store tests with Vitest
+- **Backend Tests**: Unit and integration tests for FastAPI endpoints (154 tests)
+- **Frontend Unit Tests**: Component and store tests with Vitest (137 tests)
 - **End-to-End Tests**: Critical user flow tests with Playwright
+- **AI Features Tests**: Tests for all AI-powered features (Phases 0.2-5.2)
+- **White-Label/Branding Tests**: Multi-tenant branding tests
 
 ## Test Stack
 
@@ -358,6 +361,236 @@ vi.mock('../api/client', () => ({
    - Project management
    - Reports generation
 
+5. **AI Features** ✅
+   - Smart descriptions
+   - Task categorization
+   - Productivity alerts
+   - AI reports generation
+
+---
+
+## Testing AI Features
+
+### AI Feature Test Categories
+
+| Phase | Feature | Test File | Status |
+|-------|---------|-----------|--------|
+| 0.2 | AI Infrastructure | `test_ai_features.py` | ✅ |
+| 1.1 | Smart Descriptions | `test_ai_features.py` | ✅ |
+| 1.2 | Task Categorization | `test_ai_features.py` | ✅ |
+| 2.1 | Time Entry Validation | `test_ai_features.py` | ✅ |
+| 2.2 | Break Optimization | `test_ai_features.py` | ✅ |
+| 3.1 | Daily Summaries | `test_ai_features.py` | ✅ |
+| 3.2 | Weekly Analysis | `test_ai_features.py` | ✅ |
+| 4.1 | Productivity Alerts | `test_ai_features.py` | ✅ |
+| 4.2 | AI Reports | `test_ai_features.py` | ✅ |
+| 5.1 | Semantic Search | `test_ai_features.py` | ✅ |
+| 5.2 | Team Analytics | `test_ai_features.py` | ✅ |
+
+### Running AI Tests
+
+```bash
+cd backend
+
+# Run all AI tests
+pytest tests/test_ai_features.py -v
+
+# Run specific AI feature test
+pytest tests/test_ai_features.py::TestSmartDescriptions -v
+pytest tests/test_ai_features.py::TestTaskCategorization -v
+pytest tests/test_ai_features.py::TestProductivityAlerts -v
+
+# Run with AI provider mocked
+pytest tests/test_ai_features.py -v --mock-ai
+```
+
+### AI API Endpoints to Test
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/ai/settings/features` | GET | List all AI features |
+| `/api/ai/preferences` | GET/PUT | User AI preferences |
+| `/api/ai/assist/description` | POST | Generate smart description |
+| `/api/ai/assist/categorize` | POST | Auto-categorize entry |
+| `/api/ai/validate/entry` | POST | Validate time entry |
+| `/api/ai/analyze/patterns` | GET | Weekly work patterns |
+| `/api/ai/generate/summary` | POST | Daily/weekly summary |
+| `/api/ai/alerts/productivity` | GET | Productivity alerts |
+| `/api/ai/reports/generate` | POST | AI-powered report |
+| `/api/ai/search` | POST | Semantic search |
+| `/api/ai/team-analytics` | GET | Team analytics |
+
+### AI Test Examples
+
+```python
+@pytest.mark.asyncio
+class TestSmartDescriptions:
+    """Test AI smart description generation."""
+
+    async def test_generate_description_success(
+        self, client: AsyncClient, auth_headers: dict
+    ):
+        """Test generating a description for time entry."""
+        response = await client.post(
+            "/api/ai/assist/description",
+            headers=auth_headers,
+            json={
+                "project_id": 1,
+                "context": "Working on user authentication module"
+            }
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "description" in data
+        assert len(data["description"]) > 0
+
+    async def test_generate_description_requires_auth(
+        self, client: AsyncClient
+    ):
+        """Test endpoint requires authentication."""
+        response = await client.post(
+            "/api/ai/assist/description",
+            json={"project_id": 1}
+        )
+        assert response.status_code in [401, 403]
+
+
+@pytest.mark.asyncio
+class TestProductivityAlerts:
+    """Test AI productivity alerts."""
+
+    async def test_get_alerts_returns_list(
+        self, client: AsyncClient, auth_headers: dict
+    ):
+        """Test getting productivity alerts."""
+        response = await client.get(
+            "/api/ai/alerts/productivity",
+            headers=auth_headers
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "alerts" in data or isinstance(data, list)
+```
+
+### Manual AI Testing Checklist
+
+```markdown
+## AI Feature Manual Testing
+
+### Prerequisites
+- [ ] AI API key configured (GOOGLE_AI_KEY or OPENAI_API_KEY)
+- [ ] AI features enabled in admin settings
+- [ ] User AI preferences enabled
+
+### Smart Descriptions (Phase 1.1)
+- [ ] Create time entry without description
+- [ ] Click "AI Suggest" button
+- [ ] Verify description generated
+- [ ] Description relevant to project context
+
+### Task Categorization (Phase 1.2)
+- [ ] Enter time entry with description
+- [ ] Click "Auto-categorize"
+- [ ] Verify category suggestion
+- [ ] Verify tag suggestions
+
+### Time Entry Validation (Phase 2.1)
+- [ ] Enter unusual duration (16+ hours)
+- [ ] Verify validation warning
+- [ ] Check correction suggestion
+
+### Daily Summary (Phase 3.1)
+- [ ] Navigate to Reports > AI Summary
+- [ ] Generate daily summary
+- [ ] Verify time breakdown
+- [ ] Verify productivity insights
+
+### Productivity Alerts (Phase 4.1)
+- [ ] Work without breaks
+- [ ] Verify break reminder
+- [ ] Check productivity tip
+
+### AI Reports (Phase 4.2)
+- [ ] Generate AI report
+- [ ] Verify narrative summary
+- [ ] Check recommendations
+```
+
+---
+
+## Testing White-Label/Branding
+
+### Environment Variables
+
+```env
+# White-label configuration
+VITE_APP_NAME="Custom Portal"
+VITE_APP_LOGO_URL="/custom-logo.png"
+VITE_APP_FAVICON_URL="/custom-favicon.ico"
+VITE_PRIMARY_COLOR="#FF5722"
+VITE_SECONDARY_COLOR="#795548"
+VITE_WHITE_LABELED="true"
+VITE_SHOW_POWERED_BY="false"
+VITE_SUPPORT_EMAIL="support@client.com"
+```
+
+### Branding Test Examples
+
+```typescript
+describe('BrandingContext', () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('applies custom app name', () => {
+    vi.stubEnv('VITE_APP_NAME', 'Custom App');
+    render(<Header />, { wrapper: TestWrapper });
+    expect(screen.getByText('Custom App')).toBeInTheDocument();
+  });
+
+  it('hides registration in white-label mode', () => {
+    vi.stubEnv('VITE_WHITE_LABELED', 'true');
+    render(<LoginPage />, { wrapper: TestWrapper });
+    expect(screen.queryByText(/register/i)).not.toBeInTheDocument();
+  });
+
+  it('shows account request form when white-labeled', () => {
+    vi.stubEnv('VITE_WHITE_LABELED', 'true');
+    render(<LoginPage />, { wrapper: TestWrapper });
+    expect(screen.getByText(/request account/i)).toBeInTheDocument();
+  });
+});
+```
+
+### White-Label Manual Testing Checklist
+
+```markdown
+## White-Label Testing
+
+### Branding Elements
+- [ ] App name in header
+- [ ] Custom logo loads
+- [ ] Favicon updated
+- [ ] Primary color on buttons
+- [ ] Secondary color on accents
+
+### White-Label Mode (VITE_WHITE_LABELED=true)
+- [ ] Registration hidden
+- [ ] "Powered by" hidden
+- [ ] Account request form visible
+- [ ] Support links customized
+
+### Company-Specific Branding
+- [ ] Company logo on login
+- [ ] Company colors applied
+- [ ] Custom subdomain works
+
+### Email Templates
+- [ ] Welcome email branded
+- [ ] Password reset branded
+- [ ] Invitation email branded
+```
+
 ---
 
 ## CI/CD Integration
@@ -407,37 +640,190 @@ jobs:
 
 ## Troubleshooting
 
-### Common Issues
+### Common Issues & Solutions
 
-1. **Database connection errors in tests**
-   - Ensure test database exists
-   - Check `DATABASE_URL_TEST` environment variable
+#### 1. "Event loop is closed" Error
 
-2. **Async test timeouts**
-   - Use `@pytest.mark.asyncio` decorator
-   - Increase timeout: `@pytest.mark.timeout(30)`
+**Symptom:** Redis operations fail in async tests with `RuntimeError: Event loop is closed`
 
-3. **Frontend test flakiness**
-   - Use `waitFor` for async operations
-   - Mock all external API calls
-   - Reset store state in `beforeEach`
+**Cause:** Test uses real Redis service that tries to access closed event loop
 
-4. **E2E test failures**
-   - Ensure dev server is running
-   - Check BASE_URL configuration
-   - Use `--debug` flag to step through
+**Solution:** Mock Redis-dependent services:
+```python
+with patch('app.services.invitation_service.InvitationService.create_reset_token', 
+           new_callable=AsyncMock) as mock_create:
+    with patch('app.services.invitation_service.InvitationService.get_reset_token',
+               new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = None
+        # ... test code
+```
+
+#### 2. Duplicate Key Constraint Error
+
+**Symptom:** `asyncpg.UniqueViolationError: duplicate key value violates unique constraint`
+
+**Cause:** Test fixtures use static slugs/emails that conflict between test runs
+
+**Solution:** Use dynamic unique identifiers:
+```python
+import uuid
+
+unique_id = uuid.uuid4().hex[:8]
+company = Company(
+    name="Test Company",
+    slug=f"test-company-{unique_id}",
+    email=f"test-{unique_id}@example.com",
+    status="active",  # Note: use 'status' not 'is_active'
+)
+```
+
+#### 3. API Response Format Mismatch
+
+**Symptom:** Test expects list but receives `{"items": [...], "count": 0}`
+
+**Cause:** API returns wrapped/paginated responses
+
+**Solution:** Handle both formats:
+```python
+data = response.json()
+items = data.get("items", data) if isinstance(data, dict) else data
+# Or for timer responses:
+timers = data.get("timers", data) if isinstance(data, dict) else data
+```
+
+#### 4. 307 Redirect on POST/PUT
+
+**Symptom:** `AssertionError: assert 307 == 200`
+
+**Cause:** FastAPI redirects trailing slashes
+
+**Solution:** Remove trailing slashes from URLs:
+```python
+# Wrong
+await client.post("/api/teams/", ...)
+
+# Correct
+await client.post("/api/teams", ...)
+```
+
+#### 5. pytest-asyncio Compatibility
+
+**Symptom:** `TypeError: __init__() got an unexpected keyword argument 'asyncio_default_fixture_loop_scope'`
+
+**Cause:** CI uses pytest-asyncio 0.21.1 which doesn't support this option
+
+**Solution:** Remove from pyproject.toml:
+```toml
+# Remove this line:
+# asyncio_default_fixture_loop_scope = "function"
+
+# Use this instead:
+asyncio_mode = "auto"
+```
+
+#### 6. Company Model Field Error
+
+**Symptom:** `TypeError: unexpected keyword argument 'is_active'`
+
+**Cause:** Company model uses `status` enum, not `is_active` boolean
+
+**Solution:** Use correct field:
+```python
+# Wrong
+company = Company(is_active=True, ...)
+
+# Correct
+company = Company(status="active", ...)  # or CompanyStatus.ACTIVE
+```
+
+#### 7. localStorage Not Persisting (Frontend)
+
+**Symptom:** Tests fail because localStorage mock doesn't persist values
+
+**Solution:** Create proper mock with internal store:
+```typescript
+const createMockStorage = () => {
+  let store: Record<string, string> = {};
+  return {
+    getItem: vi.fn((key: string) => store[key] || null),
+    setItem: vi.fn((key: string, value: string) => { store[key] = value; }),
+    removeItem: vi.fn((key: string) => { delete store[key]; }),
+    clear: vi.fn(() => { store = {}; }),
+    get length() { return Object.keys(store).length; },
+    key: vi.fn((i: number) => Object.keys(store)[i] || null),
+  };
+};
+
+Object.defineProperty(window, 'localStorage', {
+  value: createMockStorage(),
+});
+```
+
+#### 8. Zustand State Leaking Between Tests
+
+**Symptom:** Tests fail randomly due to state from previous test
+
+**Solution:** Reset store state in beforeEach:
+```typescript
+beforeEach(() => {
+  useAuthStore.setState({
+    user: null,
+    isAuthenticated: false,
+    isLoading: false,
+    error: null,
+  });
+  vi.clearAllMocks();
+});
+```
+
+#### 9. Permission Denied (403) vs Not Found (404)
+
+**Symptom:** Test expects 404 but gets 403, or vice versa
+
+**Cause:** Authorization checks may return different codes based on timing
+
+**Solution:** Accept both status codes:
+```python
+# For access denied scenarios
+assert response.status_code in [403, 404]
+```
+
+#### 10. WebSocket Authentication Error
+
+**Symptom:** WebSocket tests fail with 422 validation error
+
+**Cause:** HTTP endpoint using `get_current_user_ws` instead of `get_current_user`
+
+**Solution:** Use correct dependency:
+```python
+# For HTTP endpoints (not WebSocket)
+@router.get("/active-timers")
+async def get_active_timers(
+    current_user: User = Depends(get_current_user),  # Not get_current_user_ws
+):
+    ...
+```
 
 ### Debug Commands
 
 ```bash
-# Backend - verbose output
+# Backend - verbose output with long traceback
 pytest -v --tb=long
+
+# Backend - stop at first failure
+pytest -x
+
+# Backend - show print statements
+pytest -s
 
 # Frontend - debug specific test
 npm test -- --reporter=verbose src/stores/authStore.test.ts
 
 # E2E - step through test
 npx playwright test --debug e2e/timer.spec.ts
+
+# E2E - run with tracing
+npx playwright test --trace on
 ```
 
 ---

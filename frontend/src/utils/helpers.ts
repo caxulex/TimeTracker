@@ -2,6 +2,25 @@
 // TIME TRACKER - UTILITY FUNCTIONS
 // ============================================
 
+import type { User } from '../types';
+
+/**
+ * Check if user has admin privileges
+ * Includes: super_admin, admin, company_admin
+ */
+export function isAdminUser(user: User | null | undefined): boolean {
+  if (!user) return false;
+  return user.role === 'super_admin' || user.role === 'admin' || user.role === 'company_admin';
+}
+
+/**
+ * Check if user is a super admin (platform-level admin)
+ */
+export function isSuperAdmin(user: User | null | undefined): boolean {
+  if (!user) return false;
+  return user.role === 'super_admin';
+}
+
 /**
  * Format seconds into HH:MM:SS
  */

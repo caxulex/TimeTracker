@@ -5,7 +5,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, Button, Input, Modal, LoadingOverlay } from '../components/common';
 import { teamsApi, usersApi } from '../api/client';
-import { formatDate, getInitials, cn } from '../utils/helpers';
+import { formatDate, getInitials, isAdminUser, cn } from '../utils/helpers';
 import { useAuthStore } from '../stores/authStore';
 import { useAuth } from '../hooks/useAuth';
 import { useStaffNotifications } from '../hooks/useStaffNotifications';
