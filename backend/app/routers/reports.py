@@ -341,7 +341,7 @@ async def get_time_by_project(
         end_date = now.date()
     
     start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
-    end_datetime = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+    end_datetime = datetime.combine(end_date + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)  # Day after end_date at midnight
     
     # Get accessible projects and users for current user
     if current_user.role in ["super_admin", "admin"]:
@@ -356,10 +356,10 @@ async def get_time_by_project(
         team_members = select(TeamMember.user_id).where(TeamMember.team_id.in_(user_teams))
         user_filter = TimeEntry.user_id.in_(team_members)
     
-    # Fetch entries with project info to properly handle running timers
+    # Fetch entries that OVERLAP with the period (not just started within)
     query_filters = [
-        TimeEntry.start_time >= start_datetime,
-        TimeEntry.start_time <= end_datetime,
+        TimeEntry.start_time < end_datetime,  # Started before period ends
+        (TimeEntry.end_time >= start_datetime) | (TimeEntry.end_time.is_(None)),  # Ended after period started OR still running
         TimeEntry.project_id.in_(project_ids_query)
     ]
     if user_filter is not True:
@@ -371,14 +371,17 @@ async def get_time_by_project(
         .where(*query_filters)
     )
     
-    # Group by project and calculate totals including running timers
+    # Group by project and calculate totals - only count time within the period
     project_data = defaultdict(lambda: {"name": "", "seconds": 0, "count": 0})
     
     for entry, project_name in result.all():
         pid = entry.project_id
         project_data[pid]["name"] = project_name
-        project_data[pid]["seconds"] += calculate_entry_duration(entry, now)
-        project_data[pid]["count"] += 1
+        # Calculate only the portion that falls within the requested period
+        entry_seconds = calculate_entry_duration_for_period(entry, start_datetime, end_datetime, now)
+        if entry_seconds > 0:
+            project_data[pid]["seconds"] += entry_seconds
+            project_data[pid]["count"] += 1
     
     summaries = []
     for project_id, data in sorted(project_data.items(), key=lambda x: x[1]["seconds"], reverse=True):
@@ -416,9 +419,9 @@ async def get_time_by_task(
         end_date = now.date()
     
     start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
-    end_datetime = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+    end_datetime = datetime.combine(end_date + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
     
-    # Fetch entries with task/project info to properly handle running timers
+    # Fetch entries that OVERLAP with the period
     query = (
         select(TimeEntry, Task.name.label("task_name"), Task.status, Project.name.label("project_name"))
         .join(Task, TimeEntry.task_id == Task.id)
@@ -426,8 +429,8 @@ async def get_time_by_task(
         .where(
             TimeEntry.user_id == current_user.id,
             TimeEntry.task_id != None,
-            TimeEntry.start_time >= start_datetime,
-            TimeEntry.start_time <= end_datetime
+            TimeEntry.start_time < end_datetime,
+            (TimeEntry.end_time >= start_datetime) | (TimeEntry.end_time.is_(None))
         )
     )
     
@@ -436,7 +439,7 @@ async def get_time_by_task(
     
     result = await db.execute(query)
     
-    # Group by task and calculate totals including running timers
+    # Group by task and calculate totals - only count time within period
     task_data = defaultdict(lambda: {"task_name": "", "project_name": "", "status": "", "seconds": 0})
     
     for entry, task_name, task_status, project_name in result.all():
@@ -444,7 +447,9 @@ async def get_time_by_task(
         task_data[tid]["task_name"] = task_name
         task_data[tid]["project_name"] = project_name
         task_data[tid]["status"] = task_status
-        task_data[tid]["seconds"] += calculate_entry_duration(entry, now)
+        entry_seconds = calculate_entry_duration_for_period(entry, start_datetime, end_datetime, now)
+        if entry_seconds > 0:
+            task_data[tid]["seconds"] += entry_seconds
     
     summaries = []
     for task_id, data in sorted(task_data.items(), key=lambda x: x[1]["seconds"], reverse=True):
@@ -498,8 +503,9 @@ async def get_team_report(
     if not end_date:
         end_date = datetime.now(timezone.utc).date()
     
-    start_datetime = datetime.combine(start_date, datetime.min.time())
-    end_datetime = datetime.combine(end_date, datetime.max.time())
+    now = datetime.now(timezone.utc)
+    start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+    end_datetime = datetime.combine(end_date + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
     
     # Get team members
     team_members = select(TeamMember.user_id).where(TeamMember.team_id == team_id)
@@ -507,110 +513,86 @@ async def get_team_report(
     # Get team projects
     team_projects = select(Project.id).where(Project.team_id == team_id)
     
-    # Base filter
-    base_filter = and_(
-        TimeEntry.user_id.in_(team_members),
-        TimeEntry.project_id.in_(team_projects),
-        TimeEntry.start_time >= start_datetime,
-        TimeEntry.start_time <= end_datetime
-    )
-    
-    # Total summary
-    total_result = await db.execute(
-        select(
-            func.coalesce(func.sum(TimeEntry.duration_seconds), 0),
-            func.count(TimeEntry.id)
-        )
-        .where(base_filter)
-    )
-    total_row = total_result.first()
-    total_seconds = total_row[0] or 0
-    total_entries = total_row[1] or 0
-    
-    # By project
-    project_result = await db.execute(
-        select(
-            TimeEntry.project_id,
-            Project.name,
-            # Project.is_billable,
-            # Project.hourly_rate,
-            # Project.budget_hours,
-            func.coalesce(func.sum(TimeEntry.duration_seconds), 0).label("total_seconds"),
-            func.count(TimeEntry.id).label("entry_count")
-        )
+    # Fetch all entries that OVERLAP with the period (instead of using SQL aggregates)
+    entries_query = (
+        select(TimeEntry, Project.name.label("project_name"), User.name.label("user_name"))
         .join(Project, TimeEntry.project_id == Project.id)
-        .where(base_filter)
-        .group_by(TimeEntry.project_id, Project.name)
-        .order_by(func.sum(TimeEntry.duration_seconds).desc())
+        .join(User, TimeEntry.user_id == User.id)
+        .where(
+            TimeEntry.user_id.in_(team_members),
+            TimeEntry.project_id.in_(team_projects),
+            TimeEntry.start_time < end_datetime,
+            (TimeEntry.end_time >= start_datetime) | (TimeEntry.end_time.is_(None))
+        )
     )
+    entries_result = await db.execute(entries_query)
+    all_entries = entries_result.all()
     
+    # Calculate totals with proper period overlap
+    total_seconds = 0
+    total_entries = 0
+    project_data = defaultdict(lambda: {"name": "", "seconds": 0, "count": 0})
+    user_data = defaultdict(lambda: {"name": "", "seconds": 0, "count": 0})
+    
+    for entry, project_name, user_name in all_entries:
+        entry_seconds = calculate_entry_duration_for_period(entry, start_datetime, end_datetime, now)
+        if entry_seconds > 0:
+            total_seconds += entry_seconds
+            total_entries += 1
+            project_data[entry.project_id]["name"] = project_name
+            project_data[entry.project_id]["seconds"] += entry_seconds
+            project_data[entry.project_id]["count"] += 1
+            user_data[entry.user_id]["name"] = user_name
+            user_data[entry.user_id]["seconds"] += entry_seconds
+            user_data[entry.user_id]["count"] += 1
+    
+    # Build by_project list
     by_project = []
-    for row in project_result.all():
-        seconds = row.total_seconds or 0
-        hours = round(seconds / 3600, 2)
+    for pid, data in sorted(project_data.items(), key=lambda x: x[1]["seconds"], reverse=True):
+        seconds = data["seconds"]
         by_project.append(ProjectSummary(
-            project_id=row.project_id,
-            project_name=row.name,
+            project_id=pid,
+            project_name=data["name"],
             total_seconds=seconds,
-            total_hours=hours,
-            entry_count=row.entry_count,
+            total_hours=round(seconds / 3600, 2),
+            entry_count=data["count"],
             billable_amount=None,
             budget_hours=None,
             budget_used_percent=None
         ))
     
-    # By user
-    user_result = await db.execute(
-        select(
-            TimeEntry.user_id,
-            User.name,
-            func.coalesce(func.sum(TimeEntry.duration_seconds), 0).label("total_seconds"),
-            func.count(TimeEntry.id).label("entry_count")
-        )
-        .join(User, TimeEntry.user_id == User.id)
-        .where(base_filter)
-        .group_by(TimeEntry.user_id, User.name)
-        .order_by(func.sum(TimeEntry.duration_seconds).desc())
-    )
-    
+    # Build by_user list
     by_user = []
-    for row in user_result.all():
-        seconds = row.total_seconds or 0
+    for uid, data in sorted(user_data.items(), key=lambda x: x[1]["seconds"], reverse=True):
+        seconds = data["seconds"]
         by_user.append(UserSummary(
-            user_id=row.user_id,
-            user_name=row.name,
+            user_id=uid,
+            user_name=data["name"],
             total_seconds=seconds,
             total_hours=round(seconds / 3600, 2),
-            entry_count=row.entry_count
+            entry_count=data["count"]
         ))
     
-    # By day
+    # By day - calculate overlap for each day
     by_day = []
     current_date = start_date
     while current_date <= end_date:
-        day_start = datetime.combine(current_date, datetime.min.time())
-        day_end = datetime.combine(current_date, datetime.max.time())
+        day_start = datetime.combine(current_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+        day_end = datetime.combine(current_date + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
         
-        day_result = await db.execute(
-            select(
-                func.coalesce(func.sum(TimeEntry.duration_seconds), 0),
-                func.count(TimeEntry.id)
-            )
-            .where(
-                TimeEntry.user_id.in_(team_members),
-                TimeEntry.project_id.in_(team_projects),
-                TimeEntry.start_time >= day_start,
-                TimeEntry.start_time <= day_end
-            )
-        )
-        day_row = day_result.first()
-        day_seconds = day_row[0] or 0
+        day_seconds = 0
+        day_count = 0
+        for entry, _, _ in all_entries:
+            entry_day_seconds = calculate_entry_duration_for_period(entry, day_start, day_end, now)
+            if entry_day_seconds > 0:
+                day_seconds += entry_day_seconds
+                day_count += 1
         
         by_day.append(DailySummary(
             date=current_date,
             total_seconds=day_seconds,
             total_hours=round(day_seconds / 3600, 2),
-            entry_count=day_row[1] or 0
+            entry_count=day_count
         ))
         
         current_date += timedelta(days=1)
@@ -637,9 +619,10 @@ async def export_time_entries(
     current_user: User = Depends(get_current_active_user)
 ):
     """Export time entries (JSON or CSV format)"""
-    start_datetime = datetime.combine(start_date, datetime.min.time())
-    end_datetime = datetime.combine(end_date, datetime.max.time())
+    start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+    end_datetime = datetime.combine(end_date + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
     
+    # Fetch entries that OVERLAP with the export period
     query = (
         select(
             TimeEntry,
@@ -652,8 +635,8 @@ async def export_time_entries(
         .join(User, TimeEntry.user_id == User.id)
         .where(
             TimeEntry.user_id == current_user.id,
-            TimeEntry.start_time >= start_datetime,
-            TimeEntry.start_time <= end_datetime
+            TimeEntry.start_time < end_datetime,
+            (TimeEntry.end_time >= start_datetime) | (TimeEntry.end_time.is_(None))
         )
         .order_by(TimeEntry.start_time.desc())
     )
