@@ -13,7 +13,7 @@ from datetime import datetime, date, timedelta, timezone, time
 
 from app.database import get_db
 from app.models import User, Team, TeamMember, Project, Task, TimeEntry
-from app.dependencies import get_current_active_user, get_company_filter
+from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -113,12 +113,16 @@ async def get_dashboard_stats(
     
     # Base filter: admins see all in company, regular users see team data
     if current_user.role in ["super_admin", "admin"]:
-        if company_id is not None:
+        if company_id is None:
+            user_filter = True  # Platform super_admin sees all
+        elif company_id == FILTER_NULL_COMPANY:
+            # Platform admin sees only platform users (NULL company_id)
+            company_users = select(User.id).where(User.company_id.is_(None))
+            user_filter = TimeEntry.user_id.in_(company_users)
+        else:
             # Admin within a company sees all company entries
             company_users = select(User.id).where(User.company_id == company_id)
             user_filter = TimeEntry.user_id.in_(company_users)
-        else:
-            user_filter = True  # Platform super_admin sees all
     else:
         # Get all team members from user's teams (within company)
         user_teams_query = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
@@ -155,7 +159,11 @@ async def get_dashboard_stats(
         Project.team_id.in_(user_teams), 
         Project.is_archived == False
     )
-    if company_id is not None:
+    if company_id is None:
+        pass  # Super admin sees all
+    elif company_id == FILTER_NULL_COMPANY:
+        project_query = project_query.where(Team.company_id.is_(None))
+    else:
         project_query = project_query.where(Team.company_id == company_id)
     active_projects_result = await db.execute(project_query)
     active_projects = active_projects_result.scalar() or 0
@@ -205,11 +213,14 @@ async def get_weekly_summary(
     
     # Build user filter: admins see all in company, regular users see team data
     if current_user.role in ["super_admin", "admin"]:
-        if company_id is not None:
-            company_users = select(User.id).where(User.company_id == company_id)
+        if company_id is None:
+            user_filter = True  # Platform super_admin sees all
+        elif company_id == FILTER_NULL_COMPANY:
+            company_users = select(User.id).where(User.company_id.is_(None))
             user_filter = TimeEntry.user_id.in_(company_users)
         else:
-            user_filter = True  # Platform super_admin sees all
+            company_users = select(User.id).where(User.company_id == company_id)
+            user_filter = TimeEntry.user_id.in_(company_users)
     else:
         # Get all team members from user's teams
         user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
@@ -405,8 +416,7 @@ async def get_team_report(
     # Multi-tenancy: verify team belongs to user's company
     company_id = get_company_filter(current_user)
     team_query = select(Team).where(Team.id == team_id)
-    if company_id is not None:
-        team_query = team_query.where(Team.company_id == company_id)
+    team_query = apply_company_filter(team_query, Team.company_id, company_id)
     team_result = await db.execute(team_query)
     team = team_result.scalar_one_or_none()
     if not team:
@@ -725,11 +735,14 @@ async def get_admin_dashboard(
     company_id = get_company_filter(current_user)
     
     # Build company user filter
-    if company_id is not None:
-        company_users_subq = select(User.id).where(User.company_id == company_id)
+    if company_id is None:
+        user_filter = True  # Platform super_admin sees all
+    elif company_id == FILTER_NULL_COMPANY:
+        company_users_subq = select(User.id).where(User.company_id.is_(None))
         user_filter = TimeEntry.user_id.in_(company_users_subq)
     else:
-        user_filter = True  # Platform super_admin sees all
+        company_users_subq = select(User.id).where(User.company_id == company_id)
+        user_filter = TimeEntry.user_id.in_(company_users_subq)
 
     # Total time today (all users in company) - including active timers
     today_query = select(TimeEntry).where(TimeEntry.start_time >= today_start)
@@ -801,7 +814,11 @@ async def get_admin_dashboard(
 
     # Active projects (within company)
     project_query = select(func.count(Project.id)).join(Team, Project.team_id == Team.id).where(Project.is_archived == False)
-    if company_id is not None:
+    if company_id is None:
+        pass  # Super admin sees all
+    elif company_id == FILTER_NULL_COMPANY:
+        project_query = project_query.where(Team.company_id.is_(None))
+    else:
         project_query = project_query.where(Team.company_id == company_id)
     active_projects_result = await db.execute(project_query)
     active_projects = active_projects_result.scalar() or 0
@@ -898,8 +915,7 @@ async def get_team_analytics(
     # Multi-tenancy: filter teams by company
     company_id = get_company_filter(current_user)
     teams_query = select(Team)
-    if company_id is not None:
-        teams_query = teams_query.where(Team.company_id == company_id)
+    teams_query = apply_company_filter(teams_query, Team.company_id, company_id)
     teams_result = await db.execute(teams_query)
     teams = teams_result.scalars().all()
 
@@ -1095,8 +1111,7 @@ async def get_user_metrics(
     # Multi-tenancy: filter user by company
     company_id = get_company_filter(current_user)
     user_query = select(User).where(User.id == user_id)
-    if company_id is not None:
-        user_query = user_query.where(User.company_id == company_id)
+    user_query = apply_company_filter(user_query, User.company_id, company_id)
     
     user_result = await db.execute(user_query)
     user = user_result.scalar_one_or_none()
@@ -1337,8 +1352,7 @@ async def get_all_users_summary(
         TimeEntry.end_time
     ).join(User, TimeEntry.user_id == User.id).where(TimeEntry.start_time >= start_time)
     
-    if company_id is not None:
-        entries_query = entries_query.where(User.company_id == company_id)
+    entries_query = apply_company_filter(entries_query, User.company_id, company_id)
     
     entries_result = await db.execute(entries_query)
 

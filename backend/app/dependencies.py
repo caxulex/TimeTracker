@@ -163,22 +163,57 @@ async def get_current_user_ws(token: str) -> Optional[User]:
 # Aliases for common admin checks
 require_admin = get_current_admin_user
 
+# Sentinel value to indicate "filter by NULL company_id"
+FILTER_NULL_COMPANY = "FILTER_NULL"
+
+
 def get_company_filter(user: User):
     """
     Get company filter for multi-tenant data isolation.
     
     - Super admins (company_id=None) see ALL data
     - Company admins/users only see their company's data
+    - Users with NULL company_id see only NULL company_id data (legacy/platform users)
     
     Returns:
-        company_id to filter by, or None for platform admins
+        - None for super_admins (see everything)
+        - company_id (int) for company-scoped users  
+        - FILTER_NULL_COMPANY sentinel for platform users without a company
     """
     # Platform super_admins (no company) can see everything
     if user.company_id is None and user.role == 'super_admin':
         return None
     
+    # Users without a company_id but NOT super_admin should only see NULL company data
+    if user.company_id is None:
+        return FILTER_NULL_COMPANY
+    
     # Everyone else is scoped to their company
     return user.company_id
+
+
+def apply_company_filter(query, company_column, company_id):
+    """
+    Apply company filter to a query.
+    Handles the NULL company_id case correctly.
+    
+    Args:
+        query: SQLAlchemy query to filter
+        company_column: The column to filter on (e.g., Team.company_id)
+        company_id: The company_id from get_company_filter()
+        
+    Returns:
+        Filtered query
+    """
+    if company_id is None:
+        # Super admin - no filter, see everything
+        return query
+    elif company_id == FILTER_NULL_COMPANY:
+        # Platform user without company - filter by NULL
+        return query.where(company_column.is_(None))
+    else:
+        # Company-scoped user - filter by company_id
+        return query.where(company_column == company_id)
 
 
 def is_platform_admin(user: User) -> bool:

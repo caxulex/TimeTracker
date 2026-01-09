@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user, require_admin
+from app.dependencies import get_current_user, require_admin, get_company_filter, FILTER_NULL_COMPANY
 from app.models import User
 from app.schemas.payroll import (
     PayRateCreate,
@@ -50,9 +50,13 @@ async def list_pay_rates(
     Admin only. Filtered by company for non-super admins.
     """
     service = PayRateService(db)
-    # Filter by company_id for non-super admins
-    company_id = None if current_user.role == 'super_admin' else current_user.company_id
-    pay_rates, total = await service.get_all_pay_rates(skip, limit, active_only, company_id)
+    # Filter by company_id using multi-tenant filter
+    company_filter = get_company_filter(current_user)
+    # Convert sentinel to None for service layer (service handles None as no filter)
+    company_id = None if company_filter is None else (None if company_filter == FILTER_NULL_COMPANY else company_filter)
+    # For platform users (FILTER_NULL_COMPANY), we need to pass a special marker
+    # The service layer needs to be updated to handle this
+    pay_rates, total = await service.get_all_pay_rates(skip, limit, active_only, company_filter)
     
     return {
         "items": [

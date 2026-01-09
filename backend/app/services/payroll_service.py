@@ -4,7 +4,7 @@ Service layer for Payroll operations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Union
 from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -20,6 +20,7 @@ from app.schemas.payroll import (
     PayrollAdjustmentCreate, PayrollAdjustmentUpdate,
     PayrollReportFilters, PeriodStatusEnum, EntryStatusEnum
 )
+from app.dependencies import FILTER_NULL_COMPANY
 
 
 class PayRateService:
@@ -110,19 +111,34 @@ class PayRateService:
         skip: int = 0, 
         limit: int = 100,
         active_only: bool = True,
-        company_id: Optional[int] = None
+        company_id: Optional[Union[int, str]] = None
     ) -> Tuple[List[PayRate], int]:
-        """Get all pay rates with pagination, optionally filtered by company_id"""
+        """Get all pay rates with pagination, optionally filtered by company_id.
+        
+        Args:
+            company_id: None = super_admin (no filter), FILTER_NULL_COMPANY = platform users (NULL filter),
+                       int = specific company filter
+        """
         conditions = []
         if active_only:
             conditions.append(PayRate.is_active == True)
         
         # Filter by company_id via User relationship
-        if company_id is not None:
+        need_user_join = False
+        if company_id is None:
+            # Super admin - no filter
+            pass
+        elif company_id == FILTER_NULL_COMPANY:
+            # Platform users - filter for NULL company_id
+            conditions.append(User.company_id.is_(None))
+            need_user_join = True
+        else:
+            # Company-scoped users
             conditions.append(User.company_id == company_id)
+            need_user_join = True
         
         # Get total count with User join for company filtering
-        if company_id is not None:
+        if need_user_join:
             count_stmt = select(func.count(PayRate.id)).join(User, PayRate.user_id == User.id)
         else:
             count_stmt = select(func.count(PayRate.id))
@@ -132,7 +148,7 @@ class PayRateService:
         
         # Get paginated results with User join
         stmt = select(PayRate).options(selectinload(PayRate.user))
-        if company_id is not None:
+        if need_user_join:
             stmt = stmt.join(User, PayRate.user_id == User.id)
         if conditions:
             stmt = stmt.where(and_(*conditions))
@@ -252,15 +268,33 @@ class PayrollPeriodService:
         skip: int = 0,
         limit: int = 100,
         status: Optional[PeriodStatusEnum] = None,
-        company_id: Optional[int] = None
+        company_id: Optional[Union[int, str]] = None
     ) -> Tuple[List[PayrollPeriod], int]:
-        """Get all payroll periods with pagination, optionally filtered by company_id"""
+        """Get all payroll periods with pagination, optionally filtered by company_id.
+        
+        Args:
+            company_id: None = super_admin (no filter), FILTER_NULL_COMPANY = platform users (NULL filter),
+                       int = specific company filter
+        """
         conditions = []
         if status:
             conditions.append(PayrollPeriod.status == status.value)
         
         # Filter by company_id via PayrollEntry -> User relationship
-        if company_id is not None:
+        if company_id is None:
+            # Super admin - no filter
+            pass
+        elif company_id == FILTER_NULL_COMPANY:
+            # Platform users - filter for NULL company_id
+            subquery = (
+                select(PayrollEntry.payroll_period_id)
+                .join(User, PayrollEntry.user_id == User.id)
+                .where(User.company_id.is_(None))
+                .distinct()
+            )
+            conditions.append(PayrollPeriod.id.in_(subquery))
+        else:
+            # Company-scoped users
             # Get period IDs that have at least one entry for a user in this company
             subquery = (
                 select(PayrollEntry.payroll_period_id)

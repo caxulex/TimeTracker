@@ -11,7 +11,7 @@ from app.database import get_db
 from app.models import User
 from app.schemas.auth import UserResponse, Message
 from app.services.auth_service import auth_service
-from app.dependencies import get_current_admin_user, get_company_filter, is_platform_admin
+from app.dependencies import get_current_admin_user, get_company_filter, apply_company_filter, is_platform_admin, FILTER_NULL_COMPANY
 from app.utils.password_validator import validate_password_strength
 from app.services.audit_logger import AuditLogger, AuditAction
 from pydantic import BaseModel, EmailStr, Field
@@ -83,9 +83,8 @@ async def list_users(
     
     # Multi-tenant filtering: Only show users from same company
     company_id = get_company_filter(current_user)
-    if company_id is not None:
-        query = query.where(User.company_id == company_id)
-        count_query = count_query.where(User.company_id == company_id)
+    query = apply_company_filter(query, User.company_id, company_id)
+    count_query = apply_company_filter(count_query, User.company_id, company_id)
     
     if search:
         search_filter = f"%{search}%"
@@ -126,8 +125,7 @@ async def get_user(
     
     # Multi-tenant filtering
     company_id = get_company_filter(current_user)
-    if company_id is not None:
-        query = query.where(User.company_id == company_id)
+    query = apply_company_filter(query, User.company_id, company_id)
     
     result = await db.execute(query)
     user = result.scalar_one_or_none()
@@ -281,8 +279,7 @@ async def update_user(
     
     # Multi-tenancy: filter by company
     company_id = get_company_filter(current_user)
-    if company_id is not None:
-        query = query.where(User.company_id == company_id)
+    query = apply_company_filter(query, User.company_id, company_id)
     
     result = await db.execute(query)
     user = result.scalar_one_or_none()
@@ -350,8 +347,7 @@ async def deactivate_user(
     
     # Multi-tenancy: filter by company
     company_id = get_company_filter(current_user)
-    if company_id is not None:
-        query = query.where(User.company_id == company_id)
+    query = apply_company_filter(query, User.company_id, company_id)
     
     result = await db.execute(query)
     user = result.scalar_one_or_none()

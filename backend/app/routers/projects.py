@@ -11,7 +11,7 @@ from datetime import datetime
 
 from app.database import get_db
 from app.models import User, Team, TeamMember, Project, Task
-from app.dependencies import get_current_active_user, get_company_filter
+from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY
 from app.schemas.auth import Message
 from app.routers.websocket import manager as ws_manager
 from app.services.audit_logger import AuditLogger, AuditAction
@@ -61,14 +61,28 @@ async def check_team_access(db: AsyncSession, team_id: int, user: User, require_
     """Check if user has access to team (within their company)"""
     # Multi-tenancy: first verify team belongs to user's company
     company_id = get_company_filter(user)
-    if company_id is not None:
+    
+    # Build the query based on company filter
+    if company_id is None:
+        # Super admin - can access any team
+        team_result = await db.execute(
+            select(Team).where(Team.id == team_id)
+        )
+    elif company_id == FILTER_NULL_COMPANY:
+        # Platform user - can only access teams with NULL company_id
+        team_result = await db.execute(
+            select(Team).where(Team.id == team_id, Team.company_id.is_(None))
+        )
+    else:
+        # Company-scoped user
         team_result = await db.execute(
             select(Team).where(Team.id == team_id, Team.company_id == company_id)
         )
-        if not team_result.scalar_one_or_none():
-            return False
     
-    if user.role in ["super_admin", "admin"]:
+    if not team_result.scalar_one_or_none():
+        return False
+    
+    if user.role in ["super_admin", "admin", "company_admin"]:
         return True
     
     result = await db.execute(
@@ -96,9 +110,8 @@ async def list_projects(
     
     # Multi-tenancy: filter by company through team
     company_id = get_company_filter(current_user)
-    if company_id is not None:
-        base_query = base_query.where(Team.company_id == company_id)
-        count_query = count_query.where(Team.company_id == company_id)
+    base_query = apply_company_filter(base_query, Team.company_id, company_id)
+    count_query = apply_company_filter(count_query, Team.company_id, company_id)
     
     # Filter by accessible teams for non-admin users
     if current_user.role not in ["super_admin", "admin", "company_admin"]:
@@ -183,8 +196,7 @@ async def get_project(
     # Multi-tenancy: join with team to filter by company
     query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
     company_id = get_company_filter(current_user)
-    if company_id is not None:
-        query = query.where(Team.company_id == company_id)
+    query = apply_company_filter(query, Team.company_id, company_id)
     
     result = await db.execute(query)
     project = result.scalar_one_or_none()
@@ -303,8 +315,7 @@ async def update_project(
     # Multi-tenancy: join with team to filter by company
     query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
     company_id = get_company_filter(current_user)
-    if company_id is not None:
-        query = query.where(Team.company_id == company_id)
+    query = apply_company_filter(query, Team.company_id, company_id)
     
     result = await db.execute(query)
     project = result.scalar_one_or_none()
@@ -378,8 +389,7 @@ async def delete_project(
     # Multi-tenancy: join with team to filter by company
     query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
     company_id = get_company_filter(current_user)
-    if company_id is not None:
-        query = query.where(Team.company_id == company_id)
+    query = apply_company_filter(query, Team.company_id, company_id)
     
     result = await db.execute(query)
     project = result.scalar_one_or_none()
@@ -424,8 +434,7 @@ async def restore_project(
     # Multi-tenancy: join with team to filter by company
     query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
     company_id = get_company_filter(current_user)
-    if company_id is not None:
-        query = query.where(Team.company_id == company_id)
+    query = apply_company_filter(query, Team.company_id, company_id)
     
     result = await db.execute(query)
     project = result.scalar_one_or_none()

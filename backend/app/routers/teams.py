@@ -12,7 +12,7 @@ from datetime import datetime
 
 from app.database import get_db
 from app.models import User, Team, TeamMember
-from app.dependencies import get_current_active_user, get_company_filter
+from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY
 from app.schemas.auth import Message
 from app.routers.websocket import manager as ws_manager
 from app.services.audit_logger import AuditLogger, AuditAction
@@ -97,9 +97,8 @@ async def list_teams(
 
     # Multi-tenancy: filter by company
     company_id = get_company_filter(current_user)
-    if company_id is not None:
-        base_query = base_query.where(Team.company_id == company_id)
-        count_query = count_query.where(Team.company_id == company_id)
+    base_query = apply_company_filter(base_query, Team.company_id, company_id)
+    count_query = apply_company_filter(count_query, Team.company_id, company_id)
 
     # Non-admin users only see teams they're members of
     if current_user.role not in ["super_admin", "admin", "company_admin"]:
@@ -164,8 +163,7 @@ async def get_team(
     
     # Multi-tenancy: filter by company
     company_id = get_company_filter(current_user)
-    if company_id is not None:
-        query = query.where(Team.company_id == company_id)
+    query = apply_company_filter(query, Team.company_id, company_id)
     
     result = await db.execute(query)
     team = result.scalar_one_or_none()
@@ -280,8 +278,7 @@ async def update_team(
     
     # Multi-tenancy: filter by company
     company_id = get_company_filter(current_user)
-    if company_id is not None:
-        query = query.where(Team.company_id == company_id)
+    query = apply_company_filter(query, Team.company_id, company_id)
     
     result = await db.execute(query)
     team = result.scalar_one_or_none()
@@ -352,8 +349,7 @@ async def delete_team(
     
     # Multi-tenancy: filter by company
     company_id = get_company_filter(current_user)
-    if company_id is not None:
-        query = query.where(Team.company_id == company_id)
+    query = apply_company_filter(query, Team.company_id, company_id)
     
     result = await db.execute(query)
     team = result.scalar_one_or_none()
@@ -404,8 +400,7 @@ async def add_member(
     
     # Verify team exists and belongs to company
     team_query = select(Team).where(Team.id == team_id)
-    if company_id is not None:
-        team_query = team_query.where(Team.company_id == company_id)
+    team_query = apply_company_filter(team_query, Team.company_id, company_id)
     team_result = await db.execute(team_query)
     team = team_result.scalar_one_or_none()
     if not team:
@@ -425,8 +420,7 @@ async def add_member(
 
     # Check user exists and belongs to same company
     user_query = select(User).where(User.id == member_data.user_id)
-    if company_id is not None:
-        user_query = user_query.where(User.company_id == company_id)
+    user_query = apply_company_filter(user_query, User.company_id, company_id)
     user_result = await db.execute(user_query)
     user = user_result.scalar_one_or_none()
     if not user:
