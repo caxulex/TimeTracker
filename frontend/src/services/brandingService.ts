@@ -108,9 +108,12 @@ function getSlugFromSubdomain(): string | null {
 
 /**
  * Get company slug from subdomain, URL parameter, or storage
- * Priority: subdomain > URL param > stored
+ * Priority: subdomain > URL path > URL param (query string - legacy) > stored
  */
 export function getCompanySlug(): string | null {
+  const hostname = window.location.hostname;
+  const isBaseDomain = BASE_DOMAINS.some(d => hostname === d || hostname.startsWith('localhost'));
+  
   // First priority: subdomain detection
   const subdomainSlug = getSlugFromSubdomain();
   if (subdomainSlug) {
@@ -119,26 +122,41 @@ export function getCompanySlug(): string | null {
     return subdomainSlug;
   }
   
-  // Second priority: URL parameters (for testing)
+  // Second priority: URL path-based company slug (e.g., /xyz-corp/login)
+  const pathParts = window.location.pathname.split('/').filter(Boolean);
+  const potentialSlug = pathParts[0];
+  const knownRoutes = ['login', 'register', 'dashboard', 'projects', 'tasks', 'time', 
+                       'teams', 'reports', 'settings', 'admin', 'staff', 'users',
+                       'forgot-password', 'reset-password', 'request-account'];
+  
+  if (potentialSlug && !knownRoutes.includes(potentialSlug)) {
+    // First path segment is a company slug (e.g., /xyz-corp/login)
+    localStorage.setItem(COMPANY_SLUG_KEY, potentialSlug);
+    return potentialSlug;
+  }
+  
+  // Third priority: URL query parameters (legacy support - ?company=xyz)
+  // Only use this for non-base domains or if explicitly requested
   const urlParams = new URLSearchParams(window.location.search);
   const slugFromUrl = urlParams.get('company');
   
-  if (slugFromUrl) {
-    // Store for future use
+  if (slugFromUrl && !isBaseDomain) {
+    // Only store for non-base domains to prevent "sticking" issue
     localStorage.setItem(COMPANY_SLUG_KEY, slugFromUrl);
     return slugFromUrl;
   }
   
-  // Third: Check stored slug (only if not on base domain)
-  // This prevents slug "sticking" when navigating from subdomain to main site
-  const hostname = window.location.hostname;
-  const isBaseDomain = BASE_DOMAINS.some(d => hostname === d || hostname.startsWith('localhost'));
-  
-  if (!isBaseDomain) {
-    return localStorage.getItem(COMPANY_SLUG_KEY);
+  // On base domain with no slug in path/subdomain - clear any stale stored slug
+  if (isBaseDomain) {
+    // Check if we're on a known route without company prefix - clear stale slug
+    if (!potentialSlug || knownRoutes.includes(potentialSlug)) {
+      localStorage.removeItem(COMPANY_SLUG_KEY);
+    }
+    return null;
   }
   
-  return null;
+  // Fourth: Check stored slug (only for non-base domains)
+  return localStorage.getItem(COMPANY_SLUG_KEY);
 }
 
 /**
