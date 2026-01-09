@@ -106,7 +106,14 @@ const UserInsightsPanel: React.FC<UserInsightsPanelProps> = ({
   }
   
   const insights = data.insights;
-  if (!insights) return null;
+  // Ensure insights and all required properties exist
+  if (!insights || !insights.metrics) return null;
+  
+  // Provide defaults for optional arrays
+  const patterns = insights.patterns || [];
+  const achievements = insights.achievements || [];
+  const improvementAreas = insights.improvement_areas || [];
+  const recommendations = insights.recommendations || [];
   
   return (
     <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden ${className}`}>
@@ -236,14 +243,14 @@ const UserInsightsPanel: React.FC<UserInsightsPanelProps> = ({
       </div>
       
       {/* Patterns */}
-      {insights.patterns.length > 0 && (
+      {patterns.length > 0 && (
         <div className="p-4 border-t border-gray-200 dark:border-gray-700">
           <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
             <Sparkles size={16} className="text-purple-500" />
             Detected Patterns
           </h3>
           <div className="space-y-2">
-            {insights.patterns.map((pattern, i) => (
+            {patterns.map((pattern, i) => (
               <div 
                 key={i}
                 className={`p-3 rounded-lg ${getPatternImpactColor(pattern.impact)}`}
@@ -260,14 +267,14 @@ const UserInsightsPanel: React.FC<UserInsightsPanelProps> = ({
       )}
       
       {/* Achievements */}
-      {insights.achievements.length > 0 && (
+      {achievements.length > 0 && (
         <div className="p-4 border-t border-gray-200 dark:border-gray-700">
           <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
             <Award size={16} className="text-yellow-500" />
             Recent Achievements
           </h3>
           <div className="flex flex-wrap gap-2">
-            {insights.achievements.map((achievement, i) => (
+            {achievements.map((achievement, i) => (
               <span 
                 key={i}
                 className="px-3 py-1 bg-yellow-50 dark:bg-yellow-900/20 
@@ -284,14 +291,14 @@ const UserInsightsPanel: React.FC<UserInsightsPanelProps> = ({
       {/* Improvement Areas & Recommendations */}
       <div className="grid md:grid-cols-2 gap-4 p-4 border-t border-gray-200 dark:border-gray-700">
         {/* Improvement Areas */}
-        {insights.improvement_areas.length > 0 && (
+        {improvementAreas.length > 0 && (
           <div>
             <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
               <Target size={16} className="text-orange-500" />
               Areas to Improve
             </h3>
             <ul className="space-y-1">
-              {insights.improvement_areas.map((area, i) => (
+              {improvementAreas.map((area, i) => (
                 <li 
                   key={i}
                   className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400"
@@ -305,14 +312,14 @@ const UserInsightsPanel: React.FC<UserInsightsPanelProps> = ({
         )}
         
         {/* Recommendations */}
-        {insights.recommendations.length > 0 && (
+        {recommendations.length > 0 && (
           <div>
             <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
               <Sparkles size={16} className="text-blue-500" />
               Recommendations
             </h3>
             <ul className="space-y-1">
-              {insights.recommendations.map((rec, i) => (
+              {recommendations.map((rec, i) => (
                 <li 
                   key={i}
                   className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400"
