@@ -89,7 +89,7 @@ async def check_project_access(db: AsyncSession, project_id: int, user: User) ->
     if not project:
         return None
 
-    if user.role in ["super_admin", "admin"]:
+    if user.role in ["super_admin", "admin", "company_admin"]:
         return project
 
     # Check team membership for project access

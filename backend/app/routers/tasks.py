@@ -10,8 +10,8 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 
 from app.database import get_db
-from app.models import User, Project, Task, TeamMember
-from app.dependencies import get_current_active_user
+from app.models import User, Project, Task, TeamMember, Team
+from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter
 from app.schemas.auth import Message
 from app.routers.websocket import manager as ws_manager
 
@@ -54,17 +54,22 @@ class PaginatedTasks(BaseModel):
 
 
 async def check_project_access(db: AsyncSession, project_id: int, user: User) -> bool:
-    """Check if user has access to project"""
-    if user.role in ["super_admin", "admin"]:
-        return True
+    """Check if user has access to project (within their company)"""
+    # Multi-tenancy: join with team to filter by company
+    query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
+    company_id = get_company_filter(user)
+    query = apply_company_filter(query, Team.company_id, company_id)
     
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
+    result = await db.execute(query)
     project = result.scalar_one_or_none()
     if not project:
         return False
     
+    # Admins have full access to projects in their company
+    if user.role in ["super_admin", "admin", "company_admin"]:
+        return True
+    
+    # Regular users need team membership
     member_result = await db.execute(
         select(TeamMember).where(
             TeamMember.team_id == project.team_id,
