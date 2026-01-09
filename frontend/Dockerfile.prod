@@ -5,15 +5,15 @@
 # =============================================
 
 # Stage 1: Build
-FROM node:20-alpine as builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production=false
+# Install dependencies (includes devDependencies needed for build)
+RUN npm ci
 
 # Copy source code
 COPY . .
@@ -30,7 +30,7 @@ ENV VITE_API_URL=$VITE_API_URL \
 RUN npm run build
 
 # Stage 2: Production with Nginx
-FROM nginx:alpine as production
+FROM nginx:alpine AS production
 
 # Install curl for healthcheck
 RUN apk add --no-cache curl
