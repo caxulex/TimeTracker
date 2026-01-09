@@ -4,8 +4,9 @@
 // With AI Suggestions Integration
 // With NLP Chat Interface
 // ============================================
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { Card, Button, Modal, LoadingOverlay, Input } from '../components/common';
 import { TimerWidget } from '../components/time/TimerWidget';
 import { SuggestionDropdown, ChatInterface } from '../components/ai';
@@ -20,6 +21,7 @@ export function TimePage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const { addNotification } = useNotifications();
+  const [searchParams] = useSearchParams();
   const [showModal, setShowModal] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
@@ -28,6 +30,13 @@ export function TimePage() {
 
   // AI Feature flags
   const { data: nlpEnabled } = useFeatureEnabled('ai_nlp_entry');
+  
+  // Auto-show chat interface when navigating with ?ai=chat parameter
+  useEffect(() => {
+    if (searchParams.get('ai') === 'chat' && nlpEnabled) {
+      setShowChatInterface(true);
+    }
+  }, [searchParams, nlpEnabled]);
 
   // Fetch time entries
   const { data: entriesData, isLoading } = useQuery({

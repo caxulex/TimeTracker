@@ -445,7 +445,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                   )}
                   {nlpEnabled && (
                     <NavLink
-                      to="/time"
+                      to="/time?ai=chat"
                       onClick={onClose}
                       className="flex items-center space-x-3 px-3 py-2 rounded-lg text-sm transition-colors text-gray-600 hover:bg-indigo-50 hover:text-indigo-600"
                       aria-label="AI Chat Assistant on Time Tracker page"
