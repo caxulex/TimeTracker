@@ -91,11 +91,24 @@ const forceLogoutAndRedirect = () => {
       localStorage.removeItem('auth-storage');
     }
   }
-  // Preserve company slug for white-label portals
-  const companySlug = localStorage.getItem('tt_company_slug');
-  if (companySlug && !companySlug.startsWith('domain:')) {
-    window.location.href = `/${companySlug}/login`;
+  
+  // Determine correct login page from CURRENT URL path (not stale localStorage)
+  // This ensures redirect matches where user actually is
+  const pathParts = window.location.pathname.split('/').filter(Boolean);
+  const potentialSlug = pathParts[0];
+  
+  // Check if first path segment looks like a company slug (not a known route)
+  const knownRoutes = ['login', 'register', 'dashboard', 'projects', 'tasks', 'time', 
+                       'teams', 'reports', 'settings', 'admin', 'staff', 'users',
+                       'forgot-password', 'reset-password', 'request-account'];
+  
+  if (potentialSlug && !knownRoutes.includes(potentialSlug)) {
+    // First segment is likely a company slug
+    localStorage.setItem('tt_company_slug', potentialSlug);
+    window.location.href = `/${potentialSlug}/login`;
   } else {
+    // Main site - clear any stale company slug
+    localStorage.removeItem('tt_company_slug');
     window.location.href = '/login';
   }
 };

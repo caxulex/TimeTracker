@@ -14,15 +14,20 @@ interface HeaderProps {
 
 export function Header({ onMenuClick }: HeaderProps) {
   const { user, logout } = useAuthStore();
-  const { branding } = useBranding();
+  const { branding, companySlug, clearBranding } = useBranding();
   const [showDropdown, setShowDropdown] = React.useState(false);
 
   const handleLogout = async () => {
+    // Capture current company slug BEFORE clearing anything
+    // This ensures we redirect to the correct login page
+    const currentCompanySlug = companySlug;
+    
     await logout();
-    // Preserve company slug for white-label instances
-    const companySlug = localStorage.getItem('tt_company_slug');
-    if (companySlug) {
-      window.location.href = `/login?company=${companySlug}`;
+    clearBranding();
+    
+    // Redirect to the appropriate login page based on where user was logged in
+    if (currentCompanySlug && !currentCompanySlug.startsWith('domain:')) {
+      window.location.href = `/${currentCompanySlug}/login`;
     } else {
       window.location.href = '/login';
     }

@@ -27,6 +27,10 @@ export function LoginPage() {
       setCompany(companySlug);
       // Store for logout redirect
       localStorage.setItem('tt_company_slug', companySlug);
+    } else {
+      // Clear company slug when on main login (no company in URL)
+      // This prevents stale redirect to white-label login on logout
+      localStorage.removeItem('tt_company_slug');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlCompanySlug, searchParams]);
