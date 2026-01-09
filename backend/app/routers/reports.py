@@ -97,6 +97,44 @@ def calculate_entry_duration(entry: TimeEntry, now: datetime) -> int:
         return entry.duration_seconds or 0
 
 
+def calculate_entry_duration_for_period(entry: TimeEntry, period_start: datetime, period_end: datetime, now: datetime) -> int:
+    """
+    Calculate duration of a time entry that overlaps with a specific period.
+    This handles entries that span multiple days by only counting time within the period.
+    
+    Args:
+        entry: The time entry
+        period_start: Start of the period (e.g., start of day)
+        period_end: End of the period (e.g., end of day)
+        now: Current time (for running timers)
+    
+    Returns:
+        Seconds of the entry that fall within the period
+    """
+    # Get entry start time with timezone
+    entry_start = entry.start_time
+    if entry_start.tzinfo is None:
+        entry_start = entry_start.replace(tzinfo=timezone.utc)
+    
+    # Get entry end time (or now for running timers)
+    if entry.end_time is None:
+        entry_end = now
+    else:
+        entry_end = entry.end_time
+        if entry_end.tzinfo is None:
+            entry_end = entry_end.replace(tzinfo=timezone.utc)
+    
+    # Calculate overlap between entry and period
+    overlap_start = max(entry_start, period_start)
+    overlap_end = min(entry_end, period_end)
+    
+    # If no overlap, return 0
+    if overlap_start >= overlap_end:
+        return 0
+    
+    return int((overlap_end - overlap_start).total_seconds())
+
+
 @router.get("/dashboard", response_model=DashboardStats)
 async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),
@@ -105,8 +143,15 @@ async def get_dashboard_stats(
     """Get dashboard statistics for current user (filtered by company for multi-tenancy)"""
     now = datetime.now(timezone.utc)
     today_start = datetime.combine(now.date(), datetime.min.time()).replace(tzinfo=timezone.utc)
+    today_end = today_start + timedelta(days=1)
     week_start = today_start - timedelta(days=now.weekday())
+    week_end = week_start + timedelta(days=7)
     month_start = today_start.replace(day=1)
+    # Calculate month end (first day of next month)
+    if month_start.month == 12:
+        month_end = month_start.replace(year=month_start.year + 1, month=1)
+    else:
+        month_end = month_start.replace(month=month_start.month + 1)
     
     # Multi-tenancy: get company filter
     company_id = get_company_filter(current_user)
@@ -129,29 +174,40 @@ async def get_dashboard_stats(
         team_members = select(TeamMember.user_id).where(TeamMember.team_id.in_(user_teams_query))
         user_filter = TimeEntry.user_id.in_(team_members)
     
-    # Today's time - fetch entries to properly handle running timers
-    today_query = select(TimeEntry).where(TimeEntry.start_time >= today_start)
+    # Today's time - fetch entries that OVERLAP with today (started before today end AND ended after today start or still running)
+    # This includes: entries that started today, entries from yesterday still running, entries spanning midnight
+    today_query = select(TimeEntry).where(
+        TimeEntry.start_time < today_end,  # Started before today ends
+        (TimeEntry.end_time >= today_start) | (TimeEntry.end_time.is_(None))  # Ended after today started OR still running
+    )
     if user_filter is not True:
         today_query = today_query.where(user_filter)
     today_result = await db.execute(today_query)
     today_entries = today_result.scalars().all()
-    today_seconds = sum(calculate_entry_duration(e, now) for e in today_entries)
+    # Calculate only the portion that falls within today
+    today_seconds = sum(calculate_entry_duration_for_period(e, today_start, today_end, now) for e in today_entries)
     
-    # This week's time - fetch entries to properly handle running timers
-    week_query = select(TimeEntry).where(TimeEntry.start_time >= week_start)
+    # This week's time - fetch entries that overlap with this week
+    week_query = select(TimeEntry).where(
+        TimeEntry.start_time < week_end,
+        (TimeEntry.end_time >= week_start) | (TimeEntry.end_time.is_(None))
+    )
     if user_filter is not True:
         week_query = week_query.where(user_filter)
     week_result = await db.execute(week_query)
     week_entries = week_result.scalars().all()
-    week_seconds = sum(calculate_entry_duration(e, now) for e in week_entries)
+    week_seconds = sum(calculate_entry_duration_for_period(e, week_start, week_end, now) for e in week_entries)
     
-    # This month's time - fetch entries to properly handle running timers
-    month_query = select(TimeEntry).where(TimeEntry.start_time >= month_start)
+    # This month's time - fetch entries that overlap with this month
+    month_query = select(TimeEntry).where(
+        TimeEntry.start_time < month_end,
+        (TimeEntry.end_time >= month_start) | (TimeEntry.end_time.is_(None))
+    )
     if user_filter is not True:
         month_query = month_query.where(user_filter)
     month_result = await db.execute(month_query)
     month_entries = month_result.scalars().all()
-    month_seconds = sum(calculate_entry_duration(e, now) for e in month_entries)
+    month_seconds = sum(calculate_entry_duration_for_period(e, month_start, month_end, now) for e in month_entries)
     
     # Active projects (user has access to, within company)
     user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
@@ -206,7 +262,7 @@ async def get_weekly_summary(
     week_end = week_start + timedelta(days=6)
     
     start_datetime = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
-    end_datetime = datetime.combine(week_end, datetime.max.time()).replace(tzinfo=timezone.utc)
+    end_datetime = datetime.combine(week_end + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)  # Midnight after week ends
     
     # Multi-tenancy: get company filter
     company_id = get_company_filter(current_user)
@@ -227,29 +283,30 @@ async def get_weekly_summary(
         team_members = select(TeamMember.user_id).where(TeamMember.team_id.in_(user_teams))
         user_filter = TimeEntry.user_id.in_(team_members)
     
-    date_filter = and_(TimeEntry.start_time >= start_datetime, TimeEntry.start_time <= end_datetime)
-    
-    # Fetch all entries for the week to properly handle running timers
-    entries_query = select(TimeEntry).where(date_filter)
+    # Fetch entries that OVERLAP with this week (not just started within)
+    entries_query = select(TimeEntry).where(
+        TimeEntry.start_time < end_datetime,  # Started before week ends
+        (TimeEntry.end_time >= start_datetime) | (TimeEntry.end_time.is_(None))  # Ended after week started OR still running
+    )
     if user_filter is not True:
         entries_query = entries_query.where(user_filter)
     entries_result = await db.execute(entries_query)
     all_entries = entries_result.scalars().all()
     
-    # Calculate total seconds including running timers
-    total_seconds = sum(calculate_entry_duration(e, now) for e in all_entries)
+    # Calculate total seconds for the week using period overlap
+    total_seconds = sum(calculate_entry_duration_for_period(e, start_datetime, end_datetime, now) for e in all_entries)
     
-    # Daily breakdown
+    # Daily breakdown - calculate overlap for each day
     daily_breakdown = []
     for i in range(7):
         day = week_start + timedelta(days=i)
         day_start = datetime.combine(day, datetime.min.time()).replace(tzinfo=timezone.utc)
-        day_end = datetime.combine(day, datetime.max.time()).replace(tzinfo=timezone.utc)
+        day_end = datetime.combine(day + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
         
-        # Filter entries for this day
-        day_entries = [e for e in all_entries if day_start <= e.start_time.replace(tzinfo=timezone.utc) <= day_end]
-        day_seconds = sum(calculate_entry_duration(e, now) for e in day_entries)
-        day_count = len(day_entries)
+        # Calculate seconds for this day from ALL entries that overlap with this day
+        day_seconds = sum(calculate_entry_duration_for_period(e, day_start, day_end, now) for e in all_entries)
+        # Count entries that have any overlap with this day
+        day_count = sum(1 for e in all_entries if calculate_entry_duration_for_period(e, day_start, day_end, now) > 0)
         
         daily_breakdown.append(DailySummary(
             date=day,
@@ -728,8 +785,14 @@ async def get_admin_dashboard(
     
     now = datetime.now(timezone.utc)
     today_start = datetime.combine(now.date(), time.min).replace(tzinfo=timezone.utc)
+    today_end = today_start + timedelta(days=1)
     week_start = (today_start - timedelta(days=now.weekday()))
+    week_end = week_start + timedelta(days=7)
     month_start = today_start.replace(day=1)
+    if month_start.month == 12:
+        month_end = month_start.replace(year=month_start.year + 1, month=1)
+    else:
+        month_end = month_start.replace(month=month_start.month + 1)
 
     # Multi-tenancy: get company filter
     company_id = get_company_filter(current_user)
@@ -744,73 +807,49 @@ async def get_admin_dashboard(
         company_users_subq = select(User.id).where(User.company_id == company_id)
         user_filter = TimeEntry.user_id.in_(company_users_subq)
 
-    # Total time today (all users in company) - including active timers
-    today_query = select(TimeEntry).where(TimeEntry.start_time >= today_start)
+    # Total time today - entries that OVERLAP with today
+    today_query = select(TimeEntry).where(
+        TimeEntry.start_time < today_end,
+        (TimeEntry.end_time >= today_start) | (TimeEntry.end_time.is_(None))
+    )
     if user_filter is not True:
         today_query = today_query.where(user_filter)
     today_entries_result = await db.execute(today_query)
     today_entries = today_entries_result.scalars().all()
     
-    logger.info(f"Found {len(today_entries)} time entries for today")
+    logger.info(f"Found {len(today_entries)} time entries overlapping with today")
     
-    total_today = 0
-    for entry in today_entries:
-        logger.info(f"Entry {entry.id}: start={entry.start_time}, end={entry.end_time}, duration={entry.duration_seconds}")
-        if entry.end_time is None:
-            # Active timer - calculate elapsed
-            start = entry.start_time
-            if start.tzinfo is None:
-                start = start.replace(tzinfo=timezone.utc)
-            elapsed = int((now - start).total_seconds())
-            logger.info(f"Active timer ID {entry.id} - elapsed: {elapsed} seconds")
-            total_today += elapsed
-        else:
-            total_today += (entry.duration_seconds or 0)
+    # Calculate only the portion that falls within today
+    total_today = sum(calculate_entry_duration_for_period(e, today_start, today_end, now) for e in today_entries)
     
     logger.info(f"FINAL total_today={total_today}")
 
-    # Total time this week (all users in company) - including active timers
-    week_query = select(TimeEntry).where(TimeEntry.start_time >= week_start)
+    # Total time this week - entries that overlap with this week
+    week_query = select(TimeEntry).where(
+        TimeEntry.start_time < week_end,
+        (TimeEntry.end_time >= week_start) | (TimeEntry.end_time.is_(None))
+    )
     if user_filter is not True:
         week_query = week_query.where(user_filter)
     week_entries_result = await db.execute(week_query)
     week_entries = week_entries_result.scalars().all()
     
-    total_week = 0
-    for entry in week_entries:
-        if entry.end_time is None:
-            # Active timer - calculate elapsed
-            start = entry.start_time
-            if start.tzinfo is None:
-                start = start.replace(tzinfo=timezone.utc)
-            total_week += int((now - start).total_seconds())
-        else:
-            total_week += (entry.duration_seconds or 0)
+    total_week = sum(calculate_entry_duration_for_period(e, week_start, week_end, now) for e in week_entries)
 
-    # Total time this month (all users in company) - including active timers
-    month_query = select(TimeEntry).where(TimeEntry.start_time >= month_start)
+    # Total time this month - entries that overlap with this month
+    month_query = select(TimeEntry).where(
+        TimeEntry.start_time < month_end,
+        (TimeEntry.end_time >= month_start) | (TimeEntry.end_time.is_(None))
+    )
     if user_filter is not True:
         month_query = month_query.where(user_filter)
     month_entries_result = await db.execute(month_query)
     month_entries = month_entries_result.scalars().all()
     
-    total_month = 0
-    for entry in month_entries:
-        if entry.end_time is None:
-            # Active timer - calculate elapsed
-            start = entry.start_time
-            if start.tzinfo is None:
-                start = start.replace(tzinfo=timezone.utc)
-            total_month += int((now - start).total_seconds())
-        else:
-            total_month += (entry.duration_seconds or 0)
+    total_month = sum(calculate_entry_duration_for_period(e, month_start, month_end, now) for e in month_entries)
 
-    # Active users today (within company)
-    active_users_query = select(func.count(func.distinct(TimeEntry.user_id))).where(TimeEntry.start_time >= today_start)
-    if user_filter is not True:
-        active_users_query = active_users_query.where(user_filter)
-    active_users_result = await db.execute(active_users_query)
-    active_users = active_users_result.scalar() or 0
+    # Active users today - count distinct users from entries overlapping with today
+    active_users = len(set(e.user_id for e in today_entries if calculate_entry_duration_for_period(e, today_start, today_end, now) > 0))
 
     # Active projects (within company)
     project_query = select(func.count(Project.id)).join(Team, Project.team_id == Team.id).where(Project.is_archived == False)
@@ -830,46 +869,32 @@ async def get_admin_dashboard(
     running_result = await db.execute(running_query)
     running_timers = running_result.scalar() or 0
 
-    # Time by user today (including active timers, within company)
-    user_query = select(
-        TimeEntry.user_id,
-        User.name,
-        TimeEntry.duration_seconds,
-        TimeEntry.start_time,
-        TimeEntry.end_time,
-        TimeEntry.id
-    ).join(User, TimeEntry.user_id == User.id).where(TimeEntry.start_time >= today_start)
-    if user_filter is not True:
-        user_query = user_query.where(user_filter)
-    user_query = user_query.order_by(User.name)
-    user_result = await db.execute(user_query)
-
-    # Aggregate by user, calculating elapsed time for active timers
+    # Time by user today - use the already fetched today_entries with period calculation
     user_totals = {}
-    for row in user_result.all():
-        user_id = row.user_id
-        user_name = row.name
+    for entry in today_entries:
+        user_id = entry.user_id
         
         if user_id not in user_totals:
+            # Need to fetch user name
             user_totals[user_id] = {
-                "user_name": user_name,
+                "user_name": None,  # Will be populated below
                 "total_seconds": 0,
                 "entry_count": 0
             }
         
-        # Calculate duration (for active timers, use elapsed time)
-        if row.end_time is None:
-            # Active timer - calculate elapsed time
-            start = row.start_time
-            if start.tzinfo is None:
-                start = start.replace(tzinfo=timezone.utc)
-            elapsed = int((now - start).total_seconds())
-            user_totals[user_id]["total_seconds"] += elapsed
-        else:
-            # Completed entry - use stored duration
-            user_totals[user_id]["total_seconds"] += (row.duration_seconds or 0)
-        
-        user_totals[user_id]["entry_count"] += 1
+        # Calculate only the portion that falls within today
+        entry_seconds = calculate_entry_duration_for_period(entry, today_start, today_end, now)
+        if entry_seconds > 0:
+            user_totals[user_id]["total_seconds"] += entry_seconds
+            user_totals[user_id]["entry_count"] += 1
+    
+    # Fetch user names for users with entries
+    if user_totals:
+        user_names_query = select(User.id, User.name).where(User.id.in_(list(user_totals.keys())))
+        user_names_result = await db.execute(user_names_query)
+        for row in user_names_result.all():
+            if row.id in user_totals:
+                user_totals[row.id]["user_name"] = row.name
 
     by_user = []
     for user_id, data in sorted(user_totals.items(), key=lambda x: x[1]["total_seconds"], reverse=True):
