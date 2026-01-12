@@ -9,7 +9,7 @@ import logging
 import asyncio
 from datetime import datetime
 
-from app.dependencies import get_current_user_ws, get_current_user
+from app.dependencies import get_current_user_ws, get_current_user, get_company_filter, FILTER_NULL_COMPANY
 from app.models import User
 
 logger = logging.getLogger(__name__)
@@ -98,13 +98,27 @@ class ConnectionManager:
         if user_id in self.active_timers:
             del self.active_timers[user_id]
     
-    def get_active_timers(self, team_id: int = None, company_id: int = None) -> list[dict]:
-        """Get all active timers, optionally filtered by team or company"""
+    def get_active_timers(self, team_id: int = None, company_filter = None) -> list[dict]:
+        """Get all active timers, optionally filtered by team or company
+        
+        Args:
+            team_id: Filter by team (optional)
+            company_filter: Company filter from get_company_filter():
+                - None: super_admin sees all
+                - FILTER_NULL_COMPANY: platform users see only NULL company_id
+                - int: company-scoped users see only their company
+        """
         timers = list(self.active_timers.values())
         
-        # Filter by company if specified (multi-tenant isolation)
-        if company_id is not None:
-            timers = [t for t in timers if t.get("company_id") == company_id]
+        # Filter by company for multi-tenant isolation
+        if company_filter is not None:
+            if company_filter == FILTER_NULL_COMPANY:
+                # Platform users without company see only NULL company_id timers
+                timers = [t for t in timers if t.get("company_id") is None]
+            else:
+                # Company-scoped users see only their company's timers
+                timers = [t for t in timers if t.get("company_id") == company_filter]
+        # If company_filter is None (super_admin), return all timers
         
         # Filter by team if specified
         if team_id and team_id in self.team_members:
@@ -305,9 +319,9 @@ async def handle_message(websocket: WebSocket, user: User, data: dict):
     elif msg_type == "get_active_timers":
         # Request list of active timers with company filtering
         team_id = data.get("team_id")
-        # Apply company filter for multi-tenant isolation
-        company_id = user.company_id if (user.company_id is not None or user.role != 'super_admin') else None
-        active_timers = manager.get_active_timers(team_id, company_id)
+        # Apply company filter for multi-tenant isolation using proper helper
+        company_filter = get_company_filter(user)
+        active_timers = manager.get_active_timers(team_id, company_filter)
         await websocket.send_json({
             "type": "active_timers",
             "timers": active_timers
@@ -337,9 +351,9 @@ async def get_active_timers(
     current_user: User = Depends(get_current_user)
 ):
     """Get list of currently active timers with company filtering"""
-    # Apply company filter for multi-tenant isolation
-    company_id = current_user.company_id if (current_user.company_id is not None or current_user.role != 'super_admin') else None
-    timers = manager.get_active_timers(team_id, company_id)
+    # Apply company filter for multi-tenant isolation using proper helper
+    company_filter = get_company_filter(current_user)
+    timers = manager.get_active_timers(team_id, company_filter)
     return {
         "timers": timers,
         "count": len(timers)
