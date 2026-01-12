@@ -12,7 +12,7 @@ from datetime import datetime, date, timedelta, timezone
 
 from app.database import get_db
 from app.models import User, Team, TeamMember, Project, Task, TimeEntry
-from app.dependencies import get_current_active_user
+from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -252,14 +252,17 @@ async def get_activity_alerts(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    """Get activity alerts for admin (TASK-022)"""
+    """Get activity alerts for admin (TASK-022) with multi-tenant filtering"""
     now = datetime.now(timezone.utc)
     today_start = datetime.combine(now.date(), datetime.min.time()).replace(tzinfo=timezone.utc)
     
+    # Get company filter for multi-tenant data isolation
+    company_filter = get_company_filter(current_user)
+    
     alerts = []
 
-    # Alert: Long running timers (> 8 hours)
-    long_timers_result = await db.execute(
+    # Alert: Long running timers (> 8 hours) - WITH COMPANY FILTERING
+    long_timers_query = (
         select(TimeEntry, User.name)
         .join(User, TimeEntry.user_id == User.id)
         .where(
@@ -267,6 +270,9 @@ async def get_activity_alerts(
             TimeEntry.start_time <= now - timedelta(hours=8)
         )
     )
+    # Apply company filter
+    long_timers_query = apply_company_filter(long_timers_query, User.company_id, company_filter)
+    long_timers_result = await db.execute(long_timers_query)
     for row in long_timers_result.all():
         entry, user_name = row
         start = entry.start_time
@@ -283,17 +289,20 @@ async def get_activity_alerts(
             "hours": round(hours, 1)
         })
 
-    # Alert: Users with no activity today (active users only)
-    active_users_result = await db.execute(
-        select(User.id, User.name)
-        .where(User.is_active == True)
-    )
+    # Alert: Users with no activity today (active users only) - WITH COMPANY FILTERING
+    active_users_query = select(User.id, User.name).where(User.is_active == True)
+    active_users_query = apply_company_filter(active_users_query, User.company_id, company_filter)
+    active_users_result = await db.execute(active_users_query)
     active_users = active_users_result.all()
     
-    active_today_result = await db.execute(
+    # Get users active today - filter by company through User join
+    active_today_query = (
         select(func.distinct(TimeEntry.user_id))
+        .join(User, TimeEntry.user_id == User.id)
         .where(TimeEntry.start_time >= today_start)
     )
+    active_today_query = apply_company_filter(active_today_query, User.company_id, company_filter)
+    active_today_result = await db.execute(active_today_query)
     active_today_ids = {r[0] for r in active_today_result.all()}
 
     for user_id, user_name in active_users:
@@ -320,13 +329,15 @@ async def get_activity_alerts(
                         "days_inactive": days_ago
                     })
 
-    # Alert: Currently running timers
-    running_timers_result = await db.execute(
+    # Alert: Currently running timers - WITH COMPANY FILTERING
+    running_timers_query = (
         select(TimeEntry, User.name, Project.name)
         .join(User, TimeEntry.user_id == User.id)
         .join(Project, TimeEntry.project_id == Project.id)
         .where(TimeEntry.is_running == True)
     )
+    running_timers_query = apply_company_filter(running_timers_query, User.company_id, company_filter)
+    running_timers_result = await db.execute(running_timers_query)
     running_count = 0
     for row in running_timers_result.all():
         entry, user_name, project_name = row
