@@ -275,8 +275,8 @@ async def start_timer(
     await db.commit()
     await db.refresh(entry)
     
-    # Broadcast timer start to all connected users for real-time "Who's Working Now" updates
-    await ws_manager.broadcast_to_all({
+    # Broadcast timer start to SAME COMPANY ONLY for real-time "Who's Working Now" updates
+    await ws_manager.broadcast_to_company({
         "type": "timer_started",
         "data": {
             "entry_id": entry.id,
@@ -290,7 +290,7 @@ async def start_timer(
             "start_time": entry.start_time.isoformat(),
             "is_running": True
         }
-    })
+    }, company_id=current_user.company_id)
     
     # Update the WebSocket manager's active timers cache
     ws_manager.set_active_timer(current_user.id, {
@@ -339,8 +339,8 @@ async def stop_timer(
         task_result = await db.execute(select(Task.name).where(Task.id == entry.task_id))
         task_name = task_result.scalar()
     
-    # Broadcast timer stopped to all users for real-time "Who's Working Now" updates
-    await ws_manager.broadcast_to_all({
+    # Broadcast timer stopped to SAME COMPANY for real-time "Who's Working Now" updates
+    await ws_manager.broadcast_to_company({
         "type": "timer_stopped",
         "data": {
             "user_id": current_user.id,
@@ -349,13 +349,13 @@ async def stop_timer(
             "task_name": task_name,
             "duration_seconds": entry.duration_seconds
         }
-    })
+    }, company_id=current_user.company_id)
     
     # Clear the WebSocket manager's active timer cache for this user
     ws_manager.clear_active_timer(current_user.id)
     
-    # Also broadcast time entry completion for reports update
-    await ws_manager.broadcast_to_all({
+    # Also broadcast time entry completion for reports update (SAME COMPANY ONLY)
+    await ws_manager.broadcast_to_company({
         "type": "time_entry_completed",
         "data": {
             "entry_id": entry.id,
@@ -371,7 +371,7 @@ async def stop_timer(
             "duration_seconds": entry.duration_seconds,
             "is_running": False
         }
-    })
+    }, company_id=current_user.company_id)
     
     return make_entry_response(entry, project_name, task_name, current_user.name)
 
@@ -433,8 +433,8 @@ async def create_manual_entry(
     await db.commit()
     await db.refresh(entry)
     
-    # Broadcast manual time entry creation to all users for real-time reports update
-    await ws_manager.broadcast_to_all({
+    # Broadcast manual time entry creation to SAME COMPANY for real-time reports update
+    await ws_manager.broadcast_to_company({
         "type": "time_entry_created",
         "data": {
             "entry_id": entry.id,
@@ -450,7 +450,7 @@ async def create_manual_entry(
             "duration_seconds": entry.duration_seconds,
             "is_running": False
         }
-    })
+    }, company_id=current_user.company_id)
     
     return make_entry_response(entry, project.name, task_name, current_user.name)
 
@@ -586,14 +586,25 @@ async def get_time_entry(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Get time entry details"""
-    result = await db.execute(select(TimeEntry).where(TimeEntry.id == entry_id))
+    """Get time entry details with multi-tenant validation"""
+    # Get company filter for multi-tenant data isolation
+    company_filter = get_company_filter(current_user)
+    
+    # Query with company filter to ensure we only access our company's entries
+    query = (
+        select(TimeEntry)
+        .join(User, TimeEntry.user_id == User.id)
+        .where(TimeEntry.id == entry_id)
+    )
+    query = apply_company_filter(query, User.company_id, company_filter)
+    
+    result = await db.execute(query)
     entry = result.scalar_one_or_none()
     
     if not entry:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time entry not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time entry not found or access denied")
     
-    # Check access
+    # Check access - users can only see their own entries unless admin/company_admin
     if current_user.role not in ["super_admin", "admin", "company_admin"] and entry.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     
@@ -619,15 +630,26 @@ async def update_time_entry(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Update time entry"""
-    result = await db.execute(select(TimeEntry).where(TimeEntry.id == entry_id))
+    """Update time entry with multi-tenant validation"""
+    # Get company filter for multi-tenant data isolation
+    company_filter = get_company_filter(current_user)
+    
+    # Query with company filter to ensure we only access our company's entries
+    query = (
+        select(TimeEntry)
+        .join(User, TimeEntry.user_id == User.id)
+        .where(TimeEntry.id == entry_id)
+    )
+    query = apply_company_filter(query, User.company_id, company_filter)
+    
+    result = await db.execute(query)
     entry = result.scalar_one_or_none()
     
     if not entry:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time entry not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time entry not found or access denied")
     
-    # Only owner can update
-    if entry.user_id != current_user.id and current_user.role != "super_admin":
+    # Only owner can update (super_admin only allowed within their own company now)
+    if entry.user_id != current_user.id and current_user.role not in ["super_admin", "admin", "company_admin"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Can only update your own entries")
     
     if entry_data.description is not None:
@@ -656,8 +678,8 @@ async def update_time_entry(
         task_result = await db.execute(select(Task.name).where(Task.id == entry.task_id))
         task_name = task_result.scalar()
     
-    # Broadcast time entry update to all users for real-time reports update
-    await ws_manager.broadcast_to_all({
+    # Broadcast time entry update to SAME COMPANY for real-time reports update
+    await ws_manager.broadcast_to_company({
         "type": "time_entry_updated",
         "data": {
             "entry_id": entry.id,
@@ -672,7 +694,7 @@ async def update_time_entry(
             "duration_seconds": entry.duration_seconds,
             "is_running": entry.is_running
         }
-    })
+    }, company_id=current_user.company_id)
     
     return make_entry_response(entry, project_name, task_name, current_user.name)
 
@@ -683,15 +705,26 @@ async def delete_time_entry(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Delete time entry"""
-    result = await db.execute(select(TimeEntry).where(TimeEntry.id == entry_id))
+    """Delete time entry with multi-tenant validation"""
+    # Get company filter for multi-tenant data isolation
+    company_filter = get_company_filter(current_user)
+    
+    # Query with company filter to ensure we only access our company's entries
+    query = (
+        select(TimeEntry)
+        .join(User, TimeEntry.user_id == User.id)
+        .where(TimeEntry.id == entry_id)
+    )
+    query = apply_company_filter(query, User.company_id, company_filter)
+    
+    result = await db.execute(query)
     entry = result.scalar_one_or_none()
     
     if not entry:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time entry not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time entry not found or access denied")
     
-    # Only owner can delete
-    if entry.user_id != current_user.id and current_user.role != "super_admin":
+    # Only owner can delete (admins within company can delete)
+    if entry.user_id != current_user.id and current_user.role not in ["super_admin", "admin", "company_admin"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Can only delete your own entries")
     
     # Store entry data before deletion for WebSocket broadcast
@@ -705,11 +738,11 @@ async def delete_time_entry(
     await db.delete(entry)
     await db.commit()
     
-    # Broadcast time entry deletion to all users for real-time reports update
-    await ws_manager.broadcast_to_all({
+    # Broadcast time entry deletion to SAME COMPANY for real-time reports update
+    await ws_manager.broadcast_to_company({
         "type": "time_entry_deleted",
         "data": entry_data
-    })
+    }, company_id=current_user.company_id)
     
     return {"message": "Time entry deleted successfully"}
 

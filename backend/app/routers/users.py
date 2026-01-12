@@ -224,14 +224,20 @@ async def create_user(
     
     # Assign to teams if team_ids provided
     if user_data.team_ids:
+        # Get company filter to validate teams belong to admin's company
+        company_filter = get_company_filter(current_user)
+        
         for team_id in user_data.team_ids:
-            # Verify team exists
-            team_result = await db.execute(select(Team).where(Team.id == team_id))
+            # Verify team exists AND belongs to the admin's company
+            team_query = select(Team).where(Team.id == team_id)
+            team_query = apply_company_filter(team_query, Team.company_id, company_filter)
+            
+            team_result = await db.execute(team_query)
             team = team_result.scalar_one_or_none()
             if not team:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Team with ID {team_id} not found"
+                    detail=f"Team with ID {team_id} not found or not in your company"
                 )
             
             # Add user to team
@@ -477,15 +483,22 @@ async def change_user_role(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    """Change user role (admin only)"""
+    """Change user role (admin only) with multi-tenant validation"""
     if user_id == current_user.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot change your own role")
     
-    result = await db.execute(select(User).where(User.id == user_id))
+    # Get company filter for multi-tenant data isolation
+    company_filter = get_company_filter(current_user)
+    
+    # Query with company filter to ensure we only access our company's users
+    query = select(User).where(User.id == user_id)
+    query = apply_company_filter(query, User.company_id, company_filter)
+    
+    result = await db.execute(query)
     user = result.scalar_one_or_none()
     
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found or access denied")
     
     old_role = user.role
     user.role = role_data.role

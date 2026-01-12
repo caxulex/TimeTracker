@@ -83,9 +83,12 @@ async def get_admin_time_entries(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    """Get all time entries for admin (TASK-009)"""
+    """Get all time entries for admin (TASK-009) with multi-tenant filtering"""
     start_datetime = datetime.combine(start_date, datetime.min.time())
     end_datetime = datetime.combine(end_date, datetime.max.time())
+    
+    # Get company filter for multi-tenant data isolation
+    company_filter = get_company_filter(current_user)
 
     # Build query
     query = (
@@ -103,6 +106,9 @@ async def get_admin_time_entries(
             TimeEntry.start_time <= end_datetime
         )
     )
+    
+    # Apply company filter for multi-tenant isolation
+    query = apply_company_filter(query, User.company_id, company_filter)
 
     # Apply filters
     if user_id:
@@ -115,14 +121,16 @@ async def get_admin_time_entries(
     if project_id:
         query = query.where(TimeEntry.project_id == project_id)
 
-    # Get total count
+    # Get total count - also needs company filtering
     count_query = (
         select(func.count(TimeEntry.id), func.coalesce(func.sum(TimeEntry.duration_seconds), 0))
+        .join(User, TimeEntry.user_id == User.id)
         .where(
             TimeEntry.start_time >= start_datetime,
             TimeEntry.start_time <= end_datetime
         )
     )
+    count_query = apply_company_filter(count_query, User.company_id, company_filter)
     if user_id:
         count_query = count_query.where(TimeEntry.user_id == user_id)
     if team_id:
@@ -175,7 +183,7 @@ async def get_workers_report(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    """Get report for all workers (TASK-010)"""
+    """Get report for all workers (TASK-010) with multi-tenant filtering"""
     # Default to current month
     if not start_date:
         now = datetime.now(timezone.utc)
@@ -186,9 +194,13 @@ async def get_workers_report(
     start_datetime = datetime.combine(start_date, datetime.min.time())
     end_datetime = datetime.combine(end_date, datetime.max.time())
     days_in_period = (end_date - start_date).days + 1
+    
+    # Get company filter for multi-tenant data isolation
+    company_filter = get_company_filter(current_user)
 
-    # Base user filter
+    # Base user filter with company filtering
     user_query = select(User).where(User.is_active == True)
+    user_query = apply_company_filter(user_query, User.company_id, company_filter)
     
     if team_id:
         team_users = select(TeamMember.user_id).where(TeamMember.team_id == team_id)

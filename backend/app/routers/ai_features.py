@@ -300,8 +300,8 @@ async def get_user_preferences_admin(
             detail=f"User {user_id} not found"
         )
     
-    # Multi-tenancy: company_admin can only see users from their company
-    if current_user.role == "company_admin" and user.company_id != current_user.company_id:
+    # Multi-tenancy: admin and company_admin can only see users from their company
+    if current_user.role in ["admin", "company_admin"] and user.company_id != current_user.company_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only view users from your own company"
@@ -343,8 +343,8 @@ async def set_user_override(
             detail=f"User {user_id} not found"
         )
     
-    # Multi-tenancy: company_admin can only modify users from their company
-    if current_user.role == "company_admin" and user.company_id != current_user.company_id:
+    # Multi-tenancy: admin and company_admin can only modify users from their company
+    if current_user.role in ["admin", "company_admin"] and user.company_id != current_user.company_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only modify AI settings for users in your own company"
@@ -401,8 +401,8 @@ async def remove_user_override(
             detail=f"User {user_id} not found"
         )
     
-    # Multi-tenancy: company_admin can only modify users from their company
-    if current_user.role == "company_admin" and user.company_id != current_user.company_id:
+    # Multi-tenancy: admin and company_admin can only modify users from their company
+    if current_user.role in ["admin", "company_admin"] and user.company_id != current_user.company_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only modify AI settings for users in your own company"

@@ -331,7 +331,7 @@ async def get_time_by_project(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Get time summary grouped by project"""
+    """Get time summary grouped by project with multi-tenant filtering"""
     now = datetime.now(timezone.utc)
     
     # Default to current month
@@ -343,10 +343,15 @@ async def get_time_by_project(
     start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
     end_datetime = datetime.combine(end_date + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)  # Day after end_date at midnight
     
+    # Get company filter for multi-tenant data isolation
+    company_filter = get_company_filter(current_user)
+    
     # Get accessible projects and users for current user
-    if current_user.role in ["super_admin", "admin"]:
-        project_ids_query = select(Project.id)
-        user_filter = True  # No filter, see all users
+    if current_user.role in ["super_admin", "admin", "company_admin"]:
+        # For admins, get projects within their company
+        project_ids_query = select(Project.id).join(Team, Project.team_id == Team.id)
+        project_ids_query = apply_company_filter(project_ids_query, Team.company_id, company_filter)
+        user_filter = True  # Filter by company, but see all users in company
     else:
         user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
         project_ids_query = select(Project.id).where(
