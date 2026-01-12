@@ -195,9 +195,8 @@ async def get_active_timers(
         .where(TimeEntry.end_time == None)
     )
     
-    # Apply company filter for non-platform admins
-    if company_filter is not None:
-        query = query.where(User.company_id == company_filter)
+    # Apply company filter using proper helper (handles FILTER_NULL_COMPANY sentinel)
+    query = apply_company_filter(query, User.company_id, company_filter)
     
     query = query.order_by(TimeEntry.start_time.desc())
     result = await db.execute(query)
