@@ -109,6 +109,9 @@ class TestWebSocketManager:
         from app.routers.websocket import manager
         from app.dependencies import FILTER_NULL_COMPANY
         
+        # Clear any leftover state from other tests (singleton state leakage)
+        manager.active_timers.clear()
+        
         # Set up timers for different companies
         manager.set_active_timer(10, {"user_id": 10, "company_id": 1, "user_name": "Company 1 User"})
         manager.set_active_timer(11, {"user_id": 11, "company_id": 2, "user_name": "Company 2 User"})
