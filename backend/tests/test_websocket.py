@@ -105,26 +105,38 @@ class TestWebSocketManager:
         assert 2 not in manager.active_timers
 
     def test_get_active_timers_with_company_filter(self):
-        """Test filtering active timers by company_id."""
+        """Test filtering active timers by company_filter."""
         from app.routers.websocket import manager
+        from app.dependencies import FILTER_NULL_COMPANY
         
         # Set up timers for different companies
         manager.set_active_timer(10, {"user_id": 10, "company_id": 1, "user_name": "Company 1 User"})
         manager.set_active_timer(11, {"user_id": 11, "company_id": 2, "user_name": "Company 2 User"})
         manager.set_active_timer(12, {"user_id": 12, "company_id": 1, "user_name": "Company 1 User 2"})
+        manager.set_active_timer(13, {"user_id": 13, "company_id": None, "user_name": "Platform User"})
         
         # Filter by company 1
-        company1_timers = manager.get_active_timers(company_id=1)
+        company1_timers = manager.get_active_timers(company_filter=1)
         assert len(company1_timers) == 2
         
         # Filter by company 2
-        company2_timers = manager.get_active_timers(company_id=2)
+        company2_timers = manager.get_active_timers(company_filter=2)
         assert len(company2_timers) == 1
+        
+        # Filter by NULL company (platform users) using sentinel
+        null_company_timers = manager.get_active_timers(company_filter=FILTER_NULL_COMPANY)
+        assert len(null_company_timers) == 1
+        assert null_company_timers[0]["company_id"] is None
+        
+        # Super admin (company_filter=None) sees ALL timers
+        all_timers = manager.get_active_timers(company_filter=None)
+        assert len(all_timers) == 4
         
         # Clean up
         manager.clear_active_timer(10)
         manager.clear_active_timer(11)
         manager.clear_active_timer(12)
+        manager.clear_active_timer(13)
 
 
 class TestTimerBroadcast:
