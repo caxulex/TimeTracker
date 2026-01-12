@@ -27,14 +27,19 @@ class ConnectionManager:
         self.team_members: Dict[int, Set[int]] = {}
         # user_id -> current timer info
         self.active_timers: Dict[int, dict] = {}
+        # user_id -> company_id (for multi-tenant filtering)
+        self.user_companies: Dict[int, Optional[int]] = {}
     
-    async def connect(self, websocket: WebSocket, user_id: int, team_ids: list[int] = None):
+    async def connect(self, websocket: WebSocket, user_id: int, team_ids: list[int] = None, company_id: int = None):
         """Accept a new WebSocket connection"""
         await websocket.accept()
         
         if user_id not in self.active_connections:
             self.active_connections[user_id] = set()
         self.active_connections[user_id].add(websocket)
+        
+        # Track user's company for multi-tenant broadcasts
+        self.user_companies[user_id] = company_id
         
         # Register user in teams
         if team_ids:
@@ -43,7 +48,7 @@ class ConnectionManager:
                     self.team_members[team_id] = set()
                 self.team_members[team_id].add(user_id)
         
-        logger.info(f"User {user_id} connected via WebSocket")
+        logger.info(f"User {user_id} (company={company_id}) connected via WebSocket")
     
     def disconnect(self, websocket: WebSocket, user_id: int):
         """Remove a WebSocket connection"""
@@ -51,6 +56,9 @@ class ConnectionManager:
             self.active_connections[user_id].discard(websocket)
             if not self.active_connections[user_id]:
                 del self.active_connections[user_id]
+                # Clean up company tracking
+                if user_id in self.user_companies:
+                    del self.user_companies[user_id]
                 # Remove from teams
                 for team_id, members in self.team_members.items():
                     members.discard(user_id)
@@ -79,8 +87,17 @@ class ConnectionManager:
                 if user_id != exclude_user:
                     await self.send_personal_message(message, user_id)
     
+    async def broadcast_to_company(self, message: dict, company_id: int, exclude_user: int = None):
+        """Broadcast a message to all users in the same company (multi-tenant safe)"""
+        for user_id in list(self.active_connections.keys()):
+            if user_id != exclude_user:
+                user_company = self.user_companies.get(user_id)
+                # Match company_id exactly (both None or same value)
+                if user_company == company_id:
+                    await self.send_personal_message(message, user_id)
+    
     async def broadcast_to_all(self, message: dict, exclude_user: int = None):
-        """Broadcast a message to all connected users"""
+        """Broadcast a message to all connected users - USE WITH CAUTION (only for system-wide messages)"""
         for user_id in list(self.active_connections.keys()):
             if user_id != exclude_user:
                 await self.send_personal_message(message, user_id)
@@ -221,7 +238,8 @@ async def websocket_endpoint(
         # Get user's team IDs (simplified - in production, fetch from DB)
         team_ids = []  # Could be populated from user's teams
         
-        await manager.connect(websocket, user.id, team_ids)
+        # Connect with company_id for multi-tenant broadcast filtering
+        await manager.connect(websocket, user.id, team_ids, company_id=user.company_id)
         
         # Load active timers from database and populate the manager
         await load_active_timers_from_db()
@@ -278,13 +296,13 @@ async def handle_message(websocket: WebSocket, user: User, data: dict):
         }
         manager.set_active_timer(user.id, timer_info)
         
-        # Broadcast to team
-        await manager.broadcast_to_all({
+        # Broadcast to SAME COMPANY ONLY (multi-tenant isolation)
+        await manager.broadcast_to_company({
             "type": "timer_started",
             "user_id": user.id,
             "user_name": user.name,
             **timer_info
-        }, exclude_user=user.id)
+        }, company_id=user.company_id, exclude_user=user.id)
         
         # Confirm to sender
         await websocket.send_json({
@@ -296,15 +314,15 @@ async def handle_message(websocket: WebSocket, user: User, data: dict):
         # User stopped a timer
         manager.clear_active_timer(user.id)
         
-        # Broadcast to team
-        await manager.broadcast_to_all({
+        # Broadcast to SAME COMPANY ONLY (multi-tenant isolation)
+        await manager.broadcast_to_company({
             "type": "timer_stopped",
             "user_id": user.id,
             "user_name": user.name,
             "duration_seconds": data.get("duration_seconds"),
             "project_name": data.get("project_name"),
             "task_name": data.get("task_name")
-        }, exclude_user=user.id)
+        }, company_id=user.company_id, exclude_user=user.id)
         
         # Confirm to sender
         await websocket.send_json({
