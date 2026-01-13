@@ -85,17 +85,43 @@ class ReportSummary:
     generated_at: datetime = field(default_factory=datetime.now)
     
     def to_dict(self) -> Dict[str, Any]:
+        # Map backend metrics to frontend expected format
+        mapped_metrics = {
+            "total_hours": self.metrics.get("total_hours", 0),
+            "daily_average": self.metrics.get("avg_daily_hours", 0),
+            "projects_worked": self.metrics.get("projects_count", 0),
+            "tasks_completed": self.metrics.get("tasks_completed", 0),
+            "trend_vs_previous": self.metrics.get("hours_change_pct", 0),
+            "most_productive_day": self._get_most_productive_day(),
+            "top_projects": self.metrics.get("top_projects", []),
+            "daily_breakdown": self.metrics.get("daily_hours", []),
+            # Additional data
+            "last_week_hours": self.metrics.get("last_week_hours", 0),
+            "entry_count": self.metrics.get("entry_count", 0),
+            "trend": self.metrics.get("trend", "stable"),
+        }
+        
         return {
             "period_start": self.period_start.isoformat(),
             "period_end": self.period_end.isoformat(),
+            "ai_generated_summary": self.summary_text,  # Frontend expects this name
             "summary_text": self.summary_text,
             "highlights": self.highlights,
+            "attention_items": self.attention_needed,  # Frontend expects this name
             "attention_needed": self.attention_needed,
             "recommendations": self.recommendations,
             "insights": [i.to_dict() for i in self.insights],
-            "metrics": self.metrics,
+            "metrics": mapped_metrics,
             "generated_at": self.generated_at.isoformat()
         }
+    
+    def _get_most_productive_day(self) -> str:
+        """Find the day with most hours."""
+        daily_hours = self.metrics.get("daily_hours", [])
+        if not daily_hours:
+            return ""
+        max_day = max(daily_hours, key=lambda x: x.get("hours", 0), default={"date": ""})
+        return max_day.get("date", "")
 
 
 class AIReportingService:
@@ -398,6 +424,7 @@ class AIReportingService:
     ) -> Dict[str, Any]:
         """Gather metrics for weekly summary."""
         from app.models import TimeEntry, User, Project, Task, TeamMember
+        from sqlalchemy import case, extract
         
         metrics: Dict[str, Any] = {
             "week_start": week_start.isoformat(),
@@ -419,42 +446,67 @@ class AIReportingService:
         
         metrics["user_count"] = len(user_ids)
         
-        # Total hours this week
-        hours_result = await self.db.execute(
-            select(func.sum(TimeEntry.duration_seconds))
+        # Calculate duration: use duration_seconds if set, otherwise calculate from end_time - start_time
+        # For PostgreSQL: extract(epoch from (end_time - start_time))
+        duration_expr = func.coalesce(
+            TimeEntry.duration_seconds,
+            extract('epoch', TimeEntry.end_time - TimeEntry.start_time)
+        )
+        
+        # Total hours this week - fetch all entries and calculate in Python for reliability
+        entries_result = await self.db.execute(
+            select(TimeEntry)
             .where(
                 and_(
                     TimeEntry.user_id.in_(user_ids),
                     func.date(TimeEntry.start_time) >= week_start,
-                    func.date(TimeEntry.start_time) <= week_end
+                    func.date(TimeEntry.start_time) <= week_end,
+                    TimeEntry.is_running == False  # Only completed entries
                 )
             )
         )
-        total_seconds = hours_result.scalar() or 0
+        entries = entries_result.scalars().all()
+        
+        total_seconds = 0
+        for entry in entries:
+            if entry.duration_seconds:
+                total_seconds += entry.duration_seconds
+            elif entry.end_time and entry.start_time:
+                total_seconds += int((entry.end_time - entry.start_time).total_seconds())
+        
         metrics["total_hours"] = round(total_seconds / 3600, 1)
         
         # Compare to last week
         last_week_start = week_start - timedelta(days=7)
         last_week_end = week_end - timedelta(days=7)
         
-        last_week_result = await self.db.execute(
-            select(func.sum(TimeEntry.duration_seconds))
+        last_entries_result = await self.db.execute(
+            select(TimeEntry)
             .where(
                 and_(
                     TimeEntry.user_id.in_(user_ids),
                     func.date(TimeEntry.start_time) >= last_week_start,
-                    func.date(TimeEntry.start_time) <= last_week_end
+                    func.date(TimeEntry.start_time) <= last_week_end,
+                    TimeEntry.is_running == False
                 )
             )
         )
-        last_week_seconds = last_week_result.scalar() or 0
+        last_entries = last_entries_result.scalars().all()
+        
+        last_week_seconds = 0
+        for entry in last_entries:
+            if entry.duration_seconds:
+                last_week_seconds += entry.duration_seconds
+            elif entry.end_time and entry.start_time:
+                last_week_seconds += int((entry.end_time - entry.start_time).total_seconds())
+        
         metrics["last_week_hours"] = round(last_week_seconds / 3600, 1)
         
         if last_week_seconds > 0:
             change_pct = ((total_seconds - last_week_seconds) / last_week_seconds) * 100
             metrics["hours_change_pct"] = round(change_pct, 1)
         else:
-            metrics["hours_change_pct"] = 0
+            metrics["hours_change_pct"] = 0 if total_seconds == 0 else 100
         
         # Projects worked on
         projects_result = await self.db.execute(
@@ -469,61 +521,91 @@ class AIReportingService:
         )
         metrics["projects_count"] = projects_result.scalar() or 0
         
-        # Top projects by hours
-        top_projects_result = await self.db.execute(
-            select(
-                Project.name,
-                func.sum(TimeEntry.duration_seconds).label("total_seconds")
-            )
-            .join(Project, TimeEntry.project_id == Project.id)
+        # Tasks completed this week
+        tasks_result = await self.db.execute(
+            select(func.count(Task.id))
             .where(
                 and_(
-                    TimeEntry.user_id.in_(user_ids),
-                    func.date(TimeEntry.start_time) >= week_start,
-                    func.date(TimeEntry.start_time) <= week_end
+                    Task.assignee_id.in_(user_ids),
+                    Task.status == "DONE",
+                    func.date(Task.updated_at) >= week_start,
+                    func.date(Task.updated_at) <= week_end
                 )
             )
-            .group_by(Project.id, Project.name)
-            .order_by(func.sum(TimeEntry.duration_seconds).desc())
-            .limit(5)
         )
-        metrics["top_projects"] = [
-            {"name": row.name, "hours": round((row.total_seconds or 0) / 3600, 1)}
-            for row in top_projects_result.fetchall()
-        ]
+        metrics["tasks_completed"] = tasks_result.scalar() or 0
         
-        # Daily breakdown
-        daily_result = await self.db.execute(
-            select(
-                func.date(TimeEntry.start_time).label("work_date"),
-                func.sum(TimeEntry.duration_seconds).label("total_seconds")
+        # Top projects by hours - calculate in Python for accuracy
+        project_hours: Dict[int, Dict] = {}
+        for entry in entries:
+            if entry.project_id:
+                if entry.project_id not in project_hours:
+                    project_hours[entry.project_id] = {"id": entry.project_id, "seconds": 0}
+                
+                if entry.duration_seconds:
+                    project_hours[entry.project_id]["seconds"] += entry.duration_seconds
+                elif entry.end_time and entry.start_time:
+                    project_hours[entry.project_id]["seconds"] += int((entry.end_time - entry.start_time).total_seconds())
+        
+        # Get project names
+        if project_hours:
+            proj_result = await self.db.execute(
+                select(Project.id, Project.name)
+                .where(Project.id.in_(list(project_hours.keys())))
             )
-            .where(
-                and_(
-                    TimeEntry.user_id.in_(user_ids),
-                    func.date(TimeEntry.start_time) >= week_start,
-                    func.date(TimeEntry.start_time) <= week_end
-                )
-            )
-            .group_by(func.date(TimeEntry.start_time))
-            .order_by(func.date(TimeEntry.start_time))
-        )
-        daily_data = daily_result.fetchall()
+            proj_names = {r.id: r.name for r in proj_result.fetchall()}
+            
+            top_projects = sorted(project_hours.values(), key=lambda x: x["seconds"], reverse=True)[:5]
+            metrics["top_projects"] = [
+                {
+                    "project_id": p["id"],
+                    "project_name": proj_names.get(p["id"], "Unknown"),
+                    "hours": round(p["seconds"] / 3600, 1),
+                    "percentage": round((p["seconds"] / total_seconds * 100) if total_seconds > 0 else 0, 1)
+                }
+                for p in top_projects
+            ]
+        else:
+            metrics["top_projects"] = []
+        
+        # Daily breakdown - calculate in Python
+        daily_hours_map: Dict[str, float] = {}
+        for entry in entries:
+            day_key = entry.start_time.strftime("%Y-%m-%d")
+            if day_key not in daily_hours_map:
+                daily_hours_map[day_key] = 0
+            
+            if entry.duration_seconds:
+                daily_hours_map[day_key] += entry.duration_seconds
+            elif entry.end_time and entry.start_time:
+                daily_hours_map[day_key] += (entry.end_time - entry.start_time).total_seconds()
+        
         metrics["daily_hours"] = [
-            {"date": str(row.work_date), "hours": round((row.total_seconds or 0) / 3600, 1)}
-            for row in daily_data
+            {"date": k, "hours": round(v / 3600, 1)}
+            for k, v in sorted(daily_hours_map.items())
         ]
         
         # Calculate averages
-        if daily_data:
-            daily_hours = [(row.total_seconds or 0) / 3600 for row in daily_data]
-            metrics["avg_daily_hours"] = round(statistics.mean(daily_hours), 1)
-            metrics["max_daily_hours"] = round(max(daily_hours), 1)
-            metrics["min_daily_hours"] = round(min(daily_hours), 1)
+        if daily_hours_map:
+            daily_values = [v / 3600 for v in daily_hours_map.values()]
+            metrics["avg_daily_hours"] = round(statistics.mean(daily_values), 1)
+            metrics["max_daily_hours"] = round(max(daily_values), 1)
+            metrics["min_daily_hours"] = round(min(daily_values), 1)
         else:
             metrics["avg_daily_hours"] = 0
             metrics["max_daily_hours"] = 0
             metrics["min_daily_hours"] = 0
+        
+        # Entry count
+        metrics["entry_count"] = len(entries)
+        
+        # Trend indicator
+        if total_seconds > last_week_seconds:
+            metrics["trend"] = "up"
+        elif total_seconds < last_week_seconds:
+            metrics["trend"] = "down"
+        else:
+            metrics["trend"] = "stable"
         
         return metrics
     
