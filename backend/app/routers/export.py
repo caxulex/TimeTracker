@@ -12,7 +12,7 @@ from sqlalchemy import select, func, and_
 
 from app.database import get_db
 from app.models import User, Project, Task, TimeEntry, Team, TeamMember
-from app.dependencies import get_current_active_user
+from app.dependencies import get_current_active_user, get_company_filter, FILTER_NULL_COMPANY
 
 try:
     from openpyxl import Workbook
@@ -50,14 +50,24 @@ async def get_user_time_entries(
     project_id: Optional[int] = None,
     user_id: Optional[int] = None
 ) -> List[dict]:
-    """Get time entries with filtering"""
-    query = select(TimeEntry, Project.name.label("project_name"), Task.name.label("task_name")).outerjoin(
+    """Get time entries with filtering - enforces company-based multi-tenancy"""
+    # Join with User table to enable company filtering
+    query = select(TimeEntry, Project.name.label("project_name"), Task.name.label("task_name"), User).outerjoin(
         Project, TimeEntry.project_id == Project.id
     ).outerjoin(
         Task, TimeEntry.task_id == Task.id
+    ).join(
+        User, TimeEntry.user_id == User.id
     )
 
-    # Apply user filter based on role
+    # CRITICAL: Apply company filter FIRST for multi-tenancy security
+    company_filter = get_company_filter(user)
+    if company_filter == FILTER_NULL_COMPANY:
+        query = query.where(User.company_id.is_(None))
+    else:
+        query = query.where(User.company_id == company_filter)
+
+    # Apply user filter based on role (within company scope)
     if user.role not in ["super_admin", "admin", "company_admin"]:
         if user_id and user_id != user.id:
             raise HTTPException(status_code=403, detail="Access denied")

@@ -408,10 +408,9 @@ async def permanently_delete_user(
     
     query = select(User).where(User.id == user_id)
     
-    # Multi-tenancy: filter by company
+    # Multi-tenancy: filter by company using proper helper
     company_filter = get_company_filter(current_user)
-    if company_filter is not None:
-        query = query.where(User.company_id == company_filter)
+    query = apply_company_filter(query, User.company_id, company_filter)
     
     result = await db.execute(query)
     user = result.scalar_one_or_none()

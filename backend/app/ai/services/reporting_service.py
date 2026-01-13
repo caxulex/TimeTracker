@@ -488,7 +488,7 @@ class AIReportingService:
             .limit(5)
         )
         metrics["top_projects"] = [
-            {"name": row.name, "hours": round(row.total_seconds / 3600, 1)}
+            {"name": row.name, "hours": round((row.total_seconds or 0) / 3600, 1)}
             for row in top_projects_result.fetchall()
         ]
         
@@ -510,13 +510,13 @@ class AIReportingService:
         )
         daily_data = daily_result.fetchall()
         metrics["daily_hours"] = [
-            {"date": str(row.work_date), "hours": round(row.total_seconds / 3600, 1)}
+            {"date": str(row.work_date), "hours": round((row.total_seconds or 0) / 3600, 1)}
             for row in daily_data
         ]
         
         # Calculate averages
         if daily_data:
-            daily_hours = [row.total_seconds / 3600 for row in daily_data]
+            daily_hours = [(row.total_seconds or 0) / 3600 for row in daily_data]
             metrics["avg_daily_hours"] = round(statistics.mean(daily_hours), 1)
             metrics["max_daily_hours"] = round(max(daily_hours), 1)
             metrics["min_daily_hours"] = round(min(daily_hours), 1)
