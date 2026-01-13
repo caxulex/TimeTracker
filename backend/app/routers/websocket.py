@@ -339,7 +339,16 @@ async def handle_message(websocket: WebSocket, user: User, data: dict):
         team_id = data.get("team_id")
         # Apply company filter for multi-tenant isolation using proper helper
         company_filter = get_company_filter(user)
+        
+        # DEBUG LOGGING - Remove after fixing
+        logger.warning(f"[WS ACTIVE TIMERS DEBUG] User: {user.email}, Role: {user.role}, Company ID: {user.company_id}, Filter: {company_filter}")
+        
         active_timers = manager.get_active_timers(team_id, company_filter)
+        
+        logger.warning(f"[WS ACTIVE TIMERS DEBUG] Returning {len(active_timers)} timers")
+        for t in active_timers:
+            logger.warning(f"[WS ACTIVE TIMERS DEBUG] Timer: user={t.get('user_name')}, company_id={t.get('company_id')}")
+        
         await websocket.send_json({
             "type": "active_timers",
             "timers": active_timers

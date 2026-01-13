@@ -186,6 +186,11 @@ async def get_active_timers(
     # Get company filter for multi-tenant data isolation
     company_filter = get_company_filter(current_user)
     
+    # DEBUG LOGGING - Remove after fixing
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.warning(f"[ACTIVE TIMERS DEBUG] User: {current_user.email}, Role: {current_user.role}, Company ID: {current_user.company_id}, Filter: {company_filter}")
+    
     # Build base query for active time entries with user, project, and task info
     query = (
         select(TimeEntry, User, Project, Task)
@@ -203,6 +208,11 @@ async def get_active_timers(
     
     rows = result.all()
     active_timers = []
+    
+    # DEBUG LOGGING
+    logger.warning(f"[ACTIVE TIMERS DEBUG] Found {len(rows)} active timers after filtering")
+    for entry, user, project, task in rows:
+        logger.warning(f"[ACTIVE TIMERS DEBUG] Timer: user={user.name}, user_company_id={user.company_id}")
     
     for entry, user, project, task in rows:
         # Calculate elapsed seconds
