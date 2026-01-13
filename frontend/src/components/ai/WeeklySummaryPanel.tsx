@@ -172,7 +172,7 @@ const WeeklySummaryPanel: React.FC<WeeklySummaryPanelProps> = ({
             <div className="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
               <Clock className="mx-auto text-blue-500 mb-1" size={20} />
               <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                {summary.metrics.total_hours.toFixed(1)}h
+                {(summary.metrics.total_hours ?? 0).toFixed(1)}h
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">Total Hours</p>
             </div>
@@ -192,11 +192,11 @@ const WeeklySummaryPanel: React.FC<WeeklySummaryPanelProps> = ({
             </div>
             <div className="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
               <div className="flex items-center justify-center gap-1 mb-1">
-                {getTrendIcon(summary.metrics.trend_vs_previous)}
+                {getTrendIcon(summary.metrics.trend_vs_previous ?? 0)}
               </div>
               <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                {summary.metrics.trend_vs_previous > 0 ? '+' : ''}
-                {summary.metrics.trend_vs_previous.toFixed(0)}%
+                {(summary.metrics.trend_vs_previous ?? 0) > 0 ? '+' : ''}
+                {(summary.metrics.trend_vs_previous ?? 0).toFixed(0)}%
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">vs Last Week</p>
             </div>
@@ -217,7 +217,7 @@ const WeeklySummaryPanel: React.FC<WeeklySummaryPanelProps> = ({
                           {project.project_name}
                         </span>
                         <span className="text-gray-500 dark:text-gray-400">
-                          {project.hours.toFixed(1)}h ({project.percentage.toFixed(0)}%)
+                          {(project.hours ?? 0).toFixed(1)}h ({(project.percentage ?? 0).toFixed(0)}%)
                         </span>
                       </div>
                       <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
