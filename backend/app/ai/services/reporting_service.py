@@ -521,12 +521,15 @@ class AIReportingService:
         )
         metrics["projects_count"] = projects_result.scalar() or 0
         
-        # Tasks completed this week
+        # Tasks completed this week - count distinct tasks the user worked on that are now DONE
+        # Since Task doesn't have assignee_id, we count tasks via TimeEntry relationship
         tasks_result = await self.db.execute(
-            select(func.count(Task.id))
+            select(func.count(func.distinct(TimeEntry.task_id)))
+            .join(Task, TimeEntry.task_id == Task.id)
             .where(
                 and_(
-                    Task.assignee_id.in_(user_ids),
+                    TimeEntry.user_id.in_(user_ids),
+                    TimeEntry.task_id.isnot(None),
                     Task.status == "DONE",
                     func.date(Task.updated_at) >= week_start,
                     func.date(Task.updated_at) <= week_end
