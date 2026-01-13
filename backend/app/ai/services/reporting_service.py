@@ -523,20 +523,24 @@ class AIReportingService:
         
         # Tasks completed this week - count distinct tasks the user worked on that are now DONE
         # Since Task doesn't have assignee_id, we count tasks via TimeEntry relationship
-        tasks_result = await self.db.execute(
-            select(func.count(func.distinct(TimeEntry.task_id)))
-            .join(Task, TimeEntry.task_id == Task.id)
-            .where(
-                and_(
-                    TimeEntry.user_id.in_(user_ids),
-                    TimeEntry.task_id.isnot(None),
-                    Task.status == "DONE",
-                    func.date(Task.updated_at) >= week_start,
-                    func.date(Task.updated_at) <= week_end
+        try:
+            tasks_result = await self.db.execute(
+                select(func.count(func.distinct(TimeEntry.task_id)))
+                .join(Task, TimeEntry.task_id == Task.id)
+                .where(
+                    and_(
+                        TimeEntry.user_id.in_(user_ids),
+                        TimeEntry.task_id.isnot(None),
+                        Task.status == "DONE",
+                        func.date(Task.updated_at) >= week_start,
+                        func.date(Task.updated_at) <= week_end
+                    )
                 )
             )
-        )
-        metrics["tasks_completed"] = tasks_result.scalar() or 0
+            metrics["tasks_completed"] = tasks_result.scalar() or 0
+        except Exception as e:
+            logger.warning(f"Could not count completed tasks: {e}")
+            metrics["tasks_completed"] = 0
         
         # Top projects by hours - calculate in Python for accuracy
         project_hours: Dict[int, Dict] = {}
