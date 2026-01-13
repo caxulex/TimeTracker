@@ -504,6 +504,8 @@ class TopProject(BaseModel):
     """Top project by hours."""
     name: str
     hours: float
+    
+    model_config = {"extra": "allow"}
 
 
 class SummaryMetrics(BaseModel):
@@ -511,15 +513,25 @@ class SummaryMetrics(BaseModel):
     week_start: str
     week_end: str
     user_count: int = 1
-    total_hours: float
-    last_week_hours: float
-    hours_change_pct: float
-    projects_count: int
-    top_projects: List[TopProject]
-    daily_hours: List[ProjectDailyHours]
-    avg_daily_hours: float
-    max_daily_hours: float
-    min_daily_hours: float
+    total_hours: float = 0
+    last_week_hours: float = 0
+    hours_change_pct: float = 0
+    projects_count: int = 0
+    top_projects: List[TopProject] = []
+    daily_hours: List[ProjectDailyHours] = []
+    avg_daily_hours: float = 0
+    max_daily_hours: float = 0
+    min_daily_hours: float = 0
+    # Additional fields for frontend compatibility
+    projects_worked: int = 0
+    tasks_completed: int = 0
+    trend_vs_previous: float = 0
+    daily_average: float = 0
+    most_productive_day: str = ""
+    entry_count: int = 0
+    trend: str = "stable"
+    
+    model_config = {"extra": "allow"}
 
 
 class AttentionItem(BaseModel):
@@ -528,6 +540,8 @@ class AttentionItem(BaseModel):
     description: str
     severity: str
     actions: List[str] = []
+    
+    model_config = {"extra": "allow"}
 
 
 class WeeklySummary(BaseModel):
@@ -535,12 +549,16 @@ class WeeklySummary(BaseModel):
     period_start: str
     period_end: str
     summary_text: str
-    highlights: List[str]
-    attention_needed: List[AttentionItem]
-    recommendations: List[str]
-    insights: List[Insight]
+    ai_generated_summary: Optional[str] = None  # Alias for frontend
+    highlights: List[str] = []
+    attention_needed: List[AttentionItem] = []
+    attention_items: List[AttentionItem] = []  # Alias for frontend
+    recommendations: List[str] = []
+    insights: List[Insight] = []
     metrics: SummaryMetrics
     generated_at: str
+    
+    model_config = {"extra": "allow"}
 
 
 class WeeklySummaryResponse(BaseModel):

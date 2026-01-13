@@ -85,18 +85,55 @@ class ReportSummary:
     generated_at: datetime = field(default_factory=datetime.now)
     
     def to_dict(self) -> Dict[str, Any]:
-        # Map backend metrics to frontend expected format
-        mapped_metrics = {
+        # Format top_projects to match TopProject schema (name, hours)
+        raw_top_projects = self.metrics.get("top_projects", [])
+        formatted_top_projects = [
+            {
+                "name": p.get("project_name", p.get("name", "Unknown")),
+                "hours": p.get("hours", 0)
+            }
+            for p in raw_top_projects
+        ]
+        
+        # Format attention_needed to match AttentionItem schema
+        formatted_attention = [
+            {
+                "title": item.get("title", "Attention needed"),
+                "description": item.get("description", ""),
+                "severity": item.get("severity", "warning"),
+                "actions": item.get("actions", item.get("action_items", []))
+            }
+            for item in self.attention_needed
+        ]
+        
+        # Find most productive day
+        daily_hours = self.metrics.get("daily_hours", [])
+        most_productive_day = ""
+        if daily_hours:
+            max_day = max(daily_hours, key=lambda x: x.get("hours", 0), default={"date": ""})
+            most_productive_day = max_day.get("date", "")
+        
+        # Build metrics to match SummaryMetrics schema + frontend aliases
+        formatted_metrics = {
+            # Core schema fields
+            "week_start": self.metrics.get("week_start", self.period_start.isoformat()),
+            "week_end": self.metrics.get("week_end", self.period_end.isoformat()),
+            "user_count": self.metrics.get("user_count", 1),
             "total_hours": self.metrics.get("total_hours", 0),
-            "daily_average": self.metrics.get("avg_daily_hours", 0),
+            "last_week_hours": self.metrics.get("last_week_hours", 0),
+            "hours_change_pct": self.metrics.get("hours_change_pct", 0),
+            "projects_count": self.metrics.get("projects_count", 0),
+            "top_projects": formatted_top_projects,
+            "daily_hours": daily_hours,
+            "avg_daily_hours": self.metrics.get("avg_daily_hours", 0),
+            "max_daily_hours": self.metrics.get("max_daily_hours", 0),
+            "min_daily_hours": self.metrics.get("min_daily_hours", 0),
+            # Frontend compatibility aliases
             "projects_worked": self.metrics.get("projects_count", 0),
             "tasks_completed": self.metrics.get("tasks_completed", 0),
             "trend_vs_previous": self.metrics.get("hours_change_pct", 0),
-            "most_productive_day": self._get_most_productive_day(),
-            "top_projects": self.metrics.get("top_projects", []),
-            "daily_breakdown": self.metrics.get("daily_hours", []),
-            # Additional data
-            "last_week_hours": self.metrics.get("last_week_hours", 0),
+            "daily_average": self.metrics.get("avg_daily_hours", 0),
+            "most_productive_day": most_productive_day,
             "entry_count": self.metrics.get("entry_count", 0),
             "trend": self.metrics.get("trend", "stable"),
         }
@@ -104,24 +141,16 @@ class ReportSummary:
         return {
             "period_start": self.period_start.isoformat(),
             "period_end": self.period_end.isoformat(),
-            "ai_generated_summary": self.summary_text,  # Frontend expects this name
             "summary_text": self.summary_text,
+            "ai_generated_summary": self.summary_text,  # Frontend alias
             "highlights": self.highlights,
-            "attention_items": self.attention_needed,  # Frontend expects this name
-            "attention_needed": self.attention_needed,
+            "attention_needed": formatted_attention,
+            "attention_items": formatted_attention,  # Frontend alias
             "recommendations": self.recommendations,
             "insights": [i.to_dict() for i in self.insights],
-            "metrics": mapped_metrics,
+            "metrics": formatted_metrics,
             "generated_at": self.generated_at.isoformat()
         }
-    
-    def _get_most_productive_day(self) -> str:
-        """Find the day with most hours."""
-        daily_hours = self.metrics.get("daily_hours", [])
-        if not daily_hours:
-            return ""
-        max_day = max(daily_hours, key=lambda x: x.get("hours", 0), default={"date": ""})
-        return max_day.get("date", "")
 
 
 class AIReportingService:
