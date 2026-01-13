@@ -171,25 +171,23 @@ def get_company_filter(user: User):
     """
     Get company filter for multi-tenant data isolation.
     
-    - Super admins (company_id=None) see ALL data
-    - Company admins/users only see their company's data
-    - Users with NULL company_id see only NULL company_id data (legacy/platform users)
+    ALL users are scoped to their company for strict data isolation:
+    - Users with company_id see only their company's data
+    - Users with NULL company_id see only NULL company_id data (platform users)
+    
+    This ensures white-label companies NEVER see each other's data,
+    regardless of user role.
     
     Returns:
-        - None for super_admins (see everything)
         - company_id (int) for company-scoped users  
         - FILTER_NULL_COMPANY sentinel for platform users without a company
     """
-    # Platform super_admins (no company) can see everything
-    if user.company_id is None and user.role == 'super_admin':
-        return None
+    # Users with a company are scoped to their company
+    if user.company_id is not None:
+        return user.company_id
     
-    # Users without a company_id but NOT super_admin should only see NULL company data
-    if user.company_id is None:
-        return FILTER_NULL_COMPANY
-    
-    # Everyone else is scoped to their company
-    return user.company_id
+    # Platform users (no company) see only NULL company data
+    return FILTER_NULL_COMPANY
 
 
 def apply_company_filter(query, company_column, company_id):
