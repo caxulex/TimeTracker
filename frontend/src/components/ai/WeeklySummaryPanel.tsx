@@ -203,7 +203,7 @@ const WeeklySummaryPanel: React.FC<WeeklySummaryPanelProps> = ({
           </div>
           
           {/* Top Projects */}
-          {summary.metrics.top_projects.length > 0 && (
+          {summary.metrics.top_projects?.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                 Top Projects
@@ -234,7 +234,7 @@ const WeeklySummaryPanel: React.FC<WeeklySummaryPanelProps> = ({
           )}
           
           {/* Insights */}
-          {summary.insights.length > 0 && (
+          {summary.insights?.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                 Insights
@@ -261,7 +261,7 @@ const WeeklySummaryPanel: React.FC<WeeklySummaryPanelProps> = ({
           )}
           
           {/* Attention Items */}
-          {summary.attention_items.length > 0 && (
+          {summary.attention_items?.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
                 <AlertTriangle size={16} className="text-yellow-500" />
