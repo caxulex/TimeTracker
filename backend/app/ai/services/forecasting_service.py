@@ -563,7 +563,7 @@ class ForecastingService:
     ) -> float:
         """Get total hours for user in date range, including running timers."""
         from app.models import TimeEntry
-        from datetime import datetime
+        from datetime import datetime, timezone
         
         # Get completed entries (have duration_seconds)
         completed_result = await self.db.execute(
@@ -593,12 +593,16 @@ class ForecastingService:
         )
         running_entries = running_result.fetchall()
         
-        # Calculate running time
+        # Calculate running time (use timezone-aware datetime)
         running_seconds = 0
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         for entry in running_entries:
             if entry.start_time:
-                running_seconds += (now - entry.start_time).total_seconds()
+                # Make sure start_time is timezone-aware
+                entry_start = entry.start_time
+                if entry_start.tzinfo is None:
+                    entry_start = entry_start.replace(tzinfo=timezone.utc)
+                running_seconds += (now - entry_start).total_seconds()
         
         total_seconds = completed_seconds + running_seconds
         return total_seconds / 3600
