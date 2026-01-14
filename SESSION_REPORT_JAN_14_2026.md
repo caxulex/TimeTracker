@@ -192,9 +192,9 @@ git push
 
 | Fix | Status | Tested |
 |-----|--------|--------|
-| #1 AI Chat | ✅ DONE | 🔲 PENDING |
+| #1 AI Chat | ✅ DONE | ✅ PASS |
 | #2 Login Error | ✅ DONE | 🔲 PENDING |
-| #3 Task Edit | ✅ DONE | 🔲 PENDING |
+| #3 Task Edit | 🔧 FIXED | 🔲 RETEST |
 | #4 Date Filter | ✅ DONE | 🔲 PENDING |
 | #5 Team Edit | ✅ DONE | 🔲 PENDING |
 | #6 Project Delete | ✅ DONE | 🔲 PENDING |

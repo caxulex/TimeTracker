@@ -38,6 +38,8 @@ class TimeEntryUpdate(BaseModel):
     description: Optional[str] = None
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
+    project_id: Optional[int] = None
+    task_id: Optional[int] = None
 
 
 class TimeEntryResponse(BaseModel):
@@ -660,6 +662,34 @@ async def update_time_entry(
     
     if entry_data.end_time is not None:
         entry.end_time = entry_data.end_time
+    
+    if entry_data.project_id is not None:
+        # Verify project exists and belongs to same company
+        project_result = await db.execute(
+            select(Project).where(Project.id == entry_data.project_id)
+        )
+        project = project_result.scalar_one_or_none()
+        if not project:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        entry.project_id = entry_data.project_id
+        # Clear task if project changed (task may not belong to new project)
+        if entry_data.task_id is None:
+            entry.task_id = None
+    
+    if entry_data.task_id is not None:
+        # Verify task exists and belongs to the project
+        task_result = await db.execute(
+            select(Task).where(Task.id == entry_data.task_id)
+        )
+        task = task_result.scalar_one_or_none()
+        if not task:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+        if task.project_id != (entry_data.project_id or entry.project_id):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Task does not belong to the selected project")
+        entry.task_id = entry_data.task_id
+    elif entry_data.task_id == 0 or (entry_data.project_id is not None and entry_data.task_id is None):
+        # Allow clearing task by setting to None
+        pass  # task_id already handled above
     
     # Recalculate duration if times changed
     if entry.end_time:
