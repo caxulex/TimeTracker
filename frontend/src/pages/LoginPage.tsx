@@ -18,6 +18,7 @@ export function LoginPage() {
   const { addNotification } = useNotifications();
   const [showPassword, setShowPassword] = useState(false);
   const { branding, setCompany, isWhiteLabeled } = useBranding();
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   // Check for company slug in URL path or query params and load branding
   useEffect(() => {
@@ -42,6 +43,7 @@ export function LoginPage() {
   } = useForm<UserLogin>();
 
   const onSubmit = async (data: UserLogin) => {
+    setLoginError(null);
     try {
       await login(data);
       addNotification({
@@ -51,8 +53,18 @@ export function LoginPage() {
         duration: 3000,
       });
       navigate('/dashboard');
-    } catch (error) {
-      // Error is handled by the store
+    } catch (error: any) {
+      // Extract error message and store in local state
+      const detail = error?.response?.data?.detail;
+      let message = 'Login failed. Please check your credentials.';
+      if (typeof detail === 'string') {
+        message = detail;
+      } else if (Array.isArray(detail)) {
+        message = detail.map((e: any) => e.msg || e.message || String(e)).join(', ');
+      } else if (detail?.msg) {
+        message = detail.msg;
+      }
+      setLoginError(message);
     }
   };
 
@@ -97,12 +109,12 @@ export function LoginPage() {
 
         {/* Form */}
         <form className="mt-8 space-y-6" onSubmit={handleSubmit(onSubmit)}>
-          {error && (
+          {loginError && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-              {error}
+              {loginError}
               <button
                 type="button"
-                onClick={clearError}
+                onClick={() => setLoginError(null)}
                 className="float-right text-red-500 hover:text-red-700"
               >
                 ×
