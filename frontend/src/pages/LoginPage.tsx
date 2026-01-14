@@ -1,7 +1,7 @@
 // ============================================
 // TIME TRACKER - LOGIN PAGE
 // ============================================
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { useAuthStore } from '../stores/authStore';
@@ -14,11 +14,14 @@ export function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { companySlug: urlCompanySlug } = useParams<{ companySlug?: string }>();
-  const { login, isLoading, error, clearError } = useAuthStore();
+  const { login, isLoading } = useAuthStore();
   const { addNotification } = useNotifications();
   const [showPassword, setShowPassword] = useState(false);
   const { branding, setCompany, isWhiteLabeled } = useBranding();
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  // Use ref to persist error across re-renders caused by store updates
+  const errorRef = useRef<string | null>(null);
 
   // Check for company slug in URL path or query params and load branding
   useEffect(() => {
@@ -42,8 +45,19 @@ export function LoginPage() {
     formState: { errors },
   } = useForm<UserLogin>();
 
+  // Sync error ref to state when it changes (handles re-renders from store updates)
+  useEffect(() => {
+    if (errorRef.current && !loginError) {
+      setLoginError(errorRef.current);
+    }
+  }, [isLoading, loginError]);
+
   const onSubmit = async (data: UserLogin) => {
+    // Clear previous error only on new submission
     setLoginError(null);
+    errorRef.current = null;
+    setIsSubmitting(true);
+    
     try {
       await login(data);
       addNotification({
@@ -54,7 +68,7 @@ export function LoginPage() {
       });
       navigate('/dashboard');
     } catch (error: any) {
-      // Extract error message and store in local state
+      // Extract error message and store in both ref and state
       const detail = error?.response?.data?.detail;
       let message = 'Login failed. Please check your credentials.';
       if (typeof detail === 'string') {
@@ -64,7 +78,11 @@ export function LoginPage() {
       } else if (detail?.msg) {
         message = detail.msg;
       }
+      // Store in ref first (survives re-renders), then set state
+      errorRef.current = message;
       setLoginError(message);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -111,7 +129,7 @@ export function LoginPage() {
         <form className="mt-8 space-y-6" onSubmit={handleSubmit(onSubmit)}>
           {loginError && (
             <div 
-              className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm animate-pulse"
+              className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm"
               role="alert"
               aria-live="assertive"
             >
@@ -124,7 +142,10 @@ export function LoginPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setLoginError(null)}
+                  onClick={() => {
+                    errorRef.current = null;
+                    setLoginError(null);
+                  }}
                   className="text-red-500 hover:text-red-700 font-bold text-xl leading-none"
                   aria-label="Dismiss error"
                 >
