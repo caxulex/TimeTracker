@@ -635,13 +635,19 @@ class ForecastingService:
             .where(
                 and_(
                     TimeEntry.user_id == user_id,
-                    func.date(TimeEntry.start_time) >= start_date
+                    func.date(TimeEntry.start_time) >= start_date,
+                    TimeEntry.is_running == False  # Only completed entries for historical average
                 )
             )
             .group_by(func.date(TimeEntry.start_time))
         )
         
-        daily_hours = [row.total_seconds / 3600 for row in result.fetchall()]
+        # Filter out None values (shouldn't happen now but be safe)
+        daily_hours = [
+            row.total_seconds / 3600 
+            for row in result.fetchall() 
+            if row.total_seconds is not None
+        ]
         
         if not daily_hours:
             return 8.0  # Default assumption
