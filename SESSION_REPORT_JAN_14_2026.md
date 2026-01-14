@@ -233,6 +233,10 @@ All 8 QA fixes + additional bugs found during testing:
 | `48d375a` | fix: Change start_date type from str to date in UserAdminUpdate |
 | `e551da4` | fix: Use sessionStorage to persist login error across remounts |
 | `1d4c689` | fix: Handle all FK constraints when permanently deleting user |
+| `2a5b42a` | docs: Update session report with all fixes and test results |
+| `e761e71` | fix: Track AI token usage in NLP and Reporting services |
+| `49a1dee` | fix: NLP chat suggestions rendering crash (React error #31) |
+| `efb399b` | fix: Align NLP frontend types with backend schema |
 
 ### Changes Made Per Fix
 
@@ -253,6 +257,9 @@ All 8 QA fixes + additional bugs found during testing:
 | Date filter "Today" shows nothing | toISOString() converts to UTC | Use local timezone formatting |
 | Staff edit 500 error | start_date type mismatch | Changed Optional[str] → Optional[date] |
 | Staff delete 500 error | Missing FK constraint handling | Added all related table deletions |
+| AI usage showing 0 tokens | Tokens not captured from AI responses | Track tokens in NLP/Reporting services |
+| NLP chat crash (React error #31) | Suggestions rendered as objects | Added NLPSuggestion interface, render `.name` |
+| NLP confirm 422 error | Frontend types mismatched backend | Aligned all NLP types with backend schema |
 
 ### CI/CD Issues Resolved
 
@@ -309,6 +316,46 @@ All fixes are deployed. Each must be manually verified:
 
 ---
 
+## 🤖 AI Features Testing (Continued)
+
+### AI Admin Settings ✅ PASS
+- All feature toggles visible and working
+- Usage stats: 276 requests, 9 unique users
+- **Note:** Token count showed 0 - tracking bug fixed in `e761e71`
+
+### AI Quick Entry (NLP Chat) - Bugs Fixed
+1. **React error #31 crash** - Page went blank when suggestions appeared
+   - **Cause:** Backend returned `{id, name}` objects, frontend tried to render as string
+   - **Fix:** Added `NLPSuggestion` interface, render `suggestion.name`
+
+2. **422 Validation error** on confirm
+   - **Cause:** Frontend/backend type mismatch:
+     - Frontend sent `parse_result`, backend expected `parsed_result`
+     - Frontend used nested `duration.total_minutes`, backend returns `duration_seconds`
+     - Frontend expected `entry_id`, backend returns `time_entry_id`
+   - **Fix:** Completely aligned `NLPParseResult` interface with backend response
+
+### Files Modified for AI Fixes
+
+| File | Change |
+|------|--------|
+| `backend/app/ai/services/nlp_service.py` | Added `_last_tokens_used` tracking |
+| `backend/app/ai/services/reporting_service.py` | Added `_last_tokens_used` tracking |
+| `frontend/src/api/nlpServices.ts` | Rewrote `NLPParseResult` to match backend |
+| `frontend/src/components/ai/ChatInterface.tsx` | Updated to use flat structure |
+| `frontend/src/hooks/useNLPServices.ts` | Fixed field names |
+
+### AI Testing Still Needed
+- [ ] NLP Quick Entry - test after deployment
+- [ ] User AI Preferences
+- [ ] AI Suggestions in Time Entry
+- [ ] Anomaly Detection Panel (Admin)
+- [ ] Weekly Summary Panel
+- [ ] Payroll Forecast Panel
+
+---
+
 *Session Started: January 14, 2026*  
-*All 8 Fixes Implemented*  
-*Status: Awaiting Manual Production Testing*
+*All 8 Original QA Fixes + 7 Additional Bug Fixes Implemented*  
+*Total Commits This Session: 16*  
+*Status: AI Quick Entry Fix Awaiting Deployment & Testing*
