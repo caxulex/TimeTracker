@@ -184,23 +184,64 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             </span>
           </div>
           
-          <div className="space-y-2 mb-4">
-            {/* Duration */}
+          <div className="space-y-3 mb-4">
+            {/* Duration - Editable */}
             <div className="flex items-center gap-2">
               <Clock size={16} className="text-blue-500" />
-              <span className="font-medium">
-                {parsedResult.duration_display || formatDurationFromSeconds(parsedResult.duration_seconds)}
-              </span>
+              <label className="text-sm text-gray-600 dark:text-gray-400">Duration:</label>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min="0"
+                  max="23"
+                  value={Math.floor((modifications.duration_seconds as number ?? parsedResult.duration_seconds ?? 0) / 3600)}
+                  onChange={(e) => {
+                    const hours = parseInt(e.target.value) || 0;
+                    const currentMins = Math.floor(((modifications.duration_seconds as number ?? parsedResult.duration_seconds ?? 0) % 3600) / 60);
+                    setModifications(prev => ({
+                      ...prev,
+                      duration_seconds: hours * 3600 + currentMins * 60
+                    }));
+                  }}
+                  className="w-16 px-2 py-1 border rounded text-center dark:bg-gray-700 dark:border-gray-600"
+                />
+                <span className="text-gray-500">h</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="59"
+                  value={Math.floor(((modifications.duration_seconds as number ?? parsedResult.duration_seconds ?? 0) % 3600) / 60)}
+                  onChange={(e) => {
+                    const mins = parseInt(e.target.value) || 0;
+                    const currentHours = Math.floor((modifications.duration_seconds as number ?? parsedResult.duration_seconds ?? 0) / 3600);
+                    setModifications(prev => ({
+                      ...prev,
+                      duration_seconds: currentHours * 3600 + mins * 60
+                    }));
+                  }}
+                  className="w-16 px-2 py-1 border rounded text-center dark:bg-gray-700 dark:border-gray-600"
+                />
+                <span className="text-gray-500">m</span>
+              </div>
             </div>
             
-            {/* Date */}
+            {/* Date - Editable */}
             <div className="flex items-center gap-2">
               <Calendar size={16} className="text-green-500" />
-              <span className="font-medium">
-                {parsedResult.start_time 
-                  ? new Date(parsedResult.start_time).toLocaleDateString() 
-                  : 'Today'}
-              </span>
+              <label className="text-sm text-gray-600 dark:text-gray-400">Date:</label>
+              <input
+                type="date"
+                value={(modifications.start_time as string)?.split('T')[0] || 
+                       parsedResult.start_time?.split('T')[0] || 
+                       new Date().toISOString().split('T')[0]}
+                onChange={(e) => {
+                  setModifications(prev => ({
+                    ...prev,
+                    start_time: e.target.value + 'T09:00:00'
+                  }));
+                }}
+                className="px-2 py-1 border rounded dark:bg-gray-700 dark:border-gray-600"
+              />
             </div>
             
             {/* Project */}
@@ -223,15 +264,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               )}
             </div>
             
-            {/* Description */}
-            {parsedResult.description && (
-              <div className="flex items-start gap-2">
-                <FileText size={16} className="text-gray-500 mt-0.5" />
-                <span className="text-gray-600 dark:text-gray-400 italic">
-                  "{parsedResult.description}"
-                </span>
-              </div>
-            )}
+            {/* Description - Editable */}
+            <div className="flex items-start gap-2">
+              <FileText size={16} className="text-gray-500 mt-2" />
+              <input
+                type="text"
+                value={(modifications.description as string) ?? parsedResult.description ?? ''}
+                onChange={(e) => {
+                  setModifications(prev => ({
+                    ...prev,
+                    description: e.target.value
+                  }));
+                }}
+                placeholder="Add description..."
+                className="flex-1 px-2 py-1 border rounded dark:bg-gray-700 dark:border-gray-600 
+                  text-gray-600 dark:text-gray-300"
+              />
+            </div>
           </div>
           
           {/* Suggestions - Projects to choose from */}
