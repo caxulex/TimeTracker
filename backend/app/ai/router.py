@@ -293,8 +293,8 @@ async def get_all_anomalies(
     try:
         service = await get_anomaly_service(db)
         
-        # Multi-tenancy: super_admin with NULL company sees all, others see only their company
-        company_id = None if (current_user.role == "super_admin" and current_user.company_id is None) else current_user.company_id
+        # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
+        company_id = current_user.company_id
         
         result = await service.scan_all_users(
             period_days=period_days,
@@ -445,8 +445,8 @@ async def forecast_payroll(
     try:
         service = await get_forecasting_service(db)
         
-        # Multi-tenancy: super_admin with NULL company sees all, others see only their company
-        company_id = None if (current_user.role == "super_admin" and current_user.company_id is None) else current_user.company_id
+        # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
+        company_id = current_user.company_id
         
         result = await service.forecast_payroll(
             user_id=current_user.id,
@@ -489,8 +489,8 @@ async def assess_overtime_risk(
     try:
         service = await get_forecasting_service(db)
         
-        # Multi-tenancy: super_admin with NULL company sees all, others see only their company
-        company_id = None if (current_user.role == "super_admin" and current_user.company_id is None) else current_user.company_id
+        # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
+        company_id = current_user.company_id
         
         result = await service.assess_overtime_risk(
             user_id=current_user.id,
@@ -532,8 +532,8 @@ async def forecast_project_budget(
     try:
         service = await get_forecasting_service(db)
         
-        # Multi-tenancy: super_admin with NULL company sees all, others see only their company
-        company_id = None if (current_user.role == "super_admin" and current_user.company_id is None) else current_user.company_id
+        # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
+        company_id = current_user.company_id
         
         result = await service.forecast_project_budget(
             user_id=current_user.id,
@@ -572,8 +572,8 @@ async def forecast_cash_flow(
     try:
         service = await get_forecasting_service(db)
         
-        # Multi-tenancy: super_admin with NULL company sees all, others see only their company
-        company_id = None if (current_user.role == "super_admin" and current_user.company_id is None) else current_user.company_id
+        # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
+        company_id = current_user.company_id
         
         result = await service.forecast_cash_flow(
             user_id=current_user.id,
@@ -930,8 +930,8 @@ async def scan_team_burnout(
     try:
         service = await get_ml_anomaly_service(db)
         
-        # Multi-tenancy: super_admin with NULL company sees all, others see only their company
-        company_id = None if (current_user.role == "super_admin" and current_user.company_id is None) else current_user.company_id
+        # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
+        company_id = current_user.company_id
         
         result = await service.scan_team_burnout(
             team_id=request.team_id,

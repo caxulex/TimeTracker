@@ -228,9 +228,8 @@ class AnomalyService:
             else:
                 query = select(User).where(User.is_active == True)
             
-            # Multi-tenancy: filter by company_id if provided (None = show all for platform admin)
-            if company_id is not None:
-                query = query.where(User.company_id == company_id)
+            # Multi-tenancy: ALWAYS filter by company_id (strict isolation)
+            query = query.where(User.company_id == company_id)
             
             result = await self.db.execute(query)
             users = result.scalars().all()
