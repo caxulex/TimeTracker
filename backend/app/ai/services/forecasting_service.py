@@ -164,7 +164,8 @@ class ForecastingService:
         user_id: int,
         period_type: str = "bi_weekly",  # weekly, bi_weekly, semi_monthly, monthly
         periods_ahead: int = 1,
-        include_overtime: bool = True
+        include_overtime: bool = True,
+        company_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Forecast payroll for upcoming period(s).
@@ -174,6 +175,7 @@ class ForecastingService:
             period_type: Type of payroll period
             periods_ahead: How many periods to forecast
             include_overtime: Include overtime projections
+            company_id: Company filter for multi-tenancy
             
         Returns:
             Dict with forecast data and metadata
@@ -189,15 +191,15 @@ class ForecastingService:
                 }
 
             # Check cache
-            cache_key = f"payroll_{period_type}_{periods_ahead}"
+            cache_key = f"payroll_{period_type}_{periods_ahead}_{company_id}"
             cache_id = abs(hash(cache_key)) % (10**9)  # Convert to positive int
             if self.cache:
                 cached = await self.cache.get_forecast_cache("payroll", cache_id)
                 if cached:
                     return cached
 
-            # Get historical payroll data
-            historical_data = await self._get_payroll_history(period_type)
+            # Get historical payroll data (filtered by company)
+            historical_data = await self._get_payroll_history(period_type, company_id=company_id)
             
             if len(historical_data) < 3:
                 return {
@@ -261,23 +263,26 @@ class ForecastingService:
     async def _get_payroll_history(
         self,
         period_type: str,
-        limit: int = 12
+        limit: int = 12,
+        company_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """Get historical payroll data for analysis."""
         from app.models import PayrollPeriod, PayrollEntry
         
-        # Get completed payroll periods
-        result = await self.db.execute(
+        # Get completed payroll periods (filtered by company)
+        query = (
             select(PayrollPeriod)
             .where(
                 and_(
                     PayrollPeriod.period_type == period_type,
-                    PayrollPeriod.status == "paid"
+                    PayrollPeriod.status == "paid",
+                    PayrollPeriod.company_id == company_id
                 )
             )
             .order_by(PayrollPeriod.start_date.desc())
             .limit(limit)
         )
+        result = await self.db.execute(query)
         periods = result.scalars().all()
         
         history = []
@@ -688,7 +693,8 @@ class ForecastingService:
         self,
         user_id: int,
         project_id: Optional[int] = None,
-        team_id: Optional[int] = None
+        team_id: Optional[int] = None,
+        company_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Forecast project budget consumption.
@@ -697,6 +703,7 @@ class ForecastingService:
             user_id: User requesting forecast
             project_id: Specific project (optional)
             team_id: Team projects (optional)
+            company_id: Company filter for multi-tenancy
             
         Returns:
             Dict with budget forecasts per project
@@ -724,6 +731,9 @@ class ForecastingService:
                 )
             else:
                 query = select(Project).where(Project.is_archived == False).limit(20)
+            
+            # Multi-tenancy: ALWAYS filter by company_id
+            query = query.where(Project.company_id == company_id)
             
             result = await self.db.execute(query)
             projects = result.scalars().all()
@@ -847,7 +857,8 @@ class ForecastingService:
     async def forecast_cash_flow(
         self,
         user_id: int,
-        weeks_ahead: int = 4
+        weeks_ahead: int = 4,
+        company_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Forecast weekly cash flow for payroll.
@@ -855,6 +866,7 @@ class ForecastingService:
         Args:
             user_id: User requesting forecast
             weeks_ahead: Weeks to forecast
+            company_id: Company filter for multi-tenancy
             
         Returns:
             Dict with weekly cash flow projections
@@ -868,8 +880,8 @@ class ForecastingService:
                     "message": "Cash flow forecasting is disabled"
                 }
 
-            # Get recent payroll averages
-            historical = await self._get_payroll_history("bi_weekly", limit=6)
+            # Get recent payroll averages (filtered by company)
+            historical = await self._get_payroll_history("bi_weekly", limit=6, company_id=company_id)
             
             if not historical:
                 return {

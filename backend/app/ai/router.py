@@ -444,11 +444,16 @@ async def forecast_payroll(
     """Get payroll forecast."""
     try:
         service = await get_forecasting_service(db)
+        
+        # Multi-tenancy: ALWAYS filter by current user's company
+        company_id = current_user.company_id
+        
         result = await service.forecast_payroll(
             user_id=current_user.id,
             period_type=request.period_type,
             periods_ahead=request.periods_ahead,
-            include_overtime=request.include_overtime
+            include_overtime=request.include_overtime,
+            company_id=company_id
         )
         return result
     except Exception as e:
@@ -528,10 +533,15 @@ async def forecast_project_budget(
     """Get project budget forecast."""
     try:
         service = await get_forecasting_service(db)
+        
+        # Multi-tenancy: ALWAYS filter by current user's company
+        company_id = current_user.company_id
+        
         result = await service.forecast_project_budget(
             user_id=current_user.id,
             project_id=request.project_id,
-            team_id=request.team_id
+            team_id=request.team_id,
+            company_id=company_id
         )
         return result
     except Exception as e:
@@ -563,9 +573,14 @@ async def forecast_cash_flow(
     """Get cash flow forecast."""
     try:
         service = await get_forecasting_service(db)
+        
+        # Multi-tenancy: ALWAYS filter by current user's company
+        company_id = current_user.company_id
+        
         result = await service.forecast_cash_flow(
             user_id=current_user.id,
-            weeks_ahead=min(weeks_ahead, 12)  # Max 12 weeks
+            weeks_ahead=min(weeks_ahead, 12),  # Max 12 weeks
+            company_id=company_id
         )
         return result
     except Exception as e:
