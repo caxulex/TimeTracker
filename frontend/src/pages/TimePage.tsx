@@ -32,30 +32,37 @@ export function TimePage() {
   const [customEndDate, setCustomEndDate] = useState<string>('');
 
   // Calculate date range for filtering
+  // Helper to format date as YYYY-MM-DD in local timezone (not UTC)
+  const formatLocalDate = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const getDateRange = (): { start_date?: string; end_date?: string } => {
     const today = new Date();
-    const endOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
     
     switch (filterDateRange) {
       case 'today':
         return { 
-          start_date: today.toISOString().split('T')[0],
-          end_date: today.toISOString().split('T')[0]
+          start_date: formatLocalDate(today),
+          end_date: formatLocalDate(today)
         };
       case 'week': {
         const weekAgo = new Date(today);
         weekAgo.setDate(today.getDate() - 7);
         return { 
-          start_date: weekAgo.toISOString().split('T')[0],
-          end_date: today.toISOString().split('T')[0]
+          start_date: formatLocalDate(weekAgo),
+          end_date: formatLocalDate(today)
         };
       }
       case 'month': {
         const monthAgo = new Date(today);
         monthAgo.setMonth(today.getMonth() - 1);
         return { 
-          start_date: monthAgo.toISOString().split('T')[0],
-          end_date: today.toISOString().split('T')[0]
+          start_date: formatLocalDate(monthAgo),
+          end_date: formatLocalDate(today)
         };
       }
       case 'custom':
