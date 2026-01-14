@@ -293,8 +293,8 @@ async def get_all_anomalies(
     try:
         service = await get_anomaly_service(db)
         
-        # Multi-tenancy: non-super admins only see their company's users
-        company_id = None if current_user.role == "super_admin" else current_user.company_id
+        # Multi-tenancy: ALWAYS filter by current user's company
+        company_id = current_user.company_id
         
         result = await service.scan_all_users(
             period_days=period_days,
@@ -484,8 +484,10 @@ async def assess_overtime_risk(
     try:
         service = await get_forecasting_service(db)
         
-        # Multi-tenancy: non-super admins only see their company's users
-        company_id = None if current_user.role == "super_admin" else current_user.company_id
+        # Multi-tenancy: ALWAYS filter by current user's company
+        # super_admin with company_id=NULL sees platform users only
+        # company_admin sees only their company's users
+        company_id = current_user.company_id
         
         result = await service.assess_overtime_risk(
             user_id=current_user.id,
@@ -915,8 +917,8 @@ async def scan_team_burnout(
     try:
         service = await get_ml_anomaly_service(db)
         
-        # Multi-tenancy: non-super admins only see their company's users
-        company_id = None if current_user.role == "super_admin" else current_user.company_id
+        # Multi-tenancy: ALWAYS filter by current user's company
+        company_id = current_user.company_id
         
         result = await service.scan_team_burnout(
             team_id=request.team_id,

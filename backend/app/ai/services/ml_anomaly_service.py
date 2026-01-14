@@ -887,9 +887,9 @@ class MLAnomalyService:
         else:
             query = select(User).where(User.is_active == True)
         
-        # Filter by company_id if provided (multi-tenancy)
-        if company_id is not None:
-            query = query.where(User.company_id == company_id)
+        # Multi-tenancy: ALWAYS filter by company_id
+        # company_id=None means show only users without a company (platform users)
+        query = query.where(User.company_id == company_id)
         
         result = await self.db.execute(query)
         users = result.scalars().all()
