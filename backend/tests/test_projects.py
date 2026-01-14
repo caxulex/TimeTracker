@@ -183,26 +183,25 @@ class TestProjectUpdate:
 
 
 class TestProjectDelete:
-    """Test project deletion (archive) endpoint."""
+    """Test project deletion endpoint."""
     
     @pytest.mark.asyncio
     async def test_delete_project(
         self, client: AsyncClient, auth_headers: dict, test_project: Project
     ):
-        """Test archiving a project."""
+        """Test permanently deleting a project."""
         response = await client.delete(
             f"/api/projects/{test_project.id}",
             headers=auth_headers,
         )
-        # API archives the project and returns 200 with message
+        # API permanently deletes the project and returns 200 with message
         assert response.status_code == 200
         data = response.json()
         assert "message" in data
         
-        # Verify project is archived (still accessible but archived flag is true)
+        # Verify project is permanently deleted (returns 404)
         get_response = await client.get(
             f"/api/projects/{test_project.id}",
             headers=auth_headers,
         )
-        assert get_response.status_code == 200
-        assert get_response.json()["is_archived"] is True
+        assert get_response.status_code == 404
