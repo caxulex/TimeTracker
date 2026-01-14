@@ -561,20 +561,46 @@ class ForecastingService:
         start_date: date,
         end_date: date
     ) -> float:
-        """Get total hours for user in date range."""
+        """Get total hours for user in date range, including running timers."""
         from app.models import TimeEntry
+        from datetime import datetime
         
-        result = await self.db.execute(
+        # Get completed entries (have duration_seconds)
+        completed_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
             .where(
                 and_(
                     TimeEntry.user_id == user_id,
                     func.date(TimeEntry.start_time) >= start_date,
-                    func.date(TimeEntry.start_time) <= end_date
+                    func.date(TimeEntry.start_time) <= end_date,
+                    TimeEntry.is_running == False
                 )
             )
         )
-        total_seconds = result.scalar() or 0
+        completed_seconds = completed_result.scalar() or 0
+        
+        # Get running entries (calculate duration from start_time to now)
+        running_result = await self.db.execute(
+            select(TimeEntry.start_time)
+            .where(
+                and_(
+                    TimeEntry.user_id == user_id,
+                    func.date(TimeEntry.start_time) >= start_date,
+                    func.date(TimeEntry.start_time) <= end_date,
+                    TimeEntry.is_running == True
+                )
+            )
+        )
+        running_entries = running_result.fetchall()
+        
+        # Calculate running time
+        running_seconds = 0
+        now = datetime.now()
+        for entry in running_entries:
+            if entry.start_time:
+                running_seconds += (now - entry.start_time).total_seconds()
+        
+        total_seconds = completed_seconds + running_seconds
         return total_seconds / 3600
 
     async def _get_avg_daily_hours(
