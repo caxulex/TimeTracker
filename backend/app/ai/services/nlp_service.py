@@ -163,6 +163,7 @@ class NLPService:
         self.db = db
         self.ai_client = ai_client
         self._feature_manager: Optional[AIFeatureManager] = None
+        self._last_tokens_used: int = 0  # Track tokens from last AI call
     
     async def _get_feature_manager(self) -> AIFeatureManager:
         """Get or create feature manager."""
@@ -297,10 +298,13 @@ class NLPService:
                     for p in projects[:5]
                 ]
             
-            # Log usage
+            # Log usage with token count
+            tokens_used = self._last_tokens_used if (use_ai and self.ai_client is not None) else 0
+            self._last_tokens_used = 0  # Reset for next call
             await fm.log_usage(
                 user_id=user_id,
                 feature_id="ai_nlp_entry",
+                tokens_used=tokens_used,
                 metadata={
                     "confidence": result.confidence,
                     "used_ai": use_ai and self.ai_client is not None
@@ -727,6 +731,11 @@ Be precise. If unsure, set to null."""
                 max_tokens=300,
                 temperature=0.1
             )
+            
+            # Track token usage
+            if response and response.get("usage"):
+                usage = response["usage"]
+                self._last_tokens_used = usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
             
             if not response or not response.get("data"):
                 return None

@@ -174,6 +174,7 @@ class AIReportingService:
         self.ai_client = ai_client
         self.cache = cache_manager
         self._feature_manager: Optional[AIFeatureManager] = None
+        self._last_tokens_used: int = 0  # Track tokens from last AI call
     
     async def _get_feature_manager(self) -> AIFeatureManager:
         """Get or create feature manager."""
@@ -242,10 +243,13 @@ class AIReportingService:
                 metrics=metrics
             )
             
-            # Log usage
+            # Log usage with token count
+            tokens_used = self._last_tokens_used if include_ai else 0
+            self._last_tokens_used = 0  # Reset for next call
             await fm.log_usage(
                 user_id=user_id,
                 feature_id="ai_report_summaries",
+                tokens_used=tokens_used,
                 metadata={"period": "weekly", "used_ai": include_ai}
             )
             
@@ -912,6 +916,11 @@ Write 2-3 sentences summarizing this week's activity. Be concise and actionable.
                 max_tokens=200,
                 temperature=0.7
             )
+            
+            # Track token usage
+            if response and response.get("usage"):
+                usage = response["usage"]
+                self._last_tokens_used = usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
             
             if response and response.get("data"):
                 data = response["data"]
