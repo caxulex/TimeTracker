@@ -1,7 +1,7 @@
 // ============================================
 // TIME TRACKER - LOGIN PAGE
 // ============================================
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { useAuthStore } from '../stores/authStore';
@@ -18,10 +18,21 @@ export function LoginPage() {
   const { addNotification } = useNotifications();
   const [showPassword, setShowPassword] = useState(false);
   const { branding, setCompany, isWhiteLabeled } = useBranding();
-  const [loginError, setLoginError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  // Use ref to persist error across re-renders caused by store updates
-  const errorRef = useRef<string | null>(null);
+  
+  // Use sessionStorage to persist error across component remounts
+  const [loginError, setLoginError] = useState<string | null>(() => {
+    return sessionStorage.getItem('login_error');
+  });
+
+  // Sync error to sessionStorage when it changes
+  useEffect(() => {
+    if (loginError) {
+      sessionStorage.setItem('login_error', loginError);
+    } else {
+      sessionStorage.removeItem('login_error');
+    }
+  }, [loginError]);
 
   // Check for company slug in URL path or query params and load branding
   useEffect(() => {
@@ -45,17 +56,9 @@ export function LoginPage() {
     formState: { errors },
   } = useForm<UserLogin>();
 
-  // Sync error ref to state when it changes (handles re-renders from store updates)
-  useEffect(() => {
-    if (errorRef.current && !loginError) {
-      setLoginError(errorRef.current);
-    }
-  }, [isLoading, loginError]);
-
   const onSubmit = async (data: UserLogin) => {
     // Clear previous error only on new submission
     setLoginError(null);
-    errorRef.current = null;
     setIsSubmitting(true);
     
     try {
@@ -68,7 +71,7 @@ export function LoginPage() {
       });
       navigate('/dashboard');
     } catch (error: any) {
-      // Extract error message and store in both ref and state
+      // Extract error message and store in state (also persisted to sessionStorage via useEffect)
       const detail = error?.response?.data?.detail;
       let message = 'Login failed. Please check your credentials.';
       if (typeof detail === 'string') {
@@ -78,8 +81,6 @@ export function LoginPage() {
       } else if (detail?.msg) {
         message = detail.msg;
       }
-      // Store in ref first (survives re-renders), then set state
-      errorRef.current = message;
       setLoginError(message);
     } finally {
       setIsSubmitting(false);
@@ -142,10 +143,7 @@ export function LoginPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    errorRef.current = null;
-                    setLoginError(null);
-                  }}
+                  onClick={() => setLoginError(null)}
                   className="text-red-500 hover:text-red-700 font-bold text-xl leading-none"
                   aria-label="Dismiss error"
                 >

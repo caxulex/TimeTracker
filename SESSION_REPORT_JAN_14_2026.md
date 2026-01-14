@@ -199,7 +199,7 @@ git push
 | #5 Team Edit | ✅ DONE | ✅ PASS |
 | #6 Project Delete | ✅ DONE | ✅ PASS |
 | #7 Task Project | ✅ DONE | ✅ PASS |
-| #8 Staff Edit | 🔧 FIXED | 🔲 RETEST |
+| #8 Staff Edit | ✅ DONE | ✅ PASS |
 
 ---
 
