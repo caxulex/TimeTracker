@@ -79,8 +79,8 @@ async def list_payroll_periods(
     Admin only. Filtered by company for non-super admins.
     """
     service = PayrollPeriodService(db)
-    # Filter by company_id for non-super admins
-    company_id = None if current_user.role == 'super_admin' else current_user.company_id
+    # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
+    company_id = current_user.company_id
     periods, total = await service.get_periods(skip, limit, status, company_id)
     
     return {

@@ -214,8 +214,8 @@ async def scan_anomalies(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Only admins can scan all users"
                 )
-            # Multi-tenancy: non-super admins only see their company's users
-            company_id = None if is_super_admin else current_user.company_id
+            # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
+            company_id = current_user.company_id
             result = await service.scan_all_users(
                 period_days=request.period_days,
                 team_id=request.team_id,

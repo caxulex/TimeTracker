@@ -104,8 +104,8 @@ async def get_payables_report_query(
     Generate comprehensive report for payables department using query parameters.
     Admin only. Filtered by company for non-super admins.
     """
-    # Set company_id filter for non-super admins
-    company_id = None if current_user.role == 'super_admin' else current_user.company_id
+    # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
+    company_id = current_user.company_id
     
     filters = PayrollReportFilters(
         period_id=period_id,
@@ -137,8 +137,8 @@ async def export_payables_csv(
     Export payables report as CSV.
     Admin only. Filtered by company for non-super admins.
     """
-    # Set company_id filter for non-super admins
-    company_id = None if current_user.role == 'super_admin' else current_user.company_id
+    # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
+    company_id = current_user.company_id
     
     filters = PayrollReportFilters(
         period_id=period_id,
@@ -180,8 +180,8 @@ async def export_payables_excel(
     Export payables report as Excel file.
     Admin only. Filtered by company for non-super admins.
     """
-    # Set company_id filter for non-super admins
-    company_id = None if current_user.role == 'super_admin' else current_user.company_id
+    # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
+    company_id = current_user.company_id
     
     filters = PayrollReportFilters(
         period_id=period_id,
