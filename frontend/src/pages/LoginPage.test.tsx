@@ -215,13 +215,10 @@ describe('LoginPage', () => {
   });
 
   describe('Error Handling', () => {
-    it('should display error message from store', () => {
-      (useAuthStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-        login: mockLogin,
-        isLoading: false,
-        error: 'Invalid credentials',
-        clearError: mockClearError,
-      });
+    it('should display error message after failed login', async () => {
+      const user = userEvent.setup();
+      // Mock login to reject with error
+      mockLogin.mockRejectedValueOnce(new Error('Invalid credentials'));
 
       render(
         <TestWrapper>
@@ -229,17 +226,21 @@ describe('LoginPage', () => {
         </TestWrapper>
       );
 
-      expect(screen.getByText('Invalid credentials')).toBeInTheDocument();
+      // Fill form and submit
+      await user.type(screen.getByLabelText(/email/i), 'test@example.com');
+      await user.type(screen.getByLabelText(/password/i), 'wrongpassword');
+      await user.click(screen.getByRole('button', { name: /sign in/i }));
+
+      // Error should be displayed after failed login
+      await waitFor(() => {
+        expect(screen.getByText('Invalid credentials')).toBeInTheDocument();
+      });
     });
 
-    it('should call clearError when error dismiss button is clicked', async () => {
+    it('should clear error message when dismiss button is clicked', async () => {
       const user = userEvent.setup();
-      (useAuthStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-        login: mockLogin,
-        isLoading: false,
-        error: 'Invalid credentials',
-        clearError: mockClearError,
-      });
+      // Mock login to reject with error
+      mockLogin.mockRejectedValueOnce(new Error('Invalid credentials'));
 
       render(
         <TestWrapper>
@@ -247,10 +248,24 @@ describe('LoginPage', () => {
         </TestWrapper>
       );
 
+      // Fill form and submit to trigger error
+      await user.type(screen.getByLabelText(/email/i), 'test@example.com');
+      await user.type(screen.getByLabelText(/password/i), 'wrongpassword');
+      await user.click(screen.getByRole('button', { name: /sign in/i }));
+
+      // Wait for error to appear
+      await waitFor(() => {
+        expect(screen.getByText('Invalid credentials')).toBeInTheDocument();
+      });
+
+      // Click dismiss button
       const dismissButton = screen.getByText('×');
       await user.click(dismissButton);
 
-      expect(mockClearError).toHaveBeenCalled();
+      // Error should be cleared
+      await waitFor(() => {
+        expect(screen.queryByText('Invalid credentials')).not.toBeInTheDocument();
+      });
     });
   });
 
