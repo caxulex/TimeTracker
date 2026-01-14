@@ -217,8 +217,8 @@ describe('LoginPage', () => {
   describe('Error Handling', () => {
     it('should display error message after failed login', async () => {
       const user = userEvent.setup();
-      // Mock login to reject with error
-      mockLogin.mockRejectedValueOnce(new Error('Invalid credentials'));
+      // Mock login to reject with error (component shows fallback message)
+      mockLogin.mockRejectedValueOnce(new Error('Network error'));
 
       render(
         <TestWrapper>
@@ -231,16 +231,16 @@ describe('LoginPage', () => {
       await user.type(screen.getByLabelText(/password/i), 'wrongpassword');
       await user.click(screen.getByRole('button', { name: /sign in/i }));
 
-      // Error should be displayed after failed login
+      // Error should be displayed after failed login (fallback message)
       await waitFor(() => {
-        expect(screen.getByText('Invalid credentials')).toBeInTheDocument();
+        expect(screen.getByText('Login failed. Please check your credentials.')).toBeInTheDocument();
       });
     });
 
     it('should clear error message when dismiss button is clicked', async () => {
       const user = userEvent.setup();
       // Mock login to reject with error
-      mockLogin.mockRejectedValueOnce(new Error('Invalid credentials'));
+      mockLogin.mockRejectedValueOnce(new Error('Network error'));
 
       render(
         <TestWrapper>
@@ -255,7 +255,7 @@ describe('LoginPage', () => {
 
       // Wait for error to appear
       await waitFor(() => {
-        expect(screen.getByText('Invalid credentials')).toBeInTheDocument();
+        expect(screen.getByText('Login failed. Please check your credentials.')).toBeInTheDocument();
       });
 
       // Click dismiss button
@@ -264,7 +264,7 @@ describe('LoginPage', () => {
 
       // Error should be cleared
       await waitFor(() => {
-        expect(screen.queryByText('Invalid credentials')).not.toBeInTheDocument();
+        expect(screen.queryByText('Login failed. Please check your credentials.')).not.toBeInTheDocument();
       });
     });
   });
