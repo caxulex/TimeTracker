@@ -38,32 +38,35 @@ During AI features testing, discovered that **AI endpoints were leaking data bet
 ### Root Cause
 AI router endpoints passed `company_id = None` for super_admin users, and services didn't filter when `company_id=None`, resulting in ALL data being shown.
 
-### Final Fix (After Multiple Iterations)
+### Final Fix (Strict Isolation)
 ```python
-# Router logic - determines company filter
-company_id = None if (current_user.role == "super_admin" and current_user.company_id is None) else current_user.company_id
+# Router logic - ALWAYS use user's company_id
+company_id = current_user.company_id
 
-# Service logic - applies filter only when company_id is set
-if company_id is not None:
-    query = query.where(Model.company_id == company_id)
+# Service logic - ALWAYS filter by company_id (even when None)
+query = query.where(Model.company_id == company_id)
 ```
 
-### Multi-Tenancy Behavior
+### Multi-Tenancy Behavior (STRICT)
 | User Type | company_id | Sees |
 |-----------|------------|------|
-| Platform super_admin | NULL | ALL data (platform admin view) |
+| Platform super_admin | NULL | Data where company_id IS NULL only |
 | Company super_admin | 5 | Only company 5's data |
 | company_admin | 5 | Only company 5's data |
 | manager | 5 | Only company 5's data |
 | employee | 5 | Only company 5's data |
 
+**NO USER SEES ANOTHER COMPANY'S DATA - NO EXCEPTIONS**
+
 ### Files Fixed
 | File | Changes |
 |------|---------|
-| `backend/app/ai/router.py` | 6 endpoints: overtime-risk, project-budget, cash-flow, payroll, anomalies/all, burnout/scan |
+| `backend/app/ai/router.py` | 7 endpoints: overtime-risk, project-budget, cash-flow, payroll, anomalies/all, anomalies/scan, burnout/scan |
 | `backend/app/ai/services/forecasting_service.py` | `assess_overtime_risk`, `forecast_project_budget`, `forecast_cash_flow`, `forecast_payroll`, `_get_payroll_history` |
 | `backend/app/ai/services/anomaly_service.py` | `scan_all_users` |
 | `backend/app/ai/services/ml_anomaly_service.py` | `scan_team_burnout` |
+| `backend/app/routers/payroll.py` | `list_payroll_periods` |
+| `backend/app/routers/payroll_reports.py` | `get_payables_report`, `export_payables_csv`, `export_payables_excel` |
 
 ---
 
