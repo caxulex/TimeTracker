@@ -267,33 +267,55 @@ class ForecastingService:
         company_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """Get historical payroll data for analysis."""
-        from app.models import PayrollPeriod, PayrollEntry
+        from app.models import PayrollPeriod, PayrollEntry, User
         
-        # Get completed payroll periods - ALWAYS filter by company_id (strict isolation)
+        # Get completed payroll periods
+        # Note: PayrollPeriod doesn't have company_id, so we filter via PayrollEntry -> User
+        # First get all paid periods of this type
         query = (
             select(PayrollPeriod)
             .where(
                 and_(
                     PayrollPeriod.period_type == period_type,
-                    PayrollPeriod.status == "paid",
-                    PayrollPeriod.company_id == company_id
+                    PayrollPeriod.status == "paid"
                 )
             )
             .order_by(PayrollPeriod.start_date.desc())
-            .limit(limit)
+            .limit(limit * 2)  # Get extra to filter by company
         )
         
         result = await self.db.execute(query)
         periods = result.scalars().all()
         
         history = []
+        periods_added = 0
+        
         for period in reversed(periods):  # Oldest first
-            # Get entries for this period
-            entries_result = await self.db.execute(
-                select(PayrollEntry)
-                .where(PayrollEntry.payroll_period_id == period.id)
-            )
+            if periods_added >= limit:
+                break
+                
+            # Get entries for this period, filtered by company via User relationship
+            if company_id is not None:
+                entries_result = await self.db.execute(
+                    select(PayrollEntry)
+                    .join(User, PayrollEntry.user_id == User.id)
+                    .where(
+                        and_(
+                            PayrollEntry.payroll_period_id == period.id,
+                            User.company_id == company_id
+                        )
+                    )
+                )
+            else:
+                entries_result = await self.db.execute(
+                    select(PayrollEntry)
+                    .where(PayrollEntry.payroll_period_id == period.id)
+                )
             entries = entries_result.scalars().all()
+            
+            # Skip periods with no entries for this company
+            if not entries:
+                continue
             
             total_regular = sum(e.regular_hours or 0 for e in entries)
             total_overtime = sum(e.overtime_hours or 0 for e in entries)
@@ -308,6 +330,7 @@ class ForecastingService:
                 "gross_amount": float(total_gross),
                 "employee_count": len(entries)
             })
+            periods_added += 1
         
         return history
 
@@ -716,23 +739,45 @@ class ForecastingService:
                     "message": "Budget forecasting is disabled"
                 }
 
-            from app.models import Project, TimeEntry, PayRate, TeamMember
+            from app.models import Project, TimeEntry, PayRate, TeamMember, Team
             
             # Get projects to analyze
+            # Note: Project doesn't have company_id directly - must join through Team
             if project_id:
-                query = select(Project).where(Project.id == project_id)
+                query = (
+                    select(Project)
+                    .join(Team, Project.team_id == Team.id)
+                    .where(
+                        and_(
+                            Project.id == project_id,
+                            Team.company_id == company_id
+                        )
+                    )
+                )
             elif team_id:
-                query = select(Project).where(
-                    and_(
-                        Project.team_id == team_id,
-                        Project.is_archived == False
+                query = (
+                    select(Project)
+                    .join(Team, Project.team_id == Team.id)
+                    .where(
+                        and_(
+                            Project.team_id == team_id,
+                            Project.is_archived == False,
+                            Team.company_id == company_id
+                        )
                     )
                 )
             else:
-                query = select(Project).where(Project.is_archived == False).limit(20)
-            
-            # Multi-tenancy: ALWAYS filter by company_id (strict isolation)
-            query = query.where(Project.company_id == company_id)
+                query = (
+                    select(Project)
+                    .join(Team, Project.team_id == Team.id)
+                    .where(
+                        and_(
+                            Project.is_archived == False,
+                            Team.company_id == company_id
+                        )
+                    )
+                    .limit(20)
+                )
             
             result = await self.db.execute(query)
             projects = result.scalars().all()
