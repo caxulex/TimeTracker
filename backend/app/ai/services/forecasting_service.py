@@ -472,17 +472,23 @@ class ForecastingService:
             result = await self.db.execute(query)
             users = result.scalars().all()
             
+            logger.info(f"Assessing overtime risk for {len(users)} users (company_id={company_id})")
+            
             risks = []
             week_start = self._get_week_start()
             week_end = week_start + timedelta(days=6)
             
             for user in users:
-                # Get current week hours
+                # Get current week hours (includes running timers!)
                 current_hours = await self._get_user_hours(
                     user.id,
                     week_start,
                     date.today()
                 )
+                
+                # Log significant hours for debugging
+                if current_hours > 20:
+                    logger.info(f"User {user.name} (id={user.id}) has {current_hours:.1f} hours this week")
                 
                 # Get historical average daily hours
                 avg_daily = await self._get_avg_daily_hours(user.id, days=30)
@@ -561,11 +567,16 @@ class ForecastingService:
         start_date: date,
         end_date: date
     ) -> float:
-        """Get total hours for user in date range, including running timers."""
+        """
+        Get total hours for user in date range, including running timers.
+        
+        IMPORTANT: Running timers are counted even if they started before start_date,
+        because the elapsed time represents real work happening NOW.
+        """
         from app.models import TimeEntry
         from datetime import datetime, timezone
         
-        # Get completed entries (have duration_seconds)
+        # Get completed entries within the date range
         completed_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
             .where(
@@ -579,14 +590,13 @@ class ForecastingService:
         )
         completed_seconds = completed_result.scalar() or 0
         
-        # Get running entries (calculate duration from start_time to now)
+        # Get ALL running entries for this user (regardless of start date)
+        # A running timer represents active work that should be flagged as risk
         running_result = await self.db.execute(
             select(TimeEntry.start_time)
             .where(
                 and_(
                     TimeEntry.user_id == user_id,
-                    func.date(TimeEntry.start_time) >= start_date,
-                    func.date(TimeEntry.start_time) <= end_date,
                     TimeEntry.is_running == True
                 )
             )
@@ -598,8 +608,8 @@ class ForecastingService:
         now = datetime.now(timezone.utc)
         for entry in running_entries:
             if entry.start_time:
-                # Make sure start_time is timezone-aware
                 entry_start = entry.start_time
+                # Handle timezone-naive datetimes from the database
                 if entry_start.tzinfo is None:
                     entry_start = entry_start.replace(tzinfo=timezone.utc)
                 running_seconds += (now - entry_start).total_seconds()
