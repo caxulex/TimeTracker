@@ -424,11 +424,13 @@ async def permanently_delete_user(
     This will delete:
     - The user account
     - All time entries
-    - All pay rates
+    - All pay rates and pay rate history
     - Team memberships (but not the teams themselves)
-    - Payroll entries
+    - Payroll entries and adjustments
+    - AI preferences and usage logs
+    - Audit logs related to this user
     """
-    from app.models import TimeEntry, PayRate, TeamMember, PayrollEntry
+    from app.models import TimeEntry, PayRate, TeamMember, PayrollEntry, PayRateHistory, PayrollAdjustment, PayrollPeriod, AuditLog, UserAIPreference, AIUsageLog
     
     if user_id == current_user.id:
         raise HTTPException(
@@ -462,43 +464,56 @@ async def permanently_delete_user(
     from sqlalchemy import delete, update
     from app.models import Team
     
-    # 1. Delete time entries
+    # 1. Delete AI usage logs
+    await db.execute(delete(AIUsageLog).where(AIUsageLog.user_id == user_id))
+    
+    # 2. Delete user AI preferences
+    await db.execute(delete(UserAIPreference).where(UserAIPreference.user_id == user_id))
+    
+    # 3. Delete audit logs for this user (as the actor)
+    await db.execute(delete(AuditLog).where(AuditLog.user_id == user_id))
+    
+    # 4. Delete time entries
     await db.execute(delete(TimeEntry).where(TimeEntry.user_id == user_id))
     
-    # 2. Delete pay rates
+    # 5. Delete pay rate history (references pay_rates, so delete first)
+    # First get all pay rate IDs for this user
+    pay_rate_ids_result = await db.execute(select(PayRate.id).where(PayRate.user_id == user_id))
+    pay_rate_ids = [row[0] for row in pay_rate_ids_result.fetchall()]
+    if pay_rate_ids:
+        await db.execute(delete(PayRateHistory).where(PayRateHistory.pay_rate_id.in_(pay_rate_ids)))
+    
+    # 6. Delete pay rates
     await db.execute(delete(PayRate).where(PayRate.user_id == user_id))
     
-    # 3. Delete team memberships
+    # 7. Delete team memberships
     await db.execute(delete(TeamMember).where(TeamMember.user_id == user_id))
     
-    # 4. Delete payroll entries
+    # 8. Delete payroll adjustments created by this user (set to NULL or delete)
+    await db.execute(
+        update(PayrollAdjustment).where(PayrollAdjustment.created_by == user_id).values(created_by=current_user.id)
+    )
+    
+    # 9. Delete payroll entries
     await db.execute(delete(PayrollEntry).where(PayrollEntry.user_id == user_id))
     
-    # 5. Transfer ownership of teams to the admin performing deletion
+    # 10. Update payroll periods approved_by to NULL
+    await db.execute(
+        update(PayrollPeriod).where(PayrollPeriod.approved_by == user_id).values(approved_by=None)
+    )
+    
+    # 11. Transfer ownership of teams to the admin performing deletion
     await db.execute(
         update(Team).where(Team.owner_id == user_id).values(owner_id=current_user.id)
     )
     
-    # 6. Update manager_id references to NULL for users managed by this user
+    # 12. Update manager_id references to NULL for users managed by this user
     await db.execute(
         update(User).where(User.manager_id == user_id).values(manager_id=None)
     )
     
-    # 7. Finally delete the user
+    # 13. Finally delete the user
     await db.delete(user)
-    
-    # Audit log (before commit so we can capture it)
-    await AuditLogger.log(
-        db=db,
-        action=AuditAction.DELETE,
-        resource_type="user",
-        resource_id=user_id,
-        user_id=current_user.id,
-        user_email=current_user.email,
-        old_values={"email": user_email, "name": user_name},
-        new_values=None,
-        details=f"Permanently deleted user {user_email} and all associated data"
-    )
     
     await db.commit()
     
