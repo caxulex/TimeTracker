@@ -962,7 +962,9 @@ Write 2-3 sentences summarizing this week's activity. Be concise and actionable.
         top_projects = metrics.get("top_projects", [])
         if top_projects:
             top = top_projects[0]
-            highlights.append(f"Most time on: {top['name']} ({top['hours']:.1f}h)")
+            # Use project_name (from metrics) or name (from formatted output)
+            project_name = top.get('project_name', top.get('name', 'Unknown'))
+            highlights.append(f"Most time on: {project_name} ({top.get('hours', 0):.1f}h)")
         
         change_pct = metrics.get("hours_change_pct", 0)
         if abs(change_pct) > 10:
