@@ -281,17 +281,39 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             )}
           </div>
           
-          {/* Suggestions */}
+          {/* Suggestions - Projects to choose from */}
           {parsedResult.suggestions && parsedResult.suggestions.length > 0 && (
             <div className="mb-4 p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded text-sm">
               <p className="font-medium text-yellow-700 dark:text-yellow-400 mb-1">
-                Suggestions:
+                Did you mean one of these projects?
               </p>
-              <ul className="list-disc list-inside text-yellow-600 dark:text-yellow-300">
-                {parsedResult.suggestions.map((suggestion, i) => (
-                  <li key={i}>{suggestion}</li>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {parsedResult.suggestions.map((suggestion) => (
+                  <button
+                    key={suggestion.id}
+                    type="button"
+                    onClick={() => {
+                      setModifications(prev => ({
+                        ...prev,
+                        project_id: suggestion.id
+                      }));
+                      setParsedResult(prev => prev ? {
+                        ...prev,
+                        project: {
+                          name: suggestion.name,
+                          id: suggestion.id,
+                          confidence: 1.0
+                        }
+                      } : null);
+                    }}
+                    className="px-3 py-1 bg-yellow-100 dark:bg-yellow-800 text-yellow-800 
+                      dark:text-yellow-200 rounded-full hover:bg-yellow-200 
+                      dark:hover:bg-yellow-700 transition-colors text-sm"
+                  >
+                    {suggestion.name}
+                  </button>
                 ))}
-              </ul>
+              </div>
             </div>
           )}
           

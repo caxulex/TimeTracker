@@ -48,6 +48,11 @@ export interface ParsedEntity {
   }>;
 }
 
+export interface NLPSuggestion {
+  id: number;
+  name: string;
+}
+
 export interface NLPParseResult {
   original_text: string;
   duration?: ParsedDuration;
@@ -58,7 +63,7 @@ export interface NLPParseResult {
   overall_confidence: number;
   parse_method: 'rule_based' | 'ai_enhanced' | 'hybrid';
   needs_confirmation: boolean;
-  suggestions?: string[];
+  suggestions?: NLPSuggestion[];
   errors?: string[];
 }
 
