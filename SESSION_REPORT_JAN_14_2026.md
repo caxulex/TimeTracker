@@ -22,9 +22,10 @@
 ## 📊 Session Summary
 
 **QA Status:** 100% Pass Rate (75/75 tests) ✅  
-**AI Features Testing:** 8/11 Passed, 3 Remaining  
+**AI Features Testing:** 9/11 Passed, 2 Remaining  
 **Security Issues Fixed:** Critical multi-tenancy data leak in AI endpoints  
-**Total Commits This Session:** 24+
+**Data Migration:** Created "TimeTracker" company (ID: 2), migrated 6 users + 3 teams  
+**Total Commits This Session:** 26+
 
 ---
 
@@ -84,8 +85,8 @@ query = query.where(Model.company_id == company_id)
 | 6 | NLP Quick Entry | ✅ PASS | Fixed React crash + 422 error |
 | 7 | Payroll Forecast | ✅ PASS | Shows "need 3 periods" (correct) |
 | 8 | Overtime Risk | ✅ PASS | Fixed multiple bugs, now detects running timers |
-| 9 | Project Budget | ⏳ PENDING | Needs re-test after security fix |
-| 10 | Cash Flow | ⏳ PENDING | Needs re-test after security fix |
+| 9 | Project Budget | ✅ PASS | Fixed: query via Team.company_id (Project has no company_id) |
+| 10 | Cash Flow | ⏳ PENDING | Needs re-test (fixed same query issue) |
 | 11 | User Insights | ⏳ PENDING | Not yet tested |
 
 ### Bugs Fixed During AI Testing
@@ -124,6 +125,24 @@ query = query.where(Model.company_id == company_id)
 **Error:** 422 on confirm  
 **Cause:** Frontend/backend type mismatch  
 **Fix:** Aligned `NLPParseResult` interface with backend schema
+
+#### 6. AI Panels "No Data" - NULL company_id Issue
+**Error:** Cash Flow, Project Budget, Payroll Forecast all showed "No data"  
+**Cause:** Production admin user had `company_id = NULL`, but all data belonged to actual companies  
+**Fix:** Created migration script `migrate_null_company.py`:
+- Created "TimeTracker" company (ID: 2)
+- Updated 6 users with NULL company_id → company_id = 2
+- Updated 3 teams with NULL company_id → company_id = 2
+
+#### 7. Project Budget - Wrong Query Column
+**Error:** Query used `Project.company_id == company_id` but Project has no company_id column  
+**Cause:** Project links through `team_id`, not directly to company  
+**Fix:** Changed to join: `select(Project).join(Team).where(Team.company_id == company_id)`
+
+#### 8. Payroll History - Wrong Query Column  
+**Error:** Query used `PayrollPeriod.company_id` but PayrollPeriod has no company_id column  
+**Cause:** PayrollPeriod links through PayrollEntry → User  
+**Fix:** Filter entries via `PayrollEntry.user_id == User.id` where `User.company_id == company_id`
 
 ---
 
@@ -164,6 +183,15 @@ query = query.where(Model.company_id == company_id)
 | `241ac94` | security: Fix multi-tenancy data leak in AI endpoints |
 | `150a56d` | security: Fix multi-tenancy leak in project budget, cash flow, payroll forecast |
 | `9800b3a` | fix: Multi-tenancy logic - super_admin with NULL company sees all, company users see only their data |
+| `996a53d` | security: Strict company isolation - remove super_admin bypass |
+| `e339d1a` | security: Fix multi-tenancy leaks in payroll.py and payroll_reports.py |
+| `f4a8d36` | security: Final multi-tenancy hardening for AI endpoints |
+
+### Data Migration Fixes
+| Commit | Description |
+|--------|-------------|
+| `2aa17bd` | Add migration script to fix NULL company_id data for multi-tenancy |
+| `88f5f70` | Fix forecasting service: Project queries via Team.company_id, PayrollPeriod queries via User.company_id |
 
 ---
 
@@ -223,25 +251,14 @@ docker logs timetracker-backend --tail=50 | grep -i "company_id"
 
 ---
 
-## 🎯 Next Steps
-
-### Immediate
-1. **Re-deploy backend** on server:
-   ```bash
-   cd ~/timetracker
-   git pull origin master
-   ./scripts/deploy-sequential.sh
-   ```
-
-2. **Verify fixes:**
-   - Overtime Risk shows Katrina with 149+ hours
-   - Project Budget shows only current company's projects
-   - No XYZ data visible in production TimeTracker
+## 🎯 Next Steps (January 15, 2026)
 
 ### Remaining AI Tests
-- [ ] Project Budget Panel - re-test after multi-tenancy fix
-- [ ] Cash Flow Chart - re-test after multi-tenancy fix  
+- [ ] Cash Flow Chart - re-test (code fix deployed)
 - [ ] User Insights Panel - initial test
+
+### Code Updates
+- [ ] Update `seed.py` to create a default company for new installations
 
 ### Documentation
 - [ ] Update AI_FEATURES_ASSESSMENT.md with test results
@@ -253,12 +270,14 @@ docker logs timetracker-backend --tail=50 | grep -i "company_id"
 
 | Email | Password | Role | Company |
 |-------|----------|------|---------|
-| admin@timetracker.com | (your password) | super_admin | NULL (Platform) |
-| shaeadam@gmail.com | XyzTest123! | company_admin | XYZ Corp |
-| employee@xyzcorp.com | Employee123! | employee | XYZ Corp |
+| admin@timetracker.com | (your password) | super_admin | TimeTracker (ID: 2) |
+| laura@shaemarcus.com | (your password) | super_admin | TimeTracker (ID: 2) |
+| shaeadam@gmail.com | XyzTest123! | company_admin | XYZ Corp (ID: 1) |
+| employee@xyzcorp.com | Employee123! | employee | XYZ Corp (ID: 1) |
 
 ---
 
 *Session Started: January 14, 2026*  
+*Session Ended: January 14, 2026*  
 *Session Focus: AI Features Testing + Multi-Tenancy Security*  
-*Status: Security fixes deployed, awaiting verification*
+*Status: 9/11 AI features passing, 2 remaining for tomorrow*
