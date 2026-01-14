@@ -23,48 +23,38 @@ export interface NLPParseRequest {
   };
 }
 
-export interface ParsedDuration {
-  hours: number;
-  minutes: number;
-  total_minutes: number;
-  original_text: string;
-  confidence: number;
-}
-
-export interface ParsedDate {
-  date: string;
-  original_text: string;
-  confidence: number;
-}
-
-export interface ParsedEntity {
-  name: string;
-  id?: number;
-  confidence: number;
-  alternatives?: Array<{
-    name: string;
-    id?: number;
-    confidence: number;
-  }>;
-}
-
 export interface NLPSuggestion {
   id: number;
   name: string;
 }
 
+export interface NLPParsedEntity {
+  type: string;
+  value: string;
+  id?: number;
+  confidence: number;
+}
+
+/**
+ * Backend NLP Parse Result - matches backend NLPParseResult.to_dict()
+ */
 export interface NLPParseResult {
   original_text: string;
-  duration?: ParsedDuration;
-  date?: ParsedDate;
-  project?: ParsedEntity;
-  task?: ParsedEntity;
+  project_id?: number;
+  project_name?: string;
+  task_id?: number;
+  task_name?: string;
+  duration_seconds?: number;
+  duration_display?: string;
+  start_time?: string;
+  end_time?: string;
   description?: string;
-  overall_confidence: number;
-  parse_method: 'rule_based' | 'ai_enhanced' | 'hybrid';
-  needs_confirmation: boolean;
-  suggestions?: NLPSuggestion[];
-  errors?: string[];
+  confidence: number;
+  confidence_level: 'low' | 'medium' | 'high';
+  needs_clarification: boolean;
+  clarification_question?: string;
+  parsed_entities: NLPParsedEntity[];
+  suggestions: NLPSuggestion[];
 }
 
 export interface NLPParseResponse {
@@ -75,19 +65,19 @@ export interface NLPParseResponse {
 }
 
 export interface NLPConfirmRequest {
-  parse_result: NLPParseResult;
-  user_modifications?: {
+  parsed_result: NLPParseResult;
+  modifications?: {
     project_id?: number;
     task_id?: number;
-    duration_minutes?: number;
-    date?: string;
+    duration_seconds?: number;
+    start_time?: string;
     description?: string;
   };
 }
 
 export interface NLPConfirmResponse {
   success: boolean;
-  entry_id?: number;
+  time_entry_id?: number;
   message?: string;
   error?: string;
 }

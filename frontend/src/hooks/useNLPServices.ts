@@ -84,16 +84,16 @@ export function useNLPTimeEntry() {
     // Auto-confirm if confidence is high enough
     if (
       autoConfirm && 
-      !parseResult.result.needs_confirmation && 
-      parseResult.result.overall_confidence >= confidenceThreshold
+      !parseResult.result.needs_clarification && 
+      parseResult.result.confidence >= confidenceThreshold
     ) {
       const confirmResult = await confirmMutation.mutateAsync({
-        parse_result: parseResult.result
+        parsed_result: parseResult.result
       });
       return { 
         success: confirmResult.success, 
         parsed: parseResult.result,
-        entry_id: confirmResult.entry_id
+        entry_id: confirmResult.time_entry_id
       };
     }
     

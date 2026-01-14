@@ -8,7 +8,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Send, Loader2, Check, X, Clock, Calendar, Folder, FileText, AlertCircle } from 'lucide-react';
 import { useNLPTimeEntry } from '../../hooks/useNLPServices';
-import type { NLPParseResult, ParsedEntity } from '../../api/nlpServices';
+import type { NLPParseResult } from '../../api/nlpServices';
 
 interface ChatInterfaceProps {
   onEntryCreated?: (entryId: number) => void;
@@ -60,17 +60,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     
     try {
       const result = await confirm.mutateAsync({
-        parse_result: parsedResult,
-        user_modifications: Object.keys(modifications).length > 0 
-          ? modifications 
+        parsed_result: parsedResult,
+        modifications: Object.keys(modifications).length > 0 
+          ? modifications as { project_id?: number; task_id?: number; duration_seconds?: number }
           : undefined
       });
       
-      if (result.success && result.entry_id) {
+      if (result.success && result.time_entry_id) {
         setInput('');
         setParsedResult(null);
         setShowConfirmation(false);
-        onEntryCreated?.(result.entry_id);
+        onEntryCreated?.(result.time_entry_id);
       }
     } catch (err) {
       console.error('Confirm error:', err);
@@ -90,60 +90,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     return 'text-red-600 dark:text-red-400';
   };
   
-  const formatDuration = (duration: NLPParseResult['duration']): string => {
-    if (!duration) return 'Not detected';
-    const hours = Math.floor(duration.total_minutes / 60);
-    const mins = duration.total_minutes % 60;
+  const formatDurationFromSeconds = (seconds?: number): string => {
+    if (!seconds) return 'Not detected';
+    const hours = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
     if (hours > 0 && mins > 0) return `${hours}h ${mins}m`;
     if (hours > 0) return `${hours}h`;
     return `${mins}m`;
-  };
-  
-  const renderEntity = (
-    entity: ParsedEntity | undefined,
-    label: string,
-    icon: React.ReactNode
-  ) => {
-    if (!entity) {
-      return (
-        <div className="flex items-center gap-2 text-gray-400">
-          {icon}
-          <span>{label}: Not detected</span>
-        </div>
-      );
-    }
-    
-    return (
-      <div className="flex items-center gap-2">
-        {icon}
-        <span className="font-medium">{entity.name}</span>
-        <span className={`text-xs ${getConfidenceColor(entity.confidence)}`}>
-          ({Math.round(entity.confidence * 100)}%)
-        </span>
-        {entity.alternatives && entity.alternatives.length > 0 && (
-          <select
-            className="ml-2 text-sm border rounded px-1 py-0.5 
-              bg-white dark:bg-gray-800 dark:border-gray-600"
-            onChange={(e) => {
-              const alt = entity.alternatives?.find(a => a.name === e.target.value);
-              if (alt?.id) {
-                setModifications(prev => ({
-                  ...prev,
-                  [`${label.toLowerCase()}_id`]: alt.id
-                }));
-              }
-            }}
-          >
-            <option value={entity.name}>{entity.name}</option>
-            {entity.alternatives.map((alt, i) => (
-              <option key={i} value={alt.name}>
-                {alt.name} ({Math.round(alt.confidence * 100)}%)
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
-    );
   };
   
   return (
@@ -226,8 +179,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             <h3 className="font-semibold text-gray-900 dark:text-gray-100">
               Parsed Time Entry
             </h3>
-            <span className={`text-sm ${getConfidenceColor(parsedResult.overall_confidence)}`}>
-              Overall confidence: {Math.round(parsedResult.overall_confidence * 100)}%
+            <span className={`text-sm ${getConfidenceColor(parsedResult.confidence)}`}>
+              Confidence: {Math.round(parsedResult.confidence * 100)}%
             </span>
           </div>
           
@@ -235,40 +188,40 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             {/* Duration */}
             <div className="flex items-center gap-2">
               <Clock size={16} className="text-blue-500" />
-              <span className="font-medium">{formatDuration(parsedResult.duration)}</span>
-              {parsedResult.duration && (
-                <span className={`text-xs ${getConfidenceColor(parsedResult.duration.confidence)}`}>
-                  ({Math.round(parsedResult.duration.confidence * 100)}%)
-                </span>
-              )}
+              <span className="font-medium">
+                {parsedResult.duration_display || formatDurationFromSeconds(parsedResult.duration_seconds)}
+              </span>
             </div>
             
             {/* Date */}
             <div className="flex items-center gap-2">
               <Calendar size={16} className="text-green-500" />
               <span className="font-medium">
-                {parsedResult.date?.date || 'Today'}
+                {parsedResult.start_time 
+                  ? new Date(parsedResult.start_time).toLocaleDateString() 
+                  : 'Today'}
               </span>
-              {parsedResult.date && (
-                <span className={`text-xs ${getConfidenceColor(parsedResult.date.confidence)}`}>
-                  ({Math.round(parsedResult.date.confidence * 100)}%)
-                </span>
-              )}
             </div>
             
             {/* Project */}
-            {renderEntity(
-              parsedResult.project,
-              'Project',
+            <div className="flex items-center gap-2">
               <Folder size={16} className="text-purple-500" />
-            )}
+              {parsedResult.project_name ? (
+                <span className="font-medium text-green-600">{parsedResult.project_name}</span>
+              ) : (
+                <span className="text-gray-400">Project: Not detected</span>
+              )}
+            </div>
             
             {/* Task */}
-            {renderEntity(
-              parsedResult.task,
-              'Task',
+            <div className="flex items-center gap-2">
               <FileText size={16} className="text-orange-500" />
-            )}
+              {parsedResult.task_name ? (
+                <span className="font-medium">{parsedResult.task_name}</span>
+              ) : (
+                <span className="text-gray-400">Task: Not detected</span>
+              )}
+            </div>
             
             {/* Description */}
             {parsedResult.description && (
