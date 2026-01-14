@@ -1,8 +1,8 @@
 # Session Report - January 14, 2026 (Tuesday)
 
-## 🎯 Session Goal: Fix Remaining QA Issues → 100% Pass Rate
+## 🎯 Session Goal: AI Features Full Testing + Security Fixes
 
-**Session Focus:** Address all remaining QA test failures to achieve 100% resale readiness  
+**Session Focus:** Complete AI features testing and fix critical multi-tenancy security issues  
 **Previous Session:** SESSION_REPORT_JAN_13_2026.md (Multi-Tenancy Fix & QA Testing)  
 **Environment:** Production (AWS Lightsail)  
 **URL:** https://timetracker.shaemarcus.com
@@ -19,213 +19,121 @@
 
 ---
 
-## 📊 Current Status
+## 📊 Session Summary
 
-**QA Results (Jan 13):** 64 PASSED | 11 FAILED (75 tests total)  
-**Current Pass Rate:** 85%  
-**Target:** 100%
-
----
-
-## 📋 TODO LIST - Remaining Issues to Fix
-
-### 🔴 MEDIUM Priority (Fix First)
-
-| # | Test | Issue | File(s) to Modify | Complexity |
-|---|------|-------|-------------------|------------|
-| 1 | 64 | AI Chat - React error #31, 401 Unauthorized errors | `frontend/src/components/ai/AIChat.tsx`, `backend/app/ai/router.py` | MEDIUM |
-
-### 🟡 LOW Priority - UI Edit Limitations
-
-| # | Test | Issue | File(s) to Modify | Complexity |
-|---|------|-------|-------------------|------------|
-| 2 | 12 | Invalid login - no error message displayed | `frontend/src/pages/LoginPage.tsx` | EASY |
-| 3 | 20 | Time entry task field cannot be edited | `frontend/src/components/time/TimeEntryEditModal.tsx` | EASY |
-| 4 | 23 | No date filter on Time Tracker page | `frontend/src/pages/TimeTrackerPage.tsx` | MEDIUM |
-| 5 | 26 | Project team assignment cannot be edited | `frontend/src/components/projects/ProjectEditModal.tsx` | EASY |
-| 6 | 29 | Delete project archives instead of deleting | `backend/app/routers/projects.py`, frontend delete handler | MEDIUM |
-| 7 | 32 | Task project field cannot be changed | `frontend/src/components/tasks/TaskEditModal.tsx` | EASY |
-| 8 | 57 | Staff job title/department cannot be edited | `frontend/src/components/staff/StaffEditModal.tsx` | EASY |
-
-### 🟢 Clarified Issues (Working As Designed - No Fix Needed)
-
-| Test | Issue | Reason |
-|------|-------|--------|
-| 42 | Daily Hours shows 52h | Correctly shows accumulated time - not a bug |
-| 52 | Only 2/4 employees in payroll | Only employees with PayRates configured |
-| 53 | Payroll status stays Draft | Requires "Approve" step - by design |
+**QA Status:** 100% Pass Rate (75/75 tests) ✅  
+**AI Features Testing:** 8/11 Passed, 3 Remaining  
+**Security Issues Fixed:** Critical multi-tenancy data leak in AI endpoints  
+**Total Commits This Session:** 24+
 
 ---
 
-## 🔧 Detailed Fix Instructions
+## 🔐 CRITICAL: Multi-Tenancy Security Fix
 
-### Fix #1: AI Chat 401 Errors (Test 64) - MEDIUM
-**Problem:** AI Chat shows React error #31, 401 Unauthorized on /api/time, /api/projects  
-**Root Cause:** Likely missing auth token in AI Chat API calls or expired token handling  
-**Investigation Steps:**
-1. Check `AIChat.tsx` for how API calls are made
-2. Verify auth token is passed to all endpoints
-3. Check if there's a token refresh issue
-4. Look for WebSocket disconnect handling
+### Issue Discovered
+During AI features testing, discovered that **AI endpoints were leaking data between companies**:
+- XYZ Corp users/projects were visible in production TimeTracker
+- Affected endpoints: Overtime Risk, Project Budget, Cash Flow, Payroll Forecast, Anomaly Detection, Burnout Scan
 
----
+### Root Cause
+AI router endpoints passed `company_id = None` for super_admin users, and services didn't filter when `company_id=None`, resulting in ALL data being shown.
 
-### Fix #2: Login Error Message (Test 12) - EASY
-**Problem:** No error message when login fails with wrong password  
-**Solution:** Add error state display in LoginPage.tsx
-```tsx
-// Show error when login fails
-{error && <div className="text-red-500">{error}</div>}
+### Final Fix (After Multiple Iterations)
+```python
+# Router logic - determines company filter
+company_id = None if (current_user.role == "super_admin" and current_user.company_id is None) else current_user.company_id
+
+# Service logic - applies filter only when company_id is set
+if company_id is not None:
+    query = query.where(Model.company_id == company_id)
 ```
 
----
+### Multi-Tenancy Behavior
+| User Type | company_id | Sees |
+|-----------|------------|------|
+| Platform super_admin | NULL | ALL data (platform admin view) |
+| Company super_admin | 5 | Only company 5's data |
+| company_admin | 5 | Only company 5's data |
+| manager | 5 | Only company 5's data |
+| employee | 5 | Only company 5's data |
 
-### Fix #3: Time Entry Task Edit (Test 20) - EASY
-**Problem:** Task field cannot be changed when editing time entry  
-**Solution:** Enable task dropdown in TimeEntryEditModal.tsx
-
----
-
-### Fix #4: Date Filter on Time Tracker (Test 23) - MEDIUM
-**Problem:** No date range filter exists on Time Tracker page  
-**Solution:** Add DateRangePicker component to TimeTrackerPage.tsx
-
----
-
-### Fix #5: Project Team Edit (Test 26) - EASY
-**Problem:** Cannot change team assignment when editing project  
-**Solution:** Enable team dropdown in ProjectEditModal.tsx
-
----
-
-### Fix #6: Project Delete vs Archive (Test 29) - MEDIUM
-**Problem:** Delete button archives project instead of permanently deleting  
-**Solution:** 
-- Option A: Add "Permanent Delete" option
-- Option B: Make archive behavior clearer in UI
-- Check `DELETE /api/projects/{id}` endpoint behavior
+### Files Fixed
+| File | Changes |
+|------|---------|
+| `backend/app/ai/router.py` | 6 endpoints: overtime-risk, project-budget, cash-flow, payroll, anomalies/all, burnout/scan |
+| `backend/app/ai/services/forecasting_service.py` | `assess_overtime_risk`, `forecast_project_budget`, `forecast_cash_flow`, `forecast_payroll`, `_get_payroll_history` |
+| `backend/app/ai/services/anomaly_service.py` | `scan_all_users` |
+| `backend/app/ai/services/ml_anomaly_service.py` | `scan_team_burnout` |
 
 ---
 
-### Fix #7: Task Project Change (Test 32) - EASY
-**Problem:** Cannot change project when editing task  
-**Solution:** Enable project dropdown in TaskEditModal.tsx
+## 🤖 AI Features Testing Results
+
+### Test Results Summary
+
+| # | Feature | Status | Notes |
+|---|---------|--------|-------|
+| 1 | Admin AI Settings | ✅ PASS | All toggles working, usage stats visible |
+| 2 | User AI Preferences | ✅ PASS | Personal AI settings work |
+| 3 | AI Suggestions | ✅ PASS | Suggestions appear in time entry |
+| 4 | Anomaly Detection | ✅ PASS | Admin panel shows anomalies |
+| 5 | Weekly Summary | ✅ PASS | Fixed KeyError 'name' + Gemini model |
+| 6 | NLP Quick Entry | ✅ PASS | Fixed React crash + 422 error |
+| 7 | Payroll Forecast | ✅ PASS | Shows "need 3 periods" (correct) |
+| 8 | Overtime Risk | ✅ PASS | Fixed multiple bugs, now detects running timers |
+| 9 | Project Budget | ⏳ PENDING | Needs re-test after security fix |
+| 10 | Cash Flow | ⏳ PENDING | Needs re-test after security fix |
+| 11 | User Insights | ⏳ PENDING | Not yet tested |
+
+### Bugs Fixed During AI Testing
+
+#### 1. Weekly Summary - KeyError 'name'
+**Error:** `KeyError: 'name'` in `_extract_highlights()`  
+**Cause:** Metrics used `project_name` but code accessed `top['name']`  
+**Fix:** Use `.get()` with fallback: `top.get('project_name', top.get('name', 'Unknown'))`
+
+#### 2. Gemini Model 404 Error
+**Error:** `models/gemini-1.5-flash is not found`  
+**Cause:** Model deprecated or renamed  
+**Fix:** Updated `GEMINI_MODEL` to `gemini-2.0-flash` in `config.py`
+
+#### 3. Overtime Risk - Running Timers Not Detected
+**Error:** "No overtime risks detected" despite 148h running timer  
+**Cause:** Multiple issues:
+1. Only counted `duration_seconds` (running timers have NULL)
+2. Timezone mismatch (naive vs aware datetime)
+3. Date filter excluded timers started before current week
+4. NoneType division in avg daily hours calculation
+
+**Fixes Applied:**
+| Commit | Fix |
+|--------|-----|
+| `c627007` | Include ALL running timers regardless of start date |
+| `f540415` | Use `datetime.now(timezone.utc)` for timezone-aware calculation |
+| `a6fc7e0` | Exclude running timers from historical average (they have NULL duration) |
+
+#### 4. NLP Quick Entry - React Crash
+**Error:** React error #31, page goes blank  
+**Cause:** Backend returned `{id, name}` objects, frontend rendered as string  
+**Fix:** Added `NLPSuggestion` interface, render `suggestion.name`
+
+#### 5. NLP Quick Entry - 422 Validation Error
+**Error:** 422 on confirm  
+**Cause:** Frontend/backend type mismatch  
+**Fix:** Aligned `NLPParseResult` interface with backend schema
 
 ---
 
-### Fix #8: Staff Job/Dept Edit (Test 57) - EASY
-**Problem:** Job title and department fields cannot be edited  
-**Solution:** Make fields editable in StaffEditModal.tsx
+## 📝 All Commits This Session
 
----
-
-## 📁 Files to Modify
-
-### Frontend (React/TypeScript)
-```
-frontend/src/
-├── pages/
-│   ├── LoginPage.tsx              # Fix #2: Error message
-│   └── TimeTrackerPage.tsx        # Fix #4: Date filter
-├── components/
-│   ├── ai/
-│   │   └── AIChat.tsx             # Fix #1: 401 errors
-│   ├── time/
-│   │   └── TimeEntryEditModal.tsx # Fix #3: Task edit
-│   ├── projects/
-│   │   └── ProjectEditModal.tsx   # Fix #5: Team edit
-│   ├── tasks/
-│   │   └── TaskEditModal.tsx      # Fix #7: Project edit
-│   └── staff/
-│       └── StaffEditModal.tsx     # Fix #8: Job/dept edit
-```
-
-### Backend (FastAPI/Python)
-```
-backend/app/routers/
-└── projects.py                    # Fix #6: Delete vs archive
-```
-
----
-
-## ✅ Verification Checklist
-
-After each fix, re-run the corresponding test:
-
-- [ ] Test 64: AI Chat works without errors
-- [ ] Test 12: Invalid login shows error message
-- [ ] Test 20: Can edit task field on time entry
-- [ ] Test 23: Can filter time entries by date
-- [ ] Test 26: Can change project team assignment
-- [ ] Test 29: Project delete behavior is correct
-- [ ] Test 32: Can change task project
-- [ ] Test 57: Can edit staff job title/department
-
----
-
-## 📋 Test Accounts
-
-| Email | Password | Role | Company |
-|-------|----------|------|---------|
-| admin@timetracker.com | (your password) | super_admin | Platform |
-| shaeadam@gmail.com | XyzTest123! | company_admin | XYZ Corp |
-| employee@xyzcorp.com | Employee123! | employee | XYZ Corp |
-
----
-
-## 🔄 Deployment Commands
-
-```bash
-# After fixes, deploy to production:
-# Frontend changes auto-deploy via Lightsail
-
-# If backend changes needed:
-git add -A
-git commit -m "fix: [description]"
-git push
-# Wait for Lightsail auto-deploy
-```
-
----
-
-## 📊 Progress Tracking
-
-| Fix | Status | Tested |
-|-----|--------|--------|
-| #1 AI Chat | ✅ DONE | ✅ PASS |
-| #2 Login Error | ✅ DONE | ✅ PASS |
-| #3 Task Edit | ✅ DONE | ✅ PASS |
-| #4 Date Filter | ✅ DONE | ✅ PASS |
-| #5 Team Edit | ✅ DONE | ✅ PASS |
-| #6 Project Delete | ✅ DONE | ✅ PASS |
-| #7 Task Project | ✅ DONE | ✅ PASS |
-| #8 Staff Edit | ✅ DONE | ✅ PASS |
-
----
-
-## 🎯 Success Criteria
-
-- [x] All 8 remaining issues fixed
-- [x] QA pass rate: 100% (75/75)
-- [x] All fixes deployed to production
-- [x] All fixes verified in production
-- [x] Session report updated with results
-
----
-
-## 📝 Session Activity Log - January 14, 2026
-
-### Fixes Implemented
-
-All 8 QA fixes + additional bugs found during testing:
-
+### QA Fixes (Earlier Today)
 | Commit | Description |
 |--------|-------------|
 | `d0050f4` | fix: Resolve 8 QA test failures for 100% pass rate |
-| `442b619` | test: Update project delete test for permanent deletion behavior |
-| `5e62d33` | fix: Use local state for login error to prevent Zustand rehydration clearing it |
+| `442b619` | test: Update project delete test for permanent deletion |
+| `5e62d33` | fix: Use local state for login error |
 | `9c01509` | test: Update LoginPage tests for local error state |
-| `c6b6ddd` | test: Fix LoginPage tests to expect actual fallback error message |
+| `c6b6ddd` | test: Fix LoginPage tests to expect actual fallback message |
 | `6e57b1e` | fix: Enhance login error display with animation and icon |
 | `76db695` | fix: Use ref to persist login error across re-renders |
 | `aa0de03` | fix: Add project_id and task_id to TimeEntryUpdate schema |
@@ -234,128 +142,120 @@ All 8 QA fixes + additional bugs found during testing:
 | `e551da4` | fix: Use sessionStorage to persist login error across remounts |
 | `1d4c689` | fix: Handle all FK constraints when permanently deleting user |
 | `2a5b42a` | docs: Update session report with all fixes and test results |
+
+### AI Fixes
+| Commit | Description |
+|--------|-------------|
 | `e761e71` | fix: Track AI token usage in NLP and Reporting services |
 | `49a1dee` | fix: NLP chat suggestions rendering crash (React error #31) |
 | `efb399b` | fix: Align NLP frontend types with backend schema |
+| `bf8f0a0` | fix: Weekly summary KeyError 'name' and update Gemini model to 2.0-flash |
+| `baada10` | fix: Include running timers in overtime risk calculation |
+| `f540415` | fix: Use timezone-aware datetime for overtime risk calculation |
+| `c627007` | fix: Overtime risk detects ALL running timers regardless of start date |
+| `a6fc7e0` | fix: Handle NULL duration_seconds in avg daily hours (exclude running timers) |
 
-### Changes Made Per Fix
-
-1. **AI Chat Error Display** - `ChatInterface.tsx`: Safe error message extraction ✅
-2. **Login Error Message** - `LoginPage.tsx`: sessionStorage persistence ✅
-3. **Time Entry Task Edit** - `time_entries.py`: Added project_id/task_id to update schema ✅
-4. **Date Filter** - `TimePage.tsx`: Fixed timezone issue (use local date not UTC) ✅
-5. **Project Team Edit** - `projects.py`: Added team_id to ProjectUpdate schema ✅
-6. **Project Delete** - `projects.py`: Changed to permanent delete with time entry check ✅
-7. **Task Project Change** - `tasks.py`: Added project_id to TaskUpdate schema ✅
-8. **Staff Job/Dept Edit** - `users.py`: Fixed start_date type (str → date) ✅
-
-### Additional Bugs Found & Fixed During Testing
-
-| Bug | Root Cause | Fix |
-|-----|------------|-----|
-| Time entry task/project not editable | Backend schema missing fields | Added project_id/task_id to TimeEntryUpdate |
-| Date filter "Today" shows nothing | toISOString() converts to UTC | Use local timezone formatting |
-| Staff edit 500 error | start_date type mismatch | Changed Optional[str] → Optional[date] |
-| Staff delete 500 error | Missing FK constraint handling | Added all related table deletions |
-| AI usage showing 0 tokens | Tokens not captured from AI responses | Track tokens in NLP/Reporting services |
-| NLP chat crash (React error #31) | Suggestions rendered as objects | Added NLPSuggestion interface, render `.name` |
-| NLP confirm 422 error | Frontend types mismatched backend | Aligned all NLP types with backend schema |
-
-### CI/CD Issues Resolved
-
-1. **Backend test failure** - `test_projects.py`: Updated to expect 404 after permanent deletion
-2. **Frontend test failure** - `LoginPage.test.tsx`: Updated to expect actual fallback message
-
-### Additional Observations (Low Priority - Not Blocking)
-
-| Warning | Impact | Action |
-|---------|--------|--------|
-| `act(...)` warnings for BrandingProvider | Cosmetic | Future cleanup - wrap async state updates |
-| React Router v7 future flags | Deprecation | Will need migration when upgrading to v7 |
+### Security Fixes (Multi-Tenancy)
+| Commit | Description |
+|--------|-------------|
+| `241ac94` | security: Fix multi-tenancy data leak in AI endpoints |
+| `150a56d` | security: Fix multi-tenancy leak in project budget, cash flow, payroll forecast |
+| `9800b3a` | fix: Multi-tenancy logic - super_admin with NULL company sees all, company users see only their data |
 
 ---
 
-## 🧪 TESTING CHECKLIST - Must Complete
+## 📁 Files Modified This Session
 
-### Production Testing Required
+### Backend
+```
+backend/app/
+├── ai/
+│   ├── config.py                          # Gemini model update
+│   ├── router.py                          # Multi-tenancy fixes (6 endpoints)
+│   └── services/
+│       ├── forecasting_service.py         # Overtime risk + budget fixes
+│       ├── reporting_service.py           # Weekly summary KeyError fix
+│       ├── nlp_service.py                 # Token tracking
+│       ├── anomaly_service.py             # Multi-tenancy fix
+│       └── ml_anomaly_service.py          # Multi-tenancy fix
+├── routers/
+│   ├── projects.py                        # Team edit + permanent delete
+│   ├── tasks.py                           # Project change
+│   ├── time_entries.py                    # Task/project edit
+│   └── users.py                           # Staff edit + FK constraints
+└── schemas/
+    └── *.py                               # Various schema updates
+```
 
-All fixes are deployed. Each must be manually verified:
-
-1. **Test Login Error** (Test #12)
-   - Go to https://timetracker.shaemarcus.com/login
-   - Enter wrong password → Should show error message with red icon
-   - Error should stay visible until dismissed
-
-2. **Test AI Chat** (Test #64)
-   - Go to Time Tracker → Quick Entry with AI
-   - Test error handling displays properly
-
-3. **Test Time Entry Task Edit** (Test #20)
-   - Edit a time entry that has a task
-   - Task dropdown should appear and be editable
-
-4. **Test Date Filter** (Test #23)
-   - Go to Time Tracker page
-   - Date range dropdown should have: Today, Last 7 Days, Last 30 Days, Custom
-
-5. **Test Project Team Edit** (Test #26)
-   - Edit a project
-   - Team dropdown should be editable
-
-6. **Test Project Delete** (Test #29)
-   - Create a test project (no time entries)
-   - Delete it → Should be permanently deleted (404 on refresh)
-
-7. **Test Task Project Change** (Test #32)
-   - Edit a task
-   - Project dropdown should be editable
-
-8. **Test Staff Job/Dept Edit** (Test #57)
-   - Go to Staff → Edit an employee
-   - Job title and department fields should save
+### Frontend
+```
+frontend/src/
+├── api/
+│   └── nlpServices.ts                     # NLP types alignment
+├── components/
+│   └── ai/
+│       └── ChatInterface.tsx              # Suggestions rendering fix
+├── hooks/
+│   └── useNLPServices.ts                  # Field names fix
+└── pages/
+    └── LoginPage.tsx                      # Error display persistence
+```
 
 ---
 
-## 🤖 AI Features Testing (Continued)
+## ✅ Verification Commands (Server)
 
-### AI Admin Settings ✅ PASS
-- All feature toggles visible and working
-- Usage stats: 276 requests, 9 unique users
-- **Note:** Token count showed 0 - tracking bug fixed in `e761e71`
+After deployment, verify fixes with:
 
-### AI Quick Entry (NLP Chat) - Bugs Fixed
-1. **React error #31 crash** - Page went blank when suggestions appeared
-   - **Cause:** Backend returned `{id, name}` objects, frontend tried to render as string
-   - **Fix:** Added `NLPSuggestion` interface, render `suggestion.name`
+```bash
+# Check overtime risk detection
+docker logs timetracker-backend --tail=50 | grep -i "overtime\|hours"
 
-2. **422 Validation error** on confirm
-   - **Cause:** Frontend/backend type mismatch:
-     - Frontend sent `parse_result`, backend expected `parsed_result`
-     - Frontend used nested `duration.total_minutes`, backend returns `duration_seconds`
-     - Frontend expected `entry_id`, backend returns `time_entry_id`
-   - **Fix:** Completely aligned `NLPParseResult` interface with backend response
+# Check for errors
+docker logs timetracker-backend --tail=100 | grep -i "error\|exception"
 
-### Files Modified for AI Fixes
+# Verify multi-tenancy (should see company filter in logs)
+docker logs timetracker-backend --tail=50 | grep -i "company_id"
+```
 
-| File | Change |
-|------|--------|
-| `backend/app/ai/services/nlp_service.py` | Added `_last_tokens_used` tracking |
-| `backend/app/ai/services/reporting_service.py` | Added `_last_tokens_used` tracking |
-| `frontend/src/api/nlpServices.ts` | Rewrote `NLPParseResult` to match backend |
-| `frontend/src/components/ai/ChatInterface.tsx` | Updated to use flat structure |
-| `frontend/src/hooks/useNLPServices.ts` | Fixed field names |
+---
 
-### AI Testing Still Needed
-- [ ] NLP Quick Entry - test after deployment
-- [ ] User AI Preferences
-- [ ] AI Suggestions in Time Entry
-- [ ] Anomaly Detection Panel (Admin)
-- [ ] Weekly Summary Panel
-- [ ] Payroll Forecast Panel
+## 🎯 Next Steps
+
+### Immediate
+1. **Re-deploy backend** on server:
+   ```bash
+   cd ~/timetracker
+   git pull origin master
+   ./scripts/deploy-sequential.sh
+   ```
+
+2. **Verify fixes:**
+   - Overtime Risk shows Katrina with 149+ hours
+   - Project Budget shows only current company's projects
+   - No XYZ data visible in production TimeTracker
+
+### Remaining AI Tests
+- [ ] Project Budget Panel - re-test after multi-tenancy fix
+- [ ] Cash Flow Chart - re-test after multi-tenancy fix  
+- [ ] User Insights Panel - initial test
+
+### Documentation
+- [ ] Update AI_FEATURES_ASSESSMENT.md with test results
+- [ ] Document multi-tenancy security fix in SECURITY_AUDIT_REPORT.md
+
+---
+
+## 📋 Test Accounts
+
+| Email | Password | Role | Company |
+|-------|----------|------|---------|
+| admin@timetracker.com | (your password) | super_admin | NULL (Platform) |
+| shaeadam@gmail.com | XyzTest123! | company_admin | XYZ Corp |
+| employee@xyzcorp.com | Employee123! | employee | XYZ Corp |
 
 ---
 
 *Session Started: January 14, 2026*  
-*All 8 Original QA Fixes + 7 Additional Bug Fixes Implemented*  
-*Total Commits This Session: 16*  
-*Status: AI Quick Entry Fix Awaiting Deployment & Testing*
+*Session Focus: AI Features Testing + Multi-Tenancy Security*  
+*Status: Security fixes deployed, awaiting verification*
