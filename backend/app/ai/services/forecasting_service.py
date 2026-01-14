@@ -269,19 +269,23 @@ class ForecastingService:
         """Get historical payroll data for analysis."""
         from app.models import PayrollPeriod, PayrollEntry
         
-        # Get completed payroll periods (filtered by company)
+        # Get completed payroll periods
         query = (
             select(PayrollPeriod)
             .where(
                 and_(
                     PayrollPeriod.period_type == period_type,
-                    PayrollPeriod.status == "paid",
-                    PayrollPeriod.company_id == company_id
+                    PayrollPeriod.status == "paid"
                 )
             )
             .order_by(PayrollPeriod.start_date.desc())
             .limit(limit)
         )
+        
+        # Multi-tenancy: filter by company_id if provided (None = show all for platform admin)
+        if company_id is not None:
+            query = query.where(PayrollPeriod.company_id == company_id)
+        
         result = await self.db.execute(query)
         periods = result.scalars().all()
         
@@ -470,10 +474,9 @@ class ForecastingService:
             else:
                 query = select(User).where(User.is_active == True)
             
-            # Multi-tenancy: ALWAYS filter by company_id
-            # company_id=None means show only users without a company (platform users)
-            # company_id=X means show only users from company X
-            query = query.where(User.company_id == company_id)
+            # Multi-tenancy: filter by company_id if provided (None = show all for platform admin)
+            if company_id is not None:
+                query = query.where(User.company_id == company_id)
             
             result = await self.db.execute(query)
             users = result.scalars().all()
@@ -732,8 +735,9 @@ class ForecastingService:
             else:
                 query = select(Project).where(Project.is_archived == False).limit(20)
             
-            # Multi-tenancy: ALWAYS filter by company_id
-            query = query.where(Project.company_id == company_id)
+            # Multi-tenancy: filter by company_id if provided (None = show all for platform admin)
+            if company_id is not None:
+                query = query.where(Project.company_id == company_id)
             
             result = await self.db.execute(query)
             projects = result.scalars().all()
