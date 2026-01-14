@@ -195,11 +195,11 @@ git push
 | #1 AI Chat | ✅ DONE | ✅ PASS |
 | #2 Login Error | ✅ DONE | 🔲 PENDING |
 | #3 Task Edit | ✅ DONE | ✅ PASS |
-| #4 Date Filter | 🔧 FIXED | 🔲 RETEST |
-| #5 Team Edit | ✅ DONE | 🔲 PENDING |
-| #6 Project Delete | ✅ DONE | 🔲 PENDING |
-| #7 Task Project | ✅ DONE | 🔲 PENDING |
-| #8 Staff Edit | ✅ DONE | 🔲 PENDING |
+| #4 Date Filter | ✅ DONE | ✅ PASS |
+| #5 Team Edit | ✅ DONE | ✅ PASS |
+| #6 Project Delete | ✅ DONE | ✅ PASS |
+| #7 Task Project | ✅ DONE | ✅ PASS |
+| #8 Staff Edit | 🔧 FIXED | 🔲 RETEST |
 
 ---
 

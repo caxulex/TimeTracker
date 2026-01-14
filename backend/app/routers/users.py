@@ -3,6 +3,7 @@ User management router (Admin only)
 """
 
 from typing import Optional, List
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -61,7 +62,7 @@ class UserAdminUpdate(BaseModel):
     job_title: Optional[str] = None
     department: Optional[str] = None
     employment_type: Optional[str] = Field(None, pattern="^(full_time|part_time|contractor)$")
-    start_date: Optional[str] = None
+    start_date: Optional[date] = None
     expected_hours_per_week: Optional[int] = None
 
 
