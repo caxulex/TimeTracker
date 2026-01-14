@@ -225,8 +225,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               </div>
             </div>
             
-            {/* Date - Editable */}
-            <div className="flex items-center gap-2">
+            {/* Date & Time - Editable */}
+            <div className="flex items-center gap-2 flex-wrap">
               <Calendar size={16} className="text-green-500" />
               <label className="text-sm text-gray-600 dark:text-gray-400">Date:</label>
               <input
@@ -235,9 +235,29 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                        parsedResult.start_time?.split('T')[0] || 
                        new Date().toISOString().split('T')[0]}
                 onChange={(e) => {
+                  const currentTime = (modifications.start_time as string)?.split('T')[1]?.substring(0, 5) || 
+                                     parsedResult.start_time?.split('T')[1]?.substring(0, 5) || 
+                                     '09:00';
                   setModifications(prev => ({
                     ...prev,
-                    start_time: e.target.value + 'T09:00:00'
+                    start_time: e.target.value + 'T' + currentTime + ':00'
+                  }));
+                }}
+                className="px-2 py-1 border rounded dark:bg-gray-700 dark:border-gray-600"
+              />
+              <label className="text-sm text-gray-600 dark:text-gray-400 ml-2">Start:</label>
+              <input
+                type="time"
+                value={(modifications.start_time as string)?.split('T')[1]?.substring(0, 5) || 
+                       parsedResult.start_time?.split('T')[1]?.substring(0, 5) || 
+                       '09:00'}
+                onChange={(e) => {
+                  const currentDate = (modifications.start_time as string)?.split('T')[0] || 
+                                     parsedResult.start_time?.split('T')[0] || 
+                                     new Date().toISOString().split('T')[0];
+                  setModifications(prev => ({
+                    ...prev,
+                    start_time: currentDate + 'T' + e.target.value + ':00'
                   }));
                 }}
                 className="px-2 py-1 border rounded dark:bg-gray-700 dark:border-gray-600"
