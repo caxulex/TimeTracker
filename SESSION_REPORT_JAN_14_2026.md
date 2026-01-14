@@ -205,13 +205,11 @@ git push
 
 ## 🎯 Success Criteria
 
-- [ ] All 8 remaining issues fixed
-- [ ] QA pass rate: 100% (75/75)
-- [ ] All fixes deployed to production
-- [ ] All fixes verified in production
-- [ ] Session report updated with results
-
----
+- [x] All 8 remaining issues fixed
+- [x] QA pass rate: 100% (75/75)
+- [x] All fixes deployed to production
+- [x] All fixes verified in production
+- [x] Session report updated with results
 
 ---
 
@@ -219,7 +217,7 @@ git push
 
 ### Fixes Implemented
 
-All 8 QA fixes were implemented and pushed to master:
+All 8 QA fixes + additional bugs found during testing:
 
 | Commit | Description |
 |--------|-------------|
@@ -228,22 +226,38 @@ All 8 QA fixes were implemented and pushed to master:
 | `5e62d33` | fix: Use local state for login error to prevent Zustand rehydration clearing it |
 | `9c01509` | test: Update LoginPage tests for local error state |
 | `c6b6ddd` | test: Fix LoginPage tests to expect actual fallback error message |
+| `6e57b1e` | fix: Enhance login error display with animation and icon |
+| `76db695` | fix: Use ref to persist login error across re-renders |
+| `aa0de03` | fix: Add project_id and task_id to TimeEntryUpdate schema |
+| `2fb037d` | fix: Use local timezone for date filter instead of UTC |
+| `48d375a` | fix: Change start_date type from str to date in UserAdminUpdate |
+| `e551da4` | fix: Use sessionStorage to persist login error across remounts |
+| `1d4c689` | fix: Handle all FK constraints when permanently deleting user |
 
 ### Changes Made Per Fix
 
-1. **AI Chat Error Display** - `ChatInterface.tsx`: Safe error message extraction
-2. **Login Error Message** - `LoginPage.tsx`: Changed to local React state (Zustand persist was clearing it)
-3. **Time Entry Task Edit** - `TimePage.tsx`: Show task dropdown when entry has taskId
-4. **Date Filter** - `TimePage.tsx`: Added date range picker (Today, 7 Days, 30 Days, Custom)
-5. **Project Team Edit** - `projects.py`: Added team_id to ProjectUpdate schema
-6. **Project Delete** - `projects.py`: Changed to permanent delete with time entry check
-7. **Task Project Change** - `tasks.py`: Added project_id to TaskUpdate schema
-8. **Staff Job/Dept Edit** - `users.py`: Added profile fields to UserAdminUpdate schema
+1. **AI Chat Error Display** - `ChatInterface.tsx`: Safe error message extraction ✅
+2. **Login Error Message** - `LoginPage.tsx`: sessionStorage persistence ✅
+3. **Time Entry Task Edit** - `time_entries.py`: Added project_id/task_id to update schema ✅
+4. **Date Filter** - `TimePage.tsx`: Fixed timezone issue (use local date not UTC) ✅
+5. **Project Team Edit** - `projects.py`: Added team_id to ProjectUpdate schema ✅
+6. **Project Delete** - `projects.py`: Changed to permanent delete with time entry check ✅
+7. **Task Project Change** - `tasks.py`: Added project_id to TaskUpdate schema ✅
+8. **Staff Job/Dept Edit** - `users.py`: Fixed start_date type (str → date) ✅
+
+### Additional Bugs Found & Fixed During Testing
+
+| Bug | Root Cause | Fix |
+|-----|------------|-----|
+| Time entry task/project not editable | Backend schema missing fields | Added project_id/task_id to TimeEntryUpdate |
+| Date filter "Today" shows nothing | toISOString() converts to UTC | Use local timezone formatting |
+| Staff edit 500 error | start_date type mismatch | Changed Optional[str] → Optional[date] |
+| Staff delete 500 error | Missing FK constraint handling | Added all related table deletions |
 
 ### CI/CD Issues Resolved
 
 1. **Backend test failure** - `test_projects.py`: Updated to expect 404 after permanent deletion
-2. **Frontend test failure** - `LoginPage.test.tsx`: Updated to expect actual fallback message "Login failed. Please check your credentials."
+2. **Frontend test failure** - `LoginPage.test.tsx`: Updated to expect actual fallback message
 
 ### Additional Observations (Low Priority - Not Blocking)
 
