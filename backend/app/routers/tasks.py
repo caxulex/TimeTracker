@@ -29,6 +29,7 @@ class TaskUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
     status: Optional[str] = Field(None, pattern="^(TODO|IN_PROGRESS|DONE)$")
+    project_id: Optional[int] = None
 
 
 class TaskResponse(BaseModel):
@@ -260,6 +261,12 @@ async def update_task(
     if not has_access:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     
+    # If project_id is being changed, validate the new project
+    if task_data.project_id is not None and task_data.project_id != task.project_id:
+        new_project_access = await check_project_access(db, task_data.project_id, current_user)
+        if not new_project_access:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid project_id or access denied")
+    
     # Update fields
     if task_data.name is not None:
         task.name = task_data.name
@@ -267,6 +274,8 @@ async def update_task(
         task.description = task_data.description
     if task_data.status is not None:
         task.status = task_data.status
+    if task_data.project_id is not None:
+        task.project_id = task_data.project_id
     
     await db.commit()
     await db.refresh(task)

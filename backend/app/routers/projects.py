@@ -5,12 +5,12 @@ Projects management router
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from pydantic import BaseModel, Field
 from datetime import datetime
 
 from app.database import get_db
-from app.models import User, Team, TeamMember, Project, Task
+from app.models import User, Team, TeamMember, Project, Task, TimeEntry
 from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY
 from app.schemas.auth import Message
 from app.routers.websocket import manager as ws_manager
@@ -31,6 +31,7 @@ class ProjectUpdate(BaseModel):
     description: Optional[str] = None
     color: Optional[str] = Field(None, pattern="^#[0-9A-Fa-f]{6}$")
     is_archived: Optional[bool] = None
+    team_id: Optional[int] = None
 
 
 class ProjectResponse(BaseModel):
@@ -329,8 +330,19 @@ async def update_project(
         if not has_access:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     
+    # If team_id is being changed, validate the new team
+    if project_data.team_id is not None and project_data.team_id != project.team_id:
+        # Verify new team exists and user has access
+        new_team_query = select(Team).where(Team.id == project_data.team_id)
+        company_id = get_company_filter(current_user)
+        new_team_query = apply_company_filter(new_team_query, Team.company_id, company_id)
+        new_team_result = await db.execute(new_team_query)
+        new_team = new_team_result.scalar_one_or_none()
+        if not new_team:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid team_id")
+    
     # Track old values
-    old_values = {"name": project.name, "color": project.color, "is_archived": project.is_archived}
+    old_values = {"name": project.name, "color": project.color, "is_archived": project.is_archived, "team_id": project.team_id}
     
     # Update fields
     update_data = project_data.model_dump(exclude_unset=True)
@@ -338,7 +350,7 @@ async def update_project(
         setattr(project, key, value)
     
     # Audit log
-    new_values = {"name": project.name, "color": project.color, "is_archived": project.is_archived}
+    new_values = {"name": project.name, "color": project.color, "is_archived": project.is_archived, "team_id": project.team_id}
     if old_values != new_values:
         await AuditLogger.log(
             db=db,
@@ -385,7 +397,7 @@ async def delete_project(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Delete a project (archive it)"""
+    """Permanently delete a project (hard delete)"""
     # Multi-tenancy: join with team to filter by company
     query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
     company_id = get_company_filter(current_user)
@@ -403,25 +415,40 @@ async def delete_project(
         if not has_access:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     
-    # Archive instead of hard delete
-    project.is_archived = True
+    # Check if there are any time entries associated with this project
+    time_entries_count = await db.execute(
+        select(func.count()).select_from(TimeEntry).where(TimeEntry.project_id == project_id)
+    )
+    if time_entries_count.scalar() > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete project with existing time entries. Archive it instead."
+        )
+    
+    project_name = project.name
+    
+    # Delete associated tasks first
+    await db.execute(delete(Task).where(Task.project_id == project_id))
+    
+    # Permanently delete the project
+    await db.delete(project)
     
     # Audit log
     await AuditLogger.log(
         db=db,
         action=AuditAction.DELETE,
         resource_type="project",
-        resource_id=project.id,
+        resource_id=project_id,
         user_id=current_user.id,
         user_email=current_user.email,
-        old_values={"is_archived": False},
-        new_values={"is_archived": True},
-        details=f"Archived project '{project.name}'"
+        old_values={"name": project_name},
+        new_values=None,
+        details=f"Permanently deleted project '{project_name}'"
     )
     
     await db.commit()
     
-    return Message(message="Project archived successfully")
+    return Message(message="Project deleted permanently")
 
 
 @router.post("/{project_id}/restore", response_model=ProjectResponse)

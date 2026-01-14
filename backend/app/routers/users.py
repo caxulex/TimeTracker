@@ -54,6 +54,15 @@ class UserAdminUpdate(BaseModel):
     name: Optional[str] = None
     email: Optional[EmailStr] = None
     is_active: Optional[bool] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    job_title: Optional[str] = None
+    department: Optional[str] = None
+    employment_type: Optional[str] = Field(None, pattern="^(full_time|part_time|contractor)$")
+    start_date: Optional[str] = None
+    expected_hours_per_week: Optional[int] = None
 
 
 class RoleUpdate(BaseModel):
@@ -314,6 +323,26 @@ async def update_user(
     
     if user_data.is_active is not None:
         user.is_active = user_data.is_active
+    
+    # Update optional profile fields
+    if user_data.phone is not None:
+        user.phone = user_data.phone
+    if user_data.address is not None:
+        user.address = user_data.address
+    if user_data.emergency_contact_name is not None:
+        user.emergency_contact_name = user_data.emergency_contact_name
+    if user_data.emergency_contact_phone is not None:
+        user.emergency_contact_phone = user_data.emergency_contact_phone
+    if user_data.job_title is not None:
+        user.job_title = user_data.job_title
+    if user_data.department is not None:
+        user.department = user_data.department
+    if user_data.employment_type is not None:
+        user.employment_type = user_data.employment_type
+    if user_data.start_date is not None:
+        user.start_date = user_data.start_date
+    if user_data.expected_hours_per_week is not None:
+        user.expected_hours_per_week = user_data.expected_hours_per_week
     
     # Audit log
     new_values = {

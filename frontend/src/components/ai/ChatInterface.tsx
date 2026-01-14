@@ -210,7 +210,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             aria-live="polite"
           >
             <AlertCircle size={16} aria-hidden="true" />
-            {error.message}
+            {typeof error === 'string' ? error : (error?.message || 'An error occurred')}
           </div>
         )}
       </form>

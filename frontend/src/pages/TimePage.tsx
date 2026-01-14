@@ -27,6 +27,46 @@ export function TimePage() {
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
   const [filterProject, setFilterProject] = useState<number | ''>('');
   const [showChatInterface, setShowChatInterface] = useState(false);
+  const [filterDateRange, setFilterDateRange] = useState<string>('all');
+  const [customStartDate, setCustomStartDate] = useState<string>('');
+  const [customEndDate, setCustomEndDate] = useState<string>('');
+
+  // Calculate date range for filtering
+  const getDateRange = (): { start_date?: string; end_date?: string } => {
+    const today = new Date();
+    const endOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
+    
+    switch (filterDateRange) {
+      case 'today':
+        return { 
+          start_date: today.toISOString().split('T')[0],
+          end_date: today.toISOString().split('T')[0]
+        };
+      case 'week': {
+        const weekAgo = new Date(today);
+        weekAgo.setDate(today.getDate() - 7);
+        return { 
+          start_date: weekAgo.toISOString().split('T')[0],
+          end_date: today.toISOString().split('T')[0]
+        };
+      }
+      case 'month': {
+        const monthAgo = new Date(today);
+        monthAgo.setMonth(today.getMonth() - 1);
+        return { 
+          start_date: monthAgo.toISOString().split('T')[0],
+          end_date: today.toISOString().split('T')[0]
+        };
+      }
+      case 'custom':
+        return {
+          start_date: customStartDate || undefined,
+          end_date: customEndDate || undefined
+        };
+      default:
+        return {};
+    }
+  };
 
   // AI Feature flags
   const { data: nlpEnabled } = useFeatureEnabled('ai_nlp_entry');
@@ -39,11 +79,14 @@ export function TimePage() {
   }, [searchParams, nlpEnabled]);
 
   // Fetch time entries
+  const dateRange = getDateRange();
   const { data: entriesData, isLoading } = useQuery({
-    queryKey: ['time-entries', filterProject],
+    queryKey: ['time-entries', filterProject, filterDateRange, customStartDate, customEndDate],
     queryFn: () =>
       timeEntriesApi.getAll({
         project_id: filterProject || undefined,
+        start_date: dateRange.start_date,
+        end_date: dateRange.end_date,
         size: 50,
       }),
   });
@@ -201,19 +244,60 @@ export function TimePage() {
 
       {/* Filters */}
       <Card padding="sm">
-        <div className="flex flex-wrap gap-4">
-          <select
-            value={filterProject}
-            onChange={(e) => setFilterProject(e.target.value ? Number(e.target.value) : '')}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="">All Projects</option>
-            {projects.map((project: Project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
+        <div className="flex flex-wrap gap-4 items-end">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Project</label>
+            <select
+              value={filterProject}
+              onChange={(e) => setFilterProject(e.target.value ? Number(e.target.value) : '')}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">All Projects</option>
+              {projects.map((project: Project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Date Range</label>
+            <select
+              value={filterDateRange}
+              onChange={(e) => setFilterDateRange(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">All Time</option>
+              <option value="today">Today</option>
+              <option value="week">Last 7 Days</option>
+              <option value="month">Last 30 Days</option>
+              <option value="custom">Custom Range</option>
+            </select>
+          </div>
+
+          {filterDateRange === 'custom' && (
+            <>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Start Date</label>
+                <input
+                  type="date"
+                  value={customStartDate}
+                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">End Date</label>
+                <input
+                  type="date"
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </>
+          )}
         </div>
       </Card>
 
@@ -458,7 +542,7 @@ function TimeEntryModal({ isOpen, onClose, entry, projects, onSubmit, isLoading 
           </select>
         </div>
 
-        {projectId && tasks.length > 0 && (
+        {projectId && (tasks.length > 0 || taskId) && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Task
