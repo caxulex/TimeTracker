@@ -295,22 +295,17 @@ class ForecastingService:
                 break
                 
             # Get entries for this period, filtered by company via User relationship
-            if company_id is not None:
-                entries_result = await self.db.execute(
-                    select(PayrollEntry)
-                    .join(User, PayrollEntry.user_id == User.id)
-                    .where(
-                        and_(
-                            PayrollEntry.payroll_period_id == period.id,
-                            User.company_id == company_id
-                        )
+            # Multi-tenancy: ALWAYS filter by company_id (even when None)
+            entries_result = await self.db.execute(
+                select(PayrollEntry)
+                .join(User, PayrollEntry.user_id == User.id)
+                .where(
+                    and_(
+                        PayrollEntry.payroll_period_id == period.id,
+                        User.company_id == company_id  # Works for both NULL and actual IDs
                     )
                 )
-            else:
-                entries_result = await self.db.execute(
-                    select(PayrollEntry)
-                    .where(PayrollEntry.payroll_period_id == period.id)
-                )
+            )
             entries = entries_result.scalars().all()
             
             # Skip periods with no entries for this company

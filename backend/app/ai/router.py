@@ -767,11 +767,33 @@ async def generate_user_insights(
     try:
         # Permission check for viewing other users
         target_id = request.target_user_id or current_user.id
-        if target_id != current_user.id and current_user.role not in ["admin", "super_admin"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Cannot view other users' insights"
+        if target_id != current_user.id:
+            # Only admins can view other users
+            if current_user.role not in ["admin", "super_admin", "company_admin"]:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Cannot view other users' insights"
+                )
+            
+            # Multi-tenancy: verify target user is in same company
+            from app.models import User as UserModel
+            target_result = await db.execute(
+                select(UserModel).where(UserModel.id == target_id)
             )
+            target_user = target_result.scalar_one_or_none()
+            
+            if not target_user:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Target user not found"
+                )
+            
+            # Strict company isolation - must match exactly (even NULL == NULL)
+            if target_user.company_id != current_user.company_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Cannot view users from other companies"
+                )
         
         service = await get_reporting_service(db)
         result = await service.generate_user_insights(
