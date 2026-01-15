@@ -275,24 +275,38 @@ class PayrollPeriodService:
         Args:
             company_id: None = super_admin (no filter), FILTER_NULL_COMPANY = platform users (NULL filter),
                        int = specific company filter
+        
+        Note: Since PayrollPeriod doesn't have company_id directly, we filter via entries.
+              Draft periods without entries are shown to all admins in their company.
         """
         conditions = []
         if status:
             conditions.append(PayrollPeriod.status == status.value)
         
         # Filter by company_id via PayrollEntry -> User relationship
+        # Also include periods with NO entries (newly created drafts)
         if company_id is None:
-            # Super admin - no filter
+            # Super admin - no filter, see all periods
             pass
         elif company_id == FILTER_NULL_COMPANY:
-            # Platform users - filter for NULL company_id
+            # Platform users - filter for NULL company_id users OR periods with no entries
             subquery = (
                 select(PayrollEntry.payroll_period_id)
                 .join(User, PayrollEntry.user_id == User.id)
                 .where(User.company_id.is_(None))
                 .distinct()
             )
-            conditions.append(PayrollPeriod.id.in_(subquery))
+            # Also include periods with no entries (draft without processing)
+            no_entries_subquery = (
+                select(PayrollPeriod.id)
+                .outerjoin(PayrollEntry, PayrollPeriod.id == PayrollEntry.payroll_period_id)
+                .where(PayrollEntry.id.is_(None))
+            )
+            from sqlalchemy import or_
+            conditions.append(or_(
+                PayrollPeriod.id.in_(subquery),
+                PayrollPeriod.id.in_(no_entries_subquery)
+            ))
         else:
             # Company-scoped users
             # Get period IDs that have at least one entry for a user in this company
@@ -302,7 +316,17 @@ class PayrollPeriodService:
                 .where(User.company_id == company_id)
                 .distinct()
             )
-            conditions.append(PayrollPeriod.id.in_(subquery))
+            # Also include periods with no entries (draft without processing)
+            no_entries_subquery = (
+                select(PayrollPeriod.id)
+                .outerjoin(PayrollEntry, PayrollPeriod.id == PayrollEntry.payroll_period_id)
+                .where(PayrollEntry.id.is_(None))
+            )
+            from sqlalchemy import or_
+            conditions.append(or_(
+                PayrollPeriod.id.in_(subquery),
+                PayrollPeriod.id.in_(no_entries_subquery)
+            ))
         
         # Get total count
         count_stmt = select(func.count(PayrollPeriod.id))
@@ -341,8 +365,21 @@ class PayrollPeriodService:
         await self.db.refresh(period)
         return period
     
-    async def process_period(self, period_id: int) -> Optional[PayrollPeriod]:
-        """Process a payroll period - calculate all entries based on pay rate type and selection criteria"""
+    async def process_period(
+        self, 
+        period_id: int,
+        company_id: Optional[int] = None
+    ) -> Union[PayrollPeriod, dict, None]:
+        """
+        Process a payroll period - calculate all entries based on pay rate type and selection criteria.
+        
+        Args:
+            period_id: ID of the period to process
+            company_id: Company ID for multi-tenancy filtering. If provided, only users from this company are included.
+        
+        Returns:
+            PayrollPeriod if successful, dict with error if no users found, None if period invalid
+        """
         period = await self.get_period_with_entries(period_id)
         if not period or period.status != PeriodStatusEnum.DRAFT.value:
             return None
@@ -373,6 +410,13 @@ class PayrollPeriodService:
         # Build query for users with active pay rates
         conditions = [PayRate.is_active == True, User.is_active == True]
         
+        # Multi-tenancy: Filter by company (strict - even NULL company)
+        if company_id is not None:
+            conditions.append(User.company_id == company_id)
+        elif company_id is None:
+            # If company_id is explicitly None, filter for NULL company users
+            conditions.append(User.company_id.is_(None))
+        
         # Filter by specific user IDs if provided
         if selected_user_ids:
             conditions.append(User.id.in_(selected_user_ids))
@@ -386,6 +430,17 @@ class PayrollPeriodService:
         ).distinct()
         result = await self.db.execute(stmt)
         users = result.scalars().all()
+        
+        # Check if any users with pay rates were found
+        if not users:
+            # Reset status back to draft
+            period.status = PeriodStatusEnum.DRAFT.value
+            await self.db.commit()
+            return {
+                "error": "no_pay_rates",
+                "message": "No users with active pay rates found. Please configure pay rates for employees before processing payroll.",
+                "period_id": period_id
+            }
         
         total_amount = Decimal("0.00")
         entries_processed = 0

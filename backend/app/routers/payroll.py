@@ -207,18 +207,27 @@ async def process_payroll_period(
 ):
     """
     Process a payroll period - calculate hours and amounts for all users.
-    Admin only.
+    Admin only. Only processes users from the admin's company.
     """
     service = PayrollPeriodService(db)
-    period = await service.process_period(period_id)
     
-    if not period:
+    # Multi-tenancy: Pass user's company_id to filter users
+    result = await service.process_period(period_id, company_id=current_user.company_id)
+    
+    if result is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot process period. Make sure it exists and is in draft status."
         )
     
-    return period
+    # Check if it's an error dict (no pay rates found)
+    if isinstance(result, dict) and result.get("error"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result.get("message", "Failed to process payroll period")
+        )
+    
+    return result
 
 
 @router.post("/periods/{period_id}/approve", response_model=PayrollPeriodResponse)
