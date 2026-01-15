@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.models import Base, User, Team, TeamMember, Project, Task, TimeEntry
+from app.models import Base, User, Team, TeamMember, Project, Task, TimeEntry, Company
 from app.config import settings
 
 # Use sync URL for seeding - replace asyncpg with psycopg2
@@ -31,13 +31,30 @@ def seed_database():
         
         print("Seeding database...")
         
-        # Create users
+        # Create default company first (required for multi-tenancy)
+        default_company = Company(
+            name="TimeTracker",
+            slug="timetracker",
+            email="admin@timetracker.com",
+            subscription_tier="enterprise",
+            status="active",
+            max_users=100,
+            max_projects=100,
+            timezone="UTC",
+        )
+        session.add(default_company)
+        session.flush()
+        
+        print(f"Created default company: {default_company.name} (ID: {default_company.id})")
+        
+        # Create users (all assigned to default company)
         admin = User(
             email="admin@timetracker.com",
             password_hash=hash_password("admin123"),
             name="Admin User",
             role="super_admin",
             is_active=True,
+            company_id=default_company.id,
         )
         
         user1 = User(
@@ -46,6 +63,7 @@ def seed_database():
             name="John Doe",
             role="regular_user",
             is_active=True,
+            company_id=default_company.id,
         )
         
         user2 = User(
@@ -54,6 +72,7 @@ def seed_database():
             name="Jane Smith",
             role="regular_user",
             is_active=True,
+            company_id=default_company.id,
         )
         
         user3 = User(
@@ -62,6 +81,7 @@ def seed_database():
             name="Bob Wilson",
             role="regular_user",
             is_active=True,
+            company_id=default_company.id,
         )
         
         session.add_all([admin, user1, user2, user3])
@@ -69,15 +89,17 @@ def seed_database():
         
         print(f"Created 4 users")
         
-        # Create teams
+        # Create teams (assigned to default company)
         team1 = Team(
             name="Development Team",
             owner_id=admin.id,
+            company_id=default_company.id,
         )
         
         team2 = Team(
             name="Design Team",
             owner_id=user1.id,
+            company_id=default_company.id,
         )
         
         session.add_all([team1, team2])
