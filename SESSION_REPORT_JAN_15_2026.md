@@ -1,8 +1,8 @@
 # Session Report - January 15, 2026 (Wednesday)
 
-## 🎯 Session Goal: Complete AI Features Testing + Documentation
+## 🎯 Session Goal: Complete AI Features Testing + Multi-Tenancy Audit
 
-**Session Focus:** Finish remaining AI feature tests and update documentation  
+**Session Focus:** Finish AI tests, fix payroll multi-tenancy, comprehensive model audit  
 **Previous Session:** SESSION_REPORT_JAN_14_2026.md (AI Testing + Multi-Tenancy Security)  
 **Environment:** Production (AWS Lightsail)  
 **URL:** https://timetracker.shaemarcus.com
@@ -14,75 +14,178 @@
 > **CRITICAL: Start every session by reading these documents:**
 > 
 > 1. `CONTEXT.md` - Server config, deployment rules, CRITICAL warnings
-> 2. `SESSION_REPORT_JAN_15_2026.md` - This file
+> 2. `SESSION_REPORT_JAN_15_2026.md` - This file (includes AUDIT)
 > 3. `SESSION_REPORT_JAN_14_2026.md` - Yesterday's security fixes
 
 ---
 
-## 📊 Current Status
+## 📊 Session Progress
 
-**QA Status:** 100% Pass Rate (75/75 tests) ✅  
-**AI Features Testing:** 9/11 Passed ✅  
-**Remaining AI Tests:** 2  
-
----
-
-## 🎯 Today's Tasks
-
-### 1. AI Features Testing (Remaining)
-
-| # | Feature | Status | Test Steps |
-|---|---------|--------|------------|
-| 10 | Cash Flow Projection | ⏳ TO TEST | Go to AI Dashboard → Cash Flow panel |
-| 11 | User Insights | ⏳ TO TEST | Go to AI Dashboard → User Insights panel |
-
-**Note:** Cash Flow fix was deployed yesterday (`88f5f70`). The query now filters PayrollPeriod entries through User.company_id instead of non-existent PayrollPeriod.company_id.
-
-### 2. Code Updates
-
-- [ ] **Update `seed.py`** - Create default company for new installations
-  - New installs currently create users/teams without company_id
-  - This causes "No data" issues with strict multi-tenancy
-  - Should create "TimeTracker" company and assign all seeded data to it
-
-### 3. Documentation Updates
-
-- [ ] **Update `AI_FEATURES_ASSESSMENT.md`** - Add final test results
-- [ ] **Update `SECURITY_AUDIT_REPORT.md`** - Document multi-tenancy fix
+| Task | Status |
+|------|--------|
+| seed.py default company | ✅ Fixed (`5916d80`) |
+| User Insights multi-tenancy | ✅ Fixed (`57c052d`) |
+| Payroll History NULL bypass | ✅ Fixed (`57c052d`) |
+| Payroll Process stuck bug | ✅ Fixed (`b623e3b`) |
+| Multi-Tenancy Model Audit | ✅ Complete (see below) |
+| Cash Flow AI Test | ⏳ Pending deployment |
+| User Insights AI Test | ⏳ Pending deployment |
 
 ---
 
-## 📝 Yesterday's Key Fixes (Reference)
+## 🔴 CRITICAL: Multi-Tenancy Model Audit
 
-### Multi-Tenancy Security Fix
-- **Issue:** AI endpoints leaked data between companies
-- **Fix:** Strict `company_id` filtering on ALL queries
-- **Commits:** `996a53d`, `e339d1a`, `f4a8d36`
+### Executive Summary
 
-### Data Migration
-- **Issue:** Admin users had `company_id = NULL`, causing "No data" in panels
-- **Fix:** Created "TimeTracker" company (ID: 2), migrated 6 users + 3 teams
-- **Script:** `backend/scripts/migrate_null_company.py`
+After analyzing all 20+ database models, I found **architecture design issues** where certain models lack `company_id` columns, requiring complex join-based filtering that's error-prone.
 
-### Query Fixes
-- **Project Budget:** Changed to join through `Team.company_id` (Project has no company_id)
-- **Payroll History:** Filter through `PayrollEntry → User.company_id` (PayrollPeriod has no company_id)
-- **Commit:** `88f5f70`
+### Model Classification
+
+#### ✅ GOOD: Models WITH `company_id` (Direct Filtering)
+
+| Model | company_id | Notes |
+|-------|------------|-------|
+| `User` | ✅ Yes | Core multi-tenancy anchor |
+| `Team` | ✅ Yes | Direct filtering possible |
+| `WhiteLabelConfig` | ✅ Yes | FK to Company |
+
+#### ⚠️ INDIRECT: Models WITHOUT `company_id` (Require Joins)
+
+| Model | Filter Via | Complexity | Risk |
+|-------|-----------|------------|------|
+| `Project` | `Team.company_id` | Medium | Requires JOIN to Team |
+| `Task` | `Project → Team.company_id` | High | Requires 2 JOINs |
+| `TimeEntry` | `User.company_id` | Medium | Requires JOIN to User |
+| `PayRate` | `User.company_id` | Medium | Requires JOIN to User |
+| `PayRateHistory` | `PayRate → User.company_id` | High | Requires 2 JOINs |
+| `PayrollEntry` | `User.company_id` | Medium | Requires JOIN to User |
+| `PayrollAdjustment` | `PayrollEntry → User.company_id` | High | Requires 3 JOINs |
+
+#### 🔴 CRITICAL: Models MISSING `company_id` That Should Have It
+
+| Model | Current State | Problem | Impact |
+|-------|--------------|---------|--------|
+| **`PayrollPeriod`** | No company_id | Periods are GLOBAL | Admin in Company A sees ALL periods |
+| **`AccountRequest`** | No company_id | Requests are GLOBAL | Privacy/security concern |
+| **`AuditLog`** | No company_id | Logs are GLOBAL | Admins see all audit logs |
+| **`APIKey`** | No company_id | Keys are GLOBAL | All companies share API keys |
+| **`AIFeatureSetting`** | No company_id | Settings are GLOBAL | Can't customize per-company |
+| **`AIUsageLog`** | No company_id | Usage is GLOBAL | Can't track per-company costs |
+
+### Impact Analysis
+
+#### PayrollPeriod (FIXED TODAY - Workaround)
+- **Problem:** Processing was broken - clicked "Process" did nothing
+- **Root Cause:** No users with pay rates found (queried all companies)
+- **Workaround Applied:** 
+  - `process_period()` now takes `company_id` parameter
+  - Filters users by company before processing
+  - Returns clear error if no pay rates found
+- **Ideal Fix:** Add `company_id` column to PayrollPeriod model (DB migration needed)
+
+#### AccountRequest (LOW RISK)
+- **Problem:** Account requests visible to all admins
+- **Workaround:** None needed - account requests are reviewed by platform admins
+- **Ideal Fix:** Add `company_id` for company-specific onboarding
+
+#### AuditLog (MEDIUM RISK)
+- **Problem:** Company A admin could see Company B audit logs
+- **Current Status:** NOT FIXED - needs assessment of current queries
+- **Ideal Fix:** Add `company_id` column
+
+#### APIKey (HIGH RISK)
+- **Problem:** All companies share API keys
+- **Current Status:** Working as designed (platform-level keys)
+- **Alternative:** Add per-company API keys for billing purposes
+
+#### AIFeatureSetting & AIUsageLog (LOW RISK)
+- **Problem:** AI settings/usage global, not per-company
+- **Current Status:** Working as designed (platform-level settings)
+- **Future:** Add company-level AI configuration
 
 ---
 
-## 📋 Test Accounts
+## 🔧 Fixes Applied Today
 
-| Email | Password | Role | Company |
-|-------|----------|------|---------|
-| admin@timetracker.com | (your password) | super_admin | TimeTracker (ID: 2) |
-| laura@shaemarcus.com | (your password) | super_admin | TimeTracker (ID: 2) |
-| shaeadam@gmail.com | XyzTest123! | company_admin | XYZ Corp (ID: 1) |
-| employee@xyzcorp.com | Employee123! | employee | XYZ Corp (ID: 1) |
+### 1. seed.py - Default Company Creation (`5916d80`)
+```python
+# Creates "TimeTracker" company with enterprise tier
+# All seeded users/teams assigned to this company
+default_company = Company(
+    name="TimeTracker",
+    slug="timetracker",
+    ...
+)
+```
+
+### 2. User Insights - Multi-Tenancy (`57c052d`)
+```python
+# Before: Admin could view ANY user's insights
+if target_id != current_user.id and current_user.role not in ["admin", "super_admin"]:
+
+# After: Admin can only view users in SAME company
+if target_user.company_id != current_user.company_id:
+    raise HTTPException(403, "Cannot view users from other companies")
+```
+
+### 3. Payroll History - Remove NULL Bypass (`57c052d`)
+```python
+# Before: company_id=None returned ALL entries
+if company_id is not None:
+    entries_result = ...  # filtered
+else:
+    entries_result = ...  # ALL entries!
+
+# After: ALWAYS filter by company_id
+entries_result = await self.db.execute(
+    select(PayrollEntry).join(User).where(
+        User.company_id == company_id  # Works for NULL too
+    )
+)
+```
+
+### 4. Payroll Process - Company Filter + Error Handling (`b623e3b`)
+```python
+# Added company_id parameter to process_period()
+async def process_period(self, period_id: int, company_id: Optional[int] = None):
+    # Filter users by company
+    conditions.append(User.company_id == company_id)
+    
+    # Return clear error if no pay rates
+    if not users:
+        return {"error": "no_pay_rates", "message": "No users with active pay rates found..."}
+```
 
 ---
 
-## ✅ AI Features Test Checklist
+## 📋 TODO: Remaining Multi-Tenancy Fixes
+
+### Priority 1 - Security Issues (Should Fix)
+
+| Issue | File | Fix Required |
+|-------|------|--------------|
+| ⬜ AuditLog company filter | `routers/audit.py` | Add company_id filter to queries |
+| ⬜ PayrollPeriod visibility | `services/payroll_service.py` | Done (workaround), ideal: DB migration |
+
+### Priority 2 - Database Migrations (Future)
+
+| Model | Migration | Effort |
+|-------|-----------|--------|
+| `PayrollPeriod` | Add `company_id` column | Medium |
+| `AuditLog` | Add `company_id` column | Medium |
+| `AccountRequest` | Add `company_id` column | Low |
+
+### Priority 3 - Feature Enhancements (Optional)
+
+| Feature | Description |
+|---------|-------------|
+| Per-company API keys | Allow companies to use own AI API keys |
+| Per-company AI settings | Different AI features per company |
+| Company-level usage tracking | Track AI costs per company |
+
+---
+
+## 🧪 AI Tests Status (Updated)
 
 ### Completed (9/11)
 - [x] 1. Admin AI Settings - All toggles working
@@ -95,7 +198,7 @@
 - [x] 8. Overtime Risk - Detects running timers
 - [x] 9. Project Budget - Fixed query via Team.company_id
 
-### To Test Today (2/11)
+### To Test After Deployment (2/11)
 - [ ] 10. Cash Flow Projection - Should show weekly forecast
 - [ ] 11. User Insights - Should show productivity metrics
 
@@ -111,6 +214,53 @@ sudo docker compose -f docker-compose.prod.yml exec db psql -U postgres -d timet
 ```
 
 If no paid periods exist, the "No forecast data available" message is correct behavior.
+
+---
+
+## 📋 Test Accounts
+
+| Email | Password | Role | Company |
+|-------|----------|------|---------|
+| admin@timetracker.com | (your password) | super_admin | TimeTracker (ID: 2) |
+| laura@shaemarcus.com | (your password) | super_admin | TimeTracker (ID: 2) |
+| shaeadam@gmail.com | XyzTest123! | company_admin | XYZ Corp (ID: 1) |
+| employee@xyzcorp.com | Employee123! | Employee | XYZ Corp (ID: 1) |
+
+---
+
+## 🚀 Deployment Commands
+
+```bash
+# Deploy from local (Git must be clean)
+./scripts/deploy-sequential.sh
+
+# Or SSH directly:
+ssh -i "~/.ssh/lightsail-key.pem" ubuntu@3.86.159.225
+
+# On server:
+cd /opt/timetracker
+sudo ./scripts/deploy-sequential.sh
+```
+
+---
+
+## ✅ Summary
+
+**Session Accomplishments:**
+1. Fixed seed.py to create default company for new installations
+2. Fixed User Insights endpoint to prevent cross-company access
+3. Removed NULL bypass in payroll history queries
+4. Fixed payroll process stuck bug with company filtering + error handling
+5. Completed comprehensive multi-tenancy model audit
+
+**Key Insight:**
+The application has **architectural debt** where several models (`PayrollPeriod`, `AuditLog`, `AccountRequest`) lack `company_id` columns. Current workarounds use join-based filtering, but for perfect multi-tenancy, these models should have direct `company_id` foreign keys.
+
+**Next Session:**
+1. Deploy changes: `./scripts/deploy-sequential.sh`
+2. Test Cash Flow + User Insights AI features
+3. Consider AuditLog multi-tenancy fix (Priority 1)
+4. Optional: Plan database migrations for PayrollPeriod.company_id
 
 ---
 
