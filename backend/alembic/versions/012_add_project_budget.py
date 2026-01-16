@@ -1,7 +1,7 @@
 """Add project budget fields and history table
 
-Revision ID: 012_add_project_budget
-Revises: 011_add_company_id_to_teams
+Revision ID: 012
+Revises: 011
 Create Date: 2026-01-16
 
 """
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = '012_add_project_budget'
-down_revision = '011_add_company_id_to_teams'
+revision = '012'
+down_revision = '011'
 branch_labels = None
 depends_on = None
 
