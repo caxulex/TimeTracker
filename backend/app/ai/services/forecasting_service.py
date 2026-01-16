@@ -809,6 +809,12 @@ class ForecastingService:
         """Analyze budget consumption for a project."""
         from app.models import TimeEntry, PayRate
         
+        # Skip projects without a budget set
+        if not project.budget_amount:
+            return None
+        
+        budget_total = project.budget_amount
+        
         # Calculate labor cost to date
         entries_result = await self.db.execute(
             select(TimeEntry)
@@ -817,7 +823,19 @@ class ForecastingService:
         entries = entries_result.scalars().all()
         
         if not entries:
-            return None
+            # Project has budget but no time entries yet
+            return ProjectBudgetForecast(
+                project_id=project.id,
+                project_name=project.name,
+                budget_total=budget_total,
+                spent_to_date=Decimal("0.00"),
+                projected_total=Decimal("0.00"),
+                burn_rate_daily=Decimal("0.00"),
+                days_remaining=365 if not project.deadline else max((project.deadline - date.today()).days, 0),
+                projected_completion=project.deadline if project.deadline else date.today() + timedelta(days=365),
+                risk_level=RiskLevel.LOW,
+                recommendations=["No time tracked yet - budget fully available"]
+            )
         
         # Calculate total hours and approximate cost
         total_hours = sum(e.duration_seconds or 0 for e in entries) / 3600
@@ -827,21 +845,19 @@ class ForecastingService:
         spent_to_date = Decimal(str(total_hours)) * avg_rate
         
         # Calculate burn rate
-        if entries:
-            first_entry = min(entries, key=lambda e: e.start_time)
-            days_active = max((date.today() - first_entry.start_time.date()).days, 1)
-            burn_rate_daily = spent_to_date / days_active
-        else:
-            burn_rate_daily = Decimal(0)
+        first_entry = min(entries, key=lambda e: e.start_time)
+        days_active = max((date.today() - first_entry.start_time.date()).days, 1)
+        burn_rate_daily = spent_to_date / days_active
         
-        # For this implementation, we'll use a hypothetical budget
-        # In production, this would come from a project budget field
-        budget_total = Decimal("50000.00")  # Placeholder
-        
-        # Project completion
-        if burn_rate_daily > 0:
+        # Calculate days remaining based on deadline or budget
+        if project.deadline:
+            days_remaining = max((project.deadline - date.today()).days, 0)
+            projected_completion = project.deadline
+            # Project total based on burn rate until deadline
+            projected_total = spent_to_date + (burn_rate_daily * days_remaining) if burn_rate_daily > 0 else spent_to_date
+        elif burn_rate_daily > 0:
             remaining_budget = budget_total - spent_to_date
-            days_remaining = int(remaining_budget / burn_rate_daily) if burn_rate_daily > 0 else 365
+            days_remaining = int(remaining_budget / burn_rate_daily) if remaining_budget > 0 else 0
             projected_completion = date.today() + timedelta(days=days_remaining)
             projected_total = spent_to_date + (burn_rate_daily * days_remaining)
         else:
@@ -852,10 +868,17 @@ class ForecastingService:
         # Determine risk level
         utilization = float(spent_to_date / budget_total * 100) if budget_total > 0 else 0
         
-        if utilization > 90:
+        # Additional risk factor: deadline approaching with high utilization
+        deadline_risk = False
+        if project.deadline:
+            days_to_deadline = (project.deadline - date.today()).days
+            if days_to_deadline <= 7 and utilization > 75:
+                deadline_risk = True
+        
+        if utilization > 90 or deadline_risk:
             risk_level = RiskLevel.CRITICAL
             recommendations = [
-                "Project approaching budget limit",
+                "Project approaching budget limit" if utilization > 90 else "Deadline approaching with high spending",
                 "Review remaining scope for cuts",
                 "Request budget increase if necessary"
             ]

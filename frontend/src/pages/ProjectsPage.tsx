@@ -299,6 +299,7 @@ export function ProjectsPage() {
             }
           }}
           isLoading={createMutation.isPending || updateMutation.isPending}
+          isAdmin={isAdmin}
         />
       )}
     </div>
@@ -318,6 +319,15 @@ interface ProjectCardProps {
 }
 
 function ProjectCard({ project, isAdmin, showHealthButton, onViewHealth, onEdit, onArchive, onRestore, onDelete }: ProjectCardProps) {
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }).format(value);
+  };
+
   return (
     <Card className="hover:shadow-md transition-shadow">
       <div className="flex items-start justify-between">
@@ -379,6 +389,29 @@ function ProjectCard({ project, isAdmin, showHealthButton, onViewHealth, onEdit,
           </div>
         )}
       </div>
+      
+      {/* Budget info - Admin only */}
+      {isAdmin && (project.budget_amount || project.deadline) && (
+        <div className="mt-3 flex items-center gap-3 text-xs">
+          {project.budget_amount && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-50 text-green-700 rounded-md">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              {formatCurrency(project.budget_amount)}
+            </span>
+          )}
+          {project.deadline && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 rounded-md">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              {new Date(project.deadline).toLocaleDateString()}
+            </span>
+          )}
+        </div>
+      )}
+      
       <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between text-sm text-gray-500">
         <span>Created {formatDate(project.created_at)}</span>
         <div className="flex items-center gap-2">
@@ -414,13 +447,16 @@ interface ProjectModalProps {
   teams: Team[];
   onSubmit: (data: Partial<ProjectCreate>) => void;
   isLoading: boolean;
+  isAdmin: boolean;
 }
 
-function ProjectModal({ isOpen, onClose, project, teams, onSubmit, isLoading }: ProjectModalProps) {
+function ProjectModal({ isOpen, onClose, project, teams, onSubmit, isLoading, isAdmin }: ProjectModalProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [teamId, setTeamId] = useState<number | ''>('');
   const [color, setColor] = useState('#3B82F6');
+  const [budgetAmount, setBudgetAmount] = useState<string>('');
+  const [deadline, setDeadline] = useState<string>('');
 
   // Reset form when modal opens/closes or project changes
   React.useEffect(() => {
@@ -429,22 +465,34 @@ function ProjectModal({ isOpen, onClose, project, teams, onSubmit, isLoading }: 
       setDescription(project.description || '');
       setTeamId(project.team_id);
       setColor(project.color);
+      setBudgetAmount(project.budget_amount ? String(project.budget_amount) : '');
+      setDeadline(project.deadline || '');
     } else {
       setName('');
       setDescription('');
       setTeamId(teams[0]?.id || '');
       setColor(generateRandomColor());
+      setBudgetAmount('');
+      setDeadline('');
     }
   }, [project, isOpen, teams]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit({
+    const data: Partial<ProjectCreate> = {
       name,
       description: description || undefined,
       team_id: teamId as number,
       color,
-    });
+    };
+    
+    // Include budget fields only if admin
+    if (isAdmin) {
+      data.budget_amount = budgetAmount ? parseFloat(budgetAmount) : null;
+      data.deadline = deadline || null;
+    }
+    
+    onSubmit(data);
   };
 
   return (
@@ -509,6 +557,56 @@ function ProjectModal({ isOpen, onClose, project, teams, onSubmit, isLoading }: 
             />
           </div>
         </div>
+
+        {/* Budget Fields - Admin Only */}
+        {isAdmin && (
+          <>
+            <div className="border-t pt-4 mt-4">
+              <h4 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Budget Settings
+              </h4>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Budget (USD)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                    <input
+                      type="number"
+                      value={budgetAmount}
+                      onChange={(e) => setBudgetAmount(e.target.value)}
+                      placeholder="0.00"
+                      min="0"
+                      step="0.01"
+                      className="block w-full pl-7 pr-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Deadline
+                  </label>
+                  <input
+                    type="date"
+                    value={deadline}
+                    onChange={(e) => setDeadline(e.target.value)}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+              
+              <p className="text-xs text-gray-500 mt-2">
+                Budget and deadline are used for AI forecasting. Only admins can see and edit these fields.
+              </p>
+            </div>
+          </>
+        )}
 
         <div className="flex justify-end gap-2 pt-4">
           <Button type="button" variant="secondary" onClick={onClose}>

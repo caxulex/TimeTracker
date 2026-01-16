@@ -285,11 +285,16 @@ class Project(Base):
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Budget fields (admin-only visibility)
+    budget_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)  # USD budget
+    deadline: Mapped[Optional[date]] = mapped_column(Date, nullable=True)  # Project deadline
 
     # Relationships
     team: Mapped[Team] = relationship("Team", back_populates="projects")
     tasks: Mapped[list["Task"]] = relationship("Task", back_populates="project", cascade="all, delete-orphan")
     time_entries: Mapped[list["TimeEntry"]] = relationship("TimeEntry", back_populates="project", cascade="all, delete-orphan")
+    budget_history: Mapped[list["ProjectBudgetHistory"]] = relationship("ProjectBudgetHistory", back_populates="project", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Project(id={self.id}, name={self.name}, team_id={self.team_id})>"
@@ -690,4 +695,41 @@ class AIUsageLog(Base):
 
     def __repr__(self) -> str:
         return f"<AIUsageLog(id={self.id}, feature_id={self.feature_id}, user_id={self.user_id})>"
+
+
+# ============================================
+# PROJECT BUDGET HISTORY MODEL
+# ============================================
+
+class ProjectBudgetHistory(Base):
+    """
+    Tracks changes to project budget for audit trail.
+    Records who changed the budget, when, and what values changed.
+    """
+    __tablename__ = "project_budget_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    changed_by_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    
+    # Budget change tracking
+    old_budget_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
+    new_budget_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
+    old_deadline: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    new_deadline: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    
+    # Change metadata
+    change_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    # Relationships
+    project: Mapped["Project"] = relationship("Project", back_populates="budget_history")
+    changed_by: Mapped[Optional[User]] = relationship("User", foreign_keys=[changed_by_id])
+
+    __table_args__ = (
+        Index("ix_project_budget_history_project_date", "project_id", "changed_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ProjectBudgetHistory(project_id={self.project_id}, changed_at={self.changed_at})>"
 

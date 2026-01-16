@@ -105,6 +105,9 @@ export interface Project {
   is_archived: boolean;
   created_at: string;
   team?: Team;
+  // Budget fields (admin only)
+  budget_amount?: number | null;
+  deadline?: string | null;
 }
 
 export interface ProjectCreate {
@@ -112,6 +115,9 @@ export interface ProjectCreate {
   name: string;
   description?: string;
   color?: string;
+  // Budget fields (admin only)
+  budget_amount?: number | null;
+  deadline?: string | null;
 }
 
 export interface ProjectUpdate {
@@ -119,6 +125,10 @@ export interface ProjectUpdate {
   description?: string | null;
   color?: string;
   is_archived?: boolean;
+  // Budget fields (admin only)
+  budget_amount?: number | null;
+  deadline?: string | null;
+  budget_change_reason?: string;
 }
 
 // Task Types

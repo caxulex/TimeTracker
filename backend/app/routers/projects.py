@@ -7,10 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, date
+from decimal import Decimal
 
 from app.database import get_db
-from app.models import User, Team, TeamMember, Project, Task, TimeEntry
+from app.models import User, Team, TeamMember, Project, Task, TimeEntry, ProjectBudgetHistory
 from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY
 from app.schemas.auth import Message
 from app.routers.websocket import manager as ws_manager
@@ -24,6 +25,9 @@ class ProjectCreate(BaseModel):
     description: Optional[str] = None
     team_id: int
     color: Optional[str] = Field(None, pattern="^#[0-9A-Fa-f]{6}$")
+    # Budget fields (admin only)
+    budget_amount: Optional[float] = Field(None, ge=0, description="Project budget in USD")
+    deadline: Optional[date] = Field(None, description="Project deadline date")
 
 
 class ProjectUpdate(BaseModel):
@@ -32,6 +36,10 @@ class ProjectUpdate(BaseModel):
     color: Optional[str] = Field(None, pattern="^#[0-9A-Fa-f]{6}$")
     is_archived: Optional[bool] = None
     team_id: Optional[int] = None
+    # Budget fields (admin only)
+    budget_amount: Optional[float] = Field(None, ge=0, description="Project budget in USD")
+    deadline: Optional[date] = Field(None, description="Project deadline date")
+    budget_change_reason: Optional[str] = Field(None, max_length=500, description="Reason for budget change")
 
 
 class ProjectResponse(BaseModel):
@@ -45,6 +53,9 @@ class ProjectResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime]
     task_count: Optional[int] = None
+    # Budget fields (only populated for admins)
+    budget_amount: Optional[float] = None
+    deadline: Optional[date] = None
 
     class Config:
         from_attributes = True
@@ -162,6 +173,9 @@ async def list_projects(
         )
         task_counts = dict(task_count_result.all())
     
+    # Check if user is admin for budget visibility
+    is_admin = current_user.role in ["super_admin", "admin", "company_admin"]
+    
     items = []
     for project in projects:
         item = ProjectResponse(
@@ -174,7 +188,9 @@ async def list_projects(
             is_archived=project.is_archived,
             created_at=project.created_at,
             updated_at=project.updated_at,
-            task_count=task_counts.get(project.id, 0)
+            task_count=task_counts.get(project.id, 0),
+            budget_amount=float(project.budget_amount) if project.budget_amount and is_admin else None,
+            deadline=project.deadline if is_admin else None
         )
         items.append(item)
     
@@ -206,7 +222,8 @@ async def get_project(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     
     # Check access (team membership for non-admins)
-    if current_user.role not in ["super_admin", "admin", "company_admin"]:
+    is_admin = current_user.role in ["super_admin", "admin", "company_admin"]
+    if not is_admin:
         has_access = await check_team_access(db, project.team_id, current_user)
         if not has_access:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
@@ -231,7 +248,9 @@ async def get_project(
         is_archived=project.is_archived,
         created_at=project.created_at,
         updated_at=project.updated_at,
-        task_count=task_count
+        task_count=task_count,
+        budget_amount=float(project.budget_amount) if project.budget_amount and is_admin else None,
+        deadline=project.deadline if is_admin else None
     )
 
 
@@ -247,18 +266,42 @@ async def create_project(
     if not has_access:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to this team")
     
+    # Only admins can set budget fields
+    is_admin = current_user.role in ["super_admin", "admin", "company_admin"]
+    
     project = Project(
         name=project_data.name,
         description=project_data.description,
         team_id=project_data.team_id,
-        color=project_data.color or "#3B82F6"
+        color=project_data.color or "#3B82F6",
+        budget_amount=Decimal(str(project_data.budget_amount)) if project_data.budget_amount is not None and is_admin else None,
+        deadline=project_data.deadline if is_admin else None
     )
     
     db.add(project)
     await db.commit()
     await db.refresh(project)
     
+    # If budget was set, log initial budget history
+    if is_admin and (project_data.budget_amount is not None or project_data.deadline is not None):
+        budget_history = ProjectBudgetHistory(
+            project_id=project.id,
+            changed_by_id=current_user.id,
+            old_budget_amount=None,
+            new_budget_amount=project.budget_amount,
+            old_deadline=None,
+            new_deadline=project.deadline,
+            change_reason="Initial budget set on project creation"
+        )
+        db.add(budget_history)
+        await db.commit()
+    
     # Audit log
+    audit_values = {"name": project.name, "team_id": project.team_id, "color": project.color}
+    if is_admin:
+        audit_values["budget_amount"] = float(project.budget_amount) if project.budget_amount else None
+        audit_values["deadline"] = str(project.deadline) if project.deadline else None
+    
     await AuditLogger.log(
         db=db,
         action=AuditAction.CREATE,
@@ -266,7 +309,7 @@ async def create_project(
         resource_id=project.id,
         user_id=current_user.id,
         user_email=current_user.email,
-        new_values={"name": project.name, "team_id": project.team_id, "color": project.color},
+        new_values=audit_values,
         details=f"Created project '{project.name}' in team {project.team_id}"
     )
     await db.commit()
@@ -301,7 +344,9 @@ async def create_project(
         is_archived=project.is_archived,
         created_at=project.created_at,
         updated_at=project.updated_at,
-        task_count=0
+        task_count=0,
+        budget_amount=float(project.budget_amount) if project.budget_amount and is_admin else None,
+        deadline=project.deadline if is_admin else None
     )
 
 
@@ -325,7 +370,8 @@ async def update_project(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     
     # Check access (team membership for non-admins)
-    if current_user.role not in ["super_admin", "admin", "company_admin"]:
+    is_admin = current_user.role in ["super_admin", "admin", "company_admin"]
+    if not is_admin:
         has_access = await check_team_access(db, project.team_id, current_user)
         if not has_access:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
@@ -343,15 +389,53 @@ async def update_project(
     
     # Track old values
     old_values = {"name": project.name, "color": project.color, "is_archived": project.is_archived, "team_id": project.team_id}
+    old_budget_amount = project.budget_amount
+    old_deadline = project.deadline
     
-    # Update fields
+    # Update fields - exclude budget fields for non-admins
     update_data = project_data.model_dump(exclude_unset=True)
+    
+    # Remove budget fields from update if not admin
+    budget_change_reason = update_data.pop("budget_change_reason", None)
+    if not is_admin:
+        update_data.pop("budget_amount", None)
+        update_data.pop("deadline", None)
+    else:
+        # Convert budget_amount to Decimal for database
+        if "budget_amount" in update_data and update_data["budget_amount"] is not None:
+            update_data["budget_amount"] = Decimal(str(update_data["budget_amount"]))
+    
     for key, value in update_data.items():
         setattr(project, key, value)
     
+    # Track budget changes for history (admin only)
+    budget_changed = False
+    if is_admin:
+        new_budget_amount = project.budget_amount
+        new_deadline = project.deadline
+        
+        if old_budget_amount != new_budget_amount or old_deadline != new_deadline:
+            budget_changed = True
+            budget_history = ProjectBudgetHistory(
+                project_id=project.id,
+                changed_by_id=current_user.id,
+                old_budget_amount=old_budget_amount,
+                new_budget_amount=new_budget_amount,
+                old_deadline=old_deadline,
+                new_deadline=new_deadline,
+                change_reason=budget_change_reason
+            )
+            db.add(budget_history)
+    
     # Audit log
     new_values = {"name": project.name, "color": project.color, "is_archived": project.is_archived, "team_id": project.team_id}
-    if old_values != new_values:
+    if is_admin:
+        old_values["budget_amount"] = float(old_budget_amount) if old_budget_amount else None
+        old_values["deadline"] = str(old_deadline) if old_deadline else None
+        new_values["budget_amount"] = float(project.budget_amount) if project.budget_amount else None
+        new_values["deadline"] = str(project.deadline) if project.deadline else None
+    
+    if old_values != new_values or budget_changed:
         await AuditLogger.log(
             db=db,
             action=AuditAction.UPDATE,
@@ -361,7 +445,7 @@ async def update_project(
             user_email=current_user.email,
             old_values=old_values,
             new_values=new_values,
-            details=f"Updated project '{project.name}'"
+            details=f"Updated project '{project.name}'" + (" (budget changed)" if budget_changed else "")
         )
 
     await db.commit()
@@ -387,7 +471,9 @@ async def update_project(
         is_archived=project.is_archived,
         created_at=project.created_at,
         updated_at=project.updated_at,
-        task_count=task_count
+        task_count=task_count,
+        budget_amount=float(project.budget_amount) if project.budget_amount and is_admin else None,
+        deadline=project.deadline if is_admin else None
     )
 
 
