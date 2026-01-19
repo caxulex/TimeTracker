@@ -1,14 +1,48 @@
 // ============================================
 // TIME TRACKER - SETTINGS PAGE
 // ============================================
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, Button, Input, PasswordInput } from '../components/common';
 import { AIFeaturePanel } from '../components/ai';
 import { useAuthStore } from '../stores/authStore';
-import { authApi } from '../api/client';
+import { authApi, companiesApi } from '../api/client';
 import { useNotifications } from '../hooks/useNotifications';
 import { useTheme } from '../contexts/ThemeContext';
+import { isAdminUser } from '../utils/helpers';
+
+// Common timezone list
+const TIMEZONES = [
+  { value: 'UTC', label: 'UTC (Coordinated Universal Time)' },
+  { value: 'America/New_York', label: 'Eastern Time (US & Canada)' },
+  { value: 'America/Chicago', label: 'Central Time (US & Canada)' },
+  { value: 'America/Denver', label: 'Mountain Time (US & Canada)' },
+  { value: 'America/Los_Angeles', label: 'Pacific Time (US & Canada)' },
+  { value: 'America/Anchorage', label: 'Alaska' },
+  { value: 'Pacific/Honolulu', label: 'Hawaii' },
+  { value: 'America/Puerto_Rico', label: 'Atlantic Time (Puerto Rico)' },
+  { value: 'America/Mexico_City', label: 'Mexico City' },
+  { value: 'America/Bogota', label: 'Bogota, Lima' },
+  { value: 'America/Sao_Paulo', label: 'Sao Paulo' },
+  { value: 'America/Argentina/Buenos_Aires', label: 'Buenos Aires' },
+  { value: 'Europe/London', label: 'London, Dublin' },
+  { value: 'Europe/Paris', label: 'Paris, Berlin, Amsterdam' },
+  { value: 'Europe/Madrid', label: 'Madrid, Barcelona' },
+  { value: 'Europe/Rome', label: 'Rome, Milan' },
+  { value: 'Europe/Moscow', label: 'Moscow' },
+  { value: 'Asia/Dubai', label: 'Dubai' },
+  { value: 'Asia/Kolkata', label: 'Mumbai, New Delhi' },
+  { value: 'Asia/Bangkok', label: 'Bangkok' },
+  { value: 'Asia/Singapore', label: 'Singapore' },
+  { value: 'Asia/Hong_Kong', label: 'Hong Kong' },
+  { value: 'Asia/Shanghai', label: 'Beijing, Shanghai' },
+  { value: 'Asia/Tokyo', label: 'Tokyo' },
+  { value: 'Asia/Seoul', label: 'Seoul' },
+  { value: 'Australia/Sydney', label: 'Sydney' },
+  { value: 'Australia/Melbourne', label: 'Melbourne' },
+  { value: 'Pacific/Auckland', label: 'Auckland' },
+];
 
 interface ProfileForm {
   name: string;
@@ -25,8 +59,52 @@ export function SettingsPage() {
   const { user, setUser } = useAuthStore();
   const { addNotification } = useNotifications();
   const { isDark, toggleTheme } = useTheme();
+  const queryClient = useQueryClient();
   const [profileLoading, setProfileLoading] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
+  const [selectedTimezone, setSelectedTimezone] = useState('UTC');
+
+  const isAdmin = isAdminUser(user);
+
+  // Fetch company data for admins
+  const { data: companyData, isLoading: companyLoading } = useQuery({
+    queryKey: ['my-company'],
+    queryFn: () => companiesApi.getMyCompany(),
+    enabled: isAdmin,
+  });
+
+  // Update selected timezone when company data loads
+  useEffect(() => {
+    if (companyData?.timezone) {
+      setSelectedTimezone(companyData.timezone);
+    }
+  }, [companyData]);
+
+  // Timezone update mutation
+  const timezoneMutation = useMutation({
+    mutationFn: (timezone: string) => companiesApi.updateMyCompany({ timezone }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['my-company'] });
+      addNotification({
+        type: 'success',
+        title: 'Timezone Updated',
+        message: 'Company timezone has been updated successfully',
+      });
+    },
+    onError: (error: any) => {
+      addNotification({
+        type: 'error',
+        title: 'Update Failed',
+        message: error.response?.data?.detail || 'Failed to update timezone',
+      });
+    },
+  });
+
+  const handleTimezoneChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newTimezone = e.target.value;
+    setSelectedTimezone(newTimezone);
+    timezoneMutation.mutate(newTimezone);
+  };
 
   const {
     register: registerProfile,
@@ -230,6 +308,46 @@ export function SettingsPage() {
           </div>
         </div>
       </Card>
+
+      {/* Timezone section - Admin Only */}
+      {isAdmin && (
+        <Card>
+          <CardHeader 
+            title="Company Timezone" 
+            subtitle="Set the timezone for your company. This affects burnout risk calculations, weekend detection, and reports." 
+          />
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="timezone" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Timezone
+              </label>
+              <select
+                id="timezone"
+                value={selectedTimezone}
+                onChange={handleTimezoneChange}
+                disabled={companyLoading || timezoneMutation.isPending}
+                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-4 py-2 text-gray-900 dark:text-gray-100 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {TIMEZONES.map((tz) => (
+                  <option key={tz.value} value={tz.value}>
+                    {tz.label}
+                  </option>
+                ))}
+              </select>
+              {timezoneMutation.isPending && (
+                <p className="text-sm text-blue-600 mt-1">Saving...</p>
+              )}
+            </div>
+            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3">
+              <p className="text-sm text-blue-800 dark:text-blue-200">
+                <strong>Note:</strong> Changing the timezone will affect how time entries are interpreted 
+                for weekend work detection, consecutive workday calculations, and late work hours in 
+                the AI Burnout Risk Assessment.
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* AI Features section */}
       <AIFeaturePanel />

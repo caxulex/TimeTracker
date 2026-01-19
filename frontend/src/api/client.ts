@@ -676,6 +676,42 @@ export const payRatesApi = {
 };
 
 // ============================================
+// COMPANIES API
+// ============================================
+export interface Company {
+  id: number;
+  name: string;
+  slug: string;
+  email: string;
+  phone: string | null;
+  timezone: string;
+  subscription_tier: string;
+  status: string;
+  trial_ends_at: string | null;
+  max_users: number;
+  max_projects: number;
+  created_at: string;
+}
+
+export interface CompanyUpdate {
+  name?: string;
+  phone?: string;
+  timezone?: string;
+}
+
+export const companiesApi = {
+  getMyCompany: async (): Promise<Company> => {
+    const response = await api.get('/api/companies/my-company');
+    return response.data;
+  },
+
+  updateMyCompany: async (data: CompanyUpdate): Promise<Company> => {
+    const response = await api.put('/api/companies/my-company', data);
+    return response.data;
+  },
+};
+
+// ============================================
 // ADMIN API (TASK-009, TASK-010, TASK-022)
 // ============================================
 export const adminApi = {

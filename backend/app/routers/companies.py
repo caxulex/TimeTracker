@@ -50,6 +50,7 @@ class CompanyResponse(BaseModel):
     slug: str
     email: str
     phone: Optional[str]
+    timezone: str
     subscription_tier: str
     status: str
     trial_ends_at: Optional[datetime]
