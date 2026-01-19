@@ -11,12 +11,18 @@ Advanced anomaly detection using machine learning:
 import logging
 import pickle
 from typing import List, Dict, Any, Optional, Tuple, TypedDict, TYPE_CHECKING
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from enum import Enum
 from dataclasses import dataclass, field
 import json
 import statistics
 from collections import defaultdict
+
+# Timezone support for correct weekend/workday detection
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo  # Python < 3.9
 
 
 class DailyEntryData(TypedDict):
@@ -692,9 +698,9 @@ class MLAnomalyService:
         period_days: int = 30
     ) -> BurnoutRiskAssessment:
         """Assess burnout risk for a user."""
-        from app.models import User, TimeEntry
+        from app.models import User, TimeEntry, Company
         
-        # Get user
+        # Get user with company relationship for timezone
         user_result = await self.db.execute(
             select(User).where(User.id == user_id)
         )
@@ -702,9 +708,28 @@ class MLAnomalyService:
         if not user:
             raise ValueError(f"User {user_id} not found")
         
+        # Get company timezone (default to UTC if not set or no company)
+        company_tz_str = "UTC"
+        if user.company_id:
+            company_result = await self.db.execute(
+                select(Company).where(Company.id == user.company_id)
+            )
+            company = company_result.scalar_one_or_none()
+            if company and company.timezone:
+                company_tz_str = company.timezone
+        
+        # Create timezone object for date conversions
+        try:
+            company_tz = ZoneInfo(company_tz_str)
+        except Exception:
+            logger.warning(f"Invalid timezone '{company_tz_str}', falling back to UTC")
+            company_tz = ZoneInfo("UTC")
+        
+        logger.debug(f"Burnout assessment for user {user_id} using timezone: {company_tz_str}")
+        
         # Get baseline and recent data
         baseline = await self.get_user_baseline(user_id)
-        period_start = datetime.now() - timedelta(days=period_days)
+        period_start = datetime.now(timezone.utc) - timedelta(days=period_days)
         
         entries_result = await self.db.execute(
             select(TimeEntry)
@@ -719,10 +744,18 @@ class MLAnomalyService:
         )
         entries = list(entries_result.scalars().all())
         
-        # Group by day
-        daily_entries = defaultdict(list)
+        # Group by day - CONVERT TO COMPANY LOCAL TIMEZONE FIRST
+        # This ensures weekend detection works correctly for the user's location
+        daily_entries: Dict[date, list] = defaultdict(list)
         for entry in entries:
-            day_key = entry.start_time.date()
+            # Ensure start_time has timezone info
+            entry_time = entry.start_time
+            if entry_time.tzinfo is None:
+                entry_time = entry_time.replace(tzinfo=timezone.utc)
+            
+            # Convert to company's local timezone and extract date
+            local_time = entry_time.astimezone(company_tz)
+            day_key = local_time.date()
             daily_entries[day_key].append(entry)
         
         # Calculate risk factors
@@ -748,10 +781,10 @@ class MLAnomalyService:
             "detail": f"{overtime_days} overtime days out of {len(daily_entries)} work days"
         })
         
-        # Factor 2: Weekend work
+        # Factor 2: Weekend work (now correctly using local timezone dates)
         weekend_days = sum(
             1 for day in daily_entries.keys()
-            if day.weekday() >= 5
+            if day.weekday() >= 5  # Saturday=5, Sunday=6
         )
         weekend_score = min(20, weekend_days * 5)
         risk_score += weekend_score
@@ -762,12 +795,18 @@ class MLAnomalyService:
             "detail": f"{weekend_days} weekend days worked"
         })
         
-        # Factor 3: Late work hours
-        late_entries = sum(
-            1 for entries in daily_entries.values()
-            for e in entries
-            if e.end_time and e.end_time.hour >= 20
-        )
+        # Factor 3: Late work hours (using company local timezone)
+        late_entries = 0
+        for day_entries_list in daily_entries.values():
+            for e in day_entries_list:
+                if e.end_time:
+                    end_time = e.end_time
+                    if end_time.tzinfo is None:
+                        end_time = end_time.replace(tzinfo=timezone.utc)
+                    local_end = end_time.astimezone(company_tz)
+                    if local_end.hour >= 20:  # After 8 PM in company timezone
+                        late_entries += 1
+        
         late_score = min(20, late_entries * 2)
         risk_score += late_score
         factors.append({
@@ -792,12 +831,15 @@ class MLAnomalyService:
             "detail": f"Hours standard deviation: {hours_std:.1f}" if len(daily_hours_list) > 1 else "N/A"
         })
         
-        # Factor 5: No days off
+        # Factor 5: No days off (consecutive work days)
+        # Use company timezone for "today" to ensure correct day boundaries
         work_streak = 0
         max_streak = 0
-        current_date = date.today()
+        now_utc = datetime.now(timezone.utc)
+        current_date_local = now_utc.astimezone(company_tz).date()
+        
         for i in range(period_days):
-            check_date = current_date - timedelta(days=i)
+            check_date = current_date_local - timedelta(days=i)
             if check_date in daily_entries:
                 work_streak += 1
                 max_streak = max(max_streak, work_streak)

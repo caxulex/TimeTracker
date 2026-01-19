@@ -9,11 +9,11 @@
 
 ---
 
-## ✅ SESSION STATUS: FEATURE COMPLETE
+## ✅ SESSION STATUS: FEATURE COMPLETE + DEPLOYED
 
 ### New Feature: Project Budget Management ✅
 ### Frontend Build: ✅ SUCCESS (10.22s)
-### Git Commit: `bd06a9f` - Pushed to origin/master
+### Git Commits: `bd06a9f` (feature) + `11538f8` (migration fix)
 
 ---
 
@@ -246,14 +246,21 @@ cd frontend && npm run build
 
 ---
 
-## 📦 Git Commit
+## 📦 Git Commits
 
-### Commit Details
+### Commit 1: Feature Implementation (`bd06a9f`)
 
 ```
-Commit: bd06a9f
 Message: feat: Add manual project budget management
 Files: 6 files changed, 345 insertions(+), 33 deletions(-)
+```
+
+### Commit 2: Migration Fix (`11538f8`)
+
+```
+Message: fix: Correct migration revision ID format
+Issue: Migration used '011_add_company_id_to_teams' but actual revision is '011'
+Fix: Changed revision/down_revision to match existing format
 ```
 
 ### Files Committed
@@ -267,7 +274,47 @@ Files: 6 files changed, 345 insertions(+), 33 deletions(-)
 
 ---
 
-## 🚀 Deployment Instructions
+## � Deployment Issue: Migration Fix
+
+### Problem Encountered
+
+When running `alembic upgrade head` on production server, migration failed with:
+```
+KeyError: '011_add_company_id_to_teams'
+```
+
+### Root Cause
+
+Migration 012 used full filename as revision ID (`011_add_company_id_to_teams`) but existing migrations use short format (`011`).
+
+### Fix Applied
+
+```python
+# Before (incorrect)
+revision = '012_add_project_budget'
+down_revision = '011_add_company_id_to_teams'
+
+# After (correct)
+revision = '012'
+down_revision = '011'
+```
+
+### Deployment Steps Required
+
+After git pull, the container had cached the old migration file. Required rebuild:
+
+```bash
+git pull origin master
+docker compose -f docker-compose.prod.yml build backend
+docker compose -f docker-compose.prod.yml up -d backend
+docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+```
+
+Or use the deploy script: `./deploy-sequential.sh`
+
+---
+
+## �🚀 Deployment Instructions
 
 ### On Lightsail Server:
 
@@ -332,7 +379,9 @@ docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 | Frontend Types | ✅ Updated | All interfaces updated |
 | UI Components | ✅ Complete | Modal inputs + card badges |
 | Build Test | ✅ Passed | No TypeScript errors |
-| Git Commit | ✅ Pushed | `bd06a9f` to origin/master |
+| Git Commit | ✅ Pushed | `bd06a9f` feature, `11538f8` fix |
+| Migration Fix | ✅ Fixed | Corrected revision ID format |
+| Deployment | ⏳ Pending | Requires backend rebuild on server |
 
 ---
 
@@ -355,9 +404,9 @@ docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 
 ## ✅ Session Complete
 
-**Total Time:** ~30 minutes  
-**Commits:** 1 (`bd06a9f`)  
-**Files Changed:** 6  
+**Total Time:** ~45 minutes  
+**Commits:** 2 (`bd06a9f` feature + `11538f8` migration fix)  
+**Files Changed:** 6 + 1 fix  
 **Lines Changed:** +345 / -33
 
 **Feature Status:** ✅ Ready for deployment
