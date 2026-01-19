@@ -14,6 +14,9 @@
 ### Git Commits This Session:
 1. **`072cd78`** - Backend: Timezone fix for burnout risk assessment
 2. **`4e09721`** - Frontend: Improved AI dashboard empty states + CalendarDays icon
+3. **`a4d606d`** - Docs: Session report update
+4. **`9ab733b`** - Feature: Timezone settings in Settings page + IDLEASSESSMENT.md
+5. **`pending`** - Fix: Anomaly Detection sidebar link pointing to correct page
 
 ### Issues Fixed:
 | Issue | Feature | Fix Applied | Status |
@@ -22,6 +25,14 @@
 | 2 | AI Project Budget Forecast | Improved empty state with setup guidance | ✅ Frontend |
 | 3 | Weekend Work (Burnout) | Timezone conversion to company local TZ | ✅ Backend |
 | 4 | Consecutive Work Days | Timezone conversion to company local TZ | ✅ Backend |
+| 5 | Timezone Settings | Added timezone dropdown to Settings (admin only) | ✅ Full Stack |
+| 6 | Anomaly Detection Nav | Fixed sidebar link going to wrong page | ✅ Frontend |
+
+### New Features Added:
+| Feature | Description | Location |
+|---------|-------------|----------|
+| Company Timezone Setting | Admins can set company timezone in Settings | Settings Page |
+| Idle Detection Assessment | Comprehensive analysis document for future feature | IDLEASSESSMENT.md |
 
 ---
 
