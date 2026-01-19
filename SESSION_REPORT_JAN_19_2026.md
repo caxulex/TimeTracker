@@ -9,10 +9,11 @@
 
 ---
 
-## ⏳ SESSION STATUS: IMPLEMENTED ✅
+## ⏳ SESSION STATUS: IMPLEMENTED ✅ PUSHED TO GIT
 
 ### Issue 1: Weekend Work Not Showing ✅ FIXED
 ### Issue 2: Consecutive Workdays Not Showing ✅ FIXED
+### Git Commit: `072cd78` - Pushed to origin/master
 
 ---
 
@@ -369,58 +370,93 @@ for i in range(period_days):
 
 ---
 
-## 📁 Files to Modify (Estimated)
+## 📁 Files Modified
 
-| File | Changes Needed |
-|------|----------------|
-| `backend/app/models/__init__.py` | Add timezone field to User model (if Option A) |
-| `backend/alembic/versions/013_*.py` | Migration for timezone field |
-| `backend/app/ai/services/ml_anomaly_service.py` | Fix timezone conversion in `assess_burnout_risk()` |
-| `frontend/src/pages/SettingsPage.tsx` | Add timezone selector (if Option A) |
-| `frontend/src/types/index.ts` | Add timezone to User interface |
+| File | Status | Changes |
+|------|--------|---------|
+| `backend/app/ai/services/ml_anomaly_service.py` | ✅ Modified | Timezone fix for burnout assessment |
+| `SESSION_REPORT_JAN_19_2026.md` | ✅ Created | This session report |
+| `SESSION_REPORT_JAN_16_2026.md` | ✅ Updated | Added migration fix details |
 
 ---
 
-## 📝 Technical Notes
+## 📦 Git Commit
 
-### Python Timezone Handling
-
-```python
-from datetime import datetime, date, timezone
-from zoneinfo import ZoneInfo  # Python 3.9+
-
-# Convert UTC datetime to user's local timezone
-def to_user_timezone(dt: datetime, user_tz: str) -> datetime:
-    tz = ZoneInfo(user_tz)
-    return dt.astimezone(tz)
-
-# Get date in user's timezone
-def get_local_date(dt: datetime, user_tz: str) -> date:
-    local_dt = to_user_timezone(dt, user_tz)
-    return local_dt.date()
+```
+Commit: 072cd78
+Message: fix: Burnout risk assessment timezone handling for weekend/workday detection
+Files: 3 files changed, 545 insertions(+), 28 deletions(-)
 ```
 
-### Weekend Detection Fix
+---
 
-```python
-# Current (broken for non-UTC):
-day_key = entry.start_time.date()  # Raw UTC date
+## 🚀 Deployment Instructions
 
-# Fixed (with user timezone):
-user_tz = ZoneInfo(user.timezone or 'America/New_York')  # Default to EST
-local_time = entry.start_time.astimezone(user_tz)
-day_key = local_time.date()  # Local date
+### On Lightsail Server (via AWS Console SSH):
+
+```bash
+# 1. Pull latest changes
+cd /home/bitnami/timetracker
+git pull origin master
+
+# 2. Rebuild backend only (code change in backend)
+docker compose -f docker-compose.prod.yml build backend
+
+# 3. Restart containers
+docker compose -f docker-compose.prod.yml up -d
+
+# OR use the sequential deploy script:
+./scripts/deploy-sequential.sh
 ```
+
+### What Gets Deployed:
+- Backend code change only (no migration needed!)
+- The Company model already has the `timezone` field
 
 ---
 
 ## 🔄 Git Workflow Reminder
 
-1. **I push to git:** `git add . && git commit -m "message" && git push origin master`
-2. **User deploys to Lightsail:** Via AWS Console SSH
+1. **I push to git:** ✅ Done (`072cd78`)
+2. **User deploys to Lightsail:** ⏳ Pending
+
+---
+
+## 📊 Session Summary
+
+| Phase | Status | Details |
+|-------|--------|---------|
+| Investigation | ✅ Complete | Analyzed `ml_anomaly_service.py` |
+| Root Cause | ✅ Identified | Timezone mismatch in date calculations |
+| Assessment | ✅ Complete | Found Company already has timezone field |
+| Implementation | ✅ Complete | Fixed 3 burnout factors |
+| Git Commit | ✅ Pushed | `072cd78` to origin/master |
+| Deployment | ⏳ Pending | User deploys to Lightsail |
+
+---
+
+## ✅ Session Complete
+
+**Total Time:** ~20 minutes  
+**Commits:** 1 (`072cd78`)  
+**Files Changed:** 3  
+**Lines Changed:** +545 / -28
+
+**Fix Status:** ✅ Ready for deployment
+
+---
+
+## 🔮 Optional Future Enhancements
+
+| Enhancement | Priority | Notes |
+|-------------|----------|-------|
+| Site-wide Calendar View | Medium | Visual calendar to see work patterns |
+| Holiday Configuration | Low | Mark company holidays |
+| Work Schedule Config | Low | Define normal work days/hours per company |
+| User Timezone Override | Low | Let users set personal timezone |
 
 ---
 
 *Session Date: January 19, 2026*  
-*Focus: Burnout Risk Assessment Fixes*  
-*Status: ⏳ **AWAITING USER DECISION***
+*Focus: Burnout Risk Assessment Timezone Fix*  
+*Status: ✅ **IMPLEMENTED - READY FOR DEPLOYMENT***
