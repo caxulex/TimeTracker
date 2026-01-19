@@ -235,6 +235,38 @@ export interface ProjectSummary {
   percentage: number;
 }
 
+// Team Timesheet Types
+export interface TeamTimesheetUserEntry {
+  date: string;
+  seconds: number;
+  formatted: string;
+}
+
+export interface TeamTimesheetUser {
+  user_id: number;
+  user_name: string;
+  role: string;
+  daily_hours: TeamTimesheetUserEntry[];
+  total_seconds: number;
+  total_formatted: string;
+}
+
+export interface TeamTimesheetDayTotal {
+  date: string;
+  seconds: number;
+  formatted: string;
+}
+
+export interface TeamTimesheetReport {
+  start_date: string;
+  end_date: string;
+  dates: string[];
+  users: TeamTimesheetUser[];
+  daily_totals: TeamTimesheetDayTotal[];
+  grand_total_seconds: number;
+  grand_total_formatted: string;
+}
+
 // Pagination Types
 export interface PaginatedResponse<T> {
   items: T[];

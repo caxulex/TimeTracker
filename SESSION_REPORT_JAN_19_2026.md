@@ -2,7 +2,7 @@
 
 ## 🎯 Session Goal: Fix Multiple AI Feature Issues
 
-**Session Focus:** Fix AI Cash Flow, Project Budget, Burnout Risk features  
+**Session Focus:** Fix AI Cash Flow, Project Budget, Burnout Risk features + Team Timesheet  
 **Previous Session:** SESSION_REPORT_JAN_16_2026.md (Project Budget Management)  
 **Environment:** Production (AWS Lightsail)  
 **URL:** https://timetracker.shaemarcus.com
@@ -16,7 +16,8 @@
 2. **`4e09721`** - Frontend: Improved AI dashboard empty states + CalendarDays icon
 3. **`a4d606d`** - Docs: Session report update
 4. **`9ab733b`** - Feature: Timezone settings in Settings page + IDLEASSESSMENT.md
-5. **`pending`** - Fix: Anomaly Detection sidebar link pointing to correct page
+5. **`d144acc`** - Fix: Anomaly Detection sidebar link pointing to correct page
+6. **`pending`** - Feature: Team Timesheet report for admin users
 
 ### Issues Fixed:
 | Issue | Feature | Fix Applied | Status |
@@ -33,6 +34,7 @@
 |---------|-------------|----------|
 | Company Timezone Setting | Admins can set company timezone in Settings | Settings Page |
 | Idle Detection Assessment | Comprehensive analysis document for future feature | IDLEASSESSMENT.md |
+| Team Timesheet Report | Grid view of team hours by user/day with totals | Reports Page (Admin) |
 
 ---
 
@@ -524,12 +526,87 @@ docker compose -f docker-compose.prod.yml up -d
 
 ---
 
+## 📊 TEAM TIMESHEET REPORT FEATURE
+
+### Overview
+New feature that allows admins/managers to view a grid-style timesheet showing hours worked per team member per day.
+
+### Backend Implementation
+**File:** `backend/app/routers/reports.py`
+
+**New Endpoint:**
+```python
+GET /api/reports/team-timesheet?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&team_id=N
+```
+
+**Response Model:**
+```python
+class TeamTimesheetReport:
+    start_date: date
+    end_date: date
+    dates: List[date]                    # Column headers (dates in range)
+    users: List[TeamTimesheetUser]       # User rows with daily hours
+    daily_totals: List[TeamTimesheetDayTotal]  # Vertical totals per day
+    grand_total_seconds: int
+    grand_total_formatted: str           # HH:MM format
+
+class TeamTimesheetUser:
+    user_id: int
+    user_name: str
+    role: str
+    daily_hours: List[TeamTimesheetUserEntry]  # Hours per day
+    total_seconds: int
+    total_formatted: str                 # HH:MM horizontal total
+
+class TeamTimesheetUserEntry:
+    date: date
+    seconds: int
+    formatted: str                       # HH:MM or "-" if no hours
+```
+
+### Frontend Implementation
+**Component:** `frontend/src/components/reports/TeamTimesheetReport.tsx`
+
+**Features:**
+- Tab navigation on Reports page (My Reports vs Team Timesheet)
+- Date presets: This Week, Last Week, This Pay Period, Last Pay Period, Custom
+- Grid table with sticky first column (member names)
+- Weekend columns highlighted (gray background)
+- Role badges color-coded (admin=blue, manager=green, employee=gray)
+- Daily totals row at bottom
+- Grand total cell (bottom-right)
+- Summary cards: Team Members count, Days in Period, Total Team Hours
+
+### Page Integration
+**File:** `frontend/src/pages/ReportsPage.tsx`
+
+**Changes:**
+- Added tab navigation for admin users only
+- "My Reports" tab shows existing personal reports
+- "Team Timesheet" tab shows the new grid report
+- Non-admin users see only their personal reports (no tabs)
+
+### Data Format
+- Times displayed in HH:MM format (e.g., "8:30" for 8.5 hours)
+- Empty days show "-" (dash) for readability
+- Totals always show time (e.g., "0:00" if zero)
+- Handles entries spanning multiple days correctly
+- Supports running timers (calculates elapsed time)
+
+### Access Control
+- Super Admin: See all users across companies
+- Admin/Company Admin: See all users in their company
+- Manager: Must specify a team they admin
+- Team Admin: See their team members only
+
+---
+
 ## ✅ Session Complete
 
-**Total Time:** ~20 minutes  
-**Commits:** 1 (`072cd78`)  
-**Files Changed:** 3  
-**Lines Changed:** +545 / -28
+
+**Commits:** 6 (`072cd78`, `4e09721`, `a4d606d`, `9ab733b`, `d144acc`, pending)  
+**Files Changed:** 8+  
+**Lines Changed:** +700 / -30 (estimated)
 
 **Fix Status:** ✅ Ready for deployment
 
@@ -543,9 +620,11 @@ docker compose -f docker-compose.prod.yml up -d
 | Holiday Configuration | Low | Mark company holidays |
 | Work Schedule Config | Low | Define normal work days/hours per company |
 | User Timezone Override | Low | Let users set personal timezone |
+| Team Timesheet Export | Medium | Export team timesheet as CSV/Excel/PDF |
+| Team Timesheet Filters | Low | Filter by team, department, role |
 
 ---
 
 *Session Date: January 19, 2026*  
-*Focus: Burnout Risk Assessment Timezone Fix*  
+*Focus: Burnout Risk Assessment Timezone Fix + Team Timesheet Report*  
 *Status: ✅ **IMPLEMENTED - READY FOR DEPLOYMENT***

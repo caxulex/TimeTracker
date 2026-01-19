@@ -85,6 +85,51 @@ class TimeReport(BaseModel):
     by_day: List[DailySummary]
 
 
+# Team Timesheet Report Models
+class TeamTimesheetUserEntry(BaseModel):
+    """Entry for a single user's day in the timesheet"""
+    date: date
+    seconds: int
+    formatted: str  # HH:MM format
+
+
+class TeamTimesheetUser(BaseModel):
+    """Single user row in the Team Timesheet"""
+    user_id: int
+    user_name: str
+    role: str
+    daily_hours: List[TeamTimesheetUserEntry]
+    total_seconds: int
+    total_formatted: str  # HH:MM format
+
+
+class TeamTimesheetDayTotal(BaseModel):
+    """Total for a single day (column total)"""
+    date: date
+    seconds: int
+    formatted: str  # HH:MM format
+
+
+class TeamTimesheetReport(BaseModel):
+    """Complete Team Timesheet report"""
+    start_date: date
+    end_date: date
+    dates: List[date]  # List of all dates in range for column headers
+    users: List[TeamTimesheetUser]  # User rows with their daily hours
+    daily_totals: List[TeamTimesheetDayTotal]  # Column totals for each day
+    grand_total_seconds: int
+    grand_total_formatted: str  # HH:MM format
+
+
+def format_seconds_to_hhmm(seconds: int) -> str:
+    """Format seconds to HH:MM format (e.g., 3661 -> '1:01')"""
+    if seconds <= 0:
+        return "0:00"
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    return f"{hours}:{minutes:02d}"
+
+
 def calculate_entry_duration(entry: TimeEntry, now: datetime) -> int:
     """Calculate duration for a time entry, including running timers"""
     if entry.end_time is None:
@@ -1403,4 +1448,195 @@ async def get_all_users_summary(
         ))
 
     return users_summary
+
+
+@router.get("/team-timesheet", response_model=TeamTimesheetReport)
+async def get_team_timesheet(
+    start_date: date,
+    end_date: date,
+    team_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get Team Timesheet report - shows hours worked per user per day in a grid format.
+    
+    This report displays:
+    - Rows: Each team member with their name and role
+    - Columns: Each day in the date range
+    - Cells: Hours worked in HH:MM format (0:00 or dash if none)
+    - Horizontal totals: User's total across all days
+    - Vertical totals: Team total for each day
+    - Grand total: Total hours for entire team across date range
+    
+    Args:
+        start_date: Start of the reporting period (inclusive)
+        end_date: End of the reporting period (inclusive)
+        team_id: Optional filter by specific team (admins see all teams otherwise)
+    
+    Returns:
+        TeamTimesheetReport with user rows, daily columns, and totals
+    """
+    # Only admins/managers can view team timesheet
+    if current_user.role not in ["super_admin", "admin", "company_admin", "manager"]:
+        # Check if user is a team admin for the specified team
+        if team_id:
+            member_check = await db.execute(
+                select(TeamMember).where(
+                    TeamMember.team_id == team_id,
+                    TeamMember.user_id == current_user.id,
+                    TeamMember.role.in_(["owner", "admin"])
+                )
+            )
+            if not member_check.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Admin or team admin access required"
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin access required to view all teams"
+            )
+    
+    now = datetime.now(timezone.utc)
+    start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+    end_datetime = datetime.combine(end_date + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
+    
+    # Multi-tenancy: filter by company
+    company_id = get_company_filter(current_user)
+    
+    # Build user query based on team filter and company
+    if team_id:
+        # Specific team selected
+        team_query = select(Team).where(Team.id == team_id)
+        team_query = apply_company_filter(team_query, Team.company_id, company_id)
+        team_result = await db.execute(team_query)
+        team = team_result.scalar_one_or_none()
+        if not team:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+        
+        # Get team members
+        users_query = (
+            select(User.id, User.name, User.role)
+            .join(TeamMember, TeamMember.user_id == User.id)
+            .where(TeamMember.team_id == team_id, User.is_active == True)
+            .distinct()
+        )
+    else:
+        # All users in company (admin view)
+        users_query = select(User.id, User.name, User.role).where(User.is_active == True)
+        users_query = apply_company_filter(users_query, User.company_id, company_id)
+    
+    users_result = await db.execute(users_query)
+    users = users_result.all()
+    
+    if not users:
+        # Return empty report
+        dates_list = []
+        current = start_date
+        while current <= end_date:
+            dates_list.append(current)
+            current += timedelta(days=1)
+        
+        return TeamTimesheetReport(
+            start_date=start_date,
+            end_date=end_date,
+            dates=dates_list,
+            users=[],
+            daily_totals=[TeamTimesheetDayTotal(date=d, seconds=0, formatted="0:00") for d in dates_list],
+            grand_total_seconds=0,
+            grand_total_formatted="0:00"
+        )
+    
+    user_ids = [u.id for u in users]
+    user_info = {u.id: {"name": u.name, "role": u.role or "employee"} for u in users}
+    
+    # Fetch all time entries for these users in the date range
+    entries_query = (
+        select(TimeEntry)
+        .where(
+            TimeEntry.user_id.in_(user_ids),
+            TimeEntry.start_time < end_datetime,
+            (TimeEntry.end_time >= start_datetime) | (TimeEntry.end_time.is_(None))
+        )
+    )
+    entries_result = await db.execute(entries_query)
+    all_entries = entries_result.scalars().all()
+    
+    # Generate list of dates in range
+    dates_list = []
+    current = start_date
+    while current <= end_date:
+        dates_list.append(current)
+        current += timedelta(days=1)
+    
+    # Build user-day matrix: user_id -> date -> seconds
+    user_day_seconds = defaultdict(lambda: defaultdict(int))
+    
+    for entry in all_entries:
+        user_id = entry.user_id
+        # Calculate seconds for each day this entry overlaps
+        for day in dates_list:
+            day_start = datetime.combine(day, datetime.min.time()).replace(tzinfo=timezone.utc)
+            day_end = datetime.combine(day + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
+            day_seconds = calculate_entry_duration_for_period(entry, day_start, day_end, now)
+            if day_seconds > 0:
+                user_day_seconds[user_id][day] += day_seconds
+    
+    # Build response data
+    timesheet_users = []
+    daily_totals_seconds = defaultdict(int)
+    grand_total = 0
+    
+    # Sort users by name for consistent ordering
+    sorted_users = sorted(users, key=lambda u: u.name.lower())
+    
+    for user in sorted_users:
+        user_id = user.id
+        info = user_info[user_id]
+        user_total = 0
+        daily_hours = []
+        
+        for day in dates_list:
+            seconds = user_day_seconds[user_id].get(day, 0)
+            user_total += seconds
+            daily_totals_seconds[day] += seconds
+            
+            daily_hours.append(TeamTimesheetUserEntry(
+                date=day,
+                seconds=seconds,
+                formatted=format_seconds_to_hhmm(seconds) if seconds > 0 else "-"
+            ))
+        
+        grand_total += user_total
+        
+        timesheet_users.append(TeamTimesheetUser(
+            user_id=user_id,
+            user_name=info["name"],
+            role=info["role"].replace("_", " ").title(),  # Format role nicely
+            daily_hours=daily_hours,
+            total_seconds=user_total,
+            total_formatted=format_seconds_to_hhmm(user_total)
+        ))
+    
+    # Build daily totals
+    daily_totals = []
+    for day in dates_list:
+        seconds = daily_totals_seconds.get(day, 0)
+        daily_totals.append(TeamTimesheetDayTotal(
+            date=day,
+            seconds=seconds,
+            formatted=format_seconds_to_hhmm(seconds)
+        ))
+    
+    return TeamTimesheetReport(
+        start_date=start_date,
+        end_date=end_date,
+        dates=dates_list,
+        users=timesheet_users,
+        daily_totals=daily_totals,
+        grand_total_seconds=grand_total,
+        grand_total_formatted=format_seconds_to_hhmm(grand_total)
+    )
 

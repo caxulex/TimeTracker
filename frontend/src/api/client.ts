@@ -512,6 +512,13 @@ export const reportsApi = {
     return response.data;
   },
 
+  getTeamTimesheet: async (startDate: string, endDate: string, teamId?: number) => {
+    const response = await api.get('/api/reports/team-timesheet', {
+      params: { start_date: startDate, end_date: endDate, team_id: teamId },
+    });
+    return response.data;
+  },
+
   getAdminDashboard: async () => {
     const response = await api.get('/api/reports/admin/dashboard');
     return response.data;

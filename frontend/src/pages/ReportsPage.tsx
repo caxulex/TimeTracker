@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
+import { TeamTimesheetReport } from '../components/reports';
 import { reportsApi, exportApi } from '../api/client';
 import { formatDuration, toISODateString, getStartOfWeek, secondsToHours, isAdminUser } from '../utils/helpers';
 import { useAuth } from '../hooks/useAuth';
@@ -46,6 +47,8 @@ export function ReportsPage() {
   const queryClient = useQueryClient();
   const { lastMessage } = useWebSocketContext();
   const notifications = useStaffNotifications();
+
+  const [activeTab, setActiveTab] = useState<'my-reports' | 'team-timesheet'>('my-reports');
 
   const [datePreset, setDatePreset] = useState<DatePreset>('this-week');
   const [customStartDate, setCustomStartDate] = useState('');
@@ -268,23 +271,65 @@ export function ReportsPage() {
         </div>
       )}
 
-      {/* Date filters */}
-      <Card padding="sm">
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="flex gap-2">
-            {[
-              { value: 'this-week', label: 'This Week' },
-              { value: 'last-week', label: 'Last Week' },
-              { value: 'this-month', label: 'This Month' },
-              { value: 'last-month', label: 'Last Month' },
-              { value: 'custom', label: 'Custom' },
-            ].map((preset) => (
-              <button
-                key={preset.value}
-                onClick={() => setDatePreset(preset.value as DatePreset)}
-                className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                  datePreset === preset.value
-                    ? 'bg-blue-600 text-white'
+      {/* Tab Navigation (Admin Only) */}
+      {isAdmin && (
+        <div className="border-b border-gray-200 dark:border-gray-700">
+          <nav className="-mb-px flex space-x-8">
+            <button
+              onClick={() => setActiveTab('my-reports')}
+              className={`${
+                activeTab === 'my-reports'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+              } whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm flex items-center gap-2`}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+              My Reports
+            </button>
+            <button
+              onClick={() => setActiveTab('team-timesheet')}
+              className={`${
+                activeTab === 'team-timesheet'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+              } whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm flex items-center gap-2`}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+              </svg>
+              Team Timesheet
+            </button>
+          </nav>
+        </div>
+      )}
+
+      {/* Team Timesheet Tab (Admin Only) */}
+      {isAdmin && activeTab === 'team-timesheet' && (
+        <TeamTimesheetReport />
+      )}
+
+      {/* My Reports Tab Content */}
+      {(!isAdmin || activeTab === 'my-reports') && (
+        <>
+          {/* Date filters */}
+          <Card padding="sm">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex gap-2">
+                {[
+                  { value: 'this-week', label: 'This Week' },
+                  { value: 'last-week', label: 'Last Week' },
+                  { value: 'this-month', label: 'This Month' },
+                  { value: 'last-month', label: 'Last Month' },
+                  { value: 'custom', label: 'Custom' },
+                ].map((preset) => (
+                  <button
+                    key={preset.value}
+                    onClick={() => setDatePreset(preset.value as DatePreset)}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                      datePreset === preset.value
+                        ? 'bg-blue-600 text-white'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
@@ -463,7 +508,8 @@ export function ReportsPage() {
           )}
         </>
       )}
+      </>
+      )}
     </div>
   );
 }
-
