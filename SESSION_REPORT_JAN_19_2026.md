@@ -19,6 +19,8 @@
 5. **`d144acc`** - Fix: Anomaly Detection sidebar link pointing to correct page
 6. **`1adfeb1`** - Feature: Team Timesheet report for admin users
 7. **`28ef02c`** - Feature: Team Timesheet export to CSV and Excel
+8. **`a8658d0`** - Fix: Export button context (hide main export on Team Timesheet tab)
+9. **`TBD`** - Feature: Team Timesheet export to PDF
 
 ### Issues Fixed:
 | Issue | Feature | Fix Applied | Status |
@@ -36,7 +38,7 @@
 | Company Timezone Setting | Admins can set company timezone in Settings | Settings Page |
 | Idle Detection Assessment | Comprehensive analysis document for future feature | IDLEASSESSMENT.md |
 | Team Timesheet Report | Grid view of team hours by user/day with totals | Reports Page (Admin) |
-| Team Timesheet Export | Export timesheet to CSV or Excel with formatting | Reports Page (Admin) |
+| Team Timesheet Export | Export timesheet to CSV, Excel, or PDF with formatting | Reports Page (Admin) |
 
 ---
 
@@ -606,9 +608,9 @@ class TeamTimesheetUserEntry:
 ## ✅ Session Complete
 
 
-**Commits:** 7 (`072cd78`, `4e09721`, `a4d606d`, `9ab733b`, `d144acc`, `1adfeb1`, `28ef02c`)  
-**Files Changed:** 10+  
-**Lines Changed:** +1,000 / -30 (estimated)
+**Commits:** 9 (`072cd78`, `4e09721`, `a4d606d`, `9ab733b`, `d144acc`, `1adfeb1`, `28ef02c`, `a8658d0`, `TBD`)  
+**Files Changed:** 12+  
+**Lines Changed:** +1,200 / -30 (estimated)
 
 **Fix Status:** ✅ Ready for deployment
 
@@ -622,12 +624,12 @@ class TeamTimesheetUserEntry:
 | Holiday Configuration | Low | Mark company holidays |
 | Work Schedule Config | Low | Define normal work days/hours per company |
 | User Timezone Override | Low | Let users set personal timezone |
-| ~~Team Timesheet Export~~ | ~~Medium~~ | ✅ **IMPLEMENTED** - CSV/Excel export |
+| ~~Team Timesheet Export~~ | ~~Medium~~ | ✅ **IMPLEMENTED** - CSV/Excel/PDF export |
 | Team Timesheet Filters | Low | Filter by team, department, role |
-| Team Timesheet PDF Export | Low | Add PDF export option |
+| ~~Team Timesheet PDF Export~~ | ~~Low~~ | ✅ **IMPLEMENTED** |
 
 ---
 
 *Session Date: January 19, 2026*  
-*Focus: Burnout Risk Assessment Timezone Fix + Team Timesheet Report + Export*  
+*Focus: Burnout Risk Assessment Timezone Fix + Team Timesheet Report + Export (CSV/Excel/PDF)*  
 *Status: ✅ **ALL FEATURES IMPLEMENTED - READY FOR DEPLOYMENT***

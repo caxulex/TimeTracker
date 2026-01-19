@@ -12,7 +12,7 @@ import { toISODateString, getStartOfWeek } from '../../utils/helpers';
 import type { TeamTimesheetReport as TeamTimesheetReportType } from '../../types';
 
 type DatePreset = 'this-week' | 'last-week' | 'this-pay-period' | 'last-pay-period' | 'custom';
-type ExportFormat = 'csv' | 'excel';
+type ExportFormat = 'csv' | 'excel' | 'pdf';
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = window.URL.createObjectURL(blob);
@@ -105,9 +105,12 @@ export function TeamTimesheetReport({ className = '' }: Props) {
       if (format === 'csv') {
         const blob = await reportsApi.exportTeamTimesheetCsv(startDate, endDate);
         return { blob, ext: 'csv', formatName: 'CSV' };
-      } else {
+      } else if (format === 'excel') {
         const blob = await reportsApi.exportTeamTimesheetExcel(startDate, endDate);
         return { blob, ext: 'xlsx', formatName: 'Excel' };
+      } else {
+        const blob = await reportsApi.exportTeamTimesheetPdf(startDate, endDate);
+        return { blob, ext: 'pdf', formatName: 'PDF' };
       }
     },
     onSuccess: (data) => {
@@ -238,6 +241,15 @@ export function TeamTimesheetReport({ className = '' }: Props) {
                     </svg>
                     Export as Excel
                   </button>
+                  <button
+                  onClick={() => exportMutation.mutate('pdf')}
+                  className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                  </svg>
+                  Export as PDF
+                </button>
                 </div>
               )}
             </div>

@@ -1840,3 +1840,182 @@ async def export_team_timesheet_excel(
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
+
+@router.get("/team-timesheet/export/pdf")
+async def export_team_timesheet_pdf(
+    start_date: date,
+    end_date: date,
+    team_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Export Team Timesheet report as PDF.
+    Returns a downloadable PDF file with formatted user hours per day.
+    """
+    from fastapi.responses import StreamingResponse
+    from io import BytesIO
+    
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import letter, landscape
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    except ImportError:
+        raise HTTPException(status_code=500, detail="PDF export not available. Install reportlab.")
+    
+    # Get the timesheet data
+    timesheet = await get_team_timesheet(start_date, end_date, team_id, db, current_user)
+    
+    # Create PDF in memory
+    output = BytesIO()
+    
+    # Use landscape orientation for wide tables
+    doc = SimpleDocTemplate(
+        output,
+        pagesize=landscape(letter),
+        rightMargin=0.5*inch,
+        leftMargin=0.5*inch,
+        topMargin=0.5*inch,
+        bottomMargin=0.5*inch
+    )
+    
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=12,
+        alignment=TA_CENTER
+    )
+    elements.append(Paragraph(f"Team Timesheet Report", title_style))
+    
+    # Subtitle with date range
+    subtitle_style = ParagraphStyle(
+        'Subtitle',
+        parent=styles['Normal'],
+        fontSize=12,
+        spaceAfter=20,
+        alignment=TA_CENTER,
+        textColor=colors.gray
+    )
+    elements.append(Paragraph(f"{start_date} to {end_date}", subtitle_style))
+    elements.append(Spacer(1, 12))
+    
+    # Build table data
+    # Header row
+    header = ["Member", "Role"]
+    for d in timesheet.dates:
+        header.append(d.strftime("%a\n%m/%d"))
+    header.append("Total")
+    
+    table_data = [header]
+    
+    # Data rows
+    for user in timesheet.users:
+        row = [user.user_name, user.role]
+        for day_entry in user.daily_hours:
+            row.append(day_entry.formatted)
+        row.append(user.total_formatted)
+        table_data.append(row)
+    
+    # Totals row
+    totals_row = ["Daily Total", ""]
+    for day_total in timesheet.daily_totals:
+        totals_row.append(day_total.formatted)
+    totals_row.append(timesheet.grand_total_formatted)
+    table_data.append(totals_row)
+    
+    # Calculate column widths dynamically
+    num_cols = len(header)
+    page_width = landscape(letter)[0] - 1*inch  # Total width minus margins
+    name_col_width = 1.5*inch
+    role_col_width = 0.9*inch
+    total_col_width = 0.7*inch
+    remaining_width = page_width - name_col_width - role_col_width - total_col_width
+    date_col_width = remaining_width / (num_cols - 3) if num_cols > 3 else 0.6*inch
+    
+    col_widths = [name_col_width, role_col_width]
+    col_widths.extend([date_col_width] * (num_cols - 3))
+    col_widths.append(total_col_width)
+    
+    # Create table
+    table = Table(table_data, colWidths=col_widths)
+    
+    # Table styling
+    style_commands = [
+        # Header styling
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3B82F6')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 8),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+        
+        # Body styling
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 8),
+        ('ALIGN', (0, 1), (1, -1), 'LEFT'),  # Name and Role left-aligned
+        ('ALIGN', (2, 1), (-1, -1), 'CENTER'),  # Dates and totals centered
+        ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
+        
+        # Grid
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.gray),
+        
+        # Total column styling
+        ('BACKGROUND', (-1, 1), (-1, -2), colors.HexColor('#DBEAFE')),
+        ('FONTNAME', (-1, 1), (-1, -2), 'Helvetica-Bold'),
+        
+        # Totals row styling
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#DBEAFE')),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        
+        # Grand total cell
+        ('BACKGROUND', (-1, -1), (-1, -1), colors.HexColor('#93C5FD')),
+        ('FONTNAME', (-1, -1), (-1, -1), 'Helvetica-Bold'),
+        
+        # Alternating row colors
+        ('ROWBACKGROUNDS', (0, 1), (-2, -2), [colors.white, colors.HexColor('#F9FAFB')]),
+    ]
+    
+    # Add weekend highlighting (columns where date is Saturday or Sunday)
+    for i, d in enumerate(timesheet.dates):
+        if d.weekday() >= 5:  # Saturday or Sunday
+            col_idx = i + 2  # Offset for Name and Role columns
+            style_commands.append(('BACKGROUND', (col_idx, 1), (col_idx, -2), colors.HexColor('#F3F4F6')))
+    
+    table.setStyle(TableStyle(style_commands))
+    elements.append(table)
+    
+    # Add summary footer
+    elements.append(Spacer(1, 20))
+    summary_style = ParagraphStyle(
+        'Summary',
+        parent=styles['Normal'],
+        fontSize=10,
+        alignment=TA_LEFT
+    )
+    elements.append(Paragraph(
+        f"<b>Summary:</b> {len(timesheet.users)} team members | "
+        f"{len(timesheet.dates)} days | "
+        f"Total: {timesheet.grand_total_formatted} hours",
+        summary_style
+    ))
+    
+    # Build PDF
+    doc.build(elements)
+    output.seek(0)
+    
+    filename = f"team_timesheet_{start_date}_to_{end_date}.pdf"
+    
+    return StreamingResponse(
+        output,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+

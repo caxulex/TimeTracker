@@ -535,6 +535,14 @@ export const reportsApi = {
     return response.data;
   },
 
+  exportTeamTimesheetPdf: async (startDate: string, endDate: string, teamId?: number): Promise<Blob> => {
+    const response = await api.get('/api/reports/team-timesheet/export/pdf', {
+      params: { start_date: startDate, end_date: endDate, team_id: teamId },
+      responseType: 'blob',
+    });
+    return response.data;
+  },
+
   getAdminDashboard: async () => {
     const response = await api.get('/api/reports/admin/dashboard');
     return response.data;
