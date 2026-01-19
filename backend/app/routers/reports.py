@@ -1640,3 +1640,203 @@ async def get_team_timesheet(
         grand_total_formatted=format_seconds_to_hhmm(grand_total)
     )
 
+
+@router.get("/team-timesheet/export/csv")
+async def export_team_timesheet_csv(
+    start_date: date,
+    end_date: date,
+    team_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Export Team Timesheet report as CSV.
+    Returns a downloadable CSV file with user hours per day.
+    """
+    from fastapi.responses import StreamingResponse
+    from io import StringIO
+    import csv
+    
+    # Get the timesheet data using the same logic
+    timesheet = await get_team_timesheet(start_date, end_date, team_id, db, current_user)
+    
+    # Create CSV in memory
+    output = StringIO()
+    writer = csv.writer(output)
+    
+    # Header row: Member, Role, Date1, Date2, ..., Total
+    header = ["Member", "Role"]
+    for d in timesheet.dates:
+        header.append(d.strftime("%a %m/%d"))
+    header.append("Total")
+    writer.writerow(header)
+    
+    # Data rows for each user
+    for user in timesheet.users:
+        row = [user.user_name, user.role]
+        for day_entry in user.daily_hours:
+            row.append(day_entry.formatted)
+        row.append(user.total_formatted)
+        writer.writerow(row)
+    
+    # Daily totals row
+    totals_row = ["Daily Total", ""]
+    for day_total in timesheet.daily_totals:
+        totals_row.append(day_total.formatted)
+    totals_row.append(timesheet.grand_total_formatted)
+    writer.writerow(totals_row)
+    
+    # Prepare response
+    output.seek(0)
+    filename = f"team_timesheet_{start_date}_to_{end_date}.csv"
+    
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@router.get("/team-timesheet/export/excel")
+async def export_team_timesheet_excel(
+    start_date: date,
+    end_date: date,
+    team_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Export Team Timesheet report as Excel.
+    Returns a downloadable Excel file with formatted user hours per day.
+    """
+    from fastapi.responses import StreamingResponse
+    from io import BytesIO
+    
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Excel export not available. Install openpyxl.")
+    
+    # Get the timesheet data
+    timesheet = await get_team_timesheet(start_date, end_date, team_id, db, current_user)
+    
+    # Create workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Team Timesheet"
+    
+    # Styles
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="3B82F6", end_color="3B82F6", fill_type="solid")
+    total_fill = PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid")
+    weekend_fill = PatternFill(start_color="F3F4F6", end_color="F3F4F6", fill_type="solid")
+    grand_total_fill = PatternFill(start_color="93C5FD", end_color="93C5FD", fill_type="solid")
+    center_alignment = Alignment(horizontal="center", vertical="center")
+    left_alignment = Alignment(horizontal="left", vertical="center")
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin")
+    )
+    
+    # Title row
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(timesheet.dates) + 3)
+    title_cell = ws.cell(row=1, column=1, value=f"Team Timesheet: {start_date} to {end_date}")
+    title_cell.font = Font(bold=True, size=14)
+    title_cell.alignment = center_alignment
+    
+    # Header row
+    row = 3
+    headers = ["Member", "Role"]
+    for d in timesheet.dates:
+        headers.append(d.strftime("%a\n%m/%d"))
+    headers.append("Total")
+    
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=row, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = center_alignment
+        cell.border = thin_border
+    
+    # Data rows
+    row = 4
+    for user in timesheet.users:
+        # Name cell
+        name_cell = ws.cell(row=row, column=1, value=user.user_name)
+        name_cell.alignment = left_alignment
+        name_cell.border = thin_border
+        
+        # Role cell
+        role_cell = ws.cell(row=row, column=2, value=user.role)
+        role_cell.alignment = left_alignment
+        role_cell.border = thin_border
+        
+        # Daily hours
+        col = 3
+        for i, day_entry in enumerate(user.daily_hours):
+            cell = ws.cell(row=row, column=col, value=day_entry.formatted)
+            cell.alignment = center_alignment
+            cell.border = thin_border
+            
+            # Highlight weekends
+            day_date = timesheet.dates[i]
+            if day_date.weekday() >= 5:  # Saturday or Sunday
+                cell.fill = weekend_fill
+            col += 1
+        
+        # User total
+        total_cell = ws.cell(row=row, column=col, value=user.total_formatted)
+        total_cell.alignment = center_alignment
+        total_cell.border = thin_border
+        total_cell.fill = total_fill
+        total_cell.font = Font(bold=True)
+        
+        row += 1
+    
+    # Daily totals row
+    totals_row = row
+    ws.cell(row=totals_row, column=1, value="Daily Total").font = Font(bold=True)
+    ws.cell(row=totals_row, column=1).border = thin_border
+    ws.cell(row=totals_row, column=1).fill = total_fill
+    
+    ws.cell(row=totals_row, column=2, value="").border = thin_border
+    ws.cell(row=totals_row, column=2).fill = total_fill
+    
+    col = 3
+    for i, day_total in enumerate(timesheet.daily_totals):
+        cell = ws.cell(row=totals_row, column=col, value=day_total.formatted)
+        cell.alignment = center_alignment
+        cell.border = thin_border
+        cell.fill = total_fill
+        cell.font = Font(bold=True)
+        col += 1
+    
+    # Grand total cell
+    grand_cell = ws.cell(row=totals_row, column=col, value=timesheet.grand_total_formatted)
+    grand_cell.alignment = center_alignment
+    grand_cell.border = thin_border
+    grand_cell.fill = grand_total_fill
+    grand_cell.font = Font(bold=True, size=12)
+    
+    # Adjust column widths
+    ws.column_dimensions['A'].width = 25
+    ws.column_dimensions['B'].width = 15
+    for col_idx in range(3, len(timesheet.dates) + 4):
+        ws.column_dimensions[chr(64 + col_idx) if col_idx <= 26 else None].width = 10
+    
+    # Save to BytesIO
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    filename = f"team_timesheet_{start_date}_to_{end_date}.xlsx"
+    
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+

@@ -519,6 +519,22 @@ export const reportsApi = {
     return response.data;
   },
 
+  exportTeamTimesheetCsv: async (startDate: string, endDate: string, teamId?: number): Promise<Blob> => {
+    const response = await api.get('/api/reports/team-timesheet/export/csv', {
+      params: { start_date: startDate, end_date: endDate, team_id: teamId },
+      responseType: 'blob',
+    });
+    return response.data;
+  },
+
+  exportTeamTimesheetExcel: async (startDate: string, endDate: string, teamId?: number): Promise<Blob> => {
+    const response = await api.get('/api/reports/team-timesheet/export/excel', {
+      params: { start_date: startDate, end_date: endDate, team_id: teamId },
+      responseType: 'blob',
+    });
+    return response.data;
+  },
+
   getAdminDashboard: async () => {
     const response = await api.get('/api/reports/admin/dashboard');
     return response.data;
