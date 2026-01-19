@@ -1,19 +1,27 @@
 # Session Report - January 19, 2026 (Sunday)
 
-## 🎯 Session Goal: Fix Burnout Risk Assessment Issues
+## 🎯 Session Goal: Fix Multiple AI Feature Issues
 
-**Session Focus:** Fix weekend work and consecutive workdays display issues  
+**Session Focus:** Fix AI Cash Flow, Project Budget, Burnout Risk features  
 **Previous Session:** SESSION_REPORT_JAN_16_2026.md (Project Budget Management)  
 **Environment:** Production (AWS Lightsail)  
 **URL:** https://timetracker.shaemarcus.com
 
 ---
 
-## ⏳ SESSION STATUS: IMPLEMENTED ✅ PUSHED TO GIT
+## ✅ SESSION STATUS: FIXES IMPLEMENTED - READY FOR DEPLOYMENT
 
-### Issue 1: Weekend Work Not Showing ✅ FIXED
-### Issue 2: Consecutive Workdays Not Showing ✅ FIXED
-### Git Commit: `072cd78` - Pushed to origin/master
+### Git Commits This Session:
+1. **`072cd78`** - Backend: Timezone fix for burnout risk assessment
+2. **`4e09721`** - Frontend: Improved AI dashboard empty states + CalendarDays icon
+
+### Issues Fixed:
+| Issue | Feature | Fix Applied | Status |
+|-------|---------|-------------|--------|
+| 1 | AI Cash Flow Projection | Improved empty state with setup guidance | ✅ Frontend |
+| 2 | AI Project Budget Forecast | Improved empty state with setup guidance | ✅ Frontend |
+| 3 | Weekend Work (Burnout) | Timezone conversion to company local TZ | ✅ Backend |
+| 4 | Consecutive Work Days | Timezone conversion to company local TZ | ✅ Backend |
 
 ---
 
@@ -27,55 +35,125 @@
 
 ---
 
-## 🐛 Issues Identified
+## � COMPREHENSIVE ASSESSMENT
 
-### Issue 1: Weekend Work Not Showing
+### Issue 1: AI Cash Flow Projection Not Working
 
-**User Report:** "Weekend work is not showing in the burnout risk assessment"
+**Location:** Admin Dashboard → Analytics → AI Cash Flow Projection
 
-**Symptoms:**
-- Burnout Risk Panel shows 0 weekend days even when user has logged time on weekends
-- Weekend Work factor always shows "0 weekend days worked"
+**Backend Code:** `backend/app/ai/services/forecasting_service.py` → `forecast_cash_flow()`
 
-### Issue 2: Consecutive Workdays Not Showing Properly
+**Root Cause Analysis:**
 
-**User Report:** "Consecutive workdays are not being properly shown"
+```python
+# The cash flow forecast REQUIRES payroll history data
+historical = await self._get_payroll_history("bi_weekly", limit=6, company_id=company_id)
 
-**Symptoms:**
-- Consecutive Work Days factor shows incorrect count
-- May be related to the same root cause as Issue 1
+if not historical:
+    return {
+        "forecast": [],
+        "enabled": True,
+        "message": "Insufficient payroll history"  # ← THIS IS THE ISSUE
+    }
+```
+
+**Why It Fails:**
+- Cash flow projection requires **PAID payroll periods** to exist in the database
+- If no payroll periods have been created and marked as "paid", the forecast returns empty
+- The `_get_payroll_history()` function queries `PayrollPeriod` where `status == "paid"`
+
+**Prerequisites for Cash Flow to Work:**
+1. PayrollPeriod records must exist with `status = "paid"`
+2. PayrollEntry records must be linked to those periods
+3. Users must belong to the current company
 
 ---
 
-## 🔍 Assessment Phase
+### Issue 2: AI Project Budget Forecast Not Working
 
-### 1. Code Analysis - Backend
+**Location:** Admin Dashboard → Analytics → AI Project Budget Forecast
 
-#### File: `backend/app/ai/services/ml_anomaly_service.py` (Lines 695-870)
+**Backend Code:** `backend/app/ai/services/forecasting_service.py` → `forecast_project_budget()`
 
-**Burnout Risk Assessment Logic:**
+**Root Cause Analysis:**
 
 ```python
-async def assess_burnout_risk(self, user_id: int, period_days: int = 30) -> BurnoutRiskAssessment:
-    # Get time entries for the period
-    period_start = datetime.now() - timedelta(days=period_days)
-    
-    entries_result = await self.db.execute(
-        select(TimeEntry)
-        .where(
-            and_(
-                TimeEntry.user_id == user_id,
-                TimeEntry.start_time >= period_start,
-                TimeEntry.is_running == False  # ⚠️ EXCLUDES RUNNING TIMERS
-            )
-        )
+# The project budget REQUIRES budget_amount to be set on projects
+async def _analyze_project_budget(self, project) -> Optional[ProjectBudgetForecast]:
+    # Skip projects without a budget set
+    if not project.budget_amount:
+        return None  # ← Projects without budget are SKIPPED
+```
+
+**Why It Fails:**
+- Project Budget forecast only shows projects that have `budget_amount` set
+- The budget field was just added on January 16, 2026 (commit `bd06a9f`)
+- If no projects have budgets configured, the forecast shows empty results
+
+**Prerequisites for Project Budget to Work:**
+1. Projects must have `budget_amount` field set (via Project Edit modal)
+2. Optional: `deadline` field helps with projections
+3. Time entries must exist for the project to calculate "spent to date"
+
+---
+
+### Issue 3 & 4: Weekend Work & Consecutive Days Not Showing (Burnout Risk)
+
+**Location:** User Dashboard → AI Burnout Risk Assessment
+
+**Backend Code:** `backend/app/ai/services/ml_anomaly_service.py` → `assess_burnout_risk()`
+
+**Previous Fix (Commit `072cd78`):** Added timezone handling
+
+**Root Cause Analysis:**
+
+The earlier fix (this session) addressed the timezone issue, but there may be additional problems:
+
+1. **Fix Applied (not yet deployed):**
+   - Added `zoneinfo` import for timezone conversion
+   - Fetch company timezone from Company model
+   - Convert entry timestamps to company local timezone before date extraction
+
+2. **Why It Still Might Not Work:**
+   - **Deployment Required:** The fix was pushed to git but requires deployment
+   - **Company Timezone Not Set:** If company's timezone field is NULL or "UTC", weekend detection may still fail for non-UTC users
+   - **No Weekend Entries:** If the user simply hasn't logged time on weekends in the past 30 days
+
+**Key Code (Fixed Version):**
+```python
+# Get company timezone (default to UTC if not set or no company)
+company_tz_str = "UTC"
+if user.company_id:
+    company_result = await self.db.execute(
+        select(Company).where(Company.id == user.company_id)
     )
-    
-    # Group by day
-    daily_entries = defaultdict(list)
-    for entry in entries:
-        day_key = entry.start_time.date()  # ⚠️ Uses start_time's DATE
-        daily_entries[day_key].append(entry)
+    company = company_result.scalar_one_or_none()
+    if company and company.timezone:
+        company_tz_str = company.timezone
+
+# Convert entry times to company local timezone before extracting date
+for entry in entries:
+    entry_time = entry.start_time
+    if entry_time.tzinfo is None:
+        entry_time = entry_time.replace(tzinfo=timezone.utc)
+    local_time = entry_time.astimezone(company_tz)
+    day_key = local_time.date()  # Now correctly in local timezone
+```
+
+---
+
+## 📋 PROBLEM SUMMARY TABLE
+
+| Issue | Feature | Root Cause | Fix Required |
+|-------|---------|------------|--------------|
+| 1 | Cash Flow | No payroll history data | Create payroll periods OR show better error message |
+| 2 | Project Budget | No projects have budget_amount set | Set budgets on projects OR show better error message |
+| 3 | Weekend Work | Timezone fix not deployed + possible data issue | Deploy code + verify company timezone |
+| 4 | Consecutive Days | Same as #3 | Deploy code + verify company timezone |
+
+---
+
+## ✅ ACTION PLAN
 ```
 
 **Weekend Work Calculation (Lines 752-762):**
