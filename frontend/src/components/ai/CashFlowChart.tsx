@@ -92,7 +92,14 @@ export function CashFlowChart({ className = '', weeksAhead = 4 }: CashFlowChartP
         ) : data?.forecast.length === 0 ? (
           <div className="text-center text-gray-500 py-8">
             <Calendar className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-            <p>{data?.message || 'No forecast data available'}</p>
+            <p className="font-medium">{data?.message || 'No forecast data available'}</p>
+            {data?.message?.includes('Insufficient') && (
+              <p className="text-sm mt-2 max-w-md mx-auto">
+                Cash flow forecasting requires completed payroll periods. 
+                Create and process payroll in the <strong>Payroll → Periods</strong> section first, 
+                then mark periods as "Paid" to generate forecasts.
+              </p>
+            )}
           </div>
         ) : (
           <div className="space-y-4">

@@ -137,7 +137,12 @@ export function ProjectBudgetPanel({ className = '', projectId, teamId }: Projec
         ) : data?.forecasts.length === 0 ? (
           <div className="text-center text-gray-500 py-8">
             <Briefcase className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-            <p>No projects to analyze</p>
+            <p className="font-medium">No projects with budgets</p>
+            <p className="text-sm mt-2 max-w-md mx-auto">
+              Budget forecasting requires projects to have a budget amount set.
+              Edit a project in the <strong>Projects</strong> page and set its 
+              <strong> Budget (USD)</strong> and optional <strong>Deadline</strong> to see forecasts here.
+            </p>
           </div>
         ) : (
           <div className="space-y-4">

@@ -21,7 +21,8 @@ import {
   Calendar,
   Sun,
   Moon,
-  RefreshCw
+  RefreshCw,
+  CalendarDays
 } from 'lucide-react';
 import { aiApi } from '../../api/aiServices';
 
@@ -253,6 +254,7 @@ export const BurnoutRiskPanel: React.FC<BurnoutRiskPanelProps> = ({
                       {factor.name === 'Weekend Work' && <Calendar className="w-3 h-3 inline mr-1" />}
                       {factor.name === 'Late Work Hours' && <Moon className="w-3 h-3 inline mr-1" />}
                       {factor.name === 'Schedule Inconsistency' && <Sun className="w-3 h-3 inline mr-1" />}
+                      {factor.name === 'Consecutive Work Days' && <CalendarDays className="w-3 h-3 inline mr-1" />}
                       {factor.name}
                     </span>
                     <span className="text-xs text-gray-500">
