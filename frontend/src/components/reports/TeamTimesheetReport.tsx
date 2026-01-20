@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { reportsApi } from '../../api/client';
 import { Card, CardHeader, LoadingOverlay, Button } from '../common';
+import { EmailReportModal } from './EmailReportModal';
 import { toISODateString, getStartOfWeek } from '../../utils/helpers';
 import type { TeamTimesheetReport as TeamTimesheetReportType } from '../../types';
 
@@ -99,6 +100,7 @@ export function TeamTimesheetReport({ className = '' }: Props) {
 
   // Export mutations
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
   
   const exportMutation = useMutation({
     mutationFn: async (format: ExportFormat): Promise<{ blob: Blob; ext: string; formatName: string }> => {
@@ -193,8 +195,21 @@ export function TeamTimesheetReport({ className = '' }: Props) {
             </div>
           )}
 
+          {/* Email Button */}
+          <Button
+            variant="secondary"
+            onClick={() => setShowEmailModal(true)}
+            disabled={!timesheetData || timesheetData.users.length === 0}
+            className="ml-auto"
+          >
+            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+            Email Report
+          </Button>
+
           {/* Export Dropdown - Always visible but disabled when no data */}
-          <div className="relative ml-auto">
+          <div className="relative">
             <Button
               variant="secondary"
               onClick={() => setShowExportMenu(!showExportMenu)}
@@ -430,6 +445,15 @@ export function TeamTimesheetReport({ className = '' }: Props) {
           </Card>
         </div>
       )}
+
+      {/* Email Report Modal */}
+      <EmailReportModal
+        isOpen={showEmailModal}
+        onClose={() => setShowEmailModal(false)}
+        reportType="team_timesheet"
+        startDate={startDate}
+        endDate={endDate}
+      />
     </div>
   );
 }

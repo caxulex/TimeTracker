@@ -730,6 +730,55 @@ export interface CompanyUpdate {
   timezone?: string;
 }
 
+// Email Settings Types
+export interface EmailSettings {
+  email_enabled: boolean;
+  smtp_server: string | null;
+  smtp_port: number | null;
+  smtp_username: string | null;
+  smtp_from_email: string | null;
+  smtp_from_name: string | null;
+  smtp_use_tls: boolean;
+  has_password: boolean;
+}
+
+export interface EmailSettingsUpdate {
+  email_enabled?: boolean;
+  smtp_server?: string;
+  smtp_port?: number;
+  smtp_username?: string;
+  smtp_password?: string;
+  smtp_from_email?: string;
+  smtp_from_name?: string;
+  smtp_use_tls?: boolean;
+}
+
+export interface TestEmailRequest {
+  to_email: string;
+}
+
+export interface TestEmailResponse {
+  success: boolean;
+  message: string;
+}
+
+// Email Report Types
+export interface EmailReportRequest {
+  report_type: 'time_report' | 'team_timesheet';
+  start_date: string;
+  end_date: string;
+  recipients: string[];
+  format: 'pdf' | 'excel' | 'csv';
+  custom_message?: string;
+}
+
+export interface EmailReportResponse {
+  success: boolean;
+  message: string;
+  recipients_sent: number;
+  recipients_failed: number;
+}
+
 export const companiesApi = {
   getMyCompany: async (): Promise<Company> => {
     const response = await api.get('/api/companies/my-company');
@@ -738,6 +787,32 @@ export const companiesApi = {
 
   updateMyCompany: async (data: CompanyUpdate): Promise<Company> => {
     const response = await api.put('/api/companies/my-company', data);
+    return response.data;
+  },
+
+  // Email Settings API
+  getEmailSettings: async (): Promise<EmailSettings> => {
+    const response = await api.get('/api/companies/my-company/email-settings');
+    return response.data;
+  },
+
+  updateEmailSettings: async (data: EmailSettingsUpdate): Promise<EmailSettings> => {
+    const response = await api.put('/api/companies/my-company/email-settings', data);
+    return response.data;
+  },
+
+  sendTestEmail: async (data: TestEmailRequest): Promise<TestEmailResponse> => {
+    const response = await api.post('/api/companies/my-company/email-settings/test', data);
+    return response.data;
+  },
+};
+
+// ============================================
+// REPORTS EMAIL API
+// ============================================
+export const reportsEmailApi = {
+  sendReport: async (data: EmailReportRequest): Promise<EmailReportResponse> => {
+    const response = await api.post('/api/reports/email', data);
     return response.data;
   },
 };

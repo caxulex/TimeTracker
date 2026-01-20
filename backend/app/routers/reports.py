@@ -2019,3 +2019,585 @@ async def export_team_timesheet_pdf(
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
+
+# ============================================
+# EMAIL REPORT ENDPOINT
+# ============================================
+
+class EmailReportRequest(BaseModel):
+    """Schema for email report request"""
+    report_type: str  # "time_report", "team_timesheet"
+    start_date: date
+    end_date: date
+    recipients: List[str]  # List of email addresses
+    format: str = "pdf"  # "pdf", "excel", "csv"
+    custom_message: Optional[str] = None
+
+
+class EmailReportResponse(BaseModel):
+    """Schema for email report response"""
+    success: bool
+    message: str
+    recipients_sent: int
+    recipients_failed: int
+
+
+@router.post("/email", response_model=EmailReportResponse)
+async def email_report(
+    data: EmailReportRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Send a report via email to specified recipients.
+    
+    Supported report types:
+    - time_report: Personal or team time report
+    - team_timesheet: Team timesheet grid
+    
+    Supported formats:
+    - pdf: PDF document
+    - excel: Excel spreadsheet (.xlsx)
+    - csv: CSV file
+    """
+    from app.services.email_service import email_service
+    from io import BytesIO
+    
+    # Validate admin role for team reports
+    if data.report_type == "team_timesheet":
+        if current_user.role not in ["admin", "company_admin", "super_admin"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only admins can email team timesheets"
+            )
+    
+    # Validate format
+    if data.format not in ["pdf", "excel", "csv"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid format. Must be 'pdf', 'excel', or 'csv'"
+        )
+    
+    # Validate recipients (basic email format check)
+    import re
+    email_pattern = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+    invalid_emails = [e for e in data.recipients if not email_pattern.match(e)]
+    if invalid_emails:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid email addresses: {', '.join(invalid_emails)}"
+        )
+    
+    # Generate report based on type
+    try:
+        if data.report_type == "time_report":
+            attachment_data, attachment_filename, attachment_mimetype = await _generate_time_report(
+                db=db,
+                user=current_user,
+                start_date=data.start_date,
+                end_date=data.end_date,
+                format=data.format
+            )
+            report_name = "Time Report"
+            
+        elif data.report_type == "team_timesheet":
+            attachment_data, attachment_filename, attachment_mimetype = await _generate_team_timesheet_report(
+                db=db,
+                user=current_user,
+                start_date=data.start_date,
+                end_date=data.end_date,
+                format=data.format
+            )
+            report_name = "Team Timesheet"
+            
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown report type: {data.report_type}"
+            )
+    
+    except Exception as e:
+        logger.error(f"Failed to generate report: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate report: {str(e)}"
+        )
+    
+    # Format date range for email
+    date_range = f"{data.start_date.strftime('%b %d')} - {data.end_date.strftime('%b %d, %Y')}"
+    
+    # Send emails
+    try:
+        results = await email_service.send_report_email(
+            to_emails=data.recipients,
+            report_name=report_name,
+            date_range=date_range,
+            attachment_data=attachment_data,
+            attachment_filename=attachment_filename,
+            attachment_mimetype=attachment_mimetype,
+            custom_message=data.custom_message,
+            company_id=current_user.company_id,
+            db=db
+        )
+        
+        sent = sum(1 for v in results.values() if v)
+        failed = len(results) - sent
+        
+        if sent == 0:
+            return EmailReportResponse(
+                success=False,
+                message="Failed to send to all recipients",
+                recipients_sent=0,
+                recipients_failed=failed
+            )
+        elif failed > 0:
+            return EmailReportResponse(
+                success=True,
+                message=f"Report sent to {sent} recipient(s), {failed} failed",
+                recipients_sent=sent,
+                recipients_failed=failed
+            )
+        else:
+            return EmailReportResponse(
+                success=True,
+                message=f"Report sent successfully to {sent} recipient(s)",
+                recipients_sent=sent,
+                recipients_failed=0
+            )
+    
+    except Exception as e:
+        logger.error(f"Failed to send report email: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to send email: {str(e)}"
+        )
+
+
+async def _generate_time_report(
+    db: AsyncSession,
+    user: User,
+    start_date: date,
+    end_date: date,
+    format: str
+) -> tuple:
+    """Generate time report and return (data, filename, mimetype)"""
+    from io import BytesIO
+    
+    # Get time entries
+    query = select(TimeEntry, Project.name.label("project_name"), Task.name.label("task_name")).outerjoin(
+        Project, TimeEntry.project_id == Project.id
+    ).outerjoin(
+        Task, TimeEntry.task_id == Task.id
+    ).where(
+        TimeEntry.user_id == user.id,
+        TimeEntry.start_time >= datetime.combine(start_date, datetime.min.time()),
+        TimeEntry.start_time <= datetime.combine(end_date, datetime.max.time())
+    ).order_by(TimeEntry.start_time.desc())
+    
+    result = await db.execute(query)
+    rows = result.all()
+    
+    entries = []
+    for row in rows:
+        entry = row[0]
+        duration = 0
+        if entry.end_time and entry.start_time:
+            duration = int((entry.end_time - entry.start_time).total_seconds())
+        
+        entries.append({
+            "date": entry.start_time.strftime("%Y-%m-%d"),
+            "start_time": entry.start_time.strftime("%H:%M:%S"),
+            "end_time": entry.end_time.strftime("%H:%M:%S") if entry.end_time else "Running",
+            "duration": format_seconds_to_hhmm(duration),
+            "project": row[1] or "No Project",
+            "task": row[2] or "No Task",
+            "notes": entry.notes or "",
+        })
+    
+    if format == "csv":
+        import csv
+        output = BytesIO()
+        # CSV needs text wrapper
+        import io
+        text_output = io.StringIO()
+        writer = csv.DictWriter(text_output, fieldnames=["date", "start_time", "end_time", "duration", "project", "task", "notes"])
+        writer.writeheader()
+        writer.writerows(entries)
+        output.write(text_output.getvalue().encode('utf-8'))
+        output.seek(0)
+        return output.getvalue(), f"time_report_{start_date}_to_{end_date}.csv", "text/csv"
+    
+    elif format == "excel":
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+        
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Time Report"
+        
+        # Headers
+        headers = ["Date", "Start Time", "End Time", "Duration", "Project", "Task", "Notes"]
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
+            cell.font = Font(bold=True, color="FFFFFF")
+        
+        # Data
+        for row_idx, entry in enumerate(entries, 2):
+            ws.cell(row=row_idx, column=1, value=entry["date"])
+            ws.cell(row=row_idx, column=2, value=entry["start_time"])
+            ws.cell(row=row_idx, column=3, value=entry["end_time"])
+            ws.cell(row=row_idx, column=4, value=entry["duration"])
+            ws.cell(row=row_idx, column=5, value=entry["project"])
+            ws.cell(row=row_idx, column=6, value=entry["task"])
+            ws.cell(row=row_idx, column=7, value=entry["notes"])
+        
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+        return output.getvalue(), f"time_report_{start_date}_to_{end_date}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    
+    else:  # PDF
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        
+        output = BytesIO()
+        doc = SimpleDocTemplate(output, pagesize=letter)
+        elements = []
+        styles = getSampleStyleSheet()
+        
+        # Title
+        elements.append(Paragraph(f"Time Report: {start_date} to {end_date}", styles['Heading1']))
+        elements.append(Paragraph(f"User: {user.name}", styles['Normal']))
+        elements.append(Spacer(1, 20))
+        
+        # Table
+        table_data = [["Date", "Start", "End", "Duration", "Project", "Task"]]
+        for entry in entries:
+            table_data.append([
+                entry["date"],
+                entry["start_time"],
+                entry["end_time"],
+                entry["duration"],
+                entry["project"][:20],
+                entry["task"][:20]
+            ])
+        
+        table = Table(table_data)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2563EB')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F9FAFB')]),
+        ]))
+        elements.append(table)
+        
+        doc.build(elements)
+        output.seek(0)
+        return output.getvalue(), f"time_report_{start_date}_to_{end_date}.pdf", "application/pdf"
+
+
+async def _generate_team_timesheet_report(
+    db: AsyncSession,
+    user: User,
+    start_date: date,
+    end_date: date,
+    format: str
+) -> tuple:
+    """Generate team timesheet report and return (data, filename, mimetype)"""
+    from io import BytesIO
+    
+    # Get the timesheet data using existing function
+    timesheet = await _get_team_timesheet_data(db, user, start_date, end_date, None)
+    
+    if format == "csv":
+        import csv
+        import io
+        
+        output = BytesIO()
+        text_output = io.StringIO()
+        
+        # Build headers
+        headers = ["Name", "Role"] + [d.strftime("%m/%d") for d in timesheet.dates] + ["Total"]
+        writer = csv.writer(text_output)
+        writer.writerow(headers)
+        
+        # Write user rows
+        for u in timesheet.users:
+            row = [u.user_name, u.role]
+            for dh in u.daily_hours:
+                row.append(dh.formatted if dh.seconds > 0 else "-")
+            row.append(u.total_formatted)
+            writer.writerow(row)
+        
+        # Totals row
+        totals_row = ["TOTAL", ""]
+        for dt in timesheet.daily_totals:
+            totals_row.append(dt.formatted)
+        totals_row.append(timesheet.grand_total_formatted)
+        writer.writerow(totals_row)
+        
+        output.write(text_output.getvalue().encode('utf-8'))
+        output.seek(0)
+        return output.getvalue(), f"team_timesheet_{start_date}_to_{end_date}.csv", "text/csv"
+    
+    elif format == "excel":
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Team Timesheet"
+        
+        # Title row
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(timesheet.dates) + 3)
+        ws.cell(row=1, column=1, value=f"Team Timesheet: {start_date} to {end_date}")
+        ws.cell(row=1, column=1).font = Font(bold=True, size=14)
+        
+        # Headers
+        headers = ["Name", "Role"] + [d.strftime("%m/%d") for d in timesheet.dates] + ["Total"]
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=3, column=col, value=header)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
+            cell.alignment = Alignment(horizontal="center")
+        
+        # Weekend highlighting
+        weekend_fill = PatternFill(start_color="F3F4F6", end_color="F3F4F6", fill_type="solid")
+        
+        # Data rows
+        for row_idx, u in enumerate(timesheet.users, 4):
+            ws.cell(row=row_idx, column=1, value=u.user_name)
+            ws.cell(row=row_idx, column=2, value=u.role)
+            
+            for col_idx, dh in enumerate(u.daily_hours, 3):
+                cell = ws.cell(row=row_idx, column=col_idx, value=dh.formatted if dh.seconds > 0 else "-")
+                cell.alignment = Alignment(horizontal="center")
+                if dh.date.weekday() >= 5:
+                    cell.fill = weekend_fill
+            
+            # Total column
+            ws.cell(row=row_idx, column=len(timesheet.dates) + 3, value=u.total_formatted)
+            ws.cell(row=row_idx, column=len(timesheet.dates) + 3).font = Font(bold=True)
+        
+        # Totals row
+        totals_row = len(timesheet.users) + 4
+        ws.cell(row=totals_row, column=1, value="TOTAL")
+        ws.cell(row=totals_row, column=1).font = Font(bold=True)
+        
+        for col_idx, dt in enumerate(timesheet.daily_totals, 3):
+            cell = ws.cell(row=totals_row, column=col_idx, value=dt.formatted)
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal="center")
+        
+        ws.cell(row=totals_row, column=len(timesheet.dates) + 3, value=timesheet.grand_total_formatted)
+        ws.cell(row=totals_row, column=len(timesheet.dates) + 3).font = Font(bold=True)
+        
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+        return output.getvalue(), f"team_timesheet_{start_date}_to_{end_date}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    
+    else:  # PDF - reuse existing PDF generation logic
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import letter, landscape
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        
+        output = BytesIO()
+        doc = SimpleDocTemplate(output, pagesize=landscape(letter), leftMargin=20, rightMargin=20)
+        elements = []
+        styles = getSampleStyleSheet()
+        
+        # Title
+        title_style = ParagraphStyle('Title', parent=styles['Heading1'], alignment=TA_CENTER, fontSize=16)
+        elements.append(Paragraph(f"Team Timesheet", title_style))
+        
+        subtitle_style = ParagraphStyle('Subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12)
+        elements.append(Paragraph(f"{start_date.strftime('%B %d')} - {end_date.strftime('%B %d, %Y')}", subtitle_style))
+        elements.append(Spacer(1, 20))
+        
+        # Build table data
+        header_row = ["Name", "Role"] + [d.strftime("%m/%d") for d in timesheet.dates] + ["Total"]
+        table_data = [header_row]
+        
+        for u in timesheet.users:
+            row = [u.user_name[:15], u.role[:10]]
+            for dh in u.daily_hours:
+                row.append(dh.formatted if dh.seconds > 0 else "-")
+            row.append(u.total_formatted)
+            table_data.append(row)
+        
+        # Totals row
+        totals_row = ["TOTAL", ""]
+        for dt in timesheet.daily_totals:
+            totals_row.append(dt.formatted)
+        totals_row.append(timesheet.grand_total_formatted)
+        table_data.append(totals_row)
+        
+        # Calculate column widths
+        col_widths = [80, 60] + [35] * len(timesheet.dates) + [45]
+        
+        table = Table(table_data, colWidths=col_widths)
+        
+        style_commands = [
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2563EB')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 7),
+            ('ALIGN', (2, 0), (-1, -1), 'CENTER'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#E5E7EB')),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (-1, 0), (-1, -1), 'Helvetica-Bold'),
+            ('ROWBACKGROUNDS', (0, 1), (-2, -2), [colors.white, colors.HexColor('#F9FAFB')]),
+        ]
+        
+        # Weekend highlighting
+        for i, d in enumerate(timesheet.dates):
+            if d.weekday() >= 5:
+                col_idx = i + 2
+                style_commands.append(('BACKGROUND', (col_idx, 1), (col_idx, -2), colors.HexColor('#F3F4F6')))
+        
+        table.setStyle(TableStyle(style_commands))
+        elements.append(table)
+        
+        # Summary
+        elements.append(Spacer(1, 20))
+        summary_style = ParagraphStyle('Summary', parent=styles['Normal'], fontSize=10)
+        elements.append(Paragraph(
+            f"<b>Summary:</b> {len(timesheet.users)} team members | {len(timesheet.dates)} days | Total: {timesheet.grand_total_formatted} hours",
+            summary_style
+        ))
+        
+        doc.build(elements)
+        output.seek(0)
+        return output.getvalue(), f"team_timesheet_{start_date}_to_{end_date}.pdf", "application/pdf"
+
+
+async def _get_team_timesheet_data(
+    db: AsyncSession,
+    user: User,
+    start_date: date,
+    end_date: date,
+    team_id: Optional[int]
+) -> TeamTimesheetReport:
+    """Helper to get team timesheet data - shared between endpoint and email generator"""
+    from app.dependencies import get_company_filter, FILTER_NULL_COMPANY
+    
+    now = datetime.now(timezone.utc)
+    
+    # Generate list of all dates in range
+    dates_in_range = []
+    current = start_date
+    while current <= end_date:
+        dates_in_range.append(current)
+        current += timedelta(days=1)
+    
+    # Build user query based on role
+    if user.role == "super_admin":
+        users_query = select(User).where(User.is_active == True)
+    else:
+        company_filter = get_company_filter(user)
+        if company_filter == FILTER_NULL_COMPANY:
+            users_query = select(User).where(User.is_active == True, User.company_id.is_(None))
+        else:
+            users_query = select(User).where(User.is_active == True, User.company_id == company_filter)
+    
+    if team_id:
+        users_query = users_query.join(TeamMember, User.id == TeamMember.user_id).where(TeamMember.team_id == team_id)
+    
+    users_query = users_query.order_by(User.name)
+    
+    result = await db.execute(users_query)
+    users = result.scalars().all()
+    
+    # Fetch time entries for date range
+    start_datetime = datetime.combine(start_date, time.min).replace(tzinfo=timezone.utc)
+    end_datetime = datetime.combine(end_date + timedelta(days=1), time.min).replace(tzinfo=timezone.utc)
+    
+    user_ids = [u.id for u in users]
+    if not user_ids:
+        return TeamTimesheetReport(
+            start_date=start_date,
+            end_date=end_date,
+            dates=dates_in_range,
+            users=[],
+            daily_totals=[TeamTimesheetDayTotal(date=d, seconds=0, formatted="0:00") for d in dates_in_range],
+            grand_total_seconds=0,
+            grand_total_formatted="0:00"
+        )
+    
+    entries_query = select(TimeEntry).where(
+        TimeEntry.user_id.in_(user_ids),
+        TimeEntry.start_time < end_datetime,
+        ((TimeEntry.end_time >= start_datetime) | (TimeEntry.end_time.is_(None)))
+    )
+    
+    entries_result = await db.execute(entries_query)
+    entries = entries_result.scalars().all()
+    
+    # Build user-day matrix
+    user_daily_seconds: Dict[int, Dict[date, int]] = defaultdict(lambda: defaultdict(int))
+    
+    for entry in entries:
+        for d in dates_in_range:
+            day_start = datetime.combine(d, time.min).replace(tzinfo=timezone.utc)
+            day_end = datetime.combine(d + timedelta(days=1), time.min).replace(tzinfo=timezone.utc)
+            seconds = calculate_entry_duration_for_period(entry, day_start, day_end, now)
+            if seconds > 0:
+                user_daily_seconds[entry.user_id][d] += seconds
+    
+    # Build response
+    timesheet_users = []
+    daily_totals_seconds: Dict[date, int] = defaultdict(int)
+    grand_total = 0
+    
+    for u in users:
+        daily_hours = []
+        user_total = 0
+        
+        for d in dates_in_range:
+            seconds = user_daily_seconds[u.id][d]
+            daily_hours.append(TeamTimesheetUserEntry(
+                date=d,
+                seconds=seconds,
+                formatted=format_seconds_to_hhmm(seconds) if seconds > 0 else "-"
+            ))
+            daily_totals_seconds[d] += seconds
+            user_total += seconds
+        
+        timesheet_users.append(TeamTimesheetUser(
+            user_id=u.id,
+            user_name=u.name,
+            role=u.role,
+            daily_hours=daily_hours,
+            total_seconds=user_total,
+            total_formatted=format_seconds_to_hhmm(user_total)
+        ))
+        grand_total += user_total
+    
+    daily_totals = [
+        TeamTimesheetDayTotal(
+            date=d,
+            seconds=daily_totals_seconds[d],
+            formatted=format_seconds_to_hhmm(daily_totals_seconds[d])
+        )
+        for d in dates_in_range
+    ]
+    
+    return TeamTimesheetReport(
+        start_date=start_date,
+        end_date=end_date,
+        dates=dates_in_range,
+        users=timesheet_users,
+        daily_totals=daily_totals,
+        grand_total_seconds=grand_total,
+        grand_total_formatted=format_seconds_to_hhmm(grand_total)
+    )

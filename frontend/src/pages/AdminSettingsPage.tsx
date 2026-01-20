@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, LoadingOverlay, Button, Input } from '../components/common';
 import { AdminAISettings } from '../components/ai';
+import { EmailSettingsForm } from '../components/settings';
 import { apiKeysApi } from '../api/apiKeys';
 import { usersApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
@@ -29,7 +30,7 @@ export function AdminSettingsPage() {
   const queryClient = useQueryClient();
   
   // Active tab state - default to api-keys for all admins
-  const [activeTab, setActiveTab] = useState<'api-keys' | 'ai-features'>('api-keys');
+  const [activeTab, setActiveTab] = useState<'api-keys' | 'ai-features' | 'email'>('api-keys');
   
   // Form state
   const [showAddForm, setShowAddForm] = useState(false);
@@ -223,7 +224,7 @@ export function AdminSettingsPage() {
             Admin Settings
           </h1>
           <p className="text-gray-500 dark:text-gray-400 mt-1">
-            Manage API keys and AI features
+            Manage API keys, AI features, and email settings
           </p>
         </div>
       </div>
@@ -257,8 +258,26 @@ export function AdminSettingsPage() {
               AI Features
             </span>
           </button>
+          <button
+            onClick={() => setActiveTab('email')}
+            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+              activeTab === 'email'
+                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <span>✉️</span>
+              Email Settings
+            </span>
+          </button>
         </nav>
       </div>
+
+      {/* Email Settings Tab */}
+      {activeTab === 'email' && (
+        <EmailSettingsForm />
+      )}
 
       {/* AI Features Tab */}
       {activeTab === 'ai-features' && (

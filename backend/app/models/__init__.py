@@ -116,6 +116,16 @@ class Company(Base):
     date_format: Mapped[str] = mapped_column(String(20), default="YYYY-MM-DD", nullable=False)
     time_format: Mapped[str] = mapped_column(String(20), default="HH:mm", nullable=False)
     
+    # Email/SMTP Configuration
+    smtp_server: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    smtp_port: Mapped[int] = mapped_column(Integer, default=587, nullable=False)
+    smtp_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    smtp_password_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    smtp_from_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    smtp_from_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    smtp_use_tls: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    email_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

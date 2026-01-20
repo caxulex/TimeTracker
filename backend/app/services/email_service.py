@@ -441,7 +441,370 @@ class EmailService:
         """
         
         return await self.send_email(to_email, subject, body_html)
+    
+    # ==========================================
+    # COMPANY-AWARE EMAIL METHODS
+    # ==========================================
+    
+    async def send_email_for_company(
+        self,
+        company_id: int,
+        to_email: str,
+        subject: str,
+        body_html: str,
+        body_text: Optional[str] = None,
+        db = None
+    ) -> bool:
+        """
+        Send email using company-specific SMTP settings.
+        Falls back to global SMTP if company has none configured.
+        
+        Args:
+            company_id: The company ID to get SMTP settings from
+            to_email: Recipient email address
+            subject: Email subject line
+            body_html: HTML body content
+            body_text: Plain text body (optional fallback)
+            db: Database session (required for company lookup)
+            
+        Returns:
+            True if email was sent successfully
+        """
+        from app.models import Company
+        from sqlalchemy import select
+        from app.services.encryption_service import EncryptionService
+        
+        # If no db provided, use global settings
+        if db is None:
+            return await self.send_email(to_email, subject, body_html, body_text)
+        
+        # Fetch company settings
+        result = await db.execute(select(Company).where(Company.id == company_id))
+        company = result.scalar_one_or_none()
+        
+        if not company or not company.email_enabled:
+            # Fall back to global settings
+            return await self.send_email(to_email, subject, body_html, body_text)
+        
+        # Check if company has SMTP configured
+        if not company.smtp_server or not company.smtp_username or not company.smtp_password_encrypted:
+            # Fall back to global settings
+            return await self.send_email(to_email, subject, body_html, body_text)
+        
+        # Decrypt company SMTP password
+        encryption_service = EncryptionService()
+        try:
+            smtp_password = encryption_service.decrypt(company.smtp_password_encrypted)
+        except Exception as e:
+            logger.error(f"Failed to decrypt company SMTP password: {e}")
+            # Fall back to global settings
+            return await self.send_email(to_email, subject, body_html, body_text)
+        
+        # Use company SMTP settings
+        from_name = company.smtp_from_name or company.name
+        from_email = company.smtp_from_email or company.smtp_username
+        
+        msg = self._create_message(to_email, subject, body_html, body_text)
+        # Override From header with company settings
+        from email.utils import formataddr
+        msg.replace_header('From', formataddr((from_name, from_email)))
+        
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                self._send_smtp_with_config,
+                msg,
+                to_email,
+                from_email,
+                company.smtp_server,
+                company.smtp_port,
+                company.smtp_username,
+                smtp_password,
+                company.smtp_use_tls
+            )
+            logger.info(f"Email sent successfully to {to_email} via company SMTP")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send email via company SMTP: {e}")
+            raise EmailSendError(f"Failed to send email: {e}")
+    
+    def _send_smtp_with_config(
+        self,
+        msg: MIMEMultipart,
+        to_email: str,
+        from_email: str,
+        smtp_server: str,
+        smtp_port: int,
+        smtp_username: str,
+        smtp_password: str,
+        use_tls: bool
+    ) -> None:
+        """Synchronous SMTP send with custom config (called from thread pool)"""
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            if use_tls:
+                server.starttls()
+            server.login(smtp_username, smtp_password)
+            server.sendmail(from_email, to_email, msg.as_string())
+    
+    async def send_email_with_attachment(
+        self,
+        to_email: str,
+        subject: str,
+        body_html: str,
+        attachment_data: bytes,
+        attachment_filename: str,
+        attachment_mimetype: str = "application/octet-stream",
+        body_text: Optional[str] = None
+    ) -> bool:
+        """
+        Send an email with an attachment.
+        
+        Args:
+            to_email: Recipient email address
+            subject: Email subject line
+            body_html: HTML body content
+            attachment_data: Raw bytes of the attachment
+            attachment_filename: Filename for the attachment
+            attachment_mimetype: MIME type of the attachment
+            body_text: Plain text body (optional fallback)
+            
+        Returns:
+            True if email was sent successfully
+        """
+        from email.mime.base import MIMEBase
+        from email import encoders
+        
+        if not self.is_configured:
+            logger.warning("Email not configured - skipping send")
+            return False
+        
+        # Create message with mixed type for attachment support
+        msg = MIMEMultipart('mixed')
+        msg['Subject'] = subject
+        from_name = self.from_name or 'Time Tracker'
+        from_email = self.from_email or ''
+        msg['From'] = formataddr((from_name, from_email))
+        msg['To'] = to_email
+        
+        # Create alternative part for text/html body
+        alt_part = MIMEMultipart('alternative')
+        if body_text:
+            alt_part.attach(MIMEText(body_text, 'plain'))
+        alt_part.attach(MIMEText(body_html, 'html'))
+        msg.attach(alt_part)
+        
+        # Add attachment
+        maintype, subtype = attachment_mimetype.split('/', 1) if '/' in attachment_mimetype else ('application', 'octet-stream')
+        attachment = MIMEBase(maintype, subtype)
+        attachment.set_payload(attachment_data)
+        encoders.encode_base64(attachment)
+        attachment.add_header(
+            'Content-Disposition',
+            'attachment',
+            filename=attachment_filename
+        )
+        msg.attach(attachment)
+        
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self._send_smtp, msg, to_email)
+            logger.info(f"Email with attachment sent successfully to {to_email}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send email with attachment to {to_email}: {e}")
+            raise EmailSendError(f"Failed to send email: {e}")
+    
+    async def send_email_with_attachment_for_company(
+        self,
+        company_id: int,
+        to_email: str,
+        subject: str,
+        body_html: str,
+        attachment_data: bytes,
+        attachment_filename: str,
+        attachment_mimetype: str = "application/octet-stream",
+        body_text: Optional[str] = None,
+        db = None
+    ) -> bool:
+        """
+        Send email with attachment using company-specific SMTP settings.
+        Falls back to global SMTP if company has none configured.
+        """
+        from app.models import Company
+        from sqlalchemy import select
+        from app.services.encryption_service import EncryptionService
+        from email.mime.base import MIMEBase
+        from email import encoders
+        
+        # If no db provided, use global settings
+        if db is None:
+            return await self.send_email_with_attachment(
+                to_email, subject, body_html, attachment_data,
+                attachment_filename, attachment_mimetype, body_text
+            )
+        
+        # Fetch company settings
+        result = await db.execute(select(Company).where(Company.id == company_id))
+        company = result.scalar_one_or_none()
+        
+        if not company or not company.email_enabled:
+            return await self.send_email_with_attachment(
+                to_email, subject, body_html, attachment_data,
+                attachment_filename, attachment_mimetype, body_text
+            )
+        
+        if not company.smtp_server or not company.smtp_username or not company.smtp_password_encrypted:
+            return await self.send_email_with_attachment(
+                to_email, subject, body_html, attachment_data,
+                attachment_filename, attachment_mimetype, body_text
+            )
+        
+        # Decrypt company SMTP password
+        encryption_service = EncryptionService()
+        try:
+            smtp_password = encryption_service.decrypt(company.smtp_password_encrypted)
+        except Exception as e:
+            logger.error(f"Failed to decrypt company SMTP password: {e}")
+            return await self.send_email_with_attachment(
+                to_email, subject, body_html, attachment_data,
+                attachment_filename, attachment_mimetype, body_text
+            )
+        
+        # Use company SMTP settings
+        from_name = company.smtp_from_name or company.name
+        from_email = company.smtp_from_email or company.smtp_username
+        
+        # Create message with mixed type for attachment support
+        msg = MIMEMultipart('mixed')
+        msg['Subject'] = subject
+        msg['From'] = formataddr((from_name, from_email))
+        msg['To'] = to_email
+        
+        # Create alternative part for text/html body
+        alt_part = MIMEMultipart('alternative')
+        if body_text:
+            alt_part.attach(MIMEText(body_text, 'plain'))
+        alt_part.attach(MIMEText(body_html, 'html'))
+        msg.attach(alt_part)
+        
+        # Add attachment
+        maintype, subtype = attachment_mimetype.split('/', 1) if '/' in attachment_mimetype else ('application', 'octet-stream')
+        attachment = MIMEBase(maintype, subtype)
+        attachment.set_payload(attachment_data)
+        encoders.encode_base64(attachment)
+        attachment.add_header(
+            'Content-Disposition',
+            'attachment',
+            filename=attachment_filename
+        )
+        msg.attach(attachment)
+        
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                self._send_smtp_with_config,
+                msg,
+                to_email,
+                from_email,
+                company.smtp_server,
+                company.smtp_port,
+                company.smtp_username,
+                smtp_password,
+                company.smtp_use_tls
+            )
+            logger.info(f"Email with attachment sent successfully to {to_email} via company SMTP")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send email with attachment via company SMTP: {e}")
+            raise EmailSendError(f"Failed to send email: {e}")
+    
+    async def send_report_email(
+        self,
+        to_emails: List[str],
+        report_name: str,
+        date_range: str,
+        attachment_data: bytes,
+        attachment_filename: str,
+        attachment_mimetype: str,
+        custom_message: Optional[str] = None,
+        company_id: Optional[int] = None,
+        db = None
+    ) -> Dict[str, bool]:
+        """
+        Send report email to multiple recipients.
+        
+        Args:
+            to_emails: List of recipient email addresses
+            report_name: Name of the report (e.g., "Time Report", "Team Timesheet")
+            date_range: Date range string (e.g., "Jan 1 - Jan 15, 2026")
+            attachment_data: Raw bytes of the report file
+            attachment_filename: Filename for the attachment
+            attachment_mimetype: MIME type of the attachment
+            custom_message: Optional custom message from sender
+            company_id: Company ID for branded emails (optional)
+            db: Database session (required if company_id provided)
+            
+        Returns:
+            Dict of {email: success_status}
+        """
+        subject = f"{report_name} - {date_range}"
+        
+        custom_html = ""
+        if custom_message:
+            custom_html = f"""
+            <div style="background: #f5f5f5; padding: 15px; border-radius: 6px; margin: 20px 0;">
+                <p><strong>Message from sender:</strong></p>
+                <p>{custom_message}</p>
+            </div>
+            """
+        
+        body_html = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h1 style="color: #2563eb;">📊 {report_name}</h1>
+                <p>Please find attached the <strong>{report_name}</strong> for the period:</p>
+                <p style="font-size: 18px; font-weight: bold; color: #2563eb;">{date_range}</p>
+                {custom_html}
+                <p>The report is attached to this email as: <code>{attachment_filename}</code></p>
+                <p>Best regards,<br>{self.from_name} Team</p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        results = {}
+        for email in to_emails:
+            try:
+                if company_id and db:
+                    success = await self.send_email_with_attachment_for_company(
+                        company_id=company_id,
+                        to_email=email,
+                        subject=subject,
+                        body_html=body_html,
+                        attachment_data=attachment_data,
+                        attachment_filename=attachment_filename,
+                        attachment_mimetype=attachment_mimetype,
+                        db=db
+                    )
+                else:
+                    success = await self.send_email_with_attachment(
+                        to_email=email,
+                        subject=subject,
+                        body_html=body_html,
+                        attachment_data=attachment_data,
+                        attachment_filename=attachment_filename,
+                        attachment_mimetype=attachment_mimetype
+                    )
+                results[email] = success
+            except EmailSendError:
+                results[email] = False
+        
+        return results
 
 
 # Singleton instance
 email_service = EmailService()
+

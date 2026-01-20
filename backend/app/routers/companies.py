@@ -491,3 +491,285 @@ async def list_companies(
     companies = result.scalars().all()
     
     return list(companies)
+
+
+# ============================================
+# EMAIL SETTINGS SCHEMAS
+# ============================================
+
+class EmailSettingsResponse(BaseModel):
+    """Schema for email settings response"""
+    email_enabled: bool
+    smtp_server: Optional[str] = None
+    smtp_port: int
+    smtp_username: Optional[str] = None
+    smtp_password_set: bool  # True if password exists, never expose actual
+    smtp_from_email: Optional[str] = None
+    smtp_from_name: Optional[str] = None
+    smtp_use_tls: bool
+
+
+class EmailSettingsUpdate(BaseModel):
+    """Schema for updating email settings"""
+    email_enabled: Optional[bool] = None
+    smtp_server: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = None  # Only when changing
+    smtp_from_email: Optional[str] = None
+    smtp_from_name: Optional[str] = None
+    smtp_use_tls: Optional[bool] = None
+
+
+class TestEmailRequest(BaseModel):
+    """Schema for test email request"""
+    recipient: EmailStr
+
+
+class TestEmailResponse(BaseModel):
+    """Schema for test email response"""
+    success: bool
+    message: str
+    latency_ms: Optional[int] = None
+
+
+# ============================================
+# EMAIL SETTINGS ENDPOINTS
+# ============================================
+
+@router.get("/my-company/email-settings", response_model=EmailSettingsResponse)
+async def get_email_settings(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get company email/SMTP settings (admin only)"""
+    if current_user.role not in ["company_admin", "admin", "super_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can access email settings"
+        )
+    
+    if not current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User is not associated with a company"
+        )
+    
+    result = await db.execute(
+        select(Company).where(Company.id == current_user.company_id)
+    )
+    company = result.scalar_one_or_none()
+    
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company not found"
+        )
+    
+    return EmailSettingsResponse(
+        email_enabled=company.email_enabled,
+        smtp_server=company.smtp_server,
+        smtp_port=company.smtp_port,
+        smtp_username=company.smtp_username,
+        smtp_password_set=bool(company.smtp_password_encrypted),
+        smtp_from_email=company.smtp_from_email,
+        smtp_from_name=company.smtp_from_name,
+        smtp_use_tls=company.smtp_use_tls,
+    )
+
+
+@router.put("/my-company/email-settings", response_model=EmailSettingsResponse)
+async def update_email_settings(
+    data: EmailSettingsUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Update company email/SMTP settings (admin only)"""
+    from app.services.encryption_service import EncryptionService
+    
+    if current_user.role not in ["company_admin", "admin", "super_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can update email settings"
+        )
+    
+    if not current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User is not associated with a company"
+        )
+    
+    result = await db.execute(
+        select(Company).where(Company.id == current_user.company_id)
+    )
+    company = result.scalar_one_or_none()
+    
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company not found"
+        )
+    
+    # Update fields
+    if data.email_enabled is not None:
+        company.email_enabled = data.email_enabled
+    if data.smtp_server is not None:
+        company.smtp_server = data.smtp_server
+    if data.smtp_port is not None:
+        company.smtp_port = data.smtp_port
+    if data.smtp_username is not None:
+        company.smtp_username = data.smtp_username
+    if data.smtp_from_email is not None:
+        company.smtp_from_email = data.smtp_from_email
+    if data.smtp_from_name is not None:
+        company.smtp_from_name = data.smtp_from_name
+    if data.smtp_use_tls is not None:
+        company.smtp_use_tls = data.smtp_use_tls
+    
+    # Encrypt password if provided
+    if data.smtp_password is not None:
+        encryption_service = EncryptionService()
+        try:
+            company.smtp_password_encrypted = encryption_service.encrypt(data.smtp_password)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to encrypt password: {str(e)}"
+            )
+    
+    await db.commit()
+    await db.refresh(company)
+    
+    return EmailSettingsResponse(
+        email_enabled=company.email_enabled,
+        smtp_server=company.smtp_server,
+        smtp_port=company.smtp_port,
+        smtp_username=company.smtp_username,
+        smtp_password_set=bool(company.smtp_password_encrypted),
+        smtp_from_email=company.smtp_from_email,
+        smtp_from_name=company.smtp_from_name,
+        smtp_use_tls=company.smtp_use_tls,
+    )
+
+
+@router.post("/my-company/email-settings/test", response_model=TestEmailResponse)
+async def test_email_settings(
+    data: TestEmailRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Send a test email using company SMTP settings"""
+    import time
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    from email.utils import formataddr
+    from app.services.encryption_service import EncryptionService
+    
+    if current_user.role not in ["company_admin", "admin", "super_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can test email settings"
+        )
+    
+    if not current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User is not associated with a company"
+        )
+    
+    result = await db.execute(
+        select(Company).where(Company.id == current_user.company_id)
+    )
+    company = result.scalar_one_or_none()
+    
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company not found"
+        )
+    
+    # Check if SMTP is configured
+    if not company.smtp_server or not company.smtp_username or not company.smtp_password_encrypted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SMTP settings are not fully configured"
+        )
+    
+    # Decrypt password
+    encryption_service = EncryptionService()
+    try:
+        smtp_password = encryption_service.decrypt(company.smtp_password_encrypted)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to decrypt SMTP password"
+        )
+    
+    # Prepare test email
+    from_name = company.smtp_from_name or company.name
+    from_email = company.smtp_from_email or company.smtp_username
+    
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = f"Test Email from {company.name}"
+    msg['From'] = formataddr((from_name, from_email))
+    msg['To'] = data.recipient
+    
+    html_body = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h1 style="color: #2563eb;">✅ Email Configuration Test</h1>
+            <p>This is a test email from <strong>{company.name}</strong>.</p>
+            <p>If you received this email, your SMTP settings are configured correctly!</p>
+            <div style="background: #f5f5f5; padding: 15px; border-radius: 6px; margin: 20px 0;">
+                <p><strong>SMTP Server:</strong> {company.smtp_server}</p>
+                <p><strong>Port:</strong> {company.smtp_port}</p>
+                <p><strong>TLS:</strong> {'Enabled' if company.smtp_use_tls else 'Disabled'}</p>
+            </div>
+            <p style="color: #666; font-size: 14px;">Sent at: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    msg.attach(MIMEText(html_body, 'html'))
+    
+    # Send email and measure latency
+    start_time = time.time()
+    try:
+        with smtplib.SMTP(company.smtp_server, company.smtp_port) as server:
+            if company.smtp_use_tls:
+                server.starttls()
+            server.login(company.smtp_username, smtp_password)
+            server.sendmail(from_email, data.recipient, msg.as_string())
+        
+        latency_ms = int((time.time() - start_time) * 1000)
+        
+        return TestEmailResponse(
+            success=True,
+            message=f"Test email sent successfully to {data.recipient}",
+            latency_ms=latency_ms,
+        )
+    
+    except smtplib.SMTPAuthenticationError:
+        return TestEmailResponse(
+            success=False,
+            message="Authentication failed. Check your SMTP username and password.",
+        )
+    except smtplib.SMTPConnectError:
+        return TestEmailResponse(
+            success=False,
+            message=f"Failed to connect to {company.smtp_server}:{company.smtp_port}",
+        )
+    except smtplib.SMTPRecipientsRefused:
+        return TestEmailResponse(
+            success=False,
+            message=f"Recipient {data.recipient} was rejected by the server",
+        )
+    except Exception as e:
+        return TestEmailResponse(
+            success=False,
+            message=f"Failed to send email: {str(e)}",
+        )
+
