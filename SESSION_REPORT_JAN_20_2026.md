@@ -22,6 +22,26 @@ All 15 tasks have been completed. The email/SMTP integration feature is now full
 
 ---
 
+## 🔧 POST-DEPLOYMENT BUG FIXES
+
+### Fix 1: TypeScript Build Error (Commit: `7b8b7eb`)
+**Issue:** `CardHeader` component was used incorrectly with children instead of props
+**Fix:** Replaced `<CardHeader>` with inline header divs
+
+### Fix 2: API Schema Mismatches (Commit: `81baa72`)
+**Issue:** Frontend types didn't match backend schemas
+- Frontend used `has_password` but backend sends `smtp_password_set`
+- Frontend used `to_email` but backend expects `recipient`
+- Endpoint crashed when migration hadn't run (missing columns)
+
+**Fix:**
+- Updated `EmailSettings.has_password` → `smtp_password_set`
+- Updated `TestEmailRequest.to_email` → `recipient`
+- Added graceful fallback with `getattr()` for missing columns
+- Returns sensible defaults when migration hasn't run yet
+
+---
+
 ## 🎉 COMPLETED TASKS
 
 | # | Task | Status |
@@ -51,15 +71,15 @@ All 15 tasks have been completed. The email/SMTP integration feature is now full
 |------|--------|
 | `backend/alembic/versions/013_add_email_settings.py` | **NEW** - Migration for SMTP columns |
 | `backend/app/models/__init__.py` | Added 8 SMTP fields to Company |
-| `backend/app/routers/companies.py` | Added 3 email settings endpoints |
+| `backend/app/routers/companies.py` | Added 3 email settings endpoints + graceful fallback |
 | `backend/app/services/email_service.py` | Added company-aware email methods |
 | `backend/app/routers/reports.py` | Added email report endpoint |
 
 ### Frontend
 | File | Change |
 |------|--------|
-| `frontend/src/api/client.ts` | Added email settings types and API methods |
-| `frontend/src/components/settings/EmailSettingsForm.tsx` | **NEW** - SMTP config form |
+| `frontend/src/api/client.ts` | Added email settings types (fixed schema names) |
+| `frontend/src/components/settings/EmailSettingsForm.tsx` | **NEW** - SMTP config form (fixed CardHeader) |
 | `frontend/src/components/settings/index.ts` | **NEW** - Export index |
 | `frontend/src/components/reports/EmailReportModal.tsx` | **NEW** - Email report modal |
 | `frontend/src/components/reports/index.ts` | Added EmailReportModal export |
@@ -70,19 +90,22 @@ All 15 tasks have been completed. The email/SMTP integration feature is now full
 
 ## 🚀 DEPLOYMENT INSTRUCTIONS
 
-### 1. Run Database Migration
+### ⚠️ IMPORTANT: Run Database Migration
+The email settings feature requires a database migration. Run this on the production server:
 ```bash
 cd backend
 alembic upgrade head
 ```
 
-### 2. Verify New Endpoints
+**Note:** The endpoint now includes graceful fallback - it will return defaults if migration hasn't run, but full functionality requires the migration.
+
+### Verify New Endpoints
 - `GET /api/companies/my-company/email-settings`
 - `PUT /api/companies/my-company/email-settings`
 - `POST /api/companies/my-company/email-settings/test`
 - `POST /api/reports/email`
 
-### 3. Test the Feature
+### Test the Feature
 1. Go to **Admin Settings** → **Email Settings** tab
 2. Configure SMTP settings
 3. Send a test email
