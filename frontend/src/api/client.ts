@@ -734,12 +734,12 @@ export interface CompanyUpdate {
 export interface EmailSettings {
   email_enabled: boolean;
   smtp_server: string | null;
-  smtp_port: number | null;
+  smtp_port: number;
   smtp_username: string | null;
   smtp_from_email: string | null;
   smtp_from_name: string | null;
   smtp_use_tls: boolean;
-  has_password: boolean;
+  smtp_password_set: boolean;
 }
 
 export interface EmailSettingsUpdate {
@@ -754,7 +754,7 @@ export interface EmailSettingsUpdate {
 }
 
 export interface TestEmailRequest {
-  to_email: string;
+  recipient: string;
 }
 
 export interface TestEmailResponse {

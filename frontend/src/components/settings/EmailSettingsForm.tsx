@@ -80,7 +80,7 @@ export const EmailSettingsForm: React.FC<EmailSettingsFormProps> = ({
 
   // Test email mutation
   const testMutation = useMutation({
-    mutationFn: (to_email: string) => companiesApi.sendTestEmail({ to_email }),
+    mutationFn: (recipient: string) => companiesApi.sendTestEmail({ recipient }),
     onSuccess: (result) => {
       if (result.success) {
         addNotification({
@@ -261,14 +261,14 @@ export const EmailSettingsForm: React.FC<EmailSettingsFormProps> = ({
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                SMTP Password {settings?.has_password && '(saved)'}
+                SMTP Password {settings?.smtp_password_set && '(saved)'}
               </label>
               <div className="relative">
                 <Input
                   type={showPassword ? 'text' : 'password'}
                   value={formData.smtp_password || ''}
                   onChange={(e) => handleInputChange('smtp_password', e.target.value)}
-                  placeholder={settings?.has_password ? '••••••••' : 'Enter password'}
+                  placeholder={settings?.smtp_password_set ? '••••••••' : 'Enter password'}
                   className="w-full pr-10"
                 />
                 <button
@@ -279,7 +279,7 @@ export const EmailSettingsForm: React.FC<EmailSettingsFormProps> = ({
                   {showPassword ? '🙈' : '👁️'}
                 </button>
               </div>
-              {settings?.has_password && (
+              {settings?.smtp_password_set && (
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   Leave blank to keep existing password
                 </p>

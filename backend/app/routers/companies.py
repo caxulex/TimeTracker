@@ -566,16 +566,30 @@ async def get_email_settings(
             detail="Company not found"
         )
     
-    return EmailSettingsResponse(
-        email_enabled=company.email_enabled,
-        smtp_server=company.smtp_server,
-        smtp_port=company.smtp_port,
-        smtp_username=company.smtp_username,
-        smtp_password_set=bool(company.smtp_password_encrypted),
-        smtp_from_email=company.smtp_from_email,
-        smtp_from_name=company.smtp_from_name,
-        smtp_use_tls=company.smtp_use_tls,
-    )
+    # Handle case where migration hasn't run yet (columns may not exist)
+    try:
+        return EmailSettingsResponse(
+            email_enabled=getattr(company, 'email_enabled', False),
+            smtp_server=getattr(company, 'smtp_server', None),
+            smtp_port=getattr(company, 'smtp_port', 587) or 587,
+            smtp_username=getattr(company, 'smtp_username', None),
+            smtp_password_set=bool(getattr(company, 'smtp_password_encrypted', None)),
+            smtp_from_email=getattr(company, 'smtp_from_email', None),
+            smtp_from_name=getattr(company, 'smtp_from_name', None),
+            smtp_use_tls=getattr(company, 'smtp_use_tls', True),
+        )
+    except Exception as e:
+        # If columns don't exist, return defaults
+        return EmailSettingsResponse(
+            email_enabled=False,
+            smtp_server=None,
+            smtp_port=587,
+            smtp_username=None,
+            smtp_password_set=False,
+            smtp_from_email=None,
+            smtp_from_name=None,
+            smtp_use_tls=True,
+        )
 
 
 @router.put("/my-company/email-settings", response_model=EmailSettingsResponse)
