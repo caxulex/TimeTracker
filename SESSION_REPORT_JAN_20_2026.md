@@ -766,6 +766,72 @@ Please provide your SMTP credentials:
 
 ---
 
+## 🆕 NEW FEATURE: Email Credentials to New Staff Members
+
+### User Request (Late Session)
+"I want an option in which when we create a new staff member, this credentials can be sent via email in this screen and also asking him to change the password to the same password that they use to enter the email, basecamp and the rest of the system"
+
+### Implementation Summary
+Added an "Email Credentials" button to the Staff Member Created modal.
+
+### Backend Changes
+**File:** `backend/app/routers/companies.py`
+
+New endpoint:
+```
+POST /api/companies/my-company/email-settings/send-welcome-credentials
+```
+
+**Request Schema:**
+```python
+class WelcomeCredentialsRequest(BaseModel):
+    recipient_email: str
+    recipient_name: str
+    temporary_password: str
+    job_title: Optional[str]
+    department: Optional[str]
+```
+
+**Email Content Includes:**
+- Welcome header with company name
+- Login credentials in styled box
+- ⚠️ Warning to change password after first login
+- Recommendation to use same password as email, Basecamp, etc.
+- Login button linking to TimeTracker
+
+### Frontend Changes
+
+**File:** `frontend/src/api/client.ts`
+- Added `WelcomeCredentialsRequest` and `WelcomeCredentialsResponse` interfaces
+- Added `companiesApi.sendWelcomeCredentials()` method
+
+**File:** `frontend/src/pages/StaffPage.tsx`
+- Added `companiesApi` import
+- Added state: `sendingEmail`, `emailSent`, `emailError`
+- Added "Email Credentials" button (purple) next to "Copy to Clipboard"
+- Loading spinner during send
+- Success/error feedback messages
+- Close button moved to full-width below action buttons
+
+### UI Preview
+```
+┌──────────────────────────────────────────────┐
+│  ✓ Staff Member Created!                     │
+├──────────────────────────────────────────────┤
+│  Full Name        John Doe                   │
+│  Email            john@company.com           │
+│  Password         ChangePassword#1234        │
+├──────────────────────────────────────────────┤
+│  [📋 Copy to Clipboard]  [📧 Email Credentials] │
+│  [                   Close                   ]  │
+└──────────────────────────────────────────────┘
+```
+
+### Build Status
+✅ TypeScript build successful
+
+---
+
 ## ✅ SESSION STATUS
 
 | Item | Status |
@@ -773,20 +839,32 @@ Please provide your SMTP credentials:
 | Codebase Analysis | ✅ Complete |
 | Architecture Design | ✅ Complete |
 | Implementation Plan | ✅ Complete |
-| Awaiting | 🔄 SMTP credentials from user |
+| Email SMTP Integration | ✅ DEPLOYED & WORKING |
+| Email Reports | ✅ DEPLOYED & WORKING |
+| Staff Email Credentials | ✅ IMPLEMENTED |
 
 ---
 
 ## 🔮 NEXT STEPS
 
-1. **User provides SMTP credentials** for `.env`
-2. **Decide implementation priority:**
-   - Start with backend + settings UI?
-   - Or full feature including email reports?
-3. **Begin Phase 1:** Database migration
+1. **Deploy staff credentials feature:**
+   ```bash
+   git add -A
+   git commit -m "feat: Add email credentials button for new staff members"
+   git push
+   ```
+
+2. **Test in production:**
+   - Create a new staff member
+   - Click "Email Credentials" button
+   - Verify email received
+
+3. **Optional future enhancements:**
+   - "Resend Welcome Email" in staff detail page
+   - Track which staff received welcome emails
 
 ---
 
 *Session Date: January 20, 2026*  
-*Focus: Email/SMTP Integration Assessment*  
-*Status: ✅ ASSESSMENT COMPLETE - AWAITING USER INPUT*
+*Focus: Email/SMTP Integration + Staff Welcome Credentials*  
+*Status: ✅ ALL FEATURES COMPLETE - READY FOR DEPLOYMENT*

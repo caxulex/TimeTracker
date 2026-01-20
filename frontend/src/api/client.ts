@@ -762,6 +762,21 @@ export interface TestEmailResponse {
   message: string;
 }
 
+// Welcome Credentials Email Types
+export interface WelcomeCredentialsRequest {
+  recipient_email: string;
+  recipient_name: string;
+  temporary_password: string;
+  job_title?: string;
+  department?: string;
+}
+
+export interface WelcomeCredentialsResponse {
+  success: boolean;
+  message: string;
+  latency_ms?: number;
+}
+
 // Email Report Types
 export interface EmailReportRequest {
   report_type: 'time_report' | 'team_timesheet';
@@ -788,6 +803,7 @@ export const companiesApi = {
   updateMyCompany: async (data: CompanyUpdate): Promise<Company> => {
     const response = await api.put('/api/companies/my-company', data);
     return response.data;
+
   },
 
   // Email Settings API
@@ -803,6 +819,11 @@ export const companiesApi = {
 
   sendTestEmail: async (data: TestEmailRequest): Promise<TestEmailResponse> => {
     const response = await api.post('/api/companies/my-company/email-settings/test', data);
+    return response.data;
+  },
+
+  sendWelcomeCredentials: async (data: WelcomeCredentialsRequest): Promise<WelcomeCredentialsResponse> => {
+    const response = await api.post('/api/companies/my-company/email-settings/send-welcome-credentials', data);
     return response.data;
   },
 };
