@@ -201,14 +201,14 @@ export const EmailSettingsForm: React.FC<EmailSettingsFormProps> = ({
 
       {/* SMTP Configuration Form */}
       <Card>
-        <CardHeader>
+        <div className="p-6 border-b border-gray-200 dark:border-gray-700">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
             <span>⚙️</span> SMTP Server Configuration
           </h3>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Configure your SMTP server to send emails from your organization's domain
           </p>
-        </CardHeader>
+        </div>
         
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
           {/* SMTP Server Row */}
@@ -359,14 +359,14 @@ export const EmailSettingsForm: React.FC<EmailSettingsFormProps> = ({
 
       {/* Test Email Section */}
       <Card>
-        <CardHeader>
+        <div className="p-6 border-b border-gray-200 dark:border-gray-700">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
             <span>🧪</span> Test Email Configuration
           </h3>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Send a test email to verify your SMTP settings are working correctly
           </p>
-        </CardHeader>
+        </div>
         
         <div className="p-6">
           {!settings?.smtp_server ? (
@@ -404,11 +404,11 @@ export const EmailSettingsForm: React.FC<EmailSettingsFormProps> = ({
 
       {/* Help Section */}
       <Card>
-        <CardHeader>
+        <div className="p-6 border-b border-gray-200 dark:border-gray-700">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
             <span>📚</span> SMTP Setup Guides
           </h3>
-        </CardHeader>
+        </div>
         
         <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
