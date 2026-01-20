@@ -826,111 +826,118 @@ async def send_welcome_credentials(
     from email.utils import formataddr
     from app.services.encryption_service import EncryptionService
     
-    if current_user.role not in ["company_admin", "admin", "super_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can send welcome credentials emails"
-        )
-    
-    if not current_user.company_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User is not associated with a company"
-        )
-    
-    result = await db.execute(
-        select(Company).where(Company.id == current_user.company_id)
-    )
-    company = result.scalar_one_or_none()
-    
-    if not company:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Company not found"
-        )
-    
-    # Check if email is enabled
-    if not getattr(company, 'email_enabled', False):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email is not enabled for this company. Please enable email in settings first."
-        )
-    
-    # Check if SMTP is configured
-    if not company.smtp_server or not company.smtp_username or not company.smtp_password_encrypted:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="SMTP settings are not fully configured"
-        )
-    
-    # Decrypt password
-    encryption_service = EncryptionService()
     try:
-        smtp_password = encryption_service.decrypt(company.smtp_password_encrypted)
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to decrypt SMTP password"
+        if current_user.role not in ["company_admin", "admin", "super_admin"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only admins can send welcome credentials emails"
+            )
+        
+        if not current_user.company_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User is not associated with a company"
+            )
+        
+        result = await db.execute(
+            select(Company).where(Company.id == current_user.company_id)
         )
-    
-    # Prepare welcome email
-    from_name = company.smtp_from_name or company.name
-    from_email = company.smtp_from_email or company.smtp_username
-    login_url = f"https://{company.subdomain}.timetracker.com" if company.subdomain else "https://timetracker.shaemarcus.com"
-    
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = f"Welcome to {company.name} - Your Login Credentials"
-    msg['From'] = formataddr((from_name, from_email))
-    msg['To'] = data.recipient_email
-    
-    # Build optional info section
-    optional_info = ""
-    if data.job_title:
-        optional_info += f"<p><strong>Job Title:</strong> {data.job_title}</p>"
-    if data.department:
-        optional_info += f"<p><strong>Department:</strong> {data.department}</p>"
-    
-    html_body = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-            <h1 style="color: #2563eb;">🎉 Welcome to {company.name}!</h1>
-            <p>Hi {data.recipient_name},</p>
-            <p>Your account has been created in the Time Tracker system. Here are your login credentials:</p>
-            
-            <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                <p style="margin: 0 0 10px 0;"><strong>Email:</strong> {data.recipient_email}</p>
-                {optional_info}
-                <p style="margin: 10px 0 0 0;"><strong>Temporary Password:</strong> 
-                    <code style="background: #e5e5e5; padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 14px;">{data.temporary_password}</code>
+        company = result.scalar_one_or_none()
+        
+        if not company:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Company not found"
+            )
+        
+        # Check if email is enabled
+        if not getattr(company, 'email_enabled', False):
+            return WelcomeCredentialsResponse(
+                success=False,
+                message="Email is not enabled for this company. Please enable email in Admin Settings first."
+            )
+        
+        # Check if SMTP is configured
+        smtp_server = getattr(company, 'smtp_server', None)
+        smtp_username = getattr(company, 'smtp_username', None)
+        smtp_password_encrypted = getattr(company, 'smtp_password_encrypted', None)
+        
+        if not smtp_server or not smtp_username or not smtp_password_encrypted:
+            return WelcomeCredentialsResponse(
+                success=False,
+                message="SMTP settings are not fully configured. Please configure email settings first."
+            )
+        
+        # Decrypt password
+        encryption_service = EncryptionService()
+        try:
+            smtp_password = encryption_service.decrypt(smtp_password_encrypted)
+        except Exception as e:
+            return WelcomeCredentialsResponse(
+                success=False,
+                message=f"Failed to decrypt SMTP password: {str(e)}"
+            )
+        
+        # Prepare welcome email
+        from_name = getattr(company, 'smtp_from_name', None) or company.name
+        from_email = getattr(company, 'smtp_from_email', None) or smtp_username
+        smtp_port = getattr(company, 'smtp_port', 587) or 587
+        smtp_use_tls = getattr(company, 'smtp_use_tls', True)
+        login_url = f"https://{company.subdomain}.timetracker.com" if getattr(company, 'subdomain', None) else "https://timetracker.shaemarcus.com"
+        
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = f"Welcome to {company.name} - Your Login Credentials"
+        msg['From'] = formataddr((from_name, from_email))
+        msg['To'] = data.recipient_email
+        
+        # Build optional info section
+        optional_info = ""
+        if data.job_title:
+            optional_info += f"<p><strong>Job Title:</strong> {data.job_title}</p>"
+        if data.department:
+            optional_info += f"<p><strong>Department:</strong> {data.department}</p>"
+        
+        html_body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h1 style="color: #2563eb;">🎉 Welcome to {company.name}!</h1>
+                <p>Hi {data.recipient_name},</p>
+                <p>Your account has been created in the Time Tracker system. Here are your login credentials:</p>
+                
+                <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <p style="margin: 0 0 10px 0;"><strong>Email:</strong> {data.recipient_email}</p>
+                    {optional_info}
+                    <p style="margin: 10px 0 0 0;"><strong>Temporary Password:</strong> 
+                        <code style="background: #e5e5e5; padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 14px;">{data.temporary_password}</code>
+                    </p>
+                </div>
+                
+                <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
+                    <p style="margin: 0; color: #92400e;">
+                        <strong>⚠️ Important:</strong> For security, please change your password after your first login. 
+                        We recommend using the same password that you use for your email, Basecamp, and other company systems 
+                        to make it easier to remember.
+                    </p>
+                </div>
+                
+                <p>
+                    <a href="{login_url}" style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">
+                        Login to Time Tracker
+                    </a>
                 </p>
-            </div>
-            
-            <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
-                <p style="margin: 0; color: #92400e;">
-                    <strong>⚠️ Important:</strong> For security, please change your password after your first login. 
-                    We recommend using the same password that you use for your email, Basecamp, and other company systems 
-                    to make it easier to remember.
+                
+                <p style="color: #666; font-size: 14px; margin-top: 30px;">
+                    If you have any questions, please contact your administrator.
                 </p>
+                
+                <p>Best regards,<br><strong>{company.name} Team</strong></p>
             </div>
-            
-            <p>
-                <a href="{login_url}" style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">
-                    Login to Time Tracker
-                </a>
-            </p>
-            
-            <p style="color: #666; font-size: 14px; margin-top: 30px;">
-                If you have any questions, please contact your administrator.
-            </p>
-            
-            <p>Best regards,<br><strong>{company.name} Team</strong></p>
-        </div>
-    </body>
-    </html>
-    """
-    
-    text_body = f"""
+        </body>
+        </html>
+        """
+        
+        text_body = f"""
 Welcome to {company.name}!
 
 Hi {data.recipient_name},
@@ -951,18 +958,17 @@ Login at: {login_url}
 
 Best regards,
 {company.name} Team
-    """
-    
-    msg.attach(MIMEText(text_body, 'plain'))
-    msg.attach(MIMEText(html_body, 'html'))
-    
-    # Send email and measure latency
-    start_time = time.time()
-    try:
-        with smtplib.SMTP(company.smtp_server, company.smtp_port) as server:
-            if company.smtp_use_tls:
+        """
+        
+        msg.attach(MIMEText(text_body, 'plain'))
+        msg.attach(MIMEText(html_body, 'html'))
+        
+        # Send email and measure latency
+        start_time = time.time()
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            if smtp_use_tls:
                 server.starttls()
-            server.login(company.smtp_username, smtp_password)
+            server.login(smtp_username, smtp_password)
             server.sendmail(from_email, data.recipient_email, msg.as_string())
         
         latency_ms = int((time.time() - start_time) * 1000)
@@ -973,6 +979,8 @@ Best regards,
             latency_ms=latency_ms,
         )
     
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
     except smtplib.SMTPAuthenticationError:
         return WelcomeCredentialsResponse(
             success=False,
@@ -981,7 +989,7 @@ Best regards,
     except smtplib.SMTPConnectError:
         return WelcomeCredentialsResponse(
             success=False,
-            message=f"Failed to connect to email server",
+            message="Failed to connect to email server",
         )
     except smtplib.SMTPRecipientsRefused:
         return WelcomeCredentialsResponse(
