@@ -628,7 +628,11 @@ async def update_email_settings(
     if data.email_enabled is not None:
         company.email_enabled = data.email_enabled
     if data.smtp_server is not None:
-        company.smtp_server = data.smtp_server
+        # Sanitize: remove protocol prefix and trailing slashes
+        server = data.smtp_server.strip()
+        server = server.replace('http://', '').replace('https://', '')
+        server = server.rstrip('/')
+        company.smtp_server = server
     if data.smtp_port is not None:
         company.smtp_port = data.smtp_port
     if data.smtp_username is not None:
