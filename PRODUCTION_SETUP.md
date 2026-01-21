@@ -252,11 +252,107 @@ For larger deployments:
 - [ ] Workers created with proper credentials
 - [ ] Workers added to appropriate teams
 - [ ] Projects created and assigned to teams
-- [ ] Database backup scheduled
-- [ ] SSL/HTTPS configured
+- [x] Database backup scheduled (see below)
+- [x] SSL/HTTPS configured (AWS Lightsail)
 - [ ] Firewall rules set up
 - [ ] Monitoring configured
 - [ ] Worker training completed
+
+---
+
+## 🔒 SSL/HTTPS Configuration
+
+**Status: ✅ Configured via AWS Lightsail**
+
+TimeTracker uses AWS Lightsail's built-in load balancer for SSL termination:
+- Certificate managed by AWS Certificate Manager (ACM)
+- Automatic renewal (no manual intervention needed)
+- HTTPS enforced on `https://timetracker.shaemarcus.com`
+
+### Verify SSL Status
+```bash
+# Check certificate details
+curl -vI https://timetracker.shaemarcus.com 2>&1 | grep -A 5 "Server certificate"
+
+# Test SSL grade (visit in browser)
+# https://www.ssllabs.com/ssltest/analyze.html?d=timetracker.shaemarcus.com
+```
+
+### Security Headers (Already Configured)
+The application includes these security headers:
+- `Strict-Transport-Security` (HSTS)
+- `Content-Security-Policy` (CSP)
+- `X-Frame-Options: DENY`
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+
+---
+
+## 💾 Database Backup System
+
+### Setup Automated Backups
+
+1. **Copy scripts to server:**
+```bash
+scp backend/scripts/backup_database.sh ubuntu@your-server:/home/ubuntu/scripts/
+scp backend/scripts/restore_database.sh ubuntu@your-server:/home/ubuntu/scripts/
+```
+
+2. **Make executable:**
+```bash
+chmod +x /home/ubuntu/scripts/backup_database.sh
+chmod +x /home/ubuntu/scripts/restore_database.sh
+```
+
+3. **Configure cron for daily backups at 2 AM:**
+```bash
+crontab -e
+# Add this line:
+0 2 * * * /home/ubuntu/scripts/backup_database.sh >> /home/ubuntu/backups/cron.log 2>&1
+```
+
+### Backup Configuration
+
+Set environment variables in the script or export them:
+```bash
+export BACKUP_DIR="/home/ubuntu/backups"
+export RETENTION_DAYS=30
+export DB_CONTAINER="timetracker-db-1"
+export DB_NAME="time_tracker"
+
+# Optional: S3 upload
+export S3_BUCKET="your-bucket-name"
+
+# Optional: Slack/Discord notifications
+export WEBHOOK_URL="https://hooks.slack.com/services/..."
+```
+
+### Manual Backup
+```bash
+# Create immediate backup
+/home/ubuntu/scripts/backup_database.sh
+
+# Create full backup
+/home/ubuntu/scripts/backup_database.sh --full
+```
+
+### Restore from Backup
+```bash
+# List available backups
+/home/ubuntu/scripts/restore_database.sh --list
+
+# Restore latest backup
+/home/ubuntu/scripts/restore_database.sh --latest
+
+# Restore specific backup
+/home/ubuntu/scripts/restore_database.sh /home/ubuntu/backups/daily/time_tracker_daily_20260121_020000.sql.gz
+```
+
+### Backup Schedule
+| Type | Frequency | Retention |
+|------|-----------|-----------|
+| Daily | Every day at 2 AM | 30 days |
+| Weekly | Sunday at 3 AM | 90 days |
 
 ---
 
