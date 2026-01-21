@@ -27,7 +27,7 @@ set -e  # Exit on error
 # =============================================================================
 BACKUP_DIR="${BACKUP_DIR:-/home/ubuntu/backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
-DB_CONTAINER="${DB_CONTAINER:-timetracker-db-1}"
+DB_CONTAINER="${DB_CONTAINER:-timetracker-db}"
 DB_NAME="${DB_NAME:-time_tracker}"
 DB_USER="${DB_USER:-postgres}"
 
