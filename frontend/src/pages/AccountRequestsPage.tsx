@@ -287,6 +287,9 @@ export function AccountRequestsPage() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Status
                     </th>
+                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Email
+                    </th>
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Actions
                     </th>
@@ -315,6 +318,41 @@ export function AccountRequestsPage() {
                         <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadge(request.status)}`}>
                           {request.status}
                         </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        {request.status !== 'pending' ? (
+                          request.email_notification_sent ? (
+                            <span 
+                              className="inline-flex items-center text-green-600 cursor-help" 
+                              title={`Email sent ${request.email_sent_at ? formatDate(request.email_sent_at) : ''}`}
+                            >
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                              </svg>
+                              <svg className="w-3 h-3 -ml-1 -mt-2 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              </svg>
+                            </span>
+                          ) : (
+                            <span 
+                              className="inline-flex items-center text-red-500 cursor-help" 
+                              title={request.email_error || 'Email not sent'}
+                            >
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                              </svg>
+                              <svg className="w-3 h-3 -ml-1 -mt-2 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                              </svg>
+                            </span>
+                          )
+                        ) : (
+                          <span className="text-gray-300" title="Pending - no email sent yet">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                            </svg>
+                          </span>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
                         {request.status === 'pending' && (
@@ -555,6 +593,34 @@ export function AccountRequestsPage() {
                 <div>
                   <label className="text-xs font-medium text-gray-500">Admin Notes</label>
                   <p className="text-sm text-gray-900 mt-1 p-3 bg-yellow-50 rounded">{selectedRequest.admin_notes}</p>
+                </div>
+              )}
+
+              {/* Email Notification Status */}
+              {selectedRequest.status !== 'pending' && (
+                <div className={`p-3 rounded ${selectedRequest.email_notification_sent ? 'bg-green-50' : 'bg-red-50'}`}>
+                  <label className="text-xs font-medium text-gray-500">Email Notification</label>
+                  <div className="flex items-center mt-1">
+                    {selectedRequest.email_notification_sent ? (
+                      <>
+                        <svg className="w-5 h-5 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span className="text-sm text-green-800">
+                          Email sent {selectedRequest.email_sent_at ? `on ${formatDate(selectedRequest.email_sent_at)}` : 'successfully'}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-5 h-5 text-red-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span className="text-sm text-red-800">
+                          Email failed: {selectedRequest.email_error || 'Unknown error'}
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
 

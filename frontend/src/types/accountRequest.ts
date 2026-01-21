@@ -26,6 +26,10 @@ export interface AccountRequestResponse {
   reviewed_at: string | null;
   reviewed_by: number | null;
   admin_notes: string | null;
+  // Email tracking fields
+  email_notification_sent: boolean;
+  email_sent_at: string | null;
+  email_error: string | null;
   reviewer?: {
     id: number;
     name: string;

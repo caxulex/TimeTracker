@@ -31,6 +31,12 @@ class AccountRequestResponse(BaseModel):
     reviewed_at: Optional[datetime]
     reviewed_by: Optional[int]
     admin_notes: Optional[str]
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    # Email tracking fields
+    email_notification_sent: bool = False
+    email_sent_at: Optional[datetime] = None
+    email_error: Optional[str] = None
     
     class Config:
         from_attributes = True

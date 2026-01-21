@@ -513,6 +513,11 @@ class AccountRequest(Base):
     ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
     user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
+    # Email Notification Tracking
+    email_notification_sent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    email_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    email_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
     # Relationships
     reviewer: Mapped[Optional["User"]] = relationship("User", foreign_keys=[reviewed_by])
     

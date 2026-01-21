@@ -219,6 +219,7 @@ async def approve_account_request(
     """
     Approve an account request (Admin only)
     Returns pre-filled data for staff creation wizard
+    Sends approval notification email to the applicant
     """
     result = await db.execute(
         select(AccountRequest).where(AccountRequest.id == request_id)
@@ -259,9 +260,32 @@ async def approve_account_request(
     await db.commit()
     await db.refresh(account_request)
     
+    # Send approval notification email (non-blocking)
+    # Note: The actual credentials email is sent from the Staff page after user creation
+    try:
+        await email_service.send_account_approved_email(
+            to_email=account_request.email,
+            user_name=account_request.name,
+            temp_password="[Will be provided separately]",
+            login_url=""  # Will be provided in credentials email
+        )
+        # Update email tracking fields
+        account_request.email_notification_sent = True
+        account_request.email_sent_at = datetime.utcnow()
+        account_request.email_error = None
+        logger.info(f"Approval notification email sent to {account_request.email}")
+    except Exception as e:
+        account_request.email_notification_sent = False
+        account_request.email_error = str(e)[:500]
+        logger.warning(f"Failed to send approval email to {account_request.email}: {e}")
+    
+    await db.commit()
+    await db.refresh(account_request)
+    
     # Return pre-filled data for staff creation wizard
     return {
         "request_id": account_request.id,
+        "email_sent": account_request.email_notification_sent,
         "prefill_data": {
             "name": account_request.name,
             "email": account_request.email,
@@ -319,15 +343,25 @@ async def reject_account_request(
     await db.commit()
     await db.refresh(account_request)
     
-    # Send rejection email to applicant (non-blocking)
+    # Send rejection email to applicant (non-blocking) with tracking
     try:
         await email_service.send_account_rejected_email(
             to_email=account_request.email,
             user_name=account_request.name,
             reason=decision.admin_notes
         )
+        # Update email tracking fields
+        account_request.email_notification_sent = True
+        account_request.email_sent_at = datetime.utcnow()
+        account_request.email_error = None
+        logger.info(f"Rejection notification email sent to {account_request.email}")
     except Exception as e:
+        account_request.email_notification_sent = False
+        account_request.email_error = str(e)[:500]
         logger.warning(f"Failed to send rejection email to {account_request.email}: {e}")
+    
+    await db.commit()
+    await db.refresh(account_request)
     
     return account_request
 
