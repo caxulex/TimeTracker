@@ -32,7 +32,7 @@ def upgrade():
         sa.Column('is_read', sa.Boolean(), nullable=False, server_default='false'),
         sa.Column('read_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column('metadata', sa.JSON(), nullable=True),
+        sa.Column('notification_metadata', sa.JSON(), nullable=True),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id')

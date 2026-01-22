@@ -50,15 +50,6 @@ function toFrontendNotification(bn: BackendNotification): Notification {
   };
 }
 
-// Internal hook - not exported to avoid Fast Refresh warning
-function useNotificationsInternal() {
-  const context = useContext(NotificationContext);
-  if (!context) {
-    throw new Error('useNotifications must be used within a NotificationProvider');
-  }
-  return context;
-}
-
 // Notification Provider
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);

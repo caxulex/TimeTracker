@@ -32,7 +32,7 @@ class NotificationBase(BaseModel):
     link: Optional[str] = Field(None, max_length=500)
     entity_type: Optional[str] = Field(None, max_length=50)
     entity_id: Optional[int] = None
-    metadata: Optional[Dict[str, Any]] = None
+    notification_metadata: Optional[Dict[str, Any]] = None
 
 
 class NotificationCreate(NotificationBase):
