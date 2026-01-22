@@ -31,7 +31,7 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.Column('sent_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('delivered_at', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('metadata', sa.JSON(), nullable=True),
+        sa.Column('email_metadata', sa.JSON(), nullable=True),
         sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='SET NULL'),
         sa.PrimaryKeyConstraint('id')
     )

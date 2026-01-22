@@ -40,7 +40,7 @@ class EmailLogBase(BaseModel):
     email_type: str
     status: EmailStatusEnum = EmailStatusEnum.PENDING
     error_message: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    email_metadata: Optional[Dict[str, Any]] = None
 
 
 class EmailLogCreate(EmailLogBase):

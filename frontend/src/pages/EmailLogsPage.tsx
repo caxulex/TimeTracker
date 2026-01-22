@@ -6,10 +6,10 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
+import { Card, CardHeader, Spinner, Button } from '../components/common';
 import { useAuthStore } from '../stores/authStore';
 import { isAdminUser } from '../utils/helpers';
-import { apiRequest } from '../api/client';
+import api from '../api/client';
 
 interface EmailLog {
   id: number;
@@ -47,8 +47,8 @@ interface PaginatedEmailLogs {
 // API functions
 const emailLogsApi = {
   getSummary: async (days: number = 7): Promise<EmailLogSummary> => {
-    const response = await apiRequest<EmailLogSummary>(`/admin/email-logs/summary?days=${days}`);
-    return response;
+    const response = await api.get<EmailLogSummary>(`/api/admin/email-logs/summary?days=${days}`);
+    return response.data;
   },
   getList: async (
     page: number = 1,
@@ -64,12 +64,12 @@ const emailLogsApi = {
     if (emailType) params.append('email_type', emailType);
     if (toEmail) params.append('to_email', toEmail);
     
-    const response = await apiRequest<PaginatedEmailLogs>(`/admin/email-logs?${params.toString()}`);
-    return response;
+    const response = await api.get<PaginatedEmailLogs>(`/api/admin/email-logs?${params.toString()}`);
+    return response.data;
   },
   getTypes: async (): Promise<{ email_types: string[] }> => {
-    const response = await apiRequest<{ email_types: string[] }>('/admin/email-logs/types');
-    return response;
+    const response = await api.get<{ email_types: string[] }>('/api/admin/email-logs/types');
+    return response.data;
   },
 };
 
@@ -285,7 +285,11 @@ export function EmailLogsPage() {
       {/* Email Logs Table */}
       <Card>
         <div className="relative">
-          <LoadingOverlay isLoading={logsLoading} />
+          {logsLoading && (
+            <div className="absolute inset-0 bg-white/50 dark:bg-gray-900/50 flex items-center justify-center z-10">
+              <Spinner size="lg" />
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead className="bg-gray-50 dark:bg-gray-800">
