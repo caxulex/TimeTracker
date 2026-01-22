@@ -1,7 +1,7 @@
 """Add email_logs table
 
 Revision ID: 015_add_email_logs
-Revises: 014_add_email_tracking_to_account_requests
+Revises: 014
 Create Date: 2026-01-22
 
 """
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '015_add_email_logs'
-down_revision = '014_add_email_tracking_to_account_requests'
+down_revision = '014'
 branch_labels = None
 depends_on = None
 
