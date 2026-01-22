@@ -43,7 +43,7 @@ async def get_email_summary(
     
     # Build base query with company filter for non-super admins
     base_filter = EmailLog.created_at >= start_date
-    if not current_user.is_super_admin and current_user.company_id:
+    if current_user.role != "super_admin" and current_user.company_id:
         base_filter = and_(base_filter, EmailLog.company_id == current_user.company_id)
     
     # Get counts by status
@@ -99,7 +99,7 @@ async def list_email_logs(
     count_query = select(func.count(EmailLog.id))
     
     # Company filter for non-super admins
-    if not current_user.is_super_admin and current_user.company_id:
+    if current_user.role != "super_admin" and current_user.company_id:
         query = query.where(EmailLog.company_id == current_user.company_id)
         count_query = count_query.where(EmailLog.company_id == current_user.company_id)
     
@@ -149,7 +149,7 @@ async def get_email_types(
     """
     query = select(EmailLog.email_type).distinct()
     
-    if not current_user.is_super_admin and current_user.company_id:
+    if current_user.role != "super_admin" and current_user.company_id:
         query = query.where(EmailLog.company_id == current_user.company_id)
     
     result = await db.execute(query)
@@ -170,7 +170,7 @@ async def get_email_log(
     """
     query = select(EmailLog).where(EmailLog.id == log_id)
     
-    if not current_user.is_super_admin and current_user.company_id:
+    if current_user.role != "super_admin" and current_user.company_id:
         query = query.where(EmailLog.company_id == current_user.company_id)
     
     result = await db.execute(query)
