@@ -17,7 +17,8 @@
 | 2 | PDF Payslip Generation | 2-3 hrs | ✅ Complete |
 | 3 | Slack Notifications (webhook) | 1-2 hrs | ✅ Complete |
 | 4 | Email Delivery Dashboard | 2-3 hrs | ✅ Complete |
-| 5 | *(Optional)* Sentry Error Tracking | 1-2 hrs | ⬜ Skipped |
+| 5 | **Weekly Summary Bug Fix** | 30 min | ✅ Complete |
+| 6 | *(Optional)* Sentry Error Tracking | 1-2 hrs | ⬜ Skipped |
 
 ---
 
@@ -126,6 +127,43 @@ GET /api/admin/email-logs/{id}       # Get specific log entry
 
 ---
 
+### ✅ Task 5: Weekly Summary Bug Fix
+
+**Problem:** Weekly Summary panel showed 0.0h Total Hours when the admin user had logged time this week.
+
+**Root Cause:** Timezone mismatch in date comparison:
+- Time entries are stored in **UTC** (`datetime.now(timezone.utc)`)
+- Week boundaries were calculated using **local time** (`date.today()`)
+- SQL queries used `func.date(TimeEntry.start_time)` comparing UTC timestamps to local dates
+- This caused entries to fall outside the calculated week boundaries
+
+**Solution:** Use UTC consistently throughout:
+```python
+# Before (WRONG):
+today = date.today()  # Local time
+week_start = today - timedelta(days=today.weekday())
+# Query: func.date(TimeEntry.start_time) >= week_start
+
+# After (CORRECT):
+now_utc = datetime.now(timezone.utc)
+today_utc = now_utc.date()
+week_start = today_utc - timedelta(days=today_utc.weekday())
+week_start_dt = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
+# Query: TimeEntry.start_time >= week_start_dt
+```
+
+**Files Modified:**
+- `backend/app/ai/services/reporting_service.py`
+  - Added `timezone` import
+  - `generate_weekly_summary()` - Fixed week boundary calculation
+  - `_gather_weekly_metrics()` - Fixed all date queries
+  - `_gather_project_metrics()` - Fixed week comparison queries
+  - `_gather_user_metrics()` - Fixed 30-day and weekly queries
+
+**Assessment Document:** `WEEKLY_SUMMARY_BUG_ASSESSMENT.md`
+
+---
+
 ## 📁 FILES CHANGED SUMMARY
 
 ### New Files Created:
@@ -135,6 +173,7 @@ GET /api/admin/email-logs/{id}       # Get specific log entry
 4. `backend/app/routers/email_logs.py`
 5. `backend/alembic/versions/015_add_email_logs.py`
 6. `frontend/src/pages/EmailLogsPage.tsx`
+7. `WEEKLY_SUMMARY_BUG_ASSESSMENT.md` (documentation)
 
 ### Modified Files:
 1. `backend/app/config.py` - 3 new settings
@@ -144,9 +183,10 @@ GET /api/admin/email-logs/{id}       # Get specific log entry
 5. `backend/app/routers/account_requests.py` - Slack notifications
 6. `backend/app/routers/payroll.py` - Slack notifications
 7. `backend/app/main.py` - email_logs router
-8. `frontend/src/App.tsx` - EmailLogsPage route
-9. `frontend/src/pages/index.ts` - Export EmailLogsPage
-10. `frontend/src/components/layout/Sidebar.tsx` - Email Logs nav item
+8. `backend/app/ai/services/reporting_service.py` - **Weekly Summary bug fix (UTC timezone)**
+9. `frontend/src/App.tsx` - EmailLogsPage route
+10. `frontend/src/pages/index.ts` - Export EmailLogsPage
+11. `frontend/src/components/layout/Sidebar.tsx` - Email Logs nav item
 
 ---
 
@@ -173,6 +213,12 @@ After deployment, verify:
 - [ ] View summary statistics
 - [ ] Filter by status, type, email
 - [ ] Pagination works correctly
+
+### Weekly Summary (Bug Fix)
+- [ ] Navigate to Dashboard
+- [ ] Verify Weekly Summary panel shows correct hours
+- [ ] Verify date range is Monday-Sunday (not Saturday-Saturday)
+- [ ] Test with time entries logged this week
 
 ---
 

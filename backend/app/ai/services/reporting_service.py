@@ -12,7 +12,7 @@ Uses AI (Gemini/OpenAI) to transform data into actionable insights.
 
 import logging
 from typing import List, Dict, Any, Optional
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from dataclasses import dataclass, field
 from enum import Enum
 from decimal import Decimal
@@ -208,9 +208,11 @@ class AIReportingService:
                     "message": "AI report summaries are disabled"
                 }
             
-            # Calculate week boundaries
-            today = date.today()
-            week_start = today - timedelta(days=today.weekday())
+            # Calculate week boundaries in UTC for consistent timezone handling
+            # Time entries are stored in UTC, so we must use UTC dates for comparison
+            now_utc = datetime.now(timezone.utc)
+            today_utc = now_utc.date()
+            week_start = today_utc - timedelta(days=today_utc.weekday())
             week_end = week_start + timedelta(days=6)
             
             # Gather data
@@ -464,6 +466,11 @@ class AIReportingService:
             "week_end": week_end.isoformat()
         }
         
+        # Convert date boundaries to UTC datetimes for proper comparison with UTC timestamps
+        # week_start at 00:00:00 UTC, week_end at 23:59:59.999999 UTC
+        week_start_dt = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
+        week_end_dt = datetime.combine(week_end, datetime.max.time()).replace(tzinfo=timezone.utc)
+        
         # Get relevant users
         if team_id:
             user_result = await self.db.execute(
@@ -487,13 +494,14 @@ class AIReportingService:
         )
         
         # Total hours this week - fetch all entries and calculate in Python for reliability
+        # Use direct datetime comparison for proper timezone handling (entries are stored in UTC)
         entries_result = await self.db.execute(
             select(TimeEntry)
             .where(
                 and_(
                     TimeEntry.user_id.in_(user_ids),
-                    func.date(TimeEntry.start_time) >= week_start,
-                    func.date(TimeEntry.start_time) <= week_end,
+                    TimeEntry.start_time >= week_start_dt,
+                    TimeEntry.start_time <= week_end_dt,
                     TimeEntry.is_running == False  # Only completed entries
                 )
             )
@@ -512,14 +520,16 @@ class AIReportingService:
         # Compare to last week
         last_week_start = week_start - timedelta(days=7)
         last_week_end = week_end - timedelta(days=7)
+        last_week_start_dt = datetime.combine(last_week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
+        last_week_end_dt = datetime.combine(last_week_end, datetime.max.time()).replace(tzinfo=timezone.utc)
         
         last_entries_result = await self.db.execute(
             select(TimeEntry)
             .where(
                 and_(
                     TimeEntry.user_id.in_(user_ids),
-                    func.date(TimeEntry.start_time) >= last_week_start,
-                    func.date(TimeEntry.start_time) <= last_week_end,
+                    TimeEntry.start_time >= last_week_start_dt,
+                    TimeEntry.start_time <= last_week_end_dt,
                     TimeEntry.is_running == False
                 )
             )
@@ -547,8 +557,8 @@ class AIReportingService:
             .where(
                 and_(
                     TimeEntry.user_id.in_(user_ids),
-                    func.date(TimeEntry.start_time) >= week_start,
-                    func.date(TimeEntry.start_time) <= week_end
+                    TimeEntry.start_time >= week_start_dt,
+                    TimeEntry.start_time <= week_end_dt
                 )
             )
         )
@@ -565,8 +575,8 @@ class AIReportingService:
                         TimeEntry.user_id.in_(user_ids),
                         TimeEntry.task_id.isnot(None),
                         Task.status == "DONE",
-                        func.date(Task.updated_at) >= week_start,
-                        func.date(Task.updated_at) <= week_end
+                        Task.updated_at >= week_start_dt,
+                        Task.updated_at <= week_end_dt
                     )
                 )
             )
@@ -664,16 +674,21 @@ class AIReportingService:
         metrics["total_hours"] = round(total_seconds / 3600, 1)
         
         # This week vs last week
-        today = date.today()
-        week_start = today - timedelta(days=today.weekday())
+        now_utc = datetime.now(timezone.utc)
+        today_utc = now_utc.date()
+        week_start = today_utc - timedelta(days=today_utc.weekday())
         last_week_start = week_start - timedelta(days=7)
+        
+        # Convert to UTC datetimes for proper comparison
+        week_start_dt = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
+        last_week_start_dt = datetime.combine(last_week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
         
         this_week_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
             .where(
                 and_(
                     TimeEntry.project_id == project_id,
-                    func.date(TimeEntry.start_time) >= week_start
+                    TimeEntry.start_time >= week_start_dt
                 )
             )
         )
@@ -684,8 +699,8 @@ class AIReportingService:
             .where(
                 and_(
                     TimeEntry.project_id == project_id,
-                    func.date(TimeEntry.start_time) >= last_week_start,
-                    func.date(TimeEntry.start_time) < week_start
+                    TimeEntry.start_time >= last_week_start_dt,
+                    TimeEntry.start_time < week_start_dt
                 )
             )
         )
@@ -748,28 +763,31 @@ class AIReportingService:
             metrics["user_name"] = user.name
             metrics["expected_hours"] = user.expected_hours_per_week or 40
         
-        # Last 30 days hours
-        thirty_days_ago = date.today() - timedelta(days=30)
+        # Last 30 days hours - use UTC datetime for consistent timezone handling
+        now_utc = datetime.now(timezone.utc)
+        today_utc = now_utc.date()
+        thirty_days_ago = today_utc - timedelta(days=30)
+        thirty_days_ago_dt = datetime.combine(thirty_days_ago, datetime.min.time()).replace(tzinfo=timezone.utc)
         
         hours_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
             .where(
                 and_(
                     TimeEntry.user_id == user_id,
-                    func.date(TimeEntry.start_time) >= thirty_days_ago
+                    TimeEntry.start_time >= thirty_days_ago_dt
                 )
             )
         )
         total_seconds = hours_result.scalar() or 0
         metrics["total_hours_30d"] = round(total_seconds / 3600, 1)
         
-        # Daily average
+        # Daily average - count distinct days with entries
         daily_result = await self.db.execute(
             select(func.count(func.distinct(func.date(TimeEntry.start_time))))
             .where(
                 and_(
                     TimeEntry.user_id == user_id,
-                    func.date(TimeEntry.start_time) >= thirty_days_ago
+                    TimeEntry.start_time >= thirty_days_ago_dt
                 )
             )
         )
@@ -782,23 +800,25 @@ class AIReportingService:
             .where(
                 and_(
                     TimeEntry.user_id == user_id,
-                    func.date(TimeEntry.start_time) >= thirty_days_ago
+                    TimeEntry.start_time >= thirty_days_ago_dt
                 )
             )
         )
         metrics["active_projects"] = projects_result.scalar() or 0
         
         # Productivity trend (compare last 2 weeks)
-        two_weeks_ago = date.today() - timedelta(days=14)
-        one_week_ago = date.today() - timedelta(days=7)
+        two_weeks_ago = today_utc - timedelta(days=14)
+        one_week_ago = today_utc - timedelta(days=7)
+        two_weeks_ago_dt = datetime.combine(two_weeks_ago, datetime.min.time()).replace(tzinfo=timezone.utc)
+        one_week_ago_dt = datetime.combine(one_week_ago, datetime.min.time()).replace(tzinfo=timezone.utc)
         
         week1_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
             .where(
                 and_(
                     TimeEntry.user_id == user_id,
-                    func.date(TimeEntry.start_time) >= two_weeks_ago,
-                    func.date(TimeEntry.start_time) < one_week_ago
+                    TimeEntry.start_time >= two_weeks_ago_dt,
+                    TimeEntry.start_time < one_week_ago_dt
                 )
             )
         )
@@ -809,7 +829,7 @@ class AIReportingService:
             .where(
                 and_(
                     TimeEntry.user_id == user_id,
-                    func.date(TimeEntry.start_time) >= one_week_ago
+                    TimeEntry.start_time >= one_week_ago_dt
                 )
             )
         )
