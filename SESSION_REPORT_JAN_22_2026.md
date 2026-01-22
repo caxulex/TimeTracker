@@ -17,8 +17,9 @@
 | 2 | PDF Payslip Generation | 2-3 hrs | ✅ Complete |
 | 3 | Slack Notifications (webhook) | 1-2 hrs | ✅ Complete |
 | 4 | Email Delivery Dashboard | 2-3 hrs | ✅ Complete |
-| 5 | **Weekly Summary Bug Fix** | 30 min | ✅ Complete |
-| 6 | *(Optional)* Sentry Error Tracking | 1-2 hrs | ⬜ Skipped |
+| 5 | **Weekly Summary Bug Fix (Timezone)** | 30 min | ✅ Complete |
+| 6 | **Weekly Summary Bug Fix (Running Timers)** | 30 min | ✅ Complete |
+| 7 | *(Optional)* Sentry Error Tracking | 1-2 hrs | ⬜ Skipped |
 
 ---
 
@@ -127,11 +128,11 @@ GET /api/admin/email-logs/{id}       # Get specific log entry
 
 ---
 
-### ✅ Task 5: Weekly Summary Bug Fix
+### ✅ Task 5: Weekly Summary Bug Fix (Part 1 - Timezone)
 
 **Problem:** Weekly Summary panel showed 0.0h Total Hours when the admin user had logged time this week.
 
-**Root Cause:** Timezone mismatch in date comparison:
+**Root Cause #1:** Timezone mismatch in date comparison:
 - Time entries are stored in **UTC** (`datetime.now(timezone.utc)`)
 - Week boundaries were calculated using **local time** (`date.today()`)
 - SQL queries used `func.date(TimeEntry.start_time)` comparing UTC timestamps to local dates
@@ -152,15 +153,59 @@ week_start_dt = datetime.combine(week_start, datetime.min.time()).replace(tzinfo
 # Query: TimeEntry.start_time >= week_start_dt
 ```
 
+**Assessment Document:** `WEEKLY_SUMMARY_BUG_ASSESSMENT.md`
+
+---
+
+### ✅ Task 6: Weekly Summary Bug Fix (Part 2 - Running Timers & Multi-day Entries)
+
+**Problem:** Weekly Summary still showed 0 hours because:
+1. Running timers were completely excluded (`is_running == False` filter)
+2. Multi-day entries weren't handled (e.g., timer left running for several days)
+3. Entries that started before the week but overlapped weren't counted
+
+**Root Cause #2:** Query and calculation logic differences from working Dashboard:
+| Issue | Weekly Summary (Broken) | Dashboard (Working) |
+|-------|------------------------|---------------------|
+| Running timers | `is_running == False` - excluded | Included with `now` as end time |
+| Multi-day entries | Count entire duration | Count only overlap with period |
+| Entry filter | `start_time >= week_start` | Overlap query including running |
+
+**Solution:** Match dashboard logic with overlap calculation:
+```python
+# Added helper method for overlap calculation:
+def _calculate_entry_duration_for_period(self, entry, period_start, period_end, now):
+    # For running timers: use 'now' as end time
+    # Calculate overlap between entry and period
+    # Return only seconds within the period
+
+# Fixed query to include overlapping entries:
+entries_result = await self.db.execute(
+    select(TimeEntry)
+    .where(
+        and_(
+            TimeEntry.user_id.in_(user_ids),
+            TimeEntry.start_time < week_end_dt,  # Started before week ends
+            or_(
+                TimeEntry.end_time >= week_start_dt,  # Ended after week started
+                TimeEntry.end_time.is_(None)  # OR still running
+            )
+        )
+    )
+)
+
+# Calculate with overlap:
+total_seconds = sum(
+    self._calculate_entry_duration_for_period(e, week_start_dt, week_end_dt, now_utc)
+    for e in entries
+)
+```
+
 **Files Modified:**
 - `backend/app/ai/services/reporting_service.py`
-  - Added `timezone` import
-  - `generate_weekly_summary()` - Fixed week boundary calculation
-  - `_gather_weekly_metrics()` - Fixed all date queries
-  - `_gather_project_metrics()` - Fixed week comparison queries
-  - `_gather_user_metrics()` - Fixed 30-day and weekly queries
-
-**Assessment Document:** `WEEKLY_SUMMARY_BUG_ASSESSMENT.md`
+  - Added `_calculate_entry_duration_for_period()` helper method
+  - Fixed `_gather_weekly_metrics()` - proper overlap queries for this week, last week, and projects
+  - Now handles: running timers, multi-day entries, entries starting before period
 
 ---
 

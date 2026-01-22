@@ -450,6 +450,41 @@ class AIReportingService:
     # DATA GATHERING
     # ============================================
     
+    def _calculate_entry_duration_for_period(
+        self,
+        entry,
+        period_start: datetime,
+        period_end: datetime,
+        now: datetime
+    ) -> int:
+        """
+        Calculate duration of a time entry that overlaps with a specific period.
+        Handles entries that span multiple days by only counting time within the period.
+        Also handles running timers by using 'now' as the end time.
+        """
+        # Get entry start time with timezone
+        entry_start = entry.start_time
+        if entry_start.tzinfo is None:
+            entry_start = entry_start.replace(tzinfo=timezone.utc)
+        
+        # Get entry end time (or now for running timers)
+        if entry.end_time is None:
+            entry_end = now
+        else:
+            entry_end = entry.end_time
+            if entry_end.tzinfo is None:
+                entry_end = entry_end.replace(tzinfo=timezone.utc)
+        
+        # Calculate overlap between entry and period
+        overlap_start = max(entry_start, period_start)
+        overlap_end = min(entry_end, period_end)
+        
+        # If no overlap, return 0
+        if overlap_start >= overlap_end:
+            return 0
+        
+        return int((overlap_end - overlap_start).total_seconds())
+    
     async def _gather_weekly_metrics(
         self,
         user_id: int,
@@ -486,34 +521,33 @@ class AIReportingService:
         
         metrics["user_count"] = len(user_ids)
         
-        # Calculate duration: use duration_seconds if set, otherwise calculate from end_time - start_time
-        # For PostgreSQL: extract(epoch from (end_time - start_time))
-        duration_expr = func.coalesce(
-            TimeEntry.duration_seconds,
-            extract('epoch', TimeEntry.end_time - TimeEntry.start_time)
-        )
+        # Current time for calculating running timer durations
+        now_utc = datetime.now(timezone.utc)
         
-        # Total hours this week - fetch all entries and calculate in Python for reliability
-        # Use direct datetime comparison for proper timezone handling (entries are stored in UTC)
+        # Total hours this week - fetch entries that OVERLAP with this week
+        # This includes: entries that started this week, entries from before still running,
+        # and entries that span multiple days
+        # Query: started before week ends AND (ended after week starts OR still running)
         entries_result = await self.db.execute(
             select(TimeEntry)
             .where(
                 and_(
                     TimeEntry.user_id.in_(user_ids),
-                    TimeEntry.start_time >= week_start_dt,
-                    TimeEntry.start_time <= week_end_dt,
-                    TimeEntry.is_running == False  # Only completed entries
+                    TimeEntry.start_time < week_end_dt,  # Started before week ends
+                    or_(
+                        TimeEntry.end_time >= week_start_dt,  # Ended after week started
+                        TimeEntry.end_time.is_(None)  # OR still running
+                    )
                 )
             )
         )
         entries = entries_result.scalars().all()
         
-        total_seconds = 0
-        for entry in entries:
-            if entry.duration_seconds:
-                total_seconds += entry.duration_seconds
-            elif entry.end_time and entry.start_time:
-                total_seconds += int((entry.end_time - entry.start_time).total_seconds())
+        # Calculate only the portion that falls within this week
+        total_seconds = sum(
+            self._calculate_entry_duration_for_period(e, week_start_dt, week_end_dt, now_utc)
+            for e in entries
+        )
         
         metrics["total_hours"] = round(total_seconds / 3600, 1)
         
@@ -523,25 +557,27 @@ class AIReportingService:
         last_week_start_dt = datetime.combine(last_week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
         last_week_end_dt = datetime.combine(last_week_end, datetime.max.time()).replace(tzinfo=timezone.utc)
         
+        # Fetch entries that overlapped with last week (same logic as this week)
         last_entries_result = await self.db.execute(
             select(TimeEntry)
             .where(
                 and_(
                     TimeEntry.user_id.in_(user_ids),
-                    TimeEntry.start_time >= last_week_start_dt,
-                    TimeEntry.start_time <= last_week_end_dt,
-                    TimeEntry.is_running == False
+                    TimeEntry.start_time < last_week_end_dt,
+                    or_(
+                        TimeEntry.end_time >= last_week_start_dt,
+                        TimeEntry.end_time.is_(None)
+                    )
                 )
             )
         )
         last_entries = last_entries_result.scalars().all()
         
-        last_week_seconds = 0
-        for entry in last_entries:
-            if entry.duration_seconds:
-                last_week_seconds += entry.duration_seconds
-            elif entry.end_time and entry.start_time:
-                last_week_seconds += int((entry.end_time - entry.start_time).total_seconds())
+        # Calculate only the portion that fell within last week
+        last_week_seconds = sum(
+            self._calculate_entry_duration_for_period(e, last_week_start_dt, last_week_end_dt, now_utc)
+            for e in last_entries
+        )
         
         metrics["last_week_hours"] = round(last_week_seconds / 3600, 1)
         
@@ -551,14 +587,17 @@ class AIReportingService:
         else:
             metrics["hours_change_pct"] = 0 if total_seconds == 0 else 100
         
-        # Projects worked on
+        # Projects worked on (count from entries that overlap with this week)
         projects_result = await self.db.execute(
             select(func.count(func.distinct(TimeEntry.project_id)))
             .where(
                 and_(
                     TimeEntry.user_id.in_(user_ids),
-                    TimeEntry.start_time >= week_start_dt,
-                    TimeEntry.start_time <= week_end_dt
+                    TimeEntry.start_time < week_end_dt,
+                    or_(
+                        TimeEntry.end_time >= week_start_dt,
+                        TimeEntry.end_time.is_(None)
+                    )
                 )
             )
         )
