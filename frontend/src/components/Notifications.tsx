@@ -1,10 +1,54 @@
 // ============================================
 // TIME TRACKER - NOTIFICATIONS SYSTEM
 // TASK-021: Create notification system
+// Enhanced with backend API integration
 // ============================================
-import React, { useContext, useState, useCallback } from 'react';
+import React, { useContext, useState, useCallback, useEffect } from 'react';
 import { NotificationContext, NotificationContextType, Notification, NotificationType } from '../contexts/NotificationContext';
+import { useWebSocketContext } from '../contexts/WebSocketContext';
+import { useAuthStore } from '../stores/authStore';
+import * as notificationsApi from '../api/notifications';
+import type { BackendNotification } from '../api/notifications';
 import { cn } from '../utils/helpers';
+
+// Internal hook - not exported to avoid Fast Refresh warning
+function useNotificationsInternal() {
+  const context = useContext(NotificationContext);
+  if (!context) {
+    throw new Error('useNotifications must be used within a NotificationProvider');
+  }
+  return context;
+}
+
+// Convert backend notification to frontend format
+function toFrontendNotification(bn: BackendNotification): Notification {
+  const typeMap: Record<string, NotificationType> = {
+    info: 'info',
+    success: 'success',
+    warning: 'warning',
+    error: 'error',
+    timer_reminder: 'warning',
+    approval_request: 'info',
+    approval_response: 'info',
+    team_update: 'info',
+    payroll: 'info',
+    system: 'info',
+  };
+  
+  return {
+    id: `backend-${bn.id}`,
+    type: typeMap[bn.type] || 'info',
+    title: bn.title,
+    message: bn.message,
+    duration: -1, // Persistent notification
+    action: bn.link ? {
+      label: 'View',
+      onClick: () => {
+        window.location.href = bn.link!;
+      }
+    } : undefined
+  };
+}
 
 // Internal hook - not exported to avoid Fast Refresh warning
 function useNotificationsInternal() {
@@ -20,6 +64,60 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [toastNotifications, setToastNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [backendNotifications, setBackendNotifications] = useState<BackendNotification[]>([]);
+  const { isAuthenticated } = useAuthStore();
+
+  // Fetch notifications from backend on mount
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    
+    const fetchNotifications = async () => {
+      try {
+        const response = await notificationsApi.getNotifications({ page_size: 50 });
+        setBackendNotifications(response.items);
+        setUnreadCount(response.unread_count);
+        
+        // Convert to frontend format and add to notifications
+        const frontendNotifs = response.items.map(toFrontendNotification);
+        setNotifications(frontendNotifs);
+      } catch (error) {
+        console.error('Failed to fetch notifications:', error);
+      }
+    };
+    
+    fetchNotifications();
+    
+    // Poll for new notifications every 60 seconds
+    const interval = setInterval(fetchNotifications, 60000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated]);
+
+  // Handle incoming WebSocket notifications
+  const handleWebSocketNotification = useCallback((data: BackendNotification) => {
+    const frontendNotif = toFrontendNotification(data);
+    
+    // Add to persistent notifications
+    setBackendNotifications(prev => [data, ...prev]);
+    setNotifications(prev => [frontendNotif, ...prev]);
+    setUnreadCount(prev => prev + 1);
+    
+    // Show toast
+    const toastNotif = { ...frontendNotif, id: `toast-${Date.now()}`, duration: 5000 };
+    setToastNotifications(prev => [toastNotif, ...prev]);
+    
+    setTimeout(() => {
+      setToastNotifications(prev => prev.filter(n => n.id !== toastNotif.id));
+    }, 5000);
+  }, []);
+
+  // Expose handler for WebSocket context
+  useEffect(() => {
+    // This will be called by the WebSocket context when a notification message arrives
+    (window as any).__handleIncomingNotification = handleWebSocketNotification;
+    return () => {
+      delete (window as any).__handleIncomingNotification;
+    };
+  }, [handleWebSocketNotification]);
 
   const addNotification = useCallback((notification: Omit<Notification, 'id'>) => {
     const id = Math.random().toString(36).substr(2, 9);
@@ -44,16 +142,41 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const removeNotification = useCallback((id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
     setToastNotifications(prev => prev.filter(n => n.id !== id));
+    
+    // If it's a backend notification, delete it
+    if (id.startsWith('backend-')) {
+      const backendId = parseInt(id.replace('backend-', ''), 10);
+      if (!isNaN(backendId)) {
+        notificationsApi.deleteNotifications([backendId]).catch(console.error);
+        setBackendNotifications(prev => prev.filter(n => n.id !== backendId));
+      }
+    }
   }, []);
 
-  const clearAll = useCallback(() => {
+  const clearAll = useCallback(async () => {
     setNotifications([]);
     setToastNotifications([]);
     setUnreadCount(0);
+    
+    // Delete all read backend notifications
+    try {
+      await notificationsApi.deleteNotifications();
+      setBackendNotifications([]);
+    } catch (error) {
+      console.error('Failed to clear notifications:', error);
+    }
   }, []);
 
-  const markAllRead = useCallback(() => {
+  const markAllRead = useCallback(async () => {
     setUnreadCount(0);
+    
+    // Mark all backend notifications as read
+    try {
+      await notificationsApi.markNotificationsRead();
+      setBackendNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+    } catch (error) {
+      console.error('Failed to mark notifications as read:', error);
+    }
   }, []);
 
   return (

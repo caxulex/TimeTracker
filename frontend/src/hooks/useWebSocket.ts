@@ -153,6 +153,12 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
               // These events will trigger query invalidation in the consuming component
               console.log('Received update:', message.type, message.data);
               break;
+            case 'notification':
+              // Handle incoming notifications from backend
+              if (message.data && (window as any).__handleIncomingNotification) {
+                (window as any).__handleIncomingNotification(message.data);
+              }
+              break;
           }
           
           onMessage?.(message);

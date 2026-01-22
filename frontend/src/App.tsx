@@ -53,6 +53,7 @@ const AccountRequestsPage = lazy(() => import('./pages/AccountRequestsPage').the
 const AdminReportsPage = lazy(() => import('./pages/AdminReportsPage'));
 const UserDetailPage = lazy(() => import('./pages/UserDetailPage'));
 const EmailLogsPage = lazy(() => import('./pages/EmailLogsPage').then(m => ({ default: m.EmailLogsPage })));
+const AuditLogsPage = lazy(() => import('./pages/AuditLogsPage').then(m => ({ default: m.AuditLogsPage })));
 
 // Payroll pages - lazy loaded (separate chunk)
 const PayRatesPage = lazy(() => import('./pages/PayRatesPage').then(m => ({ default: m.PayRatesPage })));
@@ -358,6 +359,16 @@ function App() {
               element={
                 <AdminRoute>
                   <EmailLogsPage />
+                </AdminRoute>
+              }
+            />
+            
+            {/* Audit Logs (Admin only) */}
+            <Route
+              path="/admin/audit-logs"
+              element={
+                <AdminRoute>
+                  <AuditLogsPage />
                 </AdminRoute>
               }
             />

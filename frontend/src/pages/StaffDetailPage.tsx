@@ -560,6 +560,22 @@ export function StaffDetailPage() {
                 </div>
               </div>
             </Card>
+
+            {/* Performance Chart - Weekly Hours */}
+            <Card>
+              <CardHeader title="Weekly Hours Trend" />
+              <div className="p-6">
+                <WeeklyHoursChart timeEntries={timeEntries?.items || []} expectedHours={staff.expected_hours_per_week || 40} />
+              </div>
+            </Card>
+
+            {/* Recent Activity Timeline */}
+            <Card>
+              <CardHeader title="Recent Activity" />
+              <div className="p-6">
+                <RecentActivityTimeline timeEntries={timeEntries?.items?.slice(0, 10) || []} />
+              </div>
+            </Card>
           </>
         )}
 
@@ -998,3 +1014,199 @@ export function StaffDetailPage() {
   );
 }
 
+// ============================================
+// HELPER COMPONENTS
+// ============================================
+
+interface WeeklyHoursChartProps {
+  timeEntries: TimeEntry[];
+  expectedHours: number;
+}
+
+function WeeklyHoursChart({ timeEntries, expectedHours }: WeeklyHoursChartProps) {
+  // Calculate weekly hours for the last 8 weeks
+  const getWeeklyData = () => {
+    const weeks: { week: string; hours: number; expected: number }[] = [];
+    const now = new Date();
+    
+    for (let i = 7; i >= 0; i--) {
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - (i * 7) - now.getDay());
+      weekStart.setHours(0, 0, 0, 0);
+      
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 7);
+      
+      const weekHours = timeEntries
+        .filter(entry => {
+          const entryDate = new Date(entry.start_time);
+          return entryDate >= weekStart && entryDate < weekEnd;
+        })
+        .reduce((sum, entry) => sum + (entry.duration_seconds / 3600), 0);
+      
+      weeks.push({
+        week: weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        hours: Math.round(weekHours * 10) / 10,
+        expected: expectedHours,
+      });
+    }
+    
+    return weeks;
+  };
+
+  const data = getWeeklyData();
+  const maxHours = Math.max(...data.map(d => d.hours), expectedHours) || expectedHours;
+
+  return (
+    <div className="space-y-4">
+      {/* Bar Chart */}
+      <div className="flex items-end justify-between gap-2 h-48">
+        {data.map((week, index) => (
+          <div key={index} className="flex-1 flex flex-col items-center gap-1">
+            <div className="relative w-full flex justify-center" style={{ height: '180px' }}>
+              {/* Expected hours indicator line */}
+              <div 
+                className="absolute w-full border-t-2 border-dashed border-gray-300"
+                style={{ bottom: `${(expectedHours / maxHours) * 100}%` }}
+              />
+              {/* Actual hours bar */}
+              <div
+                className={`w-8 rounded-t transition-all ${
+                  week.hours >= expectedHours 
+                    ? 'bg-green-500' 
+                    : week.hours >= expectedHours * 0.8 
+                    ? 'bg-yellow-500' 
+                    : 'bg-red-500'
+                }`}
+                style={{ 
+                  height: `${Math.min((week.hours / maxHours) * 100, 100)}%`,
+                  minHeight: week.hours > 0 ? '4px' : '0'
+                }}
+              />
+            </div>
+            <span className="text-xs text-gray-500 text-center">{week.week}</span>
+            <span className="text-xs font-semibold text-gray-700">{week.hours}h</span>
+          </div>
+        ))}
+      </div>
+      
+      {/* Legend */}
+      <div className="flex items-center justify-center gap-6 text-sm">
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 bg-green-500 rounded" />
+          <span className="text-gray-600">Met Target</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 bg-yellow-500 rounded" />
+          <span className="text-gray-600">Near Target</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 bg-red-500 rounded" />
+          <span className="text-gray-600">Below Target</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-8 border-t-2 border-dashed border-gray-300" />
+          <span className="text-gray-600">Expected ({expectedHours}h)</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface RecentActivityTimelineProps {
+  timeEntries: TimeEntry[];
+}
+
+function RecentActivityTimeline({ timeEntries }: RecentActivityTimelineProps) {
+  if (timeEntries.length === 0) {
+    return (
+      <div className="text-center py-8 text-gray-500">
+        <svg className="w-12 h-12 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <p>No recent activity</p>
+      </div>
+    );
+  }
+
+  const formatTime = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    }
+    return `${minutes}m`;
+  };
+
+  const formatDateTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    const isToday = date.toDateString() === today.toDateString();
+    const isYesterday = date.toDateString() === yesterday.toDateString();
+    
+    if (isToday) {
+      return `Today at ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+    } else if (isYesterday) {
+      return `Yesterday at ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+    }
+    return date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      {timeEntries.map((entry, index) => (
+        <div key={entry.id} className="flex gap-4">
+          {/* Timeline connector */}
+          <div className="flex flex-col items-center">
+            <div className={`w-3 h-3 rounded-full ${entry.is_running ? 'bg-green-500 animate-pulse' : 'bg-blue-500'}`} />
+            {index < timeEntries.length - 1 && (
+              <div className="w-0.5 flex-1 bg-gray-200 mt-1" />
+            )}
+          </div>
+          
+          {/* Entry details */}
+          <div className="flex-1 pb-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="font-medium text-gray-900">
+                  {entry.project_name || 'No Project'}
+                  {entry.task_name && <span className="text-gray-500"> / {entry.task_name}</span>}
+                </p>
+                {entry.description && (
+                  <p className="text-sm text-gray-600 mt-1">{entry.description}</p>
+                )}
+                <p className="text-xs text-gray-400 mt-1">
+                  {formatDateTime(entry.start_time)}
+                </p>
+              </div>
+              <div className="text-right">
+                <span className={`inline-flex items-center px-2 py-1 text-xs font-medium rounded-full ${
+                  entry.is_running 
+                    ? 'bg-green-100 text-green-800' 
+                    : 'bg-gray-100 text-gray-800'
+                }`}>
+                  {entry.is_running ? (
+                    <>
+                      <span className="w-2 h-2 bg-green-500 rounded-full mr-1 animate-pulse" />
+                      Running
+                    </>
+                  ) : (
+                    formatTime(entry.duration_seconds)
+                  )}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}

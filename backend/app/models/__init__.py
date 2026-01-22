@@ -239,6 +239,7 @@ class User(Base):
     pay_rates: Mapped[list["PayRate"]] = relationship("PayRate", back_populates="user", foreign_keys="PayRate.user_id")
     payroll_entries: Mapped[list["PayrollEntry"]] = relationship("PayrollEntry", back_populates="user")
     manager: Mapped[Optional["User"]] = relationship("User", remote_side=[id], foreign_keys=[manager_id])
+    notifications: Mapped[list["Notification"]] = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, email={self.email}, role={self.role}, company_id={self.company_id})>"
@@ -798,3 +799,65 @@ class EmailLog(Base):
 
     def __repr__(self) -> str:
         return f"<EmailLog(id={self.id}, to={self.to_email}, type={self.email_type}, status={self.status})>"
+
+
+# ============================================
+# IN-APP NOTIFICATION MODEL
+# ============================================
+
+class NotificationType(str, enum.Enum):
+    """Notification type enumeration"""
+    INFO = "info"
+    SUCCESS = "success"
+    WARNING = "warning"
+    ERROR = "error"
+    TIMER_REMINDER = "timer_reminder"
+    APPROVAL_REQUEST = "approval_request"
+    APPROVAL_RESPONSE = "approval_response"
+    TEAM_UPDATE = "team_update"
+    PAYROLL = "payroll"
+    SYSTEM = "system"
+
+
+class Notification(Base):
+    """
+    In-app notifications for users.
+    Supports real-time delivery via WebSocket and persistent storage.
+    """
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True)
+    
+    # Notification content
+    type: Mapped[str] = mapped_column(String(50), default="info", nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    
+    # Link to related entity (optional)
+    link: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    entity_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # time_entry, approval, payroll, etc.
+    entity_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    
+    # Status
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    # Extra data (for custom notification content)
+    metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="notifications")
+
+    __table_args__ = (
+        Index("ix_notification_user_read", "user_id", "is_read"),
+        Index("ix_notification_user_created", "user_id", "created_at"),
+        Index("ix_notification_company_created", "company_id", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Notification(id={self.id}, user_id={self.user_id}, type={self.type}, read={self.is_read})>"
