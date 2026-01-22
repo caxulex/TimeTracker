@@ -1177,8 +1177,8 @@ function RecentActivityTimeline({ timeEntries }: RecentActivityTimelineProps) {
             <div className="flex items-start justify-between">
               <div>
                 <p className="font-medium text-gray-900">
-                  {entry.project_name || 'No Project'}
-                  {entry.task_name && <span className="text-gray-500"> / {entry.task_name}</span>}
+                  {entry.project?.name || 'No Project'}
+                  {entry.task?.name && <span className="text-gray-500"> / {entry.task.name}</span>}
                 </p>
                 {entry.description && (
                   <p className="text-sm text-gray-600 mt-1">{entry.description}</p>
