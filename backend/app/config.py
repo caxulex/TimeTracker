@@ -94,6 +94,9 @@ class Settings(BaseSettings):
     SMTP_FROM_EMAIL: Optional[str] = None  # Defaults to SMTP_USERNAME if not set
     SMTP_FROM_NAME: str = "Time Tracker"   # Display name for email sender
     SMTP_USE_TLS: bool = True
+    
+    # Slack Integration
+    SLACK_WEBHOOK_URL: Optional[str] = None  # Webhook URL for Slack notifications
 
     # Admin - SEC-012: No default credentials
     FIRST_SUPER_ADMIN_EMAIL: str = ""
@@ -118,6 +121,10 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"
+    
+    # Slow Query Logging
+    SLOW_QUERY_THRESHOLD_MS: int = 500  # Log queries taking longer than this (milliseconds)
+    ENABLE_QUERY_LOGGING: bool = True
 
     # File Upload
     UPLOAD_DIR: str = "uploads/"

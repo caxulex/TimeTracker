@@ -2,6 +2,7 @@
 API Router for Payroll Periods management
 """
 
+import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,10 @@ from app.services.payroll_service import (
     PayrollEntryService,
     PayrollAdjustmentService,
     PayRateService
+)
+from app.services.slack_service import slack_service
+
+logger = logging.getLogger(__name__)
 )
 
 
@@ -227,6 +232,19 @@ async def process_payroll_period(
             detail=result.get("message", "Failed to process payroll period")
         )
     
+    # Send Slack notification for payroll processed
+    try:
+        await slack_service.send_payroll_notification(
+            event_type="processed",
+            period_name=result.name,
+            period_start=result.start_date,
+            period_end=result.end_date,
+            total_amount=result.total_amount,
+            employee_count=result.entry_count if hasattr(result, 'entry_count') else None
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send Slack notification for payroll processed: {e}")
+    
     return result
 
 
@@ -249,6 +267,18 @@ async def approve_payroll_period(
             detail="Cannot approve period. Make sure it exists and is in draft/processing status."
         )
     
+    # Send Slack notification for payroll approved
+    try:
+        await slack_service.send_payroll_notification(
+            event_type="approved",
+            period_name=period.name,
+            period_start=period.start_date,
+            period_end=period.end_date,
+            total_amount=period.total_amount
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send Slack notification for payroll approved: {e}")
+    
     return period
 
 
@@ -270,6 +300,18 @@ async def mark_period_as_paid(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot mark period as paid. Make sure it exists and is approved."
         )
+    
+    # Send Slack notification for payroll paid
+    try:
+        await slack_service.send_payroll_notification(
+            event_type="paid",
+            period_name=period.name,
+            period_start=period.start_date,
+            period_end=period.end_date,
+            total_amount=period.total_amount
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send Slack notification for payroll paid: {e}")
     
     return period
 

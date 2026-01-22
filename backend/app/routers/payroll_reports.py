@@ -232,6 +232,168 @@ async def get_my_payroll_report(
     return reports
 
 
+@router.get("/payslip/pdf/{user_id}/{period_id}")
+async def generate_payslip_pdf(
+    user_id: int,
+    period_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Generate a PDF payslip for a specific user and period.
+    Users can download their own payslip, admins can download anyone's.
+    """
+    from app.services.payslip_pdf_service import payslip_generator
+    from app.models import PayrollPeriod, Company
+    from sqlalchemy import select
+    
+    # Permission check
+    if current_user.role not in ["super_admin", "admin", "company_admin"] and current_user.id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Can only download your own payslip"
+        )
+    
+    service = PayrollReportService(db)
+    reports = await service.get_user_payroll_report(user_id, period_id)
+    
+    if not reports:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payroll entry not found for this user and period"
+        )
+    
+    report = reports[0]
+    
+    # Get company info for the payslip header
+    company_name = "Time Tracker"
+    company_address = None
+    if current_user.company_id:
+        stmt = select(Company).where(Company.id == current_user.company_id)
+        result = await db.execute(stmt)
+        company = result.scalar_one_or_none()
+        if company:
+            company_name = company.name
+            # Use custom domain or build address from available info
+            company_address = getattr(company, 'address', None)
+    
+    # Convert adjustments to dict format
+    adjustments = [
+        {
+            'adjustment_type': adj.adjustment_type,
+            'description': adj.description,
+            'amount': adj.amount
+        }
+        for adj in report.adjustments
+    ]
+    
+    # Generate PDF
+    pdf_bytes = payslip_generator.generate_payslip(
+        employee_name=report.user_name,
+        employee_email=report.user_email,
+        employee_id=report.user_id,
+        period_name=report.period_name,
+        period_start=report.start_date,
+        period_end=report.end_date,
+        regular_hours=report.regular_hours,
+        overtime_hours=report.overtime_hours,
+        regular_rate=report.regular_rate,
+        overtime_rate=report.overtime_rate,
+        gross_amount=report.gross_amount,
+        adjustments=adjustments,
+        adjustments_total=report.adjustments_total,
+        net_amount=report.net_amount,
+        company_name=company_name,
+        company_address=company_address,
+    )
+    
+    filename = f"payslip_{report.user_name.replace(' ', '_')}_{report.period_name.replace(' ', '_')}.pdf"
+    
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}"
+        }
+    )
+
+
+@router.get("/my-payslip/pdf/{period_id}")
+async def download_my_payslip_pdf(
+    period_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Download current user's own payslip as PDF.
+    Available to all authenticated users.
+    """
+    from app.services.payslip_pdf_service import payslip_generator
+    from app.models import Company
+    from sqlalchemy import select
+    
+    service = PayrollReportService(db)
+    reports = await service.get_user_payroll_report(current_user.id, period_id)
+    
+    if not reports:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No payroll entry found for this period"
+        )
+    
+    report = reports[0]
+    
+    # Get company info
+    company_name = "Time Tracker"
+    company_address = None
+    if current_user.company_id:
+        stmt = select(Company).where(Company.id == current_user.company_id)
+        result = await db.execute(stmt)
+        company = result.scalar_one_or_none()
+        if company:
+            company_name = company.name
+    
+    # Convert adjustments
+    adjustments = [
+        {
+            'adjustment_type': adj.adjustment_type,
+            'description': adj.description,
+            'amount': adj.amount
+        }
+        for adj in report.adjustments
+    ]
+    
+    # Generate PDF
+    pdf_bytes = payslip_generator.generate_payslip(
+        employee_name=report.user_name,
+        employee_email=report.user_email,
+        employee_id=report.user_id,
+        period_name=report.period_name,
+        period_start=report.start_date,
+        period_end=report.end_date,
+        regular_hours=report.regular_hours,
+        overtime_hours=report.overtime_hours,
+        regular_rate=report.regular_rate,
+        overtime_rate=report.overtime_rate,
+        gross_amount=report.gross_amount,
+        adjustments=adjustments,
+        adjustments_total=report.adjustments_total,
+        net_amount=report.net_amount,
+        company_name=company_name,
+        company_address=company_address,
+    )
+    
+    filename = f"payslip_{report.period_name.replace(' ', '_')}.pdf"
+    
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}"
+        }
+    )
+
+
 
 
 

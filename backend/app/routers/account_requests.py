@@ -22,6 +22,7 @@ from app.utils.sanitize import sanitize_string, get_client_ip
 from app.middleware.rate_limit import rate_limiter
 from app.services.audit_logger import AuditLogger, AuditAction
 from app.services.email_service import email_service
+from app.services.slack_service import slack_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -119,6 +120,17 @@ async def submit_account_request(
                 logger.warning(f"Failed to send notification to {admin_email}: {e}")
     except Exception as e:
         logger.warning(f"Failed to notify admins of new account request: {e}")
+    
+    # Send Slack notification for new account request
+    try:
+        await slack_service.send_user_notification(
+            event_type="request",
+            user_name=account_request.name,
+            user_email=account_request.email,
+            details=f"Job: {account_request.job_title or 'N/A'}, Dept: {account_request.department or 'N/A'}"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send Slack notification for new request: {e}")
     
     return account_request
 
@@ -282,6 +294,17 @@ async def approve_account_request(
     await db.commit()
     await db.refresh(account_request)
     
+    # Send Slack notification (non-blocking)
+    try:
+        await slack_service.send_user_notification(
+            event_type="approved",
+            user_name=account_request.name,
+            user_email=account_request.email,
+            details=f"Approved by {current_user.name}"
+        )
+    except Exception as e:
+        logger.debug(f"Slack notification skipped: {e}")
+    
     # Return pre-filled data for staff creation wizard
     return {
         "request_id": account_request.id,
@@ -359,6 +382,17 @@ async def reject_account_request(
         account_request.email_notification_sent = False
         account_request.email_error = str(e)[:500]
         logger.warning(f"Failed to send rejection email to {account_request.email}: {e}")
+    
+    # Send Slack notification for rejection
+    try:
+        await slack_service.send_user_notification(
+            event_type="rejected",
+            user_name=account_request.name,
+            user_email=account_request.email,
+            details=f"Rejected by {current_user.name}. Reason: {decision.admin_notes or 'Not specified'}"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send Slack notification for rejection: {e}")
     
     await db.commit()
     await db.refresh(account_request)

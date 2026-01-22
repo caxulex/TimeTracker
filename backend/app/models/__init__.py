@@ -748,3 +748,53 @@ class ProjectBudgetHistory(Base):
     def __repr__(self) -> str:
         return f"<ProjectBudgetHistory(project_id={self.project_id}, changed_at={self.changed_at})>"
 
+
+# ============================================
+# EMAIL LOG MODEL
+# ============================================
+
+class EmailStatus(str, enum.Enum):
+    """Email status enumeration"""
+    PENDING = "pending"
+    SENT = "sent"
+    DELIVERED = "delivered"
+    FAILED = "failed"
+    BOUNCED = "bounced"
+
+
+class EmailLog(Base):
+    """
+    Tracks all emails sent from the system for delivery monitoring.
+    Provides visibility into email delivery status and errors.
+    """
+    __tablename__ = "email_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    company_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("companies.id", ondelete="SET NULL"), nullable=True, index=True)
+    
+    # Email details
+    to_email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    from_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    subject: Mapped[str] = mapped_column(String(500), nullable=False)
+    email_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)  # welcome, password_reset, notification, etc.
+    
+    # Status tracking
+    status: Mapped[str] = mapped_column(String(50), default="pending", nullable=False, index=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    # Metadata
+    metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
+    __table_args__ = (
+        Index("ix_email_log_company_date", "company_id", "created_at"),
+        Index("ix_email_log_status_date", "status", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<EmailLog(id={self.id}, to={self.to_email}, type={self.email_type}, status={self.status})>"

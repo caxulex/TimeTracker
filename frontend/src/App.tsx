@@ -52,6 +52,7 @@ const StaffDetailPage = lazy(() => import('./pages/StaffDetailPage').then(m => (
 const AccountRequestsPage = lazy(() => import('./pages/AccountRequestsPage').then(m => ({ default: m.AccountRequestsPage })));
 const AdminReportsPage = lazy(() => import('./pages/AdminReportsPage'));
 const UserDetailPage = lazy(() => import('./pages/UserDetailPage'));
+const EmailLogsPage = lazy(() => import('./pages/EmailLogsPage').then(m => ({ default: m.EmailLogsPage })));
 
 // Payroll pages - lazy loaded (separate chunk)
 const PayRatesPage = lazy(() => import('./pages/PayRatesPage').then(m => ({ default: m.PayRatesPage })));
@@ -350,6 +351,17 @@ function App() {
                 </AdminRoute>
               }
             />
+            
+            {/* Email Logs (Admin only) */}
+            <Route
+              path="/admin/email-logs"
+              element={
+                <AdminRoute>
+                  <EmailLogsPage />
+                </AdminRoute>
+              }
+            />
+            
             <Route
               path="/staff/:id"
               element={
