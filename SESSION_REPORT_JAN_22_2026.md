@@ -303,66 +303,202 @@ SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
 
 ---
 
-## 📊 REMAINING DEVELOPMENT WORK
+## � MASTER TODO LIST (Future Sessions)
 
-Based on FULL_ASSESSMENT.md, here's what's left to build:
+### 🔴 HIGH PRIORITY
 
-### 🔴 HIGH PRIORITY (Should Do)
+#### TODO 1: WebSocket Real-Time Features
+**Effort:** 10-12 hours  
+**Status:** ⬜ Not Started
 
-| Feature | Effort | Status |
-|---------|--------|--------|
-| WebSocket Real-Time Features | 10-12 hrs | ⬜ Not Started |
-| Token Blacklist on Logout | 4-6 hrs | ⬜ Not Started |
-| Password Strength Enforcement | 2-3 hrs | ⬜ Not Started |
-| Team Delete Cascade Fix | 2 hrs | ⬜ Not Started |
+**Backend Tasks:**
+- [ ] Complete `backend/app/websocket/router.py` (currently placeholder)
+- [ ] Create WebSocket connection manager class
+- [ ] Implement JWT authentication for WebSocket connections
+- [ ] Create connection pool tracking (user_id → connections)
+- [ ] Implement broadcast system for notifications
+- [ ] Add online/offline user tracking
+- [ ] Add heartbeat/ping-pong for connection health
+- [ ] Create activity feed event types
 
-### 🟡 MEDIUM PRIORITY (Nice to Have)
+**Frontend Tasks:**
+- [ ] Create `frontend/src/hooks/useWebSocket.ts`
+- [ ] Implement connection management with auto-reconnect
+- [ ] Create event listener/dispatcher system
+- [ ] Build online users display component
+- [ ] Build real-time activity feed component
+- [ ] Integrate toast notifications from WebSocket events
 
-| Feature | Effort | Status |
-|---------|--------|--------|
-| Integrate EmailLog with Email Service | 2-3 hrs | ⬜ Not Started |
-| In-App Notifications | 4-6 hrs | ⬜ Not Started |
-| Staff Detail Page Enhancements | 4-6 hrs | ⬜ Not Started |
-| Account Lockout After Failed Attempts | 3-4 hrs | ⬜ Not Started |
+**WebSocket Events to Implement:**
+```
+Client → Server: auth, ping, subscribe:activity, unsubscribe:activity
+Server → Client: authenticated, pong, user.online, user.offline, 
+                 activity.new, notification.new, account_request.new
+```
 
-### 🟢 LOW PRIORITY (Future)
+---
 
-| Feature | Effort | Status |
-|---------|--------|--------|
-| Two-Factor Authentication (2FA) | 8-10 hrs | ⬜ Not Started |
-| Sentry Error Tracking | 1-2 hrs | ⬜ Optional |
-| Activity Timeline/Audit Log UI | 4-6 hrs | ⬜ Not Started |
-| Document Uploads for Staff | 6-8 hrs | ⬜ Not Started |
+#### TODO 2: Token Blacklist on Logout
+**Effort:** 4-6 hours  
+**Status:** ⬜ Not Started
 
-### ✅ COMPLETED (This & Previous Sessions)
+**Tasks:**
+- [ ] Create `backend/app/services/token_blacklist.py`
+- [ ] Add JTI (JWT ID) claim to token payload generation
+- [ ] Store blacklisted JTIs in Redis with TTL matching token expiry
+- [ ] Update `get_current_user` dependency to check blacklist
+- [ ] Update logout endpoint to blacklist current token
+- [ ] Add "logout all devices" endpoint (blacklist all user tokens)
+- [ ] Write unit tests for blacklist functionality
+- [ ] Add Redis key prefix: `token_blacklist:{jti}`
 
-| Feature | Session |
-|---------|---------|
-| Slow Query Logging | Jan 22 |
-| PDF Payslip Generation | Jan 22 |
-| Slack Notifications | Jan 22 |
-| Email Delivery Dashboard | Jan 22 |
-| Weekly Summary Bug Fix | Jan 22 |
-| AI Reporting Features | Jan 21 |
-| Payroll Module | Dec sessions |
-| Multi-tenancy | Dec sessions |
-| Core Time Tracking | Initial |
+**Files to Modify:**
+- `backend/app/services/auth.py` - Add JTI to token, create blacklist check
+- `backend/app/routers/auth.py` - Update logout endpoint
+- `backend/app/dependencies.py` - Check blacklist in get_current_user
+
+---
+
+#### TODO 3: Team Delete Cascade Fix
+**Effort:** 2 hours  
+**Status:** ⬜ Not Started
+
+**Problem:** Deleting a team with members/projects fails due to foreign key constraints  
+**Test:** `backend/tests/test_teams.py:131` (currently skipped)
+
+**Tasks:**
+- [ ] Update Team model with cascade delete configuration
+- [ ] Add `cascade="all, delete-orphan"` to members relationship
+- [ ] Add `cascade="all, delete-orphan"` to projects relationship
+- [ ] Create Alembic migration for cascade constraints
+- [ ] Add confirmation dialog in frontend before delete
+- [ ] Show warning about data loss (members, projects, time entries)
+- [ ] Remove `@pytest.mark.skip` decorator from test
+- [ ] Verify test passes
+
+**Files to Modify:**
+- `backend/app/models/__init__.py` - Team model relationships
+- `backend/alembic/versions/` - New migration
+- `frontend/src/pages/TeamsPage.tsx` - Delete confirmation dialog
+
+---
+
+### 🟡 MEDIUM PRIORITY
+
+#### TODO 4: In-App Notifications System
+**Effort:** 4-6 hours  
+**Status:** ⬜ Not Started
+
+**Backend Tasks:**
+- [ ] Create `Notification` model (id, user_id, type, title, message, read, created_at)
+- [ ] Create Alembic migration for notifications table
+- [ ] Create `backend/app/routers/notifications.py`
+- [ ] Endpoints: GET /notifications, PATCH /notifications/{id}/read, POST /notifications/read-all
+- [ ] Create notification service for creating notifications
+- [ ] Integrate with existing events (account requests, payroll, etc.)
+
+**Frontend Tasks:**
+- [ ] Create notification bell icon in header with badge count
+- [ ] Create notifications dropdown/panel
+- [ ] Mark as read on click
+- [ ] "Mark all as read" button
+- [ ] Link notifications to relevant pages
+- [ ] Store unread count in context/state
+
+**Notification Types:**
+- `account_request_new` - New account request (admin)
+- `account_request_approved` - Your request was approved
+- `account_request_rejected` - Your request was rejected
+- `payroll_processed` - Payroll period processed
+- `payroll_approved` - Payroll approved
+- `time_entry_approved` - Time entry approved
+- `time_entry_rejected` - Time entry rejected
+
+---
+
+#### TODO 5: Staff Detail Page Enhancements
+**Effort:** 4-6 hours  
+**Status:** ⬜ Not Started
+
+**File:** `frontend/src/pages/StaffDetailPage.tsx`
+
+**Current Features:**
+- ✅ Basic info display
+- ✅ Payroll tab with rates
+- ✅ Time tracking tab with entries
+- ✅ Teams tab showing memberships
+
+**Missing Features to Add:**
+- [ ] Edit functionality directly from detail view (inline editing)
+- [ ] Activity timeline showing recent actions
+- [ ] Notes/comments section (admin can add notes about staff)
+- [ ] Performance metrics dashboard (hours per week trend, project distribution)
+- [ ] Quick actions: Reset password, Deactivate, Change role
+- [ ] Export staff data to PDF
+
+**New Components Needed:**
+- `StaffActivityTimeline.tsx` - Recent activity feed
+- `StaffNotesSection.tsx` - Admin notes CRUD
+- `StaffPerformanceChart.tsx` - Hours/productivity charts
+
+---
+
+#### TODO 6: Activity Timeline / Audit Log UI
+**Effort:** 4-6 hours  
+**Status:** ⬜ Not Started
+
+**Backend Tasks:**
+- [ ] Create `AuditLog` model if not exists (action, user_id, target_type, target_id, details, ip_address, created_at)
+- [ ] Create audit logging service
+- [ ] Log key actions: login, logout, create/update/delete for users, teams, projects, time entries
+- [ ] Create `backend/app/routers/audit_logs.py` with admin-only endpoints
+- [ ] Endpoints: GET /audit-logs (with filters), GET /audit-logs/user/{id}, GET /audit-logs/entity/{type}/{id}
+
+**Frontend Tasks:**
+- [ ] Create `AuditLogsPage.tsx` for admin
+- [ ] Add to sidebar under Admin section
+- [ ] Filterable table: date range, user, action type, entity type
+- [ ] Expandable rows showing full details JSON
+- [ ] Export to CSV functionality
+
+**Actions to Log:**
+- User: login, logout, password_change, profile_update
+- Staff: create, update, deactivate, role_change
+- Team: create, update, delete, member_add, member_remove
+- Project: create, update, archive, delete
+- Time Entry: create, update, delete, approve, reject
+- Payroll: process, approve, pay
+- Account Request: submit, approve, reject
+
+---
+
+## 📊 EFFORT SUMMARY
+
+| Priority | Feature | Hours |
+|----------|---------|-------|
+| 🔴 High | WebSocket Real-Time | 10-12 |
+| 🔴 High | Token Blacklist | 4-6 |
+| 🔴 High | Team Delete Cascade | 2 |
+| 🟡 Medium | In-App Notifications | 4-6 |
+| 🟡 Medium | Staff Detail Enhancements | 4-6 |
+| 🟡 Medium | Activity Timeline/Audit Log | 4-6 |
+| **TOTAL** | | **28-38 hours** |
 
 ---
 
 ## ⏭️ NEXT SESSION PRIORITIES
 
-1. **WebSocket Implementation** - Real-time activity feed & notifications
-2. **Token Blacklist** - Security: invalidate tokens on logout
-3. **Password Strength** - Enforce strong passwords on registration
-4. **Team Delete Cascade** - Fix the skipped test
+1. **WebSocket Implementation** - Biggest impact for real-time UX
+2. **Token Blacklist** - Important security fix
+3. **Team Delete Cascade** - Quick win, fixes skipped test
+4. **In-App Notifications** - Enhances user experience
 
 ---
 
 ## 🏆 SESSION SUMMARY
 
 **Duration:** ~3 hours  
-**Commits:** 3  
+**Commits:** 4  
 **Features Added:** 4 new features  
 **Bugs Fixed:** 1 major bug (Weekly Summary - 2 root causes)
 
