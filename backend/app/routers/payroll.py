@@ -33,7 +33,6 @@ from app.services.payroll_service import (
 from app.services.slack_service import slack_service
 
 logger = logging.getLogger(__name__)
-)
 
 
 router = APIRouter(prefix="/api/payroll", tags=["Payroll"])
