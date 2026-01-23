@@ -2147,22 +2147,20 @@ async def email_report(
                 await log_email_sent(
                     db=db,
                     to_email=recipient_email,
+                    subject=f"{report_name} - {date_range}",
                     email_type="report_email",
-                    template_name=f"{data.report_type}_{data.format}",
-                    user_id=current_user.id,
                     company_id=current_user.company_id,
-                    metadata={"report_type": data.report_type, "format": data.format, "date_range": date_range}
+                    metadata={"report_type": data.report_type, "format": data.format, "date_range": date_range, "user_id": current_user.id}
                 )
             else:
                 await log_email_failed(
                     db=db,
                     to_email=recipient_email,
+                    subject=f"{report_name} - {date_range}",
                     email_type="report_email",
-                    template_name=f"{data.report_type}_{data.format}",
                     error_message="Failed to send report email",
-                    user_id=current_user.id,
                     company_id=current_user.company_id,
-                    metadata={"report_type": data.report_type, "format": data.format, "date_range": date_range}
+                    metadata={"report_type": data.report_type, "format": data.format, "date_range": date_range, "user_id": current_user.id}
                 )
         
         sent = sum(1 for v in results.values() if v)
