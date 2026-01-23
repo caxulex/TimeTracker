@@ -1402,7 +1402,21 @@ async def get_all_users_summary(
     # Multi-tenancy: filter by company
     company_id = get_company_filter(current_user)
 
-    # Get all users' time entries for the period (filtered by company)
+    # First, get ALL active users (not just those with time entries)
+    all_users_query = select(User.id, User.name).where(User.is_active == True)
+    all_users_query = apply_company_filter(all_users_query, User.company_id, company_id)
+    all_users_result = await db.execute(all_users_query)
+    
+    # Initialize all users with zero time
+    user_totals = {}
+    for row in all_users_result.all():
+        user_totals[row.id] = {
+            "user_name": row.name or f"User {row.id}",
+            "total_seconds": 0,
+            "entry_count": 0
+        }
+
+    # Get time entries for the period (filtered by company)
     entries_query = select(
         TimeEntry.user_id,
         User.name,
@@ -1415,17 +1429,12 @@ async def get_all_users_summary(
     
     entries_result = await db.execute(entries_query)
 
-    user_totals = {}
     for row in entries_result.all():
         user_id = row.user_id
-        user_name = row.name
         
+        # Only update if user exists in our list (active users)
         if user_id not in user_totals:
-            user_totals[user_id] = {
-                "user_name": user_name,
-                "total_seconds": 0,
-                "entry_count": 0
-            }
+            continue
         
         if row.end_time is None:
             start = row.start_time

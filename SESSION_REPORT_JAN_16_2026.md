@@ -404,7 +404,7 @@ docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 
 ## ✅ Session Complete
 
-**Total Time:** ~45 minutes  
+**Total Time:** 
 **Commits:** 2 (`bd06a9f` feature + `11538f8` migration fix)  
 **Files Changed:** 6 + 1 fix  
 **Lines Changed:** +345 / -33
