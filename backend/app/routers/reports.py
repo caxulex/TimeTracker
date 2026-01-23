@@ -14,6 +14,7 @@ from datetime import datetime, date, timedelta, timezone, time
 from app.database import get_db
 from app.models import User, Team, TeamMember, Project, Task, TimeEntry
 from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY
+from app.services.email_log_utils import log_email_sent, log_email_failed
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -2139,6 +2140,30 @@ async def email_report(
             company_id=current_user.company_id,
             db=db
         )
+        
+        # Log email results
+        for recipient_email, success in results.items():
+            if success:
+                await log_email_sent(
+                    db=db,
+                    to_email=recipient_email,
+                    email_type="report_email",
+                    template_name=f"{data.report_type}_{data.format}",
+                    user_id=current_user.id,
+                    company_id=current_user.company_id,
+                    metadata={"report_type": data.report_type, "format": data.format, "date_range": date_range}
+                )
+            else:
+                await log_email_failed(
+                    db=db,
+                    to_email=recipient_email,
+                    email_type="report_email",
+                    template_name=f"{data.report_type}_{data.format}",
+                    error_message="Failed to send report email",
+                    user_id=current_user.id,
+                    company_id=current_user.company_id,
+                    metadata={"report_type": data.report_type, "format": data.format, "date_range": date_range}
+                )
         
         sent = sum(1 for v in results.values() if v)
         failed = len(results) - sent

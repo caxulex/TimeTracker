@@ -345,6 +345,7 @@ export function StaffPage() {
     },
     onSuccess: (updatedStaff) => {
       queryClient.invalidateQueries({ queryKey: ['staff'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] }); // Sync with Admin page
       if (updatedStaff.is_active) {
         notifications.notifyStaffActivated(updatedStaff);
       } else {
@@ -364,6 +365,7 @@ export function StaffPage() {
     },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['staff'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] }); // Sync with Admin page
       notifications.notifySuccess('User Deleted', result.message);
     },
     onError: (error: unknown) => {

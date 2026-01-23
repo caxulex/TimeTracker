@@ -16,6 +16,8 @@ import {
   ArrowTrendingUpIcon,
   UserGroupIcon,
   ChartPieIcon,
+  UserIcon,
+  XMarkIcon,
 } from '../components/Icons';
 import { BarChart, Bar, PieChart, Pie, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
 import { isAdminUser } from '../utils/helpers';
@@ -70,11 +72,38 @@ interface UserSummary {
   entry_count: number;
 }
 
+interface SelectedUserDetail {
+  user_id: number;
+  user_name: string;
+  user_email: string;
+  role: string;
+  teams: string[];
+  today_seconds: number;
+  today_hours: number;
+  week_seconds: number;
+  week_hours: number;
+  month_seconds: number;
+  month_hours: number;
+  total_entries: number;
+  active_days_this_month: number;
+  avg_hours_per_day: number;
+  current_timer_running: boolean;
+  projects: Array<{
+    project_id: number;
+    project_name: string;
+    total_seconds: number;
+    total_hours: number;
+    entry_count: number;
+  }>;
+  last_activity: string | null;
+}
+
 export default function AdminReportsPage() {
   const user = useAuthStore((state) => state.user);
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'overview' | 'teams' | 'individuals'>('overview');
   const [userPeriod, setUserPeriod] = useState<'today' | 'week' | 'month'>('week');
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
 
   // AI Feature flags
   const { data: payrollForecastEnabled } = useFeatureEnabled('ai_payroll_forecast');
@@ -129,6 +158,21 @@ export default function AdminReportsPage() {
     },
     refetchInterval: 30000,
     enabled: isAdminUser(user), // Only fetch if admin
+  });
+
+  // Fetch selected user detail
+  const { data: selectedUserDetail, isLoading: isSelectedUserLoading } = useQuery<SelectedUserDetail>({
+    queryKey: ['admin-user-detail', selectedUserId],
+    queryFn: async () => {
+      const response = await fetch(`/api/reports/admin/users/${selectedUserId}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      });
+      if (!response.ok) throw new Error('Failed to fetch user detail');
+      return response.json();
+    },
+    enabled: isAdminUser(user) && selectedUserId !== null,
   });
 
   // Redirect if not admin
@@ -531,11 +575,30 @@ export default function AdminReportsPage() {
             
             {!isUsersLoading && !isUsersError && usersData && usersData.length > 0 && (
               <>
-            {/* Period Selector */}
+            {/* User Selector and Period Selector */}
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-              <div className="flex items-center gap-4">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Time Period:</label>
-                <div className="flex gap-2">
+              <div className="flex flex-wrap items-center gap-4">
+                {/* User Selector Dropdown */}
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Select Staff:</label>
+                  <select
+                    value={selectedUserId || ''}
+                    onChange={(e) => setSelectedUserId(e.target.value ? parseInt(e.target.value) : null)}
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none min-w-[200px]"
+                  >
+                    <option value="">-- All Staff Comparison --</option>
+                    {usersData.map((u) => (
+                      <option key={u.user_id} value={u.user_id}>
+                        {u.user_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                
+                {/* Period Selector */}
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Time Period:</label>
+                  <div className="flex gap-2">
                   {(['today', 'week', 'month'] as const).map((period) => (
                     <button
                       key={period}
@@ -552,6 +615,107 @@ export default function AdminReportsPage() {
                 </div>
               </div>
             </div>
+
+            {/* Selected User Detail Panel */}
+            {selectedUserId && selectedUserDetail && (
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow border-2 border-blue-500">
+                <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                    <UserIcon className="h-5 w-5 text-blue-500" />
+                    {selectedUserDetail.user_name}'s Performance Details
+                  </h2>
+                  <button
+                    onClick={() => setSelectedUserId(null)}
+                    className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                  >
+                    <XMarkIcon className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="p-6">
+                  {/* User Info */}
+                  <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+                    <span className="font-medium">{selectedUserDetail.user_email}</span>
+                    <span className="mx-2">•</span>
+                    <span className="capitalize">{selectedUserDetail.role}</span>
+                    {selectedUserDetail.teams.length > 0 && (
+                      <>
+                        <span className="mx-2">•</span>
+                        <span>Teams: {selectedUserDetail.teams.join(', ')}</span>
+                      </>
+                    )}
+                    {selectedUserDetail.current_timer_running && (
+                      <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
+                        Timer Running
+                      </span>
+                    )}
+                  </div>
+                  
+                  {/* User Summary Stats */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
+                    <div className="bg-blue-50 dark:bg-blue-900/30 rounded-lg p-4">
+                      <p className="text-sm text-blue-600 dark:text-blue-400">Today</p>
+                      <p className="text-xl font-bold text-blue-700 dark:text-blue-300">
+                        {selectedUserDetail.today_hours.toFixed(1)}h
+                      </p>
+                    </div>
+                    <div className="bg-green-50 dark:bg-green-900/30 rounded-lg p-4">
+                      <p className="text-sm text-green-600 dark:text-green-400">This Week</p>
+                      <p className="text-xl font-bold text-green-700 dark:text-green-300">
+                        {selectedUserDetail.week_hours.toFixed(1)}h
+                      </p>
+                    </div>
+                    <div className="bg-purple-50 dark:bg-purple-900/30 rounded-lg p-4">
+                      <p className="text-sm text-purple-600 dark:text-purple-400">This Month</p>
+                      <p className="text-xl font-bold text-purple-700 dark:text-purple-300">
+                        {selectedUserDetail.month_hours.toFixed(1)}h
+                      </p>
+                    </div>
+                    <div className="bg-orange-50 dark:bg-orange-900/30 rounded-lg p-4">
+                      <p className="text-sm text-orange-600 dark:text-orange-400">Total Entries</p>
+                      <p className="text-xl font-bold text-orange-700 dark:text-orange-300">
+                        {selectedUserDetail.total_entries}
+                      </p>
+                    </div>
+                    <div className="bg-teal-50 dark:bg-teal-900/30 rounded-lg p-4">
+                      <p className="text-sm text-teal-600 dark:text-teal-400">Active Days</p>
+                      <p className="text-xl font-bold text-teal-700 dark:text-teal-300">
+                        {selectedUserDetail.active_days_this_month}
+                      </p>
+                    </div>
+                    <div className="bg-pink-50 dark:bg-pink-900/30 rounded-lg p-4">
+                      <p className="text-sm text-pink-600 dark:text-pink-400">Avg/Day</p>
+                      <p className="text-xl font-bold text-pink-700 dark:text-pink-300">
+                        {selectedUserDetail.avg_hours_per_day.toFixed(1)}h
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {/* Projects Breakdown */}
+                  {selectedUserDetail.projects && selectedUserDetail.projects.length > 0 && (
+                    <div>
+                      <h3 className="text-md font-semibold text-gray-900 dark:text-white mb-3">Project Breakdown</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {selectedUserDetail.projects.map((proj, idx) => (
+                          <div key={idx} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700 rounded">
+                            <span className="text-gray-700 dark:text-gray-300 truncate mr-2">{proj.project_name}</span>
+                            <span className="font-medium text-gray-900 dark:text-white whitespace-nowrap">
+                              {proj.total_hours.toFixed(1)}h ({proj.entry_count} entries)
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Last Activity */}
+                  {selectedUserDetail.last_activity && (
+                    <div className="mt-4 text-sm text-gray-500 dark:text-gray-400">
+                      Last activity: {new Date(selectedUserDetail.last_activity).toLocaleString()}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* User Ranking Chart */}
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow">

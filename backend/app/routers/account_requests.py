@@ -23,6 +23,7 @@ from app.middleware.rate_limit import rate_limiter
 from app.services.audit_logger import AuditLogger, AuditAction
 from app.services.email_service import email_service
 from app.services.slack_service import slack_service
+from app.services.email_log_utils import log_email_sent, log_email_failed
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -116,8 +117,24 @@ async def submit_account_request(
                     requester_name=account_request.name,
                     requester_email=account_request.email
                 )
+                # Log successful email
+                await log_email_sent(
+                    db=db,
+                    to_email=admin_email,
+                    subject=f"New Account Request: {account_request.name}",
+                    email_type="account_request_notification",
+                    metadata={"requester_email": account_request.email}
+                )
             except Exception as e:
                 logger.warning(f"Failed to send notification to {admin_email}: {e}")
+                # Log failed email
+                await log_email_failed(
+                    db=db,
+                    to_email=admin_email,
+                    subject=f"New Account Request: {account_request.name}",
+                    email_type="account_request_notification",
+                    error_message=str(e)[:500]
+                )
     except Exception as e:
         logger.warning(f"Failed to notify admins of new account request: {e}")
     
@@ -281,12 +298,30 @@ async def approve_account_request(
             temp_password="[Will be provided separately]",
             login_url=""  # Will be provided in credentials email
         )
+        # Log successful email
+        await log_email_sent(
+            db=db,
+            to_email=account_request.email,
+            subject=f"Account Request Approved",
+            email_type="account_approved",
+            company_id=current_user.company_id,
+            metadata={"user_name": account_request.name, "approved_by": current_user.email}
+        )
         # Update email tracking fields
         account_request.email_notification_sent = True
         account_request.email_sent_at = datetime.utcnow()
         account_request.email_error = None
         logger.info(f"Approval notification email sent to {account_request.email}")
     except Exception as e:
+        # Log failed email
+        await log_email_failed(
+            db=db,
+            to_email=account_request.email,
+            subject=f"Account Request Approved",
+            email_type="account_approved",
+            error_message=str(e)[:500],
+            company_id=current_user.company_id
+        )
         account_request.email_notification_sent = False
         account_request.email_error = str(e)[:500]
         logger.warning(f"Failed to send approval email to {account_request.email}: {e}")
@@ -373,12 +408,30 @@ async def reject_account_request(
             user_name=account_request.name,
             reason=decision.admin_notes
         )
+        # Log successful email
+        await log_email_sent(
+            db=db,
+            to_email=account_request.email,
+            subject=f"Account Request Update",
+            email_type="account_rejected",
+            company_id=current_user.company_id,
+            metadata={"user_name": account_request.name, "reason": decision.admin_notes}
+        )
         # Update email tracking fields
         account_request.email_notification_sent = True
         account_request.email_sent_at = datetime.utcnow()
         account_request.email_error = None
         logger.info(f"Rejection notification email sent to {account_request.email}")
     except Exception as e:
+        # Log failed email
+        await log_email_failed(
+            db=db,
+            to_email=account_request.email,
+            subject=f"Account Request Update",
+            email_type="account_rejected",
+            error_message=str(e)[:500],
+            company_id=current_user.company_id
+        )
         account_request.email_notification_sent = False
         account_request.email_error = str(e)[:500]
         logger.warning(f"Failed to send rejection email to {account_request.email}: {e}")

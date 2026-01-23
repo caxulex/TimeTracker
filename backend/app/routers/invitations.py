@@ -16,6 +16,7 @@ from app.dependencies import get_current_active_user, get_current_admin_user
 from app.services.invitation_service import invitation_service
 from app.services.auth_service import auth_service
 from app.services.email_service import email_service
+from app.services.email_log_utils import log_email_sent, log_email_failed
 from app.schemas.auth import Message
 from app.config import settings
 
@@ -215,8 +216,26 @@ async def request_password_reset(
             reset_url=reset_url,
             expires_in_hours=24
         )
+        # Log successful email
+        await log_email_sent(
+            db=db,
+            to_email=user.email,
+            subject="Password Reset Request",
+            email_type="password_reset",
+            company_id=user.company_id,
+            metadata={"user_name": user.name}
+        )
         logger.info(f"Password reset email sent to {user.email}")
     except Exception as e:
+        # Log failed email
+        await log_email_failed(
+            db=db,
+            to_email=user.email,
+            subject="Password Reset Request",
+            email_type="password_reset",
+            error_message=str(e)[:500],
+            company_id=user.company_id
+        )
         # Log error but don't expose it to user
         logger.error(f"Failed to send password reset email to {user.email}: {e}")
         # Still log the token for development debugging
