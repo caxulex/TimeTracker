@@ -109,7 +109,7 @@
 
 ## 🏆 SESSION SUMMARY
 
-**Duration:** ~1 hour  
+**Duration:**  
 **Commits:** 1 pending  
 **Issues Fixed:** 4/4
 

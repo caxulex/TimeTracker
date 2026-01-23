@@ -612,6 +612,7 @@ export default function AdminReportsPage() {
                       {period.charAt(0).toUpperCase() + period.slice(1)}
                     </button>
                   ))}
+                  </div>
                 </div>
               </div>
             </div>
