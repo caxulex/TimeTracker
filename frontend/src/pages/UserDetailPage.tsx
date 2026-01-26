@@ -47,20 +47,22 @@ export default function UserDetailPage() {
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
-
-  // Redirect if not admin
-  if (user?.role !== 'admin' && user?.role !== 'super_admin') {
-    navigate('/reports');
-    return null;
-  }
+  
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
 
   const { data: userData, isLoading } = useQuery<IndividualUserMetrics>({
     queryKey: ['user-detail', userId],
     queryFn: async () => {
       return reportsApi.getAdminUserDetail(parseInt(userId!));
     },
-    enabled: !!userId,
+    enabled: !!userId && isAdmin,
   });
+
+  // Redirect if not admin (after hooks)
+  if (!isAdmin) {
+    navigate('/reports');
+    return null;
+  }
 
   const formatTime = (seconds: number) => {
     const hours = Math.floor(seconds / 3600);
