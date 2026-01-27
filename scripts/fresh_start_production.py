@@ -141,9 +141,18 @@ async def main(dry_run: bool = True):
     database_url = os.getenv("DATABASE_URL")
     
     if not database_url:
+        # Try alternative env var names
+        database_url = os.getenv("DB_URL") or os.getenv("POSTGRES_URL")
+    
+    if not database_url:
         print("\n❌ ERROR: DATABASE_URL not found in environment!")
         print("Make sure your .env file contains DATABASE_URL")
         return False
+    
+    # Convert SQLAlchemy URL to asyncpg format
+    # postgresql+asyncpg://user:pass@host/db -> postgresql://user:pass@host/db
+    database_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
+    database_url = database_url.replace("postgres+asyncpg://", "postgresql://")
     
     # Parse connection string for display (hide password)
     try:
