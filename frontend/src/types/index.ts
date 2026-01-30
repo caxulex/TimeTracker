@@ -367,9 +367,12 @@ export interface SessionMeetingCreate {
 
 export interface SessionStatusResponse {
   has_active_session: boolean;
-  current_session?: WorkSession;
-  active_break?: SessionBreak;
-  active_meeting?: SessionMeeting;
+  session?: WorkSession;  // Backend returns 'session' not 'current_session'
+  current_status: string; // "working", "break", "meeting", "idle"
+  global_timer_seconds: number;
+  task_timer_seconds: number;
+  current_break?: SessionBreak;  // Backend returns 'current_break'
+  current_meeting?: SessionMeeting;  // Backend returns 'current_meeting'
 }
 
 // Export payroll types

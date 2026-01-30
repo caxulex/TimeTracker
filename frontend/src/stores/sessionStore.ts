@@ -95,19 +95,19 @@ export const useSessionStore = create<SessionState>()(
           const status = await sessionsApi.getCurrentSession();
           console.log('[SessionStore] Fetched session status:', status);
 
-          if (status.has_active_session && status.current_session) {
-            const sessionElapsed = calculateElapsed(status.current_session.start_time);
-            const breakElapsed = status.active_break 
-              ? calculateElapsed(status.active_break.start_time) 
+          if (status.has_active_session && status.session) {
+            const sessionElapsed = calculateElapsed(status.session.start_time);
+            const breakElapsed = status.current_break 
+              ? calculateElapsed(status.current_break.start_time) 
               : 0;
-            const meetingElapsed = status.active_meeting 
-              ? calculateElapsed(status.active_meeting.start_time) 
+            const meetingElapsed = status.current_meeting 
+              ? calculateElapsed(status.current_meeting.start_time) 
               : 0;
 
             set({
-              currentSession: status.current_session,
-              activeBreak: status.active_break || null,
-              activeMeeting: status.active_meeting || null,
+              currentSession: status.session,
+              activeBreak: status.current_break || null,
+              activeMeeting: status.current_meeting || null,
               sessionElapsedSeconds: sessionElapsed,
               breakElapsedSeconds: breakElapsed,
               meetingElapsedSeconds: meetingElapsed,
