@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, LoadingOverlay } from '../components/common';
 import { TimerWidget } from '../components/time/TimerWidget';
+import { SessionWidget } from '../components/sessions';
 import { ActiveTimers } from '../components/ActiveTimers';
 import { AdminAlertsPanel } from '../components/AdminAlertsPanel';
 import { AnomalyAlertPanel } from '../components/ai/AnomalyAlertPanel';
@@ -167,6 +168,10 @@ export function DashboardPage() {
         </div>
       )}
 
+      {/* Session Widget - Clock In/Out, Breaks, Meetings */}
+      <SessionWidget />
+
+      {/* Task Timer */}
       <TimerWidget />
 
       <div>
