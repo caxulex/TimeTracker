@@ -27,8 +27,8 @@ export function BreakControls() {
     setShowMenu(false);
     try {
       await startBreak({ break_type: breakType });
-      // Refresh timer state to get isPaused=true
-      await fetchTimer();
+      // Force refresh timer state to get isPaused=true
+      await fetchTimer(true);
       const labels: Record<BreakType, string> = {
         short: 'Short break',
         lunch: 'Lunch break',
@@ -52,8 +52,8 @@ export function BreakControls() {
   const handleEndBreak = async () => {
     try {
       await endBreak();
-      // Refresh timer state to get isPaused=false and resume counting
-      await fetchTimer();
+      // Force refresh timer state to get isPaused=false and resume counting
+      await fetchTimer(true);
       addNotification({
         type: 'success',
         title: 'Break Ended',

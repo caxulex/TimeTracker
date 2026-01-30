@@ -34,8 +34,8 @@ export function MeetingControls() {
         title: meetingTitle || undefined, 
         meeting_type: selectedType 
       });
-      // Refresh timer state to get isPaused=true
-      await fetchTimer();
+      // Force refresh timer state to get isPaused=true
+      await fetchTimer(true);
       const labels: Record<MeetingType, string> = {
         internal: 'Internal meeting',
         external: 'External meeting',
@@ -60,8 +60,8 @@ export function MeetingControls() {
   const handleEndMeeting = async () => {
     try {
       await endMeeting();
-      // Refresh timer state to get isPaused=false and resume counting
-      await fetchTimer();
+      // Force refresh timer state to get isPaused=false and resume counting
+      await fetchTimer(true);
       addNotification({
         type: 'success',
         title: 'Meeting Ended',

@@ -17,7 +17,7 @@ interface TimerState {
   lastSyncTime: number | null;
 
   // Actions
-  fetchTimer: () => Promise<void>;
+  fetchTimer: (forceRefresh?: boolean) => Promise<void>;
   startTimer: (data?: TimerStart) => Promise<void>;
   stopTimer: () => Promise<TimeEntry | null>;
   updateElapsed: () => void;
@@ -48,16 +48,16 @@ export const useTimerStore = create<TimerState>()(
       error: null,
       lastSyncTime: null,
 
-      fetchTimer: async () => {
+      fetchTimer: async (forceRefresh?: boolean) => {
         // Don't fetch if not authenticated
         if (!isAuthenticated()) {
           console.log('[TimerStore] Skipping fetch - not authenticated');
           return;
         }
         
-        // Debounce: Don't fetch if we synced in the last 2 seconds
+        // Debounce: Don't fetch if we synced in the last 2 seconds (unless forced)
         const { lastSyncTime } = get();
-        if (lastSyncTime && Date.now() - lastSyncTime < 2000) {
+        if (!forceRefresh && lastSyncTime && Date.now() - lastSyncTime < 2000) {
           console.log('[TimerStore] Skipping fetch - recently synced');
           return;
         }

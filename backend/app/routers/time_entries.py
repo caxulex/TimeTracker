@@ -56,6 +56,10 @@ class TimeEntryResponse(BaseModel):
     duration_seconds: Optional[int]
     duration_minutes: Optional[int] = None  # Computed field for convenience
     is_running: bool
+    # Pause tracking for breaks/meetings
+    is_paused: bool = False
+    paused_at: Optional[datetime] = None
+    pause_seconds: int = 0
     created_at: datetime
 
     class Config:
@@ -135,6 +139,10 @@ def make_entry_response(entry: TimeEntry, project_name: str = None, task_name: s
         duration_seconds=duration_seconds,
         duration_minutes=duration_minutes,
         is_running=entry.end_time is None,
+        # Pause tracking for breaks/meetings
+        is_paused=entry.is_paused or False,
+        paused_at=entry.paused_at,
+        pause_seconds=entry.pause_seconds or 0,
         created_at=entry.created_at
     )
 
