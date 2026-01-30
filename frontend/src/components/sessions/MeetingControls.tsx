@@ -4,6 +4,7 @@
 // ============================================
 import { useState } from 'react';
 import { useSessionStore, formatDuration } from '../../stores/sessionStore';
+import { useTimerStore } from '../../stores/timerStore';
 import { useNotifications } from '../../hooks/useNotifications';
 import { cn } from '../../utils/helpers';
 import type { MeetingType } from '../../types';
@@ -16,6 +17,8 @@ export function MeetingControls() {
     startMeeting,
     endMeeting,
   } = useSessionStore();
+
+  const { fetchTimer } = useTimerStore();
 
   const { addNotification } = useNotifications();
   const [showMenu, setShowMenu] = useState(false);
@@ -31,6 +34,8 @@ export function MeetingControls() {
         title: meetingTitle || undefined, 
         meeting_type: selectedType 
       });
+      // Refresh timer state to get isPaused=true
+      await fetchTimer();
       const labels: Record<MeetingType, string> = {
         internal: 'Internal meeting',
         external: 'External meeting',
@@ -55,6 +60,8 @@ export function MeetingControls() {
   const handleEndMeeting = async () => {
     try {
       await endMeeting();
+      // Refresh timer state to get isPaused=false and resume counting
+      await fetchTimer();
       addNotification({
         type: 'success',
         title: 'Meeting Ended',

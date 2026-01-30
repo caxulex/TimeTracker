@@ -33,6 +33,7 @@ export function SessionWidget() {
 
   const {
     isRunning: timerRunning,
+    isPaused: timerPaused,
     elapsedSeconds: taskElapsedSeconds,
     startTimer,
     stopTimer,
@@ -319,10 +320,15 @@ export function SessionWidget() {
         {/* Task timer */}
         {timerRunning && (
           <div className="flex items-center gap-4">
-            <div className="text-2xl">⏱️</div>
+            <div className="text-2xl">{timerPaused ? '⏸️' : '⏱️'}</div>
             <div>
-              <div className="text-xs text-white/70">Current Task</div>
-              <div className="text-2xl font-mono font-semibold text-emerald-200">
+              <div className="text-xs text-white/70">
+                Current Task {timerPaused && <span className="text-amber-200">(PAUSED)</span>}
+              </div>
+              <div className={cn(
+                "text-2xl font-mono font-semibold",
+                timerPaused ? "text-amber-200/70" : "text-emerald-200"
+              )}>
                 {formatDuration(taskElapsedSeconds)}
               </div>
             </div>

@@ -10,6 +10,7 @@ import { timeEntriesApi } from '../api/client';
 interface TimerState {
   currentEntry: TimeEntry | null;
   isRunning: boolean;
+  isPaused: boolean;  // True when on break or in meeting
   elapsedSeconds: number;
   isLoading: boolean;
   error: string | null;
@@ -41,6 +42,7 @@ export const useTimerStore = create<TimerState>()(
     (set, get) => ({
       currentEntry: null,
       isRunning: false,
+      isPaused: false,
       elapsedSeconds: 0,
       isLoading: false,
       error: null,
@@ -65,12 +67,23 @@ export const useTimerStore = create<TimerState>()(
           const status = await timeEntriesApi.getTimer();
           console.log('[TimerStore] Fetched timer status:', status);
           if (status.is_running && status.current_entry) {
-            const elapsed = calculateElapsed(status.current_entry.start_time);
-            console.log('[TimerStore] Setting running timer, elapsed:', elapsed);
+            const entry = status.current_entry;
+            const isPaused = entry.is_paused || false;
+            // Calculate elapsed: total time minus pause time
+            let elapsed = calculateElapsed(entry.start_time);
+            // Subtract accumulated pause seconds
+            elapsed -= entry.pause_seconds || 0;
+            // If currently paused, don't include time since pause started
+            if (isPaused && entry.paused_at) {
+              const pauseElapsed = calculateElapsed(entry.paused_at);
+              elapsed -= pauseElapsed;
+            }
+            console.log('[TimerStore] Setting timer, elapsed:', elapsed, 'isPaused:', isPaused);
             set({
-              currentEntry: status.current_entry,
+              currentEntry: entry,
               isRunning: true,
-              elapsedSeconds: elapsed,
+              isPaused: isPaused,
+              elapsedSeconds: Math.max(0, elapsed),
               isLoading: false,
               lastSyncTime: Date.now(),
             });
@@ -79,6 +92,7 @@ export const useTimerStore = create<TimerState>()(
             set({ 
               currentEntry: null, 
               isRunning: false, 
+              isPaused: false,
               elapsedSeconds: 0, 
               isLoading: false,
               lastSyncTime: Date.now(),
@@ -104,6 +118,7 @@ export const useTimerStore = create<TimerState>()(
           set({
             currentEntry: entry,
             isRunning: true,
+            isPaused: false,
             elapsedSeconds: 0,
             isLoading: false,
             lastSyncTime: Date.now(),
@@ -122,6 +137,7 @@ export const useTimerStore = create<TimerState>()(
           set({
             currentEntry: null,
             isRunning: false,
+            isPaused: false,
             elapsedSeconds: 0,
             isLoading: false,
             lastSyncTime: Date.now(),
@@ -135,10 +151,13 @@ export const useTimerStore = create<TimerState>()(
       },
 
       updateElapsed: () => {
-        const { currentEntry, isRunning } = get();
-        if (isRunning && currentEntry) {
-          const elapsed = calculateElapsed(currentEntry.start_time);
-          set({ elapsedSeconds: elapsed });
+        const { currentEntry, isRunning, isPaused } = get();
+        // Don't increment if paused (on break or in meeting)
+        if (isRunning && currentEntry && !isPaused) {
+          let elapsed = calculateElapsed(currentEntry.start_time);
+          // Subtract accumulated pause seconds
+          elapsed -= currentEntry.pause_seconds || 0;
+          set({ elapsedSeconds: Math.max(0, elapsed) });
         }
       },
 

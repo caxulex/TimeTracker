@@ -4,6 +4,7 @@
 // ============================================
 import { useState } from 'react';
 import { useSessionStore, formatDuration } from '../../stores/sessionStore';
+import { useTimerStore } from '../../stores/timerStore';
 import { useNotifications } from '../../hooks/useNotifications';
 import { cn } from '../../utils/helpers';
 import type { BreakType } from '../../types';
@@ -17,6 +18,8 @@ export function BreakControls() {
     endBreak,
   } = useSessionStore();
 
+  const { fetchTimer } = useTimerStore();
+
   const { addNotification } = useNotifications();
   const [showMenu, setShowMenu] = useState(false);
 
@@ -24,6 +27,8 @@ export function BreakControls() {
     setShowMenu(false);
     try {
       await startBreak({ break_type: breakType });
+      // Refresh timer state to get isPaused=true
+      await fetchTimer();
       const labels: Record<BreakType, string> = {
         short: 'Short break',
         lunch: 'Lunch break',
@@ -47,6 +52,8 @@ export function BreakControls() {
   const handleEndBreak = async () => {
     try {
       await endBreak();
+      // Refresh timer state to get isPaused=false and resume counting
+      await fetchTimer();
       addNotification({
         type: 'success',
         title: 'Break Ended',

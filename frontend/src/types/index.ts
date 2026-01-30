@@ -169,6 +169,10 @@ export interface TimeEntry {
   description: string | null;
   is_running: boolean;
   is_manual?: boolean;
+  // Pause tracking for breaks/meetings
+  is_paused?: boolean;
+  paused_at?: string | null;
+  pause_seconds?: number;
   created_at: string;
   project?: Project;
   task?: Task;
