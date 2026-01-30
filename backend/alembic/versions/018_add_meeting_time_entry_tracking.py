@@ -1,7 +1,7 @@
 """Add meeting time entry tracking columns
 
 Revision ID: 018_meeting_time_entries
-Revises: 017_add_micro_task_management
+Revises: 017_add_micro_task
 Create Date: 2026-01-30
 
 Adds paused_entry_id and time_entry_id to session_meetings table
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '018_meeting_time_entries'
-down_revision = '017_add_micro_task_management'
+down_revision = '017_add_micro_task'
 branch_labels = None
 depends_on = None
 
