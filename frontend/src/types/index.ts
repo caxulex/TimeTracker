@@ -313,6 +313,65 @@ export interface TaskFilters {
   size?: number;
 }
 
+// ============================================
+// MICRO-TASK SESSION TYPES
+// ============================================
+
+export type SessionStatus = 'active' | 'break' | 'meeting' | 'completed';
+export type BreakType = 'short' | 'lunch' | 'other';
+export type MeetingType = 'internal' | 'external' | 'client';
+
+export interface SessionBreak {
+  id: number;
+  work_session_id: number;
+  break_type: BreakType;
+  start_time: string;
+  end_time?: string;
+  duration_seconds?: number;
+}
+
+export interface SessionMeeting {
+  id: number;
+  work_session_id: number;
+  title?: string;
+  meeting_type: MeetingType;
+  start_time: string;
+  end_time?: string;
+  duration_seconds?: number;
+}
+
+export interface WorkSession {
+  id: number;
+  user_id: number;
+  company_id?: number;
+  start_time: string;
+  end_time?: string;
+  status: SessionStatus;
+  total_work_seconds: number;
+  total_break_seconds: number;
+  total_meeting_seconds: number;
+  created_at: string;
+  updated_at: string;
+  breaks?: SessionBreak[];
+  meetings?: SessionMeeting[];
+}
+
+export interface SessionBreakCreate {
+  break_type: BreakType;
+}
+
+export interface SessionMeetingCreate {
+  title?: string;
+  meeting_type: MeetingType;
+}
+
+export interface SessionStatusResponse {
+  has_active_session: boolean;
+  current_session?: WorkSession;
+  active_break?: SessionBreak;
+  active_meeting?: SessionMeeting;
+}
+
 // Export payroll types
 export * from './payroll';
 

@@ -868,3 +868,65 @@ export const adminApi = {
   },
 };
 
+// ============================================
+// WORK SESSIONS API (Micro-Task Management)
+// ============================================
+import type {
+  WorkSession,
+  SessionBreak,
+  SessionMeeting,
+  SessionBreakCreate,
+  SessionMeetingCreate,
+  SessionStatusResponse,
+} from '../types';
+
+export const sessionsApi = {
+  // Get current session status
+  getCurrentSession: async (): Promise<SessionStatusResponse> => {
+    const response = await api.get<SessionStatusResponse>('/api/work-sessions/current');
+    return response.data;
+  },
+
+  // Start a new work session (clock in)
+  startSession: async (): Promise<WorkSession> => {
+    const response = await api.post<WorkSession>('/api/work-sessions/start');
+    return response.data;
+  },
+
+  // End current work session (clock out)
+  endSession: async (): Promise<WorkSession> => {
+    const response = await api.post<WorkSession>('/api/work-sessions/end');
+    return response.data;
+  },
+
+  // Get session details by ID
+  getSession: async (sessionId: number): Promise<WorkSession> => {
+    const response = await api.get<WorkSession>(`/api/work-sessions/${sessionId}`);
+    return response.data;
+  },
+
+  // Start a break
+  startBreak: async (data: SessionBreakCreate): Promise<SessionBreak> => {
+    const response = await api.post<SessionBreak>('/api/work-sessions/break/start', data);
+    return response.data;
+  },
+
+  // End current break
+  endBreak: async (): Promise<SessionBreak> => {
+    const response = await api.post<SessionBreak>('/api/work-sessions/break/end');
+    return response.data;
+  },
+
+  // Start a meeting
+  startMeeting: async (data: SessionMeetingCreate): Promise<SessionMeeting> => {
+    const response = await api.post<SessionMeeting>('/api/work-sessions/meeting/start', data);
+    return response.data;
+  },
+
+  // End current meeting
+  endMeeting: async (): Promise<SessionMeeting> => {
+    const response = await api.post<SessionMeeting>('/api/work-sessions/meeting/end');
+    return response.data;
+  },
+};
+
