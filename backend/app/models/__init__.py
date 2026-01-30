@@ -240,6 +240,7 @@ class User(Base):
     payroll_entries: Mapped[list["PayrollEntry"]] = relationship("PayrollEntry", back_populates="user")
     manager: Mapped[Optional["User"]] = relationship("User", remote_side=[id], foreign_keys=[manager_id])
     notifications: Mapped[list["Notification"]] = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
+    work_sessions: Mapped[list["WorkSession"]] = relationship("WorkSession", back_populates="user")
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, email={self.email}, role={self.role}, company_id={self.company_id})>"
@@ -346,14 +347,118 @@ class TimeEntry(Base):
     is_running: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Link to work session (NULLABLE for backward compatibility with existing entries)
+    work_session_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("work_sessions.id"), nullable=True
+    )
+    
+    # Pause tracking (for breaks/meetings)
+    is_paused: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    paused_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    pause_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # Relationships
     user: Mapped[User] = relationship("User", back_populates="time_entries")
     project: Mapped[Project] = relationship("Project", back_populates="time_entries")
     task: Mapped[Optional[Task]] = relationship("Task", back_populates="time_entries")
+    work_session: Mapped[Optional["WorkSession"]] = relationship("WorkSession", back_populates="time_entries")
 
     def __repr__(self) -> str:
         return f"<TimeEntry(id={self.id}, user_id={self.user_id}, is_running={self.is_running})>"
+
+
+# ============================================
+# WORK SESSION / MICRO-TASK MODELS
+# ============================================
+
+class WorkSession(Base):
+    """
+    Represents a user's work day/session.
+    Links multiple TimeEntry records together.
+    Tracks global work time, breaks, and meetings.
+    """
+    __tablename__ = "work_sessions"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    company_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    
+    # Session timing
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    end_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    # Calculated totals (updated on session end)
+    total_work_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_break_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_meeting_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    
+    # Status tracking
+    status: Mapped[str] = mapped_column(String(20), default="active", nullable=False, index=True)
+    # Values: "active", "break", "meeting", "completed"
+    
+    # Metadata
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="work_sessions")
+    company: Mapped[Optional["Company"]] = relationship("Company")
+    time_entries: Mapped[list["TimeEntry"]] = relationship("TimeEntry", back_populates="work_session")
+    breaks: Mapped[list["SessionBreak"]] = relationship("SessionBreak", back_populates="work_session", cascade="all, delete-orphan")
+    meetings: Mapped[list["SessionMeeting"]] = relationship("SessionMeeting", back_populates="work_session", cascade="all, delete-orphan")
+
+    def __repr__(self) -> str:
+        return f"<WorkSession(id={self.id}, user_id={self.user_id}, status={self.status})>"
+
+
+class SessionBreak(Base):
+    """
+    Records break periods within a work session.
+    Breaks pause BOTH global and task timers.
+    """
+    __tablename__ = "session_breaks"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    work_session_id: Mapped[int] = mapped_column(Integer, ForeignKey("work_sessions.id"), nullable=False, index=True)
+    
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    end_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    
+    break_type: Mapped[str] = mapped_column(String(20), default="short", nullable=False)
+    # Values: "short", "lunch", "other"
+    
+    # Relationships
+    work_session: Mapped["WorkSession"] = relationship("WorkSession", back_populates="breaks")
+
+    def __repr__(self) -> str:
+        return f"<SessionBreak(id={self.id}, session_id={self.work_session_id}, type={self.break_type})>"
+
+
+class SessionMeeting(Base):
+    """
+    Records meeting periods within a work session.
+    Meetings pause ONLY task timer, global timer keeps running.
+    """
+    __tablename__ = "session_meetings"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    work_session_id: Mapped[int] = mapped_column(Integer, ForeignKey("work_sessions.id"), nullable=False, index=True)
+    
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    end_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    
+    title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    meeting_type: Mapped[str] = mapped_column(String(20), default="internal", nullable=False)
+    # Values: "internal", "external", "client"
+    
+    # Relationships
+    work_session: Mapped["WorkSession"] = relationship("WorkSession", back_populates="meetings")
+
+    def __repr__(self) -> str:
+        return f"<SessionMeeting(id={self.id}, session_id={self.work_session_id}, title={self.title})>"
 
 
 # ============================================
