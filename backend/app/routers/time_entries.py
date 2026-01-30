@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, date, timedelta, timezone
 
 from app.database import get_db
-from app.models import User, Team, TeamMember, Project, Task, TimeEntry
+from app.models import User, Team, TeamMember, Project, Task, TimeEntry, WorkSession
 from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY
 from app.schemas.auth import Message
 from app.routers.websocket import manager as ws_manager
@@ -272,6 +272,33 @@ async def start_timer(
         duration_seconds=None,
         is_running=True
     )
+    
+    # === MICRO-TASK INTEGRATION: Link timer to work session ===
+    # Find or create active work session for this user
+    session_result = await db.execute(
+        select(WorkSession)
+        .where(
+            and_(
+                WorkSession.user_id == current_user.id,
+                WorkSession.end_time.is_(None)
+            )
+        )
+    )
+    active_session = session_result.scalar_one_or_none()
+    
+    if not active_session:
+        # Auto-create session when starting first timer of the day
+        active_session = WorkSession(
+            user_id=current_user.id,
+            company_id=current_user.company_id,
+            status="active",
+        )
+        db.add(active_session)
+        await db.flush()  # Get the ID without committing
+    
+    # Link time entry to session
+    entry.work_session_id = active_session.id
+    # === END MICRO-TASK INTEGRATION ===
     
     db.add(entry)
     await db.commit()
