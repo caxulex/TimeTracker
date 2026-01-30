@@ -64,4 +64,5 @@ from .sessions import (
     SessionStatusResponse,
     SessionSummary,
     DailySessionReport,
+    TaskBreakdownItem,
 )

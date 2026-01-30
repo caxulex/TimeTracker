@@ -13,7 +13,7 @@ Timer behavior:
 - Task timer: Tracks time on current task (pauses for breaks AND meetings)
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, time, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, and_
@@ -32,6 +32,8 @@ from app.schemas.sessions import (
     SessionMeetingCreate,
     SessionMeetingResponse,
     SessionStatusResponse,
+    DailySessionReport,
+    SessionSummary,
 )
 from app.routers.websocket import manager as ws_manager
 
@@ -577,3 +579,144 @@ async def end_meeting(
     )
     
     return SessionMeetingResponse.model_validate(active_meeting)
+
+
+# ============================================
+# SESSION REPORTS ENDPOINTS (Additive)
+# ============================================
+
+@router.get("/reports/daily", response_model=DailySessionReport)
+async def get_daily_session_report(
+    report_date: Optional[date] = None,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get a daily session report showing work, break, and meeting breakdown.
+    
+    If no date provided, returns today's report.
+    This is ADDITIVE - does not modify existing reports.
+    """
+    if report_date is None:
+        report_date = datetime.now(timezone.utc).date()
+    
+    # Get session for the date
+    day_start = datetime.combine(report_date, time.min).replace(tzinfo=timezone.utc)
+    day_end = datetime.combine(report_date, time.max).replace(tzinfo=timezone.utc)
+    
+    result = await db.execute(
+        select(WorkSession)
+        .where(
+            and_(
+                WorkSession.user_id == current_user.id,
+                WorkSession.start_time >= day_start,
+                WorkSession.start_time <= day_end
+            )
+        )
+        .options(
+            selectinload(WorkSession.breaks),
+            selectinload(WorkSession.meetings),
+            selectinload(WorkSession.time_entries)
+        )
+    )
+    sessions = result.scalars().all()
+    
+    # Aggregate data
+    total_work = 0
+    total_break = 0
+    total_meeting = 0
+    task_breakdown = []
+    
+    for session in sessions:
+        total_work += session.total_work_seconds
+        total_break += session.total_break_seconds
+        total_meeting += session.total_meeting_seconds
+        
+        # Build task breakdown from time entries
+        for entry in session.time_entries:
+            if entry.duration_seconds:
+                task_breakdown.append({
+                    "time_entry_id": entry.id,
+                    "task_id": entry.task_id,
+                    "project_id": entry.project_id,
+                    "description": entry.description,
+                    "duration_seconds": entry.duration_seconds,
+                    "start_time": entry.start_time.isoformat() if entry.start_time else None,
+                    "end_time": entry.end_time.isoformat() if entry.end_time else None,
+                })
+    
+    return DailySessionReport(
+        date=report_date,
+        user_id=current_user.id,
+        user_name=current_user.name,
+        total_work_seconds=total_work,
+        total_break_seconds=total_break,
+        total_meeting_seconds=total_meeting,
+        net_productive_seconds=total_work,  # Work time excludes breaks/meetings
+        session_count=len(sessions),
+        task_breakdown=task_breakdown
+    )
+
+
+@router.get("/reports/summary", response_model=SessionSummary)
+async def get_session_summary(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get a session summary for a date range.
+    
+    Defaults to the current week if no dates provided.
+    This is ADDITIVE - does not modify existing reports.
+    """
+    if end_date is None:
+        end_date = datetime.now(timezone.utc).date()
+    if start_date is None:
+        # Default to start of current week (Monday)
+        start_date = end_date - timedelta(days=end_date.weekday())
+    
+    range_start = datetime.combine(start_date, time.min).replace(tzinfo=timezone.utc)
+    range_end = datetime.combine(end_date, time.max).replace(tzinfo=timezone.utc)
+    
+    result = await db.execute(
+        select(WorkSession)
+        .where(
+            and_(
+                WorkSession.user_id == current_user.id,
+                WorkSession.start_time >= range_start,
+                WorkSession.start_time <= range_end
+            )
+        )
+    )
+    sessions = result.scalars().all()
+    
+    # Aggregate totals
+    total_work = sum(s.total_work_seconds for s in sessions)
+    total_break = sum(s.total_break_seconds for s in sessions)
+    total_meeting = sum(s.total_meeting_seconds for s in sessions)
+    
+    # Calculate averages
+    completed_sessions = [s for s in sessions if s.status == "completed"]
+    avg_session_length = 0
+    if completed_sessions:
+        total_session_time = sum(
+            int((s.end_time - s.start_time).total_seconds()) 
+            for s in completed_sessions 
+            if s.end_time
+        )
+        avg_session_length = total_session_time // len(completed_sessions)
+    
+    return SessionSummary(
+        start_date=start_date,
+        end_date=end_date,
+        user_id=current_user.id,
+        user_name=current_user.name,
+        total_work_seconds=total_work,
+        total_break_seconds=total_break,
+        total_meeting_seconds=total_meeting,
+        session_count=len(sessions),
+        average_session_seconds=avg_session_length
+    )
+

@@ -3,7 +3,7 @@ Pydantic schemas for Work Sessions, Breaks, and Meetings.
 
 Part of the Micro-Task Management feature.
 """
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict
 
@@ -120,25 +120,38 @@ class SessionStatusResponse(BaseModel):
 # SESSION HISTORY/REPORT SCHEMAS
 # ============================================
 
-class SessionSummary(BaseModel):
-    """Summary of a completed session for reports."""
-    model_config = ConfigDict(from_attributes=True)
-    
-    id: int
-    date: datetime
-    total_work_seconds: int
-    total_break_seconds: int
-    total_meeting_seconds: int
-    net_work_seconds: int  # work - breaks
-    task_count: int  # Number of tasks worked on
-    status: str
+class TaskBreakdownItem(BaseModel):
+    """Single task in the breakdown."""
+    time_entry_id: int
+    task_id: Optional[int] = None
+    project_id: Optional[int] = None
+    description: Optional[str] = None
+    duration_seconds: int
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
 
 
 class DailySessionReport(BaseModel):
-    """Daily report showing session breakdown."""
-    date: str  # YYYY-MM-DD
-    sessions: List[SessionSummary] = []
-    total_work_hours: float
-    total_break_hours: float
-    total_meeting_hours: float
-    net_work_hours: float
+    """Daily report showing session breakdown with task details."""
+    date: date
+    user_id: int
+    user_name: str
+    total_work_seconds: int
+    total_break_seconds: int
+    total_meeting_seconds: int
+    net_productive_seconds: int  # Work time (already excludes breaks/meetings)
+    session_count: int
+    task_breakdown: List[TaskBreakdownItem] = []
+
+
+class SessionSummary(BaseModel):
+    """Summary of sessions for a date range."""
+    start_date: date
+    end_date: date
+    user_id: int
+    user_name: str
+    total_work_seconds: int
+    total_break_seconds: int
+    total_meeting_seconds: int
+    session_count: int
+    average_session_seconds: int  # Average session length
