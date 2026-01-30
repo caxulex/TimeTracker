@@ -447,12 +447,17 @@ async def start_meeting(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Start a meeting (pauses ONLY task timer, global keeps running).
+    Start a meeting (pauses task timer, creates meeting time entry).
     
     Meeting types:
     - "internal": Internal team meeting
     - "external": External meeting
     - "client": Client meeting
+    
+    This will:
+    1. Pause any running time entry
+    2. Create a new time entry for the meeting
+    3. The meeting time entry will show in reports
     """
     session = await get_active_session(db, current_user.id)
     
@@ -478,22 +483,50 @@ async def start_meeting(
                 detail="End your break before starting a meeting."
             )
     
-    # Pause current task (but NOT the global session timer!)
     now = datetime.now(timezone.utc)
+    paused_entry_id = None
+    
+    # Find and STOP (not just pause) current time entry
     for entry in session.time_entries:
-        if entry.is_running and not entry.is_paused:
-            entry.is_paused = True
-            entry.paused_at = now
+        if entry.is_running:
+            # Stop this entry completely (we'll restart it after meeting)
+            entry.end_time = now
+            entry.is_running = False
+            entry.is_paused = False
+            if entry.start_time:
+                total_elapsed = int((now - entry.start_time).total_seconds())
+                entry.duration_seconds = total_elapsed - (entry.pause_seconds or 0)
+            paused_entry_id = entry.id
+            break
     
     # Update session status
     session.status = "meeting"
     
-    # Create meeting record
+    # Create a time entry for the meeting
+    meeting_description = meeting_data.title or f"{meeting_data.meeting_type.capitalize()} Meeting"
+    meeting_entry = TimeEntry(
+        user_id=current_user.id,
+        company_id=current_user.company_id,
+        project_id=None,  # Meetings don't require a project
+        task_id=None,
+        description=f"[Meeting] {meeting_description}",
+        start_time=now,
+        is_running=True,
+        is_paused=False,
+        pause_seconds=0,
+        work_session_id=session.id,
+    )
+    db.add(meeting_entry)
+    await db.flush()  # Get the ID
+    
+    # Create meeting record with references
     new_meeting = SessionMeeting(
         work_session_id=session.id,
         title=meeting_data.title,
         meeting_type=meeting_data.meeting_type,
         start_time=now,
+        paused_entry_id=paused_entry_id,
+        time_entry_id=meeting_entry.id,
     )
     db.add(new_meeting)
     await db.commit()
@@ -508,7 +541,8 @@ async def start_meeting(
             "meeting_id": new_meeting.id,
             "title": new_meeting.title,
             "meeting_type": new_meeting.meeting_type,
-            "start_time": new_meeting.start_time.isoformat()
+            "start_time": new_meeting.start_time.isoformat(),
+            "time_entry_id": meeting_entry.id
         }
     )
     
@@ -521,7 +555,11 @@ async def end_meeting(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    End the current meeting (resumes task timer).
+    End the current meeting (stops meeting time entry, restarts previous task).
+    
+    This will:
+    1. Stop the meeting time entry
+    2. Restart the previously paused time entry (if any)
     """
     session = await get_active_session(db, current_user.id)
     
@@ -544,22 +582,48 @@ async def end_meeting(
             detail="No active meeting to end."
         )
     
-    # End the meeting
     now = datetime.now(timezone.utc)
+    
+    # End the meeting
     active_meeting.end_time = now
     active_meeting.duration_seconds = int((now - active_meeting.start_time).total_seconds())
+    
+    # Stop the meeting time entry
+    if active_meeting.time_entry_id:
+        result = await db.execute(
+            select(TimeEntry).where(TimeEntry.id == active_meeting.time_entry_id)
+        )
+        meeting_entry = result.scalar_one_or_none()
+        if meeting_entry and meeting_entry.is_running:
+            meeting_entry.end_time = now
+            meeting_entry.is_running = False
+            meeting_entry.duration_seconds = int((now - meeting_entry.start_time).total_seconds())
+    
+    # Restart the previously paused time entry
+    if active_meeting.paused_entry_id:
+        result = await db.execute(
+            select(TimeEntry).where(TimeEntry.id == active_meeting.paused_entry_id)
+        )
+        paused_entry = result.scalar_one_or_none()
+        if paused_entry:
+            # Create a NEW time entry continuing the previous task
+            resumed_entry = TimeEntry(
+                user_id=current_user.id,
+                company_id=current_user.company_id,
+                project_id=paused_entry.project_id,
+                task_id=paused_entry.task_id,
+                description=paused_entry.description,
+                start_time=now,
+                is_running=True,
+                is_paused=False,
+                pause_seconds=0,
+                work_session_id=session.id,
+            )
+            db.add(resumed_entry)
     
     # Update session totals
     session.total_meeting_seconds += active_meeting.duration_seconds
     session.status = "active"
-    
-    # Resume paused time entries
-    for entry in session.time_entries:
-        if entry.is_paused:
-            entry.is_paused = False
-            if entry.paused_at:
-                entry.pause_seconds += int((now - entry.paused_at).total_seconds())
-            entry.paused_at = None
     
     await db.commit()
     await db.refresh(active_meeting)

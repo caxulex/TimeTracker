@@ -57,6 +57,8 @@ class SessionMeetingResponse(SessionMeetingBase):
     start_time: datetime
     end_time: Optional[datetime] = None
     duration_seconds: int = 0
+    paused_entry_id: Optional[int] = None
+    time_entry_id: Optional[int] = None
 
 
 # ============================================

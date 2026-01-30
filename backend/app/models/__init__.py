@@ -440,6 +440,7 @@ class SessionMeeting(Base):
     """
     Records meeting periods within a work session.
     Meetings pause ONLY task timer, global timer keeps running.
+    Now also creates a time entry for the meeting itself.
     """
     __tablename__ = "session_meetings"
     
@@ -454,8 +455,15 @@ class SessionMeeting(Base):
     meeting_type: Mapped[str] = mapped_column(String(20), default="internal", nullable=False)
     # Values: "internal", "external", "client"
     
+    # Track paused entry to resume after meeting
+    paused_entry_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("time_entries.id"), nullable=True)
+    # The time entry created for this meeting
+    time_entry_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("time_entries.id"), nullable=True)
+    
     # Relationships
     work_session: Mapped["WorkSession"] = relationship("WorkSession", back_populates="meetings")
+    paused_entry: Mapped[Optional["TimeEntry"]] = relationship("TimeEntry", foreign_keys=[paused_entry_id])
+    time_entry: Mapped[Optional["TimeEntry"]] = relationship("TimeEntry", foreign_keys=[time_entry_id])
 
     def __repr__(self) -> str:
         return f"<SessionMeeting(id={self.id}, session_id={self.work_session_id}, title={self.title})>"
