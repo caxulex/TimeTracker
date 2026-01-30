@@ -25,6 +25,7 @@ from app.routers import companies  # Multi-tenancy / White-label support
 from app.routers import email_logs  # Email delivery monitoring
 from app.routers import notifications  # In-app notifications
 from app.routers import audit_logs  # Audit log viewing
+from app.routers import work_sessions  # Micro-task management: Work sessions, breaks, meetings
 from app.ai import ai_router  # AI Services (suggestions, anomalies)
 from app.middleware import RateLimitMiddleware, rate_limiter, SecurityHeadersMiddleware, RequestValidationMiddleware
 from app.exceptions import AppException
@@ -398,6 +399,9 @@ app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
 
 # Audit Logs routes
 app.include_router(audit_logs.router, prefix="/api", tags=["Audit Logs"])
+
+# Work Sessions routes (Micro-task management: sessions, breaks, meetings)
+app.include_router(work_sessions.router, tags=["Work Sessions"])
 
 
 # SEC-010: Custom exception handler for AppException
