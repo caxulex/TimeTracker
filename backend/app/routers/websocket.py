@@ -87,7 +87,7 @@ class ConnectionManager:
                 if user_id != exclude_user:
                     await self.send_personal_message(message, user_id)
     
-    async def broadcast_to_company(self, message: dict, company_id: int, exclude_user: int = None):
+    async def broadcast_to_company(self, message: dict, company_id: int | None, exclude_user: int = None):
         """Broadcast a message to all users in the same company (multi-tenant safe)"""
         for user_id in list(self.active_connections.keys()):
             if user_id != exclude_user:
@@ -149,6 +149,73 @@ class ConnectionManager:
         if team_id and team_id in self.team_members:
             return [uid for uid in self.team_members[team_id] if uid in self.active_connections]
         return list(self.active_connections.keys())
+
+    # ============================================
+    # MICRO-TASK SESSION BROADCASTS
+    # ============================================
+    
+    async def broadcast_session_started(self, company_id: int | None, user_id: int, user_name: str, session_data: dict):
+        """Broadcast when a user starts their work session."""
+        await self.broadcast_to_company({
+            "type": "session_started",
+            "user_id": user_id,
+            "user_name": user_name,
+            "data": session_data
+        }, company_id=company_id)
+
+    async def broadcast_session_ended(self, company_id: int | None, user_id: int, user_name: str, session_data: dict):
+        """Broadcast when a user ends their work session."""
+        await self.broadcast_to_company({
+            "type": "session_ended",
+            "user_id": user_id,
+            "user_name": user_name,
+            "data": session_data
+        }, company_id=company_id)
+
+    async def broadcast_break_started(self, company_id: int | None, user_id: int, user_name: str, break_data: dict):
+        """Broadcast when a user starts a break."""
+        await self.broadcast_to_company({
+            "type": "break_started",
+            "user_id": user_id,
+            "user_name": user_name,
+            "data": break_data
+        }, company_id=company_id)
+
+    async def broadcast_break_ended(self, company_id: int | None, user_id: int, user_name: str, break_data: dict):
+        """Broadcast when a user ends a break."""
+        await self.broadcast_to_company({
+            "type": "break_ended",
+            "user_id": user_id,
+            "user_name": user_name,
+            "data": break_data
+        }, company_id=company_id)
+
+    async def broadcast_meeting_started(self, company_id: int | None, user_id: int, user_name: str, meeting_data: dict):
+        """Broadcast when a user starts a meeting."""
+        await self.broadcast_to_company({
+            "type": "meeting_started",
+            "user_id": user_id,
+            "user_name": user_name,
+            "data": meeting_data
+        }, company_id=company_id)
+
+    async def broadcast_meeting_ended(self, company_id: int | None, user_id: int, user_name: str, meeting_data: dict):
+        """Broadcast when a user ends a meeting."""
+        await self.broadcast_to_company({
+            "type": "meeting_ended",
+            "user_id": user_id,
+            "user_name": user_name,
+            "data": meeting_data
+        }, company_id=company_id)
+
+    async def broadcast_task_switched(self, company_id: int | None, user_id: int, user_name: str, task_data: dict):
+        """Broadcast when a user switches to a different task."""
+        await self.broadcast_to_company({
+            "type": "task_switched",
+            "user_id": user_id,
+            "user_name": user_name,
+            "data": task_data
+        }, company_id=company_id)
 
 
 # Global connection manager instance

@@ -33,6 +33,7 @@ from app.schemas.sessions import (
     SessionMeetingResponse,
     SessionStatusResponse,
 )
+from app.routers.websocket import manager as ws_manager
 
 router = APIRouter(prefix="/api/work-sessions", tags=["work-sessions"])
 
@@ -169,6 +170,18 @@ async def start_session(
     await db.commit()
     await db.refresh(session)
     
+    # Broadcast session started to company
+    await ws_manager.broadcast_session_started(
+        company_id=current_user.company_id,
+        user_id=current_user.id,
+        user_name=current_user.name,
+        session_data={
+            "session_id": session.id,
+            "start_time": session.start_time.isoformat(),
+            "status": session.status
+        }
+    )
+    
     return WorkSessionResponse.model_validate(session)
 
 
@@ -229,6 +242,21 @@ async def end_session(
     
     await db.commit()
     await db.refresh(session)
+    
+    # Broadcast session ended to company
+    await ws_manager.broadcast_session_ended(
+        company_id=current_user.company_id,
+        user_id=current_user.id,
+        user_name=current_user.name,
+        session_data={
+            "session_id": session.id,
+            "end_time": session.end_time.isoformat(),
+            "total_work_seconds": session.total_work_seconds,
+            "total_break_seconds": session.total_break_seconds,
+            "total_meeting_seconds": session.total_meeting_seconds,
+            "status": session.status
+        }
+    )
     
     return WorkSessionResponse.model_validate(session)
 
@@ -326,6 +354,18 @@ async def start_break(
     await db.commit()
     await db.refresh(new_break)
     
+    # Broadcast break started to company
+    await ws_manager.broadcast_break_started(
+        company_id=current_user.company_id,
+        user_id=current_user.id,
+        user_name=current_user.name,
+        break_data={
+            "break_id": new_break.id,
+            "break_type": new_break.break_type,
+            "start_time": new_break.start_time.isoformat()
+        }
+    )
+    
     return SessionBreakResponse.model_validate(new_break)
 
 
@@ -377,6 +417,19 @@ async def end_break(
     
     await db.commit()
     await db.refresh(active_break)
+    
+    # Broadcast break ended to company
+    await ws_manager.broadcast_break_ended(
+        company_id=current_user.company_id,
+        user_id=current_user.id,
+        user_name=current_user.name,
+        break_data={
+            "break_id": active_break.id,
+            "break_type": active_break.break_type,
+            "duration_seconds": active_break.duration_seconds,
+            "end_time": active_break.end_time.isoformat()
+        }
+    )
     
     return SessionBreakResponse.model_validate(active_break)
 
@@ -444,6 +497,19 @@ async def start_meeting(
     await db.commit()
     await db.refresh(new_meeting)
     
+    # Broadcast meeting started to company
+    await ws_manager.broadcast_meeting_started(
+        company_id=current_user.company_id,
+        user_id=current_user.id,
+        user_name=current_user.name,
+        meeting_data={
+            "meeting_id": new_meeting.id,
+            "title": new_meeting.title,
+            "meeting_type": new_meeting.meeting_type,
+            "start_time": new_meeting.start_time.isoformat()
+        }
+    )
+    
     return SessionMeetingResponse.model_validate(new_meeting)
 
 
@@ -495,5 +561,19 @@ async def end_meeting(
     
     await db.commit()
     await db.refresh(active_meeting)
+    
+    # Broadcast meeting ended to company
+    await ws_manager.broadcast_meeting_ended(
+        company_id=current_user.company_id,
+        user_id=current_user.id,
+        user_name=current_user.name,
+        meeting_data={
+            "meeting_id": active_meeting.id,
+            "title": active_meeting.title,
+            "meeting_type": active_meeting.meeting_type,
+            "duration_seconds": active_meeting.duration_seconds,
+            "end_time": active_meeting.end_time.isoformat()
+        }
+    )
     
     return SessionMeetingResponse.model_validate(active_meeting)
