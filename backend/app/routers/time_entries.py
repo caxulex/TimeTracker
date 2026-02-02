@@ -153,6 +153,41 @@ async def get_timer_status(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get current running timer status"""
+    # First check if user has an active work session
+    # If no active session, user should not have a running timer
+    session_result = await db.execute(
+        select(WorkSession)
+        .where(
+            and_(
+                WorkSession.user_id == current_user.id,
+                WorkSession.end_time.is_(None)
+            )
+        )
+    )
+    active_session = session_result.scalar_one_or_none()
+    
+    # If no active session, auto-stop any orphaned running timers and return not running
+    if not active_session:
+        orphan_result = await db.execute(
+            select(TimeEntry)
+            .where(TimeEntry.user_id == current_user.id, TimeEntry.end_time == None)
+        )
+        orphan_entries = orphan_result.scalars().all()
+        if orphan_entries:
+            now = datetime.now(timezone.utc)
+            for entry in orphan_entries:
+                entry.end_time = now
+                entry.is_running = False
+                entry.is_paused = False
+                if entry.start_time:
+                    start = entry.start_time
+                    if start.tzinfo is None:
+                        start = start.replace(tzinfo=timezone.utc)
+                    total_elapsed = int((now - start).total_seconds())
+                    entry.duration_seconds = total_elapsed - (entry.pause_seconds or 0)
+            await db.commit()
+        return TimerStatus(is_running=False)
+    
     result = await db.execute(
         select(TimeEntry)
         .where(TimeEntry.user_id == current_user.id, TimeEntry.end_time == None)

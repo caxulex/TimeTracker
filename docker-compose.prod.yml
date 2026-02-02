@@ -100,6 +100,38 @@ services:
     networks:
       - timetracker-network
 
+  # Scheduler for daily cleanup tasks (closes stale sessions at midnight)
+  scheduler:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: timetracker-scheduler
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:-timetracker}:${DB_PASSWORD:-timetracker_secure_password}@postgres:5432/${DB_NAME:-time_tracker}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Scheduler started. Will run cleanup at midnight daily."
+        while true; do
+          # Calculate seconds until next midnight
+          CURRENT_HOUR=$$(date +%H)
+          CURRENT_MIN=$$(date +%M)
+          CURRENT_SEC=$$(date +%S)
+          SECS_UNTIL_MIDNIGHT=$$(( (24 - $$CURRENT_HOUR - 1) * 3600 + (60 - $$CURRENT_MIN - 1) * 60 + (60 - $$CURRENT_SEC) ))
+          echo "[Scheduler] Next cleanup in $$SECS_UNTIL_MIDNIGHT seconds (at midnight)"
+          sleep $$SECS_UNTIL_MIDNIGHT
+          echo "[Scheduler] Running stale session cleanup..."
+          python scripts/close_stale_sessions.py
+          # Sleep 1 minute to avoid running twice
+          sleep 60
+        done
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - timetracker-network
+
 volumes:
   postgres_data:
     driver: local

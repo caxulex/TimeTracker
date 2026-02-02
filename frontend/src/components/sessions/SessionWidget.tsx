@@ -147,6 +147,9 @@ export function SessionWidget() {
       // Then end session
       await endSession();
       
+      // Force refresh timer state to ensure it's cleared
+      await fetchTimer(true);
+      
       addNotification({
         type: 'success',
         title: 'Clocked Out!',

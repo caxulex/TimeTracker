@@ -211,7 +211,7 @@ async def end_session(
     
     now = datetime.now(timezone.utc)
     
-    # Stop any running time entries
+    # Stop any running time entries linked to this session
     for entry in session.time_entries:
         if entry.end_time is None:
             entry.end_time = now
@@ -220,6 +220,26 @@ async def end_session(
             if entry.start_time:
                 total_elapsed = int((entry.end_time - entry.start_time).total_seconds())
                 entry.duration_seconds = total_elapsed - entry.pause_seconds
+    
+    # ALSO stop any orphaned running entries for this user (entries without session_id)
+    # This ensures all timers stop when user clocks out
+    orphan_result = await db.execute(
+        select(TimeEntry).where(
+            and_(
+                TimeEntry.user_id == current_user.id,
+                TimeEntry.end_time.is_(None),
+                TimeEntry.work_session_id.is_(None)  # Not linked to any session
+            )
+        )
+    )
+    orphan_entries = orphan_result.scalars().all()
+    for entry in orphan_entries:
+        entry.end_time = now
+        entry.is_running = False
+        entry.is_paused = False
+        if entry.start_time:
+            total_elapsed = int((entry.end_time - entry.start_time).total_seconds())
+            entry.duration_seconds = total_elapsed - (entry.pause_seconds or 0)
     
     # End any active breaks
     for brk in session.breaks:
@@ -784,3 +804,114 @@ async def get_session_summary(
         average_session_seconds=avg_session_length
     )
 
+
+# ============================================
+# ADMIN: STALE SESSION CLEANUP
+# ============================================
+
+@router.post("/admin/cleanup-stale", response_model=dict)
+async def cleanup_stale_sessions(
+    max_hours: int = 12,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Admin endpoint to manually close stale work sessions.
+    
+    Closes all sessions that have been running longer than max_hours.
+    Also closes any orphaned time entries.
+    
+    Only accessible by admin/super_admin users.
+    """
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    
+    now = datetime.now(timezone.utc)
+    max_age = now - timedelta(hours=max_hours)
+    
+    sessions_closed = 0
+    entries_closed = 0
+    
+    # Find all stale sessions
+    stale_result = await db.execute(
+        select(WorkSession)
+        .where(
+            and_(
+                WorkSession.end_time.is_(None),
+                WorkSession.start_time < max_age
+            )
+        )
+        .options(
+            selectinload(WorkSession.time_entries),
+            selectinload(WorkSession.breaks),
+            selectinload(WorkSession.meetings)
+        )
+    )
+    stale_sessions = stale_result.scalars().all()
+    
+    for session in stale_sessions:
+        # Close time entries
+        for entry in session.time_entries:
+            if entry.end_time is None:
+                entry.end_time = now
+                entry.is_running = False
+                entry.is_paused = False
+                if entry.start_time:
+                    total_elapsed = int((now - entry.start_time).total_seconds())
+                    entry.duration_seconds = total_elapsed - (entry.pause_seconds or 0)
+                entries_closed += 1
+        
+        # Close breaks
+        for brk in session.breaks:
+            if brk.end_time is None:
+                brk.end_time = now
+                brk.duration_seconds = int((now - brk.start_time).total_seconds())
+                session.total_break_seconds += brk.duration_seconds
+        
+        # Close meetings
+        for mtg in session.meetings:
+            if mtg.end_time is None:
+                mtg.end_time = now
+                mtg.duration_seconds = int((now - mtg.start_time).total_seconds())
+                session.total_meeting_seconds += mtg.duration_seconds
+        
+        # Close session
+        session.end_time = now
+        session.status = "auto_closed"
+        session.total_work_seconds = sum(
+            (e.duration_seconds or 0) for e in session.time_entries
+        )
+        sessions_closed += 1
+    
+    # Close orphaned entries (not linked to any session)
+    orphan_result = await db.execute(
+        select(TimeEntry).where(
+            and_(
+                TimeEntry.end_time.is_(None),
+                TimeEntry.start_time < max_age
+            )
+        )
+    )
+    orphan_entries = orphan_result.scalars().all()
+    
+    for entry in orphan_entries:
+        entry.end_time = now
+        entry.is_running = False
+        entry.is_paused = False
+        if entry.start_time:
+            total_elapsed = int((now - entry.start_time).total_seconds())
+            entry.duration_seconds = total_elapsed - (entry.pause_seconds or 0)
+        entries_closed += 1
+    
+    await db.commit()
+    
+    return {
+        "success": True,
+        "sessions_closed": sessions_closed,
+        "entries_closed": entries_closed,
+        "max_hours": max_hours,
+        "cleanup_time": now.isoformat()
+    }
