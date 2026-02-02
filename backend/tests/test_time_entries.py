@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import User, Project, Team, TeamMember, TimeEntry
+from app.models import User, Project, Team, TeamMember, TimeEntry, WorkSession
 
 
 @pytest_asyncio.fixture
@@ -71,10 +71,22 @@ async def test_time_entry(
 async def running_time_entry(
     db_session: AsyncSession, test_user: User, test_project: Project
 ) -> TimeEntry:
-    """Create a running (no end_time) time entry."""
+    """Create a running (no end_time) time entry with an active work session."""
+    # First create an active work session (required for timer to be considered running)
+    work_session = WorkSession(
+        user_id=test_user.id,
+        company_id=test_user.company_id,
+        start_time=datetime.now(timezone.utc) - timedelta(hours=1),
+        status="active",
+    )
+    db_session.add(work_session)
+    await db_session.flush()
+    
+    # Now create the running time entry linked to the session
     entry = TimeEntry(
         user_id=test_user.id,
         project_id=test_project.id,
+        work_session_id=work_session.id,
         description="Running time entry",
         start_time=datetime.now(timezone.utc) - timedelta(minutes=30),
         end_time=None,
