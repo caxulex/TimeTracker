@@ -26,8 +26,7 @@ from datetime import datetime, timezone, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy import select, and_, update
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 # Configuration
 MAX_SESSION_HOURS = 12  # Sessions running longer than this will be auto-closed
@@ -42,7 +41,7 @@ async def close_stale_sessions():
     """Close all stale work sessions and orphaned time entries."""
     
     engine = create_async_engine(DATABASE_URL, echo=False)
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     
     now = datetime.now(timezone.utc)
     max_age = now - timedelta(hours=MAX_SESSION_HOURS)

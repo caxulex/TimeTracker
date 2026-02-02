@@ -14,6 +14,31 @@ import type {
 } from '../types';
 import { sessionsApi } from '../api/client';
 
+// WebSocket event payload types
+interface SessionWebSocketEvent {
+  user_id: number;
+  data?: WorkSession;
+}
+
+interface BreakWebSocketEvent {
+  user_id: number;
+  data?: SessionBreak & { duration_seconds?: number };
+}
+
+interface MeetingWebSocketEvent {
+  user_id: number;
+  data?: SessionMeeting & { duration_seconds?: number };
+}
+
+// Error type for catch blocks
+interface ApiError {
+  response?: {
+    status?: number;
+    data?: { detail?: string };
+  };
+  message?: string;
+}
+
 interface SessionState {
   // Current session state
   currentSession: WorkSession | null;
@@ -42,12 +67,12 @@ interface SessionState {
   clearError: () => void;
   
   // WebSocket event handlers
-  handleSessionStarted: (data: any) => void;
-  handleSessionEnded: (data: any) => void;
-  handleBreakStarted: (data: any) => void;
-  handleBreakEnded: (data: any) => void;
-  handleMeetingStarted: (data: any) => void;
-  handleMeetingEnded: (data: any) => void;
+  handleSessionStarted: (data: SessionWebSocketEvent) => void;
+  handleSessionEnded: (data: SessionWebSocketEvent) => void;
+  handleBreakStarted: (data: BreakWebSocketEvent) => void;
+  handleBreakEnded: (data: BreakWebSocketEvent) => void;
+  handleMeetingStarted: (data: MeetingWebSocketEvent) => void;
+  handleMeetingEnded: (data: MeetingWebSocketEvent) => void;
 }
 
 // Helper to calculate elapsed seconds from ISO start time
@@ -126,7 +151,8 @@ export const useSessionStore = create<SessionState>()(
               lastSyncTime: Date.now(),
             });
           }
-        } catch (error: any) {
+        } catch (err: unknown) {
+          const error = err as ApiError;
           const status = error.response?.status;
           if (status === 401 || status === 403 || status === 429) {
             console.warn(`[SessionStore] ${status === 429 ? 'Rate limited' : 'Auth error'}, using local state`);
@@ -134,7 +160,7 @@ export const useSessionStore = create<SessionState>()(
             return;
           }
           console.error('[SessionStore] Error fetching session:', error);
-          set({ error: error.message, isLoading: false });
+          set({ error: error.message || 'Unknown error', isLoading: false });
         }
       },
 
@@ -153,7 +179,8 @@ export const useSessionStore = create<SessionState>()(
             isLoading: false,
             lastSyncTime: Date.now(),
           });
-        } catch (error: any) {
+        } catch (err: unknown) {
+          const error = err as ApiError;
           const message = error.response?.data?.detail || 'Failed to start session';
           set({ error: message, isLoading: false });
           throw error;
@@ -175,7 +202,8 @@ export const useSessionStore = create<SessionState>()(
             isLoading: false,
             lastSyncTime: Date.now(),
           });
-        } catch (error: any) {
+        } catch (err: unknown) {
+          const error = err as ApiError;
           const message = error.response?.data?.detail || 'Failed to end session';
           set({ error: message, isLoading: false });
           throw error;
@@ -197,7 +225,8 @@ export const useSessionStore = create<SessionState>()(
               lastSyncTime: Date.now(),
             });
           }
-        } catch (error: any) {
+        } catch (err: unknown) {
+          const error = err as ApiError;
           const message = error.response?.data?.detail || 'Failed to start break';
           set({ error: message, isLoading: false });
           throw error;
@@ -223,7 +252,8 @@ export const useSessionStore = create<SessionState>()(
               lastSyncTime: Date.now(),
             });
           }
-        } catch (error: any) {
+        } catch (err: unknown) {
+          const error = err as ApiError;
           const message = error.response?.data?.detail || 'Failed to end break';
           set({ error: message, isLoading: false });
           throw error;
@@ -245,7 +275,8 @@ export const useSessionStore = create<SessionState>()(
               lastSyncTime: Date.now(),
             });
           }
-        } catch (error: any) {
+        } catch (err: unknown) {
+          const error = err as ApiError;
           const message = error.response?.data?.detail || 'Failed to start meeting';
           set({ error: message, isLoading: false });
           throw error;
@@ -271,7 +302,8 @@ export const useSessionStore = create<SessionState>()(
               lastSyncTime: Date.now(),
             });
           }
-        } catch (error: any) {
+        } catch (err: unknown) {
+          const error = err as ApiError;
           const message = error.response?.data?.detail || 'Failed to end meeting';
           set({ error: message, isLoading: false });
           throw error;
@@ -304,7 +336,7 @@ export const useSessionStore = create<SessionState>()(
       // WEBSOCKET EVENT HANDLERS
       // ============================================
       
-      handleSessionStarted: (data: any) => {
+      handleSessionStarted: (data: SessionWebSocketEvent) => {
         // Only update if it's for the current user
         const currentUserId = get().currentSession?.user_id;
         if (data.user_id === currentUserId || !currentUserId) {
@@ -313,7 +345,7 @@ export const useSessionStore = create<SessionState>()(
         }
       },
 
-      handleSessionEnded: (data: any) => {
+      handleSessionEnded: (data: SessionWebSocketEvent) => {
         const { currentSession } = get();
         if (currentSession && data.user_id === currentSession.user_id) {
           set({
@@ -327,9 +359,9 @@ export const useSessionStore = create<SessionState>()(
         }
       },
 
-      handleBreakStarted: (data: any) => {
+      handleBreakStarted: (data: BreakWebSocketEvent) => {
         const { currentSession } = get();
-        if (currentSession && data.user_id === currentSession.user_id) {
+        if (currentSession && data.user_id === currentSession.user_id && data.data) {
           set({
             currentSession: { ...currentSession, status: 'break' as SessionStatus },
             activeBreak: data.data,
@@ -338,7 +370,7 @@ export const useSessionStore = create<SessionState>()(
         }
       },
 
-      handleBreakEnded: (data: any) => {
+      handleBreakEnded: (data: BreakWebSocketEvent) => {
         const { currentSession } = get();
         if (currentSession && data.user_id === currentSession.user_id) {
           set({
@@ -353,9 +385,9 @@ export const useSessionStore = create<SessionState>()(
         }
       },
 
-      handleMeetingStarted: (data: any) => {
+      handleMeetingStarted: (data: MeetingWebSocketEvent) => {
         const { currentSession } = get();
-        if (currentSession && data.user_id === currentSession.user_id) {
+        if (currentSession && data.user_id === currentSession.user_id && data.data) {
           set({
             currentSession: { ...currentSession, status: 'meeting' as SessionStatus },
             activeMeeting: data.data,
@@ -364,7 +396,7 @@ export const useSessionStore = create<SessionState>()(
         }
       },
 
-      handleMeetingEnded: (data: any) => {
+      handleMeetingEnded: (data: MeetingWebSocketEvent) => {
         const { currentSession } = get();
         if (currentSession && data.user_id === currentSession.user_id) {
           set({

@@ -217,9 +217,10 @@ async def end_session(
             entry.end_time = now
             entry.is_running = False
             entry.is_paused = False
-            if entry.start_time:
-                total_elapsed = int((entry.end_time - entry.start_time).total_seconds())
-                entry.duration_seconds = total_elapsed - entry.pause_seconds
+            end_time = entry.end_time  # Capture for type checker
+            if entry.start_time and end_time:
+                total_elapsed = int((end_time - entry.start_time).total_seconds())
+                entry.duration_seconds = total_elapsed - (entry.pause_seconds or 0)
     
     # ALSO stop any orphaned running entries for this user (entries without session_id)
     # This ensures all timers stop when user clocks out
@@ -237,23 +238,26 @@ async def end_session(
         entry.end_time = now
         entry.is_running = False
         entry.is_paused = False
-        if entry.start_time:
-            total_elapsed = int((entry.end_time - entry.start_time).total_seconds())
+        end_time = entry.end_time  # Capture for type checker
+        if entry.start_time and end_time:
+            total_elapsed = int((end_time - entry.start_time).total_seconds())
             entry.duration_seconds = total_elapsed - (entry.pause_seconds or 0)
     
     # End any active breaks
     for brk in session.breaks:
         if brk.end_time is None:
             brk.end_time = now
-            brk.duration_seconds = int((now - brk.start_time).total_seconds())
-            session.total_break_seconds += brk.duration_seconds
+            if brk.start_time:
+                brk.duration_seconds = int((now - brk.start_time).total_seconds())
+                session.total_break_seconds += brk.duration_seconds
     
     # End any active meetings
     for mtg in session.meetings:
         if mtg.end_time is None:
             mtg.end_time = now
-            mtg.duration_seconds = int((now - mtg.start_time).total_seconds())
-            session.total_meeting_seconds += mtg.duration_seconds
+            if mtg.start_time:
+                mtg.duration_seconds = int((now - mtg.start_time).total_seconds())
+                session.total_meeting_seconds += mtg.duration_seconds
     
     # Calculate totals
     session.end_time = now
@@ -272,7 +276,7 @@ async def end_session(
         user_name=current_user.name,
         session_data={
             "session_id": session.id,
-            "end_time": session.end_time.isoformat(),
+            "end_time": now.isoformat(),
             "total_work_seconds": session.total_work_seconds,
             "total_break_seconds": session.total_break_seconds,
             "total_meeting_seconds": session.total_meeting_seconds,
@@ -449,7 +453,7 @@ async def end_break(
             "break_id": active_break.id,
             "break_type": active_break.break_type,
             "duration_seconds": active_break.duration_seconds,
-            "end_time": active_break.end_time.isoformat()
+            "end_time": now.isoformat()
         }
     )
     
@@ -642,7 +646,7 @@ async def end_meeting(
             db.add(resumed_entry)
     
     # Update session totals
-    session.total_meeting_seconds += active_meeting.duration_seconds
+    session.total_meeting_seconds += active_meeting.duration_seconds or 0
     session.status = "active"
     
     await db.commit()
@@ -658,7 +662,7 @@ async def end_meeting(
             "title": active_meeting.title,
             "meeting_type": active_meeting.meeting_type,
             "duration_seconds": active_meeting.duration_seconds,
-            "end_time": active_meeting.end_time.isoformat()
+            "end_time": now.isoformat()
         }
     )
     
