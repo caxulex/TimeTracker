@@ -9,8 +9,10 @@ from sqlalchemy import select, func, and_
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, date, timedelta, timezone
 
+from sqlalchemy.orm import selectinload
+
 from app.database import get_db
-from app.models import User, Team, TeamMember, Project, Task, TimeEntry, WorkSession
+from app.models import User, Team, TeamMember, Project, Task, TimeEntry, WorkSession, SessionMeeting, SessionBreak
 from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY
 from app.schemas.auth import Message
 from app.routers.websocket import manager as ws_manager
@@ -153,8 +155,7 @@ async def get_timer_status(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get current running timer status"""
-    # First check if user has an active work session
-    # If no active session, user should not have a running timer
+    # Single eager-loaded query for session + meetings + breaks (used for orphan check AND meeting detection)
     session_result = await db.execute(
         select(WorkSession)
         .where(
@@ -163,6 +164,7 @@ async def get_timer_status(
                 WorkSession.end_time.is_(None)
             )
         )
+        .options(selectinload(WorkSession.meetings), selectinload(WorkSession.breaks))
     )
     active_session = session_result.scalar_one_or_none()
     
@@ -190,18 +192,7 @@ async def get_timer_status(
     
     # Check if user is in a meeting — if so, find the PAUSED task entry, not the meeting entry
     # This way the frontend shows isPaused=true and the task timer freezes
-    from sqlalchemy.orm import selectinload as _sel
-    session_q = await db.execute(
-        select(WorkSession)
-        .where(
-            and_(
-                WorkSession.user_id == current_user.id,
-                WorkSession.end_time.is_(None)
-            )
-        )
-        .options(_sel(WorkSession.meetings))
-    )
-    session_obj = session_q.scalar_one_or_none()
+    session_obj = active_session  # Reuse the same eager-loaded session
     
     in_meeting = False
     paused_entry_id = None
@@ -444,6 +435,27 @@ async def stop_timer(
     current_user: User = Depends(get_current_active_user)
 ):
     """Stop the running timer"""
+    # Guard: block stop during active meeting or break (must end those first)
+    guard_session_result = await db.execute(
+        select(WorkSession)
+        .where(and_(WorkSession.user_id == current_user.id, WorkSession.end_time.is_(None)))
+        .options(selectinload(WorkSession.meetings), selectinload(WorkSession.breaks))
+    )
+    guard_session = guard_session_result.scalar_one_or_none()
+    if guard_session:
+        for mtg in guard_session.meetings:
+            if mtg.end_time is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot stop timer during a meeting. End the meeting first."
+                )
+        for brk in guard_session.breaks:
+            if brk.end_time is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot stop timer during a break. End the break first."
+                )
+    
     result = await db.execute(
         select(TimeEntry).where(TimeEntry.user_id == current_user.id, TimeEntry.end_time == None)
     )
@@ -461,9 +473,11 @@ async def stop_timer(
     await db.commit()
     await db.refresh(entry)
     
-    # Get names
-    project_result = await db.execute(select(Project.name).where(Project.id == entry.project_id))
-    project_name = project_result.scalar()
+    # Get names (guard for null project_id — e.g. meeting entries)
+    project_name = None
+    if entry.project_id:
+        project_result = await db.execute(select(Project.name).where(Project.id == entry.project_id))
+        project_name = project_result.scalar()
     
     task_name = None
     if entry.task_id:
@@ -535,6 +549,27 @@ async def switch_task(
     The work session (Clock In) keeps running — only the task timer resets.
     """
     now = datetime.now(timezone.utc)
+    
+    # Guard: block switch during active meeting or break (must end those first)
+    guard_session_result = await db.execute(
+        select(WorkSession)
+        .where(and_(WorkSession.user_id == current_user.id, WorkSession.end_time.is_(None)))
+        .options(selectinload(WorkSession.meetings), selectinload(WorkSession.breaks))
+    )
+    guard_session = guard_session_result.scalar_one_or_none()
+    if guard_session:
+        for mtg in guard_session.meetings:
+            if mtg.end_time is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot switch tasks during a meeting. End the meeting first."
+                )
+        for brk in guard_session.breaks:
+            if brk.end_time is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot switch tasks during a break. End the break first."
+                )
     
     # 1. Find and stop the current running entry
     result = await db.execute(
@@ -866,9 +901,11 @@ async def get_time_entry(
     if current_user.role not in ["super_admin", "admin", "company_admin"] and entry.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     
-    # Get names
-    project_result = await db.execute(select(Project.name).where(Project.id == entry.project_id))
-    project_name = project_result.scalar()
+    # Get names (guard for null project_id — e.g. meeting entries)
+    project_name = None
+    if entry.project_id:
+        project_result = await db.execute(select(Project.name).where(Project.id == entry.project_id))
+        project_name = project_result.scalar()
     
     task_name = None
     if entry.task_id:
@@ -955,9 +992,11 @@ async def update_time_entry(
     await db.commit()
     await db.refresh(entry)
     
-    # Get names
-    project_result = await db.execute(select(Project.name).where(Project.id == entry.project_id))
-    project_name = project_result.scalar()
+    # Get names (guard for null project_id — e.g. meeting entries)
+    project_name = None
+    if entry.project_id:
+        project_result = await db.execute(select(Project.name).where(Project.id == entry.project_id))
+        project_name = project_result.scalar()
     
     task_name = None
     if entry.task_id:

@@ -247,7 +247,7 @@ class SuggestionService:
         
         entries_query = await self.db.execute(
             select(TimeEntry, Project.name.label("project_name"), Task.name.label("task_name"))
-            .join(Project, TimeEntry.project_id == Project.id)
+            .outerjoin(Project, TimeEntry.project_id == Project.id)
             .outerjoin(Task, TimeEntry.task_id == Task.id)
             .where(
                 and_(

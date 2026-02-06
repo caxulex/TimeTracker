@@ -99,7 +99,7 @@ async def get_admin_time_entries(
             Task.name.label("task_name")
         )
         .join(User, TimeEntry.user_id == User.id)
-        .join(Project, TimeEntry.project_id == Project.id)
+        .outerjoin(Project, TimeEntry.project_id == Project.id)
         .outerjoin(Task, TimeEntry.task_id == Task.id)
         .where(
             TimeEntry.start_time >= start_datetime,
@@ -345,7 +345,7 @@ async def get_activity_alerts(
     running_timers_query = (
         select(TimeEntry, User.name, Project.name)
         .join(User, TimeEntry.user_id == User.id)
-        .join(Project, TimeEntry.project_id == Project.id)
+        .outerjoin(Project, TimeEntry.project_id == Project.id)
         .where(TimeEntry.is_running == True)
     )
     running_timers_query = apply_company_filter(running_timers_query, User.company_id, company_filter)
@@ -353,6 +353,7 @@ async def get_activity_alerts(
     running_count = 0
     for row in running_timers_result.all():
         entry, user_name, project_name = row
+        project_name = project_name or "Meeting"  # Handle meeting entries
         running_count += 1
         start = entry.start_time
         if start.tzinfo is None:

@@ -14,6 +14,7 @@ export function TimerWidget() {
   const {
     currentEntry,
     isRunning,
+    isPaused,
     elapsedSeconds,
     isLoading,
     error,
@@ -24,6 +25,9 @@ export function TimerWidget() {
     updateElapsed,
     clearError,
   } = useTimerStore();
+
+  // Controls are disabled during meeting/break (isPaused) to prevent state corruption
+  const controlsDisabled = isLoading || isPaused;
 
   const { addNotification } = useNotifications();
 
@@ -208,12 +212,20 @@ export function TimerWidget() {
           <div
             className={cn(
               'w-4 h-4 rounded-full',
+              isPaused ? 'bg-yellow-400 animate-pulse' :
               isRunning ? 'bg-green-400 animate-pulse' : 'bg-gray-400'
             )}
           />
-          <span className="text-4xl font-mono font-bold tracking-wider">
-            {formatTime(elapsedSeconds)}
-          </span>
+          <div className="flex flex-col">
+            <span className="text-4xl font-mono font-bold tracking-wider">
+              {formatTime(elapsedSeconds)}
+            </span>
+            {isPaused && (
+              <span className="text-xs text-yellow-200 font-medium">
+                ⏸ Paused — In meeting or break
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Description input */}
@@ -227,17 +239,17 @@ export function TimerWidget() {
           />
         </div>
 
-        {/* Project/Task selectors — ALWAYS ENABLED for task switching */}
+        {/* Project/Task selectors — disabled during meeting/break to prevent state corruption */}
         <div className="flex gap-2">
           <select
             value={selectedProject || ''}
             onChange={(e) => {
               handleProjectChange(e.target.value ? Number(e.target.value) : undefined);
             }}
-            disabled={isLoading}
+            disabled={controlsDisabled}
             className={cn(
               "px-3 py-2 bg-white/20 border rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-white/50",
-              isLoading && "opacity-50 cursor-not-allowed",
+              controlsDisabled && "opacity-50 cursor-not-allowed",
               !selectedProject && !isRunning ? "border-yellow-300/70" : "border-white/30"
             )}
           >
@@ -255,10 +267,10 @@ export function TimerWidget() {
               onChange={(e) => {
                 handleTaskChange(e.target.value ? Number(e.target.value) : undefined);
               }}
-              disabled={isLoading}
+              disabled={controlsDisabled}
               className={cn(
                 "px-3 py-2 bg-white/20 border border-white/30 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-white/50",
-                isLoading && "opacity-50 cursor-not-allowed"
+                controlsDisabled && "opacity-50 cursor-not-allowed"
               )}
             >
               <option value="">No task</option>
@@ -274,13 +286,13 @@ export function TimerWidget() {
         {/* Start/Stop button */}
         <button
           onClick={handleStartStop}
-          disabled={isLoading}
+          disabled={controlsDisabled}
           className={cn(
             'px-6 py-3 rounded-lg font-semibold text-sm transition-all',
             isRunning
               ? 'bg-red-500 hover:bg-red-600 text-white'
               : 'bg-white hover:bg-gray-100 text-blue-600',
-            isLoading && 'opacity-50 cursor-not-allowed'
+            controlsDisabled && 'opacity-50 cursor-not-allowed'
           )}
         >
           {isLoading ? (

@@ -418,7 +418,7 @@ async def get_time_by_project(
     
     result = await db.execute(
         select(TimeEntry, Project.name)
-        .join(Project, TimeEntry.project_id == Project.id)
+        .outerjoin(Project, TimeEntry.project_id == Project.id)
         .where(*query_filters)
     )
     
@@ -426,8 +426,8 @@ async def get_time_by_project(
     project_data = defaultdict(lambda: {"name": "", "seconds": 0, "count": 0})
     
     for entry, project_name in result.all():
-        pid = entry.project_id
-        project_data[pid]["name"] = project_name
+        pid = entry.project_id or 0  # Group meeting entries (NULL project) under key 0
+        project_data[pid]["name"] = project_name or "Meeting"
         # Calculate only the portion that falls within the requested period
         entry_seconds = calculate_entry_duration_for_period(entry, start_datetime, end_datetime, now)
         if entry_seconds > 0:
@@ -476,7 +476,7 @@ async def get_time_by_task(
     query = (
         select(TimeEntry, Task.name.label("task_name"), Task.status, Project.name.label("project_name"))
         .join(Task, TimeEntry.task_id == Task.id)
-        .join(Project, TimeEntry.project_id == Project.id)
+        .outerjoin(Project, TimeEntry.project_id == Project.id)
         .where(
             TimeEntry.user_id == current_user.id,
             TimeEntry.task_id != None,
@@ -567,7 +567,7 @@ async def get_team_report(
     # Fetch all entries that OVERLAP with the period (instead of using SQL aggregates)
     entries_query = (
         select(TimeEntry, Project.name.label("project_name"), User.name.label("user_name"))
-        .join(Project, TimeEntry.project_id == Project.id)
+        .outerjoin(Project, TimeEntry.project_id == Project.id)
         .join(User, TimeEntry.user_id == User.id)
         .where(
             TimeEntry.user_id.in_(team_members),
@@ -681,7 +681,7 @@ async def export_time_entries(
             Task.name.label("task_name"),
             User.name.label("user_name")
         )
-        .join(Project, TimeEntry.project_id == Project.id)
+        .outerjoin(Project, TimeEntry.project_id == Project.id)
         .outerjoin(Task, TimeEntry.task_id == Task.id)
         .join(User, TimeEntry.user_id == User.id)
         .where(
@@ -1302,7 +1302,7 @@ async def get_user_metrics(
             TimeEntry.start_time,
             TimeEntry.end_time
         )
-        .join(Project, TimeEntry.project_id == Project.id)
+        .outerjoin(Project, TimeEntry.project_id == Project.id)
         .where(
             and_(
                 TimeEntry.start_time >= month_start,
@@ -1313,8 +1313,8 @@ async def get_user_metrics(
 
     project_totals = {}
     for row in project_result.all():
-        project_id = row.project_id
-        project_name = row.name
+        project_id = row.project_id or 0  # Group meeting entries under key 0
+        project_name = row.name or "Meeting"
         
         if project_id not in project_totals:
             project_totals[project_id] = {

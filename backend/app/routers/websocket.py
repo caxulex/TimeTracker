@@ -236,7 +236,7 @@ async def load_active_timers_from_db():
             result = await db.execute(
                 select(TimeEntry, User, Project, Task)
                 .join(User, TimeEntry.user_id == User.id)
-                .join(Project, TimeEntry.project_id == Project.id)
+                .outerjoin(Project, TimeEntry.project_id == Project.id)
                 .outerjoin(Task, TimeEntry.task_id == Task.id)
                 .where(TimeEntry.end_time == None)
             )
@@ -256,8 +256,8 @@ async def load_active_timers_from_db():
                     "user_id": user.id,
                     "user_name": user.name,
                     "company_id": user.company_id,  # For multi-tenant filtering
-                    "project_id": project.id,
-                    "project_name": project.name,
+                    "project_id": project.id if project else None,
+                    "project_name": project.name if project else "Meeting",
                     "task_id": task.id if task else None,
                     "task_name": task.name if task else None,
                     "description": entry.description,
