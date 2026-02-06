@@ -316,19 +316,13 @@ export const useSessionStore = create<SessionState>()(
         const { currentSession, activeBreak, activeMeeting } = get();
         
         if (currentSession) {
-          // Session clock = raw elapsed - accumulated breaks - accumulated meetings
+          // Session clock = raw elapsed - breaks only (meetings count as work time)
           let sessionElapsed = calculateElapsed(currentSession.start_time)
-            - (currentSession.total_break_seconds || 0)
-            - (currentSession.total_meeting_seconds || 0);
+            - (currentSession.total_break_seconds || 0);
           
           // If currently on break, also subtract the live break duration
           if (activeBreak) {
             sessionElapsed -= calculateElapsed(activeBreak.start_time);
-          }
-          
-          // If currently in meeting, also subtract the live meeting duration
-          if (activeMeeting) {
-            sessionElapsed -= calculateElapsed(activeMeeting.start_time);
           }
           
           set({ sessionElapsedSeconds: Math.max(0, sessionElapsed) });
@@ -439,15 +433,11 @@ export const useSessionStore = create<SessionState>()(
         console.log('[SessionStore] Rehydrating state from localStorage:', state);
         
         if (state?.currentSession) {
-          // Subtract breaks + meetings so session clock doesn't include pause time
+          // Subtract breaks only — meetings count as work time
           let elapsed = calculateElapsed(state.currentSession.start_time)
-            - (state.currentSession.total_break_seconds || 0)
-            - (state.currentSession.total_meeting_seconds || 0);
+            - (state.currentSession.total_break_seconds || 0);
           if (state.activeBreak) {
             elapsed -= calculateElapsed(state.activeBreak.start_time);
-          }
-          if (state.activeMeeting) {
-            elapsed -= calculateElapsed(state.activeMeeting.start_time);
           }
           state.sessionElapsedSeconds = Math.max(0, elapsed);
         }
