@@ -632,7 +632,6 @@ async def end_meeting(
             # Create a NEW time entry continuing the previous task
             resumed_entry = TimeEntry(
                 user_id=current_user.id,
-                company_id=current_user.company_id,
                 project_id=paused_entry.project_id,
                 task_id=paused_entry.task_id,
                 description=paused_entry.description,
