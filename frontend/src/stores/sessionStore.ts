@@ -121,7 +121,8 @@ export const useSessionStore = create<SessionState>()(
           console.log('[SessionStore] Fetched session status:', status);
 
           if (status.has_active_session && status.session) {
-            const sessionElapsed = calculateElapsed(status.session.start_time);
+            // Use backend's global_timer_seconds which already subtracts breaks + meetings
+            const sessionElapsed = Math.max(0, status.global_timer_seconds);
             const breakElapsed = status.current_break 
               ? calculateElapsed(status.current_break.start_time) 
               : 0;
@@ -315,8 +316,22 @@ export const useSessionStore = create<SessionState>()(
         const { currentSession, activeBreak, activeMeeting } = get();
         
         if (currentSession) {
-          const sessionElapsed = calculateElapsed(currentSession.start_time);
-          set({ sessionElapsedSeconds: sessionElapsed });
+          // Session clock = raw elapsed - accumulated breaks - accumulated meetings
+          let sessionElapsed = calculateElapsed(currentSession.start_time)
+            - (currentSession.total_break_seconds || 0)
+            - (currentSession.total_meeting_seconds || 0);
+          
+          // If currently on break, also subtract the live break duration
+          if (activeBreak) {
+            sessionElapsed -= calculateElapsed(activeBreak.start_time);
+          }
+          
+          // If currently in meeting, also subtract the live meeting duration
+          if (activeMeeting) {
+            sessionElapsed -= calculateElapsed(activeMeeting.start_time);
+          }
+          
+          set({ sessionElapsedSeconds: Math.max(0, sessionElapsed) });
         }
         
         if (activeBreak) {
@@ -424,7 +439,17 @@ export const useSessionStore = create<SessionState>()(
         console.log('[SessionStore] Rehydrating state from localStorage:', state);
         
         if (state?.currentSession) {
-          state.sessionElapsedSeconds = calculateElapsed(state.currentSession.start_time);
+          // Subtract breaks + meetings so session clock doesn't include pause time
+          let elapsed = calculateElapsed(state.currentSession.start_time)
+            - (state.currentSession.total_break_seconds || 0)
+            - (state.currentSession.total_meeting_seconds || 0);
+          if (state.activeBreak) {
+            elapsed -= calculateElapsed(state.activeBreak.start_time);
+          }
+          if (state.activeMeeting) {
+            elapsed -= calculateElapsed(state.activeMeeting.start_time);
+          }
+          state.sessionElapsedSeconds = Math.max(0, elapsed);
         }
         if (state?.activeBreak) {
           state.breakElapsedSeconds = calculateElapsed(state.activeBreak.start_time);

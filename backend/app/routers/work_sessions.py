@@ -120,13 +120,18 @@ async def get_current_session(
         if entry.is_running and not entry.is_paused:
             task_timer_seconds = int((now - entry.start_time).total_seconds()) - entry.pause_seconds
     
-    # Global timer = elapsed - total break time (meetings don't subtract from global)
-    global_timer_seconds = elapsed_seconds - session.total_break_seconds
+    # Global timer = elapsed - breaks - meetings (both pause the session clock)
+    global_timer_seconds = elapsed_seconds - session.total_break_seconds - session.total_meeting_seconds
     
     # If currently on break, subtract current break duration too
     if current_break:
         current_break_duration = int((now - current_break.start_time).total_seconds())
         global_timer_seconds -= current_break_duration
+    
+    # If currently in meeting, subtract current meeting duration too
+    if current_meeting:
+        current_meeting_duration = int((now - current_meeting.start_time).total_seconds())
+        global_timer_seconds -= current_meeting_duration
     
     return SessionStatusResponse(
         has_active_session=True,
