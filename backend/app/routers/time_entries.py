@@ -48,7 +48,7 @@ class TimeEntryResponse(BaseModel):
     user_name: Optional[str] = None
     task_id: Optional[int]
     task_name: Optional[str] = None
-    project_id: int
+    project_id: Optional[int] = None
     project_name: Optional[str] = None
     description: Optional[str]
     start_time: datetime
@@ -188,6 +188,63 @@ async def get_timer_status(
             await db.commit()
         return TimerStatus(is_running=False)
     
+    # Check if user is in a meeting — if so, find the PAUSED task entry, not the meeting entry
+    # This way the frontend shows isPaused=true and the task timer freezes
+    from sqlalchemy.orm import selectinload as _sel
+    session_q = await db.execute(
+        select(WorkSession)
+        .where(
+            and_(
+                WorkSession.user_id == current_user.id,
+                WorkSession.end_time.is_(None)
+            )
+        )
+        .options(_sel(WorkSession.meetings))
+    )
+    session_obj = session_q.scalar_one_or_none()
+    
+    in_meeting = False
+    paused_entry_id = None
+    if session_obj:
+        for mtg in session_obj.meetings:
+            if mtg.end_time is None:
+                in_meeting = True
+                paused_entry_id = mtg.paused_entry_id
+                break
+    
+    if in_meeting and paused_entry_id:
+        # Return the paused task entry so frontend shows isPaused=true
+        paused_result = await db.execute(
+            select(TimeEntry).where(TimeEntry.id == paused_entry_id)
+        )
+        paused_entry = paused_result.scalar_one_or_none()
+        if paused_entry:
+            # Get project/task names
+            project_name = None
+            if paused_entry.project_id:
+                proj_r = await db.execute(select(Project.name).where(Project.id == paused_entry.project_id))
+                project_name = proj_r.scalar()
+            task_name = None
+            if paused_entry.task_id:
+                task_r = await db.execute(select(Task.name).where(Task.id == paused_entry.task_id))
+                task_name = task_r.scalar()
+            
+            # Calculate elapsed from paused entry (it was stopped, so use its duration)
+            elapsed = paused_entry.duration_seconds or 0
+            
+            # Build response — mark as paused so frontend freezes the task timer
+            entry_resp = make_entry_response(paused_entry, project_name, task_name, current_user.name)
+            # Override is_paused to true for the frontend
+            entry_resp.is_paused = True
+            entry_resp.is_running = True  # Still "running" conceptually, just paused
+            
+            return TimerStatus(
+                is_running=True,
+                current_entry=entry_resp,
+                elapsed_seconds=elapsed
+            )
+    
+    # Normal case: find running entry
     result = await db.execute(
         select(TimeEntry)
         .where(TimeEntry.user_id == current_user.id, TimeEntry.end_time == None)
@@ -198,9 +255,11 @@ async def get_timer_status(
     if not running_entry:
         return TimerStatus(is_running=False)
     
-    # Get project name
-    project_result = await db.execute(select(Project.name).where(Project.id == running_entry.project_id))
-    project_name = project_result.scalar()
+    # Get project name (guard for null project_id — e.g. meeting entries)
+    project_name = None
+    if running_entry.project_id:
+        project_result = await db.execute(select(Project.name).where(Project.id == running_entry.project_id))
+        project_name = project_result.scalar()
     
     # Get task name if applicable
     task_name = None
@@ -235,7 +294,7 @@ async def get_active_timers(
     query = (
         select(TimeEntry, User, Project, Task)
         .join(User, TimeEntry.user_id == User.id)
-        .join(Project, TimeEntry.project_id == Project.id)
+        .outerjoin(Project, TimeEntry.project_id == Project.id)
         .outerjoin(Task, TimeEntry.task_id == Task.id)
         .where(TimeEntry.end_time == None)
     )
@@ -260,8 +319,8 @@ async def get_active_timers(
         active_timers.append({
             "user_id": user.id,
             "user_name": user.name,
-            "project_id": project.id,
-            "project_name": project.name,
+            "project_id": project.id if project else None,
+            "project_name": project.name if project else None,
             "task_id": task.id if task else None,
             "task_name": task.name if task else None,
             "description": entry.description,
