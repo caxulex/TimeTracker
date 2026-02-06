@@ -20,6 +20,7 @@ interface TimerState {
   fetchTimer: (forceRefresh?: boolean) => Promise<void>;
   startTimer: (data?: TimerStart) => Promise<void>;
   stopTimer: () => Promise<TimeEntry | null>;
+  switchTimer: (data: { project_id: number; task_id?: number; description?: string }) => Promise<void>;
   updateElapsed: () => void;
   clearError: () => void;
   syncWithBackend: () => Promise<void>;
@@ -145,6 +146,25 @@ export const useTimerStore = create<TimerState>()(
           return entry;
         } catch (error: any) {
           const message = error.response?.data?.detail || 'Failed to stop timer';
+          set({ error: message, isLoading: false });
+          throw error;
+        }
+      },
+
+      switchTimer: async (data: { project_id: number; task_id?: number; description?: string }) => {
+        set({ isLoading: true, error: null });
+        try {
+          const entry = await timeEntriesApi.switchTimer(data);
+          set({
+            currentEntry: entry,
+            isRunning: true,
+            isPaused: false,
+            elapsedSeconds: 0,  // Reset task timer — session clock keeps going
+            isLoading: false,
+            lastSyncTime: Date.now(),
+          });
+        } catch (error: any) {
+          const message = error.response?.data?.detail || 'Failed to switch task';
           set({ error: message, isLoading: false });
           throw error;
         }

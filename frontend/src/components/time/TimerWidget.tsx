@@ -1,7 +1,7 @@
 // ============================================
 // TIME TRACKER - TIMER WIDGET COMPONENT
 // ============================================
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card } from '../common';
 import { useTimerStore } from '../../stores/timerStore';
@@ -20,6 +20,7 @@ export function TimerWidget() {
     fetchTimer,
     startTimer,
     stopTimer,
+    switchTimer,
     updateElapsed,
     clearError,
   } = useTimerStore();
@@ -88,6 +89,54 @@ export function TimerWidget() {
     }
   }, [currentEntry]);
 
+  // Handle task switch: called when project or task changes while timer is running
+  const handleTaskSwitch = useCallback(async (newProjectId: number, newTaskId?: number, newDescription?: string) => {
+    if (!isRunning || isLoading) return;
+    
+    try {
+      await switchTimer({
+        project_id: newProjectId,
+        task_id: newTaskId,
+        description: newDescription || description || undefined,
+      });
+      
+      const projectName = projects.find((p: Project) => p.id === newProjectId)?.name || 'Unknown';
+      const taskName = newTaskId ? tasks.find((t: Task) => t.id === newTaskId)?.name : null;
+      addNotification({
+        type: 'info',
+        title: 'Switched Task',
+        message: `Now tracking: ${projectName}${taskName ? ` → ${taskName}` : ''}`,
+        duration: 3000,
+      });
+    } catch {
+      addNotification({
+        type: 'error',
+        title: 'Failed to Switch Task',
+        message: 'Please try again',
+      });
+    }
+  }, [isRunning, isLoading, switchTimer, description, projects, tasks, addNotification]);
+
+  const handleProjectChange = (newProjectId: number | undefined) => {
+    setSelectedProject(newProjectId);
+    setSelectedTask(undefined);
+    setLocalError(null);
+
+    // If timer is running and a valid project was selected, switch task
+    if (isRunning && newProjectId) {
+      handleTaskSwitch(newProjectId, undefined, description);
+    }
+  };
+
+  const handleTaskChange = (newTaskId: number | undefined) => {
+    setSelectedTask(newTaskId);
+
+    // If timer is running, switch to the new task within the same project
+    if (isRunning && selectedProject) {
+      handleTaskSwitch(selectedProject, newTaskId, description);
+    }
+  };
+
   const handleStartStop = async () => {
     setLocalError(null);
 
@@ -124,7 +173,7 @@ export function TimerWidget() {
           message: `Tracking time for ${projectName}`,
           duration: 3000,
         });
-      } catch (err) {
+      } catch {
         addNotification({
           type: 'error',
           title: 'Failed to Start Timer',
@@ -174,23 +223,21 @@ export function TimerWidget() {
             placeholder="What are you working on?"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            disabled={isRunning}
-            className="w-full px-4 py-2 bg-white/20 border border-white/30 rounded-lg text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/50 disabled:opacity-50"
+            className="w-full px-4 py-2 bg-white/20 border border-white/30 rounded-lg text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/50"
           />
         </div>
 
-        {/* Project/Task selectors */}
+        {/* Project/Task selectors — ALWAYS ENABLED for task switching */}
         <div className="flex gap-2">
           <select
             value={selectedProject || ''}
             onChange={(e) => {
-              setSelectedProject(e.target.value ? Number(e.target.value) : undefined);
-              setSelectedTask(undefined);
-              setLocalError(null);
+              handleProjectChange(e.target.value ? Number(e.target.value) : undefined);
             }}
-            disabled={isRunning}
+            disabled={isLoading}
             className={cn(
-              "px-3 py-2 bg-white/20 border rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-white/50 disabled:opacity-50",
+              "px-3 py-2 bg-white/20 border rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-white/50",
+              isLoading && "opacity-50 cursor-not-allowed",
               !selectedProject && !isRunning ? "border-yellow-300/70" : "border-white/30"
             )}
           >
@@ -205,9 +252,14 @@ export function TimerWidget() {
           {selectedProject && (
             <select
               value={selectedTask || ''}
-              onChange={(e) => setSelectedTask(e.target.value ? Number(e.target.value) : undefined)}
-              disabled={isRunning}
-              className="px-3 py-2 bg-white/20 border border-white/30 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-white/50 disabled:opacity-50"
+              onChange={(e) => {
+                handleTaskChange(e.target.value ? Number(e.target.value) : undefined);
+              }}
+              disabled={isLoading}
+              className={cn(
+                "px-3 py-2 bg-white/20 border border-white/30 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-white/50",
+                isLoading && "opacity-50 cursor-not-allowed"
+              )}
             >
               <option value="">No task</option>
               {tasks.map((task: Task) => (

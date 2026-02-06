@@ -448,6 +448,133 @@ async def stop_timer(
     return make_entry_response(entry, project_name, task_name, current_user.name)
 
 
+# ============================================
+# TASK SWITCHING ENDPOINT
+# ============================================
+
+class TaskSwitchRequest(BaseModel):
+    """Request body for switching tasks while timer keeps running."""
+    project_id: int
+    task_id: Optional[int] = None
+    description: Optional[str] = None
+
+
+@router.post("/switch", response_model=TimeEntryResponse)
+async def switch_task(
+    switch_data: TaskSwitchRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Switch to a different project/task without stopping the session clock.
+    
+    This atomically:
+    1. Stops the current running time entry (finalizes its duration)
+    2. Starts a new time entry with the new project/task
+    3. Links the new entry to the same work session
+    
+    The work session (Clock In) keeps running — only the task timer resets.
+    """
+    now = datetime.now(timezone.utc)
+    
+    # 1. Find and stop the current running entry
+    result = await db.execute(
+        select(TimeEntry).where(
+            TimeEntry.user_id == current_user.id,
+            TimeEntry.end_time == None
+        )
+    )
+    old_entry = result.scalar_one_or_none()
+    
+    if not old_entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No running timer to switch from. Start a timer first."
+        )
+    
+    # 2. Validate the new project
+    new_project = await check_project_access(db, switch_data.project_id, current_user)
+    if not new_project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found or access denied"
+        )
+    
+    # 3. Validate the new task (if provided)
+    new_task_name = None
+    if switch_data.task_id:
+        task_result = await db.execute(
+            select(Task).where(
+                Task.id == switch_data.task_id,
+                Task.project_id == switch_data.project_id
+            )
+        )
+        task = task_result.scalar_one_or_none()
+        if not task:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Task not found in this project"
+            )
+        new_task_name = task.name
+    
+    # 4. Stop the old entry
+    old_entry.end_time = now
+    old_entry.is_running = False
+    old_entry.is_paused = False
+    if old_entry.start_time:
+        old_entry.duration_seconds = calculate_duration_seconds(old_entry.start_time, now)
+    
+    # 5. Create the new entry linked to the same work session
+    new_entry = TimeEntry(
+        user_id=current_user.id,
+        project_id=switch_data.project_id,
+        task_id=switch_data.task_id,
+        description=switch_data.description,
+        start_time=now,
+        end_time=None,
+        duration_seconds=None,
+        is_running=True,
+        is_paused=False,
+        pause_seconds=0,
+        work_session_id=old_entry.work_session_id,  # Keep same session!
+    )
+    db.add(new_entry)
+    
+    await db.commit()
+    await db.refresh(new_entry)
+    
+    # 6. Broadcast task switch to company
+    await ws_manager.broadcast_to_company({
+        "type": "timer_started",
+        "data": {
+            "entry_id": new_entry.id,
+            "user_id": current_user.id,
+            "user_name": current_user.name,
+            "project_id": new_entry.project_id,
+            "project_name": new_project.name,
+            "task_id": new_entry.task_id,
+            "task_name": new_task_name,
+            "description": new_entry.description,
+            "start_time": new_entry.start_time.isoformat(),
+            "is_running": True
+        }
+    }, company_id=current_user.company_id)
+    
+    # Update WebSocket active timer cache
+    ws_manager.set_active_timer(current_user.id, {
+        "user_name": current_user.name,
+        "company_id": current_user.company_id,
+        "project_id": new_entry.project_id,
+        "project_name": new_project.name,
+        "task_id": new_entry.task_id,
+        "task_name": new_task_name,
+        "description": new_entry.description,
+        "start_time": new_entry.start_time.isoformat()
+    })
+    
+    return make_entry_response(new_entry, new_project.name, new_task_name, current_user.name)
+
+
 @router.post("", response_model=TimeEntryResponse, status_code=status.HTTP_201_CREATED)
 async def create_manual_entry(
     entry_data: TimeEntryCreate,

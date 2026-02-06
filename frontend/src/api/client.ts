@@ -469,6 +469,11 @@ export const timeEntriesApi = {
     return response.data;
   },
 
+  switchTimer: async (data: { project_id: number; task_id?: number; description?: string }): Promise<TimeEntry> => {
+    const response = await api.post<TimeEntry>('/api/time/switch', data);
+    return response.data;
+  },
+
   getActiveTimers: async (): Promise<any[]> => {
     const response = await api.get<any[]>('/api/time/active');
     return response.data;
