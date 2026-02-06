@@ -530,7 +530,6 @@ async def start_meeting(
     meeting_description = meeting_data.title or f"{meeting_data.meeting_type.capitalize()} Meeting"
     meeting_entry = TimeEntry(
         user_id=current_user.id,
-        company_id=current_user.company_id,
         project_id=None,  # Meetings don't require a project
         task_id=None,
         description=f"[Meeting] {meeting_description}",

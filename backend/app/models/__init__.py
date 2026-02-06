@@ -338,7 +338,7 @@ class TimeEntry(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
-    project_id: Mapped[int] = mapped_column(Integer, ForeignKey("projects.id"), nullable=False)
+    project_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("projects.id"), nullable=True)
     task_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("tasks.id"))
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     end_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
@@ -360,7 +360,7 @@ class TimeEntry(Base):
 
     # Relationships
     user: Mapped[User] = relationship("User", back_populates="time_entries")
-    project: Mapped[Project] = relationship("Project", back_populates="time_entries")
+    project: Mapped[Optional[Project]] = relationship("Project", back_populates="time_entries")
     task: Mapped[Optional[Task]] = relationship("Task", back_populates="time_entries")
     work_session: Mapped[Optional["WorkSession"]] = relationship("WorkSession", back_populates="time_entries")
 
