@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
+import dynamicManifestPlugin from './plugins/vite-plugin-manifest'
 
 // Read version from package.json for Sentry release tagging
 const packageJson = JSON.parse(
@@ -10,7 +11,7 @@ const packageJson = JSON.parse(
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
-  plugins: [react()],
+  plugins: [react(), dynamicManifestPlugin()],
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version),
   },

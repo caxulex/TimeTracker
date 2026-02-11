@@ -5,7 +5,7 @@
 **Session Focus:** Remove obsolete documentation, clean up codebase  
 **Previous Session:** This is now the ONLY session report (all others deleted)  
 **Environment:** Production (AWS Lightsail)  
-**URL:** https://timetracker.shaemarcus.com
+**URL:** https://<YOUR_DOMAIN>
 
 ---
 

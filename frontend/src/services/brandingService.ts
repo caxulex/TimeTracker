@@ -61,14 +61,29 @@ const RATE_LIMIT_WINDOW = 60000; // 1 minute
 const MAX_REQUESTS_PER_WINDOW = 5;
 
 /**
- * Known base domains - requests from these domains are NOT white-labeled
- * Add your production domain(s) here
+ * Parse BASE_DOMAINS from environment variable or use defaults.
+ * VITE_BASE_DOMAINS should be a comma-separated string, e.g.:
+ *   "timetracker.shaemarcus.com,localhost,127.0.0.1"
  */
-const BASE_DOMAINS = [
-  'timetracker.shaemarcus.com',
-  'localhost',
-  '127.0.0.1',
-];
+function parseBaseDomains(): string[] {
+  const envValue = import.meta.env.VITE_BASE_DOMAINS;
+  if (envValue && typeof envValue === 'string' && envValue.trim().length > 0) {
+    return envValue.split(',').map(d => d.trim()).filter(Boolean);
+  }
+  // Default fallback — preserves backward compatibility
+  return [
+    'timetracker.shaemarcus.com',
+    'localhost',
+    '127.0.0.1',
+  ];
+}
+
+/**
+ * Known base domains - requests from these domains are NOT white-labeled.
+ * Configurable via VITE_BASE_DOMAINS environment variable (comma-separated).
+ * Falls back to hardcoded defaults if not set.
+ */
+const BASE_DOMAINS = parseBaseDomains();
 
 /**
  * Extract company slug from subdomain

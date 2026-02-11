@@ -26,7 +26,7 @@ Este documento te guía **EXACTAMENTE** paso a paso para subir TimeTracker a AWS
 ## 🚀 PARTE 1: CONFIGURAR DNS (5-10 minutos)
 
 ### ¿Qué es esto?
-Vamos a hacer que `timetracker.shaemarcus.com` apunte a tu servidor AWS.
+Vamos a hacer que `<YOUR_DOMAIN>` apunte a tu servidor AWS.
 
 ### Paso 1: Identifica dónde está tu dominio
 
@@ -99,7 +99,7 @@ Ahora verás una tabla con registros DNS. Sigue estos pasos:
 1. **Abre PowerShell** (Inicio → Escribe "PowerShell" → Enter)
 2. **Copia y pega** este comando:
    ```powershell
-   nslookup timetracker.shaemarcus.com
+   nslookup <YOUR_DOMAIN>
    ```
 3. **Presiona** Enter
 4. **Deberías ver:** `44.193.3.170` en la respuesta
@@ -398,7 +398,7 @@ DATABASE_URL=postgresql+asyncpg://postgres:postgres@time-tracker-postgres:5432/t
 JWT_SECRET=PONER_AQUI_LA_CLAVE_QUE_COPIASTE
 JWT_ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
-ALLOWED_ORIGINS=https://timetracker.shaemarcus.com,http://timetracker.shaemarcus.com
+ALLOWED_ORIGINS=https://<YOUR_DOMAIN>,http://<YOUR_DOMAIN>
 REDIS_URL=redis://time-tracker-redis:6379
 ENVIRONMENT=production
 DEBUG=False
@@ -422,7 +422,7 @@ Deberías ver todas las variables. **Verifica que JWT_SECRET NO diga "PONER_AQUI
 
 ```bash
 cat > ~/timetracker/frontend/.env.production << 'EOF'
-VITE_API_URL=https://timetracker.shaemarcus.com/api
+VITE_API_URL=https://<YOUR_DOMAIN>/api
 EOF
 ```
 
@@ -544,7 +544,7 @@ Deberías ver la página de login de TimeTracker.
 - Backend: http://44.193.3.170:8080/health
 
 **Por dominio (después de que se propague el DNS):**
-- http://timetracker.shaemarcus.com
+- http://<YOUR_DOMAIN>
 
 ### Credenciales:
 - **Admin:** admin@timetracker.com / admin123
@@ -589,7 +589,7 @@ Deberías ver la página de login de TimeTracker.
 
 ### "El DNS no resuelve"
 
-**Síntomas:** `nslookup timetracker.shaemarcus.com` no muestra la IP
+**Síntomas:** `nslookup <YOUR_DOMAIN>` no muestra la IP
 
 **Soluciones:**
 1. Espera 30-60 minutos más
@@ -612,7 +612,7 @@ Deberías ver la página de login de TimeTracker.
 **Una vez que todo funcione con la IP, el siguiente paso será:**
 
 1. Esperar a que el DNS se propague completamente
-2. Verificar que http://timetracker.shaemarcus.com funcione
+2. Verificar que http://<YOUR_DOMAIN> funcione
 3. Configurar Caddy para SSL/TLS (HTTPS)
 
 **Esto lo haremos en la siguiente sesión.**

@@ -1,11 +1,11 @@
 # 🚀 Guía Completa de Despliegue a AWS Lightsail
-## TimeTracker - timetracker.shaemarcus.com
+## TimeTracker - <YOUR_DOMAIN>
 
 ---
 
 ## 📋 Información del Servidor
 
-**Subdominio:** timetracker.shaemarcus.com  
+**Subdominio:** <YOUR_DOMAIN>  
 **IP Pública:** 44.193.3.170  
 **IP Pública IPv6:** 2600:1f18:e3d:8b00:6fe7:c2ca:76e7:dd2c  
 **Usuario:** ubuntu  
@@ -19,7 +19,7 @@
 
 1. Preparar y actualizar el servidor
 2. Instalar Docker y Docker Compose
-3. Configurar DNS para timetracker.shaemarcus.com
+3. Configurar DNS para <YOUR_DOMAIN>
 4. Transferir archivos del proyecto
 5. Configurar variables de entorno con el nuevo dominio
 6. Actualizar configuración de la aplicación para el subdominio
@@ -100,7 +100,7 @@ docker-compose --version
 
 ---
 
-## 🌐 PASO 3: Configurar DNS para timetracker.shaemarcus.com
+## 🌐 PASO 3: Configurar DNS para <YOUR_DOMAIN>
 
 ### 3.1 Acceder al Panel de Control de DNS
 
@@ -137,10 +137,10 @@ docker-compose --version
 
 ```bash
 # Desde el servidor AWS
-dig timetracker.shaemarcus.com
+dig <YOUR_DOMAIN>
 
 # Desde tu máquina Windows
-nslookup timetracker.shaemarcus.com
+nslookup <YOUR_DOMAIN>
 ```
 
 **⏳ La propagación DNS puede tardar de 5 minutos a 24 horas**
@@ -228,7 +228,7 @@ JWT_ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 
 # CORS - Permitir acceso desde el dominio
-ALLOWED_ORIGINS=https://timetracker.shaemarcus.com,http://timetracker.shaemarcus.com
+ALLOWED_ORIGINS=https://<YOUR_DOMAIN>,http://<YOUR_DOMAIN>
 
 # Redis para cache y sesiones
 REDIS_URL=redis://time-tracker-redis:6379
@@ -248,7 +248,7 @@ cd ~/timetracker/frontend
 
 cat > .env.production << 'EOF'
 # API Backend URL
-VITE_API_URL=https://timetracker.shaemarcus.com/api
+VITE_API_URL=https://<YOUR_DOMAIN>/api
 EOF
 ```
 
@@ -315,8 +315,8 @@ grep -A 10 "CORSMiddleware" main.py
 ```
 
 **Debe permitir:**
-- https://timetracker.shaemarcus.com
-- http://timetracker.shaemarcus.com
+- https://<YOUR_DOMAIN>
+- http://<YOUR_DOMAIN>
 
 ---
 
@@ -515,7 +515,7 @@ http://44.193.3.170
 
 **⚠️ Este paso se realizará después**
 
-Una vez que el DNS esté propagado y puedas acceder a `http://timetracker.shaemarcus.com`, se procederá a:
+Una vez que el DNS esté propagado y puedas acceder a `http://<YOUR_DOMAIN>`, se procederá a:
 
 1. Configurar Caddy como proxy reverso
 2. Obtener certificados SSL automáticamente
@@ -523,7 +523,7 @@ Una vez que el DNS esté propagado y puedas acceder a `http://timetracker.shaema
 4. Configurar headers de seguridad
 
 **Requisitos previos:**
-- DNS propagado (timetracker.shaemarcus.com apunta a 44.193.3.170)
+- DNS propagado (<YOUR_DOMAIN> apunta a 44.193.3.170)
 - Aplicación funcionando en http://44.193.3.170
 - Puerto 80 y 443 abiertos en firewall
 
@@ -714,7 +714,7 @@ docker compose up -d
 
 **Pre-despliegue:**
 - [ ] Servidor AWS Lightsail accesible vía SSH
-- [ ] DNS configurado (timetracker.shaemarcus.com → 44.193.3.170)
+- [ ] DNS configurado (<YOUR_DOMAIN> → 44.193.3.170)
 - [ ] DNS propagado (verificado con dig/nslookup)
 
 **Instalación:**
@@ -755,7 +755,7 @@ docker compose up -d
 **Pendiente (próximo paso):**
 - [ ] Caddy configurado como proxy reverso
 - [ ] SSL/TLS configurado
-- [ ] timetracker.shaemarcus.com accesible vía HTTPS
+- [ ] <YOUR_DOMAIN> accesible vía HTTPS
 
 ---
 
@@ -767,9 +767,9 @@ docker compose up -d
 - **Health Check:** http://44.193.3.170:8080/health
 
 ### Después de Configurar Caddy (Con SSL):
-- **Aplicación:** https://timetracker.shaemarcus.com
-- **Backend API:** https://timetracker.shaemarcus.com/api
-- **WebSocket:** wss://timetracker.shaemarcus.com/ws
+- **Aplicación:** https://<YOUR_DOMAIN>
+- **Backend API:** https://<YOUR_DOMAIN>/api
+- **WebSocket:** wss://<YOUR_DOMAIN>/ws
 
 ---
 
@@ -802,7 +802,7 @@ docker compose up -d
 
 **Siguiente sesión:**
 1. Verificar que DNS está propagado
-2. Confirmar acceso a http://timetracker.shaemarcus.com
+2. Confirmar acceso a http://<YOUR_DOMAIN>
 3. Configurar Caddy para SSL/TLS automático
 4. Probar HTTPS y renovación de certificados
 5. Configurar monitoreo y alertas

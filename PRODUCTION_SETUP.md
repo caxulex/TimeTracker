@@ -267,15 +267,15 @@ For larger deployments:
 TimeTracker uses AWS Lightsail's built-in load balancer for SSL termination:
 - Certificate managed by AWS Certificate Manager (ACM)
 - Automatic renewal (no manual intervention needed)
-- HTTPS enforced on `https://timetracker.shaemarcus.com`
+- HTTPS enforced on `https://<YOUR_DOMAIN>`
 
 ### Verify SSL Status
 ```bash
 # Check certificate details
-curl -vI https://timetracker.shaemarcus.com 2>&1 | grep -A 5 "Server certificate"
+curl -vI https://<YOUR_DOMAIN> 2>&1 | grep -A 5 "Server certificate"
 
 # Test SSL grade (visit in browser)
-# https://www.ssllabs.com/ssltest/analyze.html?d=timetracker.shaemarcus.com
+# https://www.ssllabs.com/ssltest/analyze.html?d=<YOUR_DOMAIN>
 ```
 
 ### Security Headers (Already Configured)

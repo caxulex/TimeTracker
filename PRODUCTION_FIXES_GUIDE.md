@@ -50,8 +50,8 @@ Ports (Host):
   - 6379 (redis - internal) # Clone: can reuse if isolated network
 
 Domains:
-  - timetracker.shaemarcus.com        # PRODUCTION - NEVER USE IN CLONES
-  - timetracker-staging.shaemarcus.com # Reserved for V2.0 staging
+  - <YOUR_DOMAIN>                     # PRODUCTION - NEVER USE IN CLONES
+  - staging.<YOUR_DOMAIN>              # Reserved for V2.0 staging
 
 Database:
   - Database Name: time_tracker        # Clone: time_tracker_v2
@@ -329,7 +329,7 @@ proxy_pass http://timetracker-backend:8080;
 ```yaml
 backend:
   environment:
-    - ALLOWED_HOSTS=["timetracker.shaemarcus.com","localhost","127.0.0.1","timetracker-backend","backend"]
+    - ALLOWED_HOSTS=["<YOUR_DOMAIN>","localhost","127.0.0.1","timetracker-backend","backend"]
 ```
 
 **⚠️ V2.0 Warning:** Always include these in ALLOWED_HOSTS:
@@ -604,10 +604,10 @@ sudo netstat -tlnp | grep LISTEN
 ### Test API Directly
 ```bash
 # Health check
-curl -s https://timetracker.shaemarcus.com/api/health | jq
+curl -s https://<YOUR_DOMAIN>/api/health | jq
 
 # With verbose for debugging
-curl -v https://timetracker.shaemarcus.com/api/health
+curl -v https://<YOUR_DOMAIN>/api/health
 ```
 
 ### Check Docker Networks
@@ -640,7 +640,7 @@ REDIS_PORT=6379
 
 # Security
 SECRET_KEY=your-secret-key-here
-ALLOWED_HOSTS=["timetracker.shaemarcus.com","localhost","127.0.0.1","timetracker-backend","backend"]
+ALLOWED_HOSTS=["<YOUR_DOMAIN>","localhost","127.0.0.1","timetracker-backend","backend"]
 
 # Environment
 ENVIRONMENT=production

@@ -3,7 +3,7 @@
 **Generated:** December 23, 2025  
 **Last Updated:** December 24, 2025  
 **Application:** TimeTracker  
-**URL:** https://timetracker.shaemarcus.com/
+**URL:** https://<YOUR_DOMAIN>/
 
 ---
 

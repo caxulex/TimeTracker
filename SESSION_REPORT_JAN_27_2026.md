@@ -5,7 +5,7 @@
 **Session Focus:** Prepare app for real-world production use  
 **Previous Session:** January 26, 2026 - Codebase cleanup (70 files deleted)  
 **Environment:** Production (AWS Lightsail)  
-**URL:** https://timetracker.shaemarcus.com
+**URL:** https://<YOUR_DOMAIN>
 
 ---
 
@@ -198,7 +198,7 @@ python scripts/fresh_start_production.py --execute
 Create a new admin account or change existing password via the app.
 
 ### Step 4: Verify Everything Works
-1. Login to https://timetracker.shaemarcus.com
+1. Login to https://<YOUR_DOMAIN>
 2. Create a test time entry
 3. Check reports display correctly
 4. Verify email notifications work

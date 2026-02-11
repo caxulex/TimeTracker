@@ -21,7 +21,7 @@ Read CONTEXT.md, AIupgrade.md, PRODUCTION_FIXES_GUIDE.md, and the latest SESSION
 ### Production Status
 | Item | Value |
 |------|-------|
-| **URL** | https://timetracker.shaemarcus.com |
+| **URL** | https://<YOUR_DOMAIN> |
 | **Server** | AWS Lightsail |
 | **Server IP** | `100.52.110.180` (use browser SSH from AWS Console) |
 | **Path** | `/home/ubuntu/timetracker` (lowercase!) |

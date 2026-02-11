@@ -5,7 +5,7 @@
 **Session Focus:** Fix reported issues from production testing  
 **Previous Session:** SESSION_REPORT_JAN_22_2026.md (TODO List Completion)  
 **Environment:** Production (AWS Lightsail)  
-**URL:** https://timetracker.shaemarcus.com
+**URL:** https://<YOUR_DOMAIN>
 
 ---
 

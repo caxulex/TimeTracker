@@ -16,7 +16,7 @@ export default defineConfig({
       tsconfig: './tsconfig.test.json',
     },
     css: true,
-    include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
+    include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}', 'plugins/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
     exclude: ['node_modules', 'dist', 'e2e'],
     coverage: {
       provider: 'v8',
