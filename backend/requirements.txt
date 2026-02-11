@@ -49,10 +49,13 @@ mypy==1.7.1
 mkdocs==1.5.3
 mkdocs-material==9.4.8
 
+# Phase 3: Production Observability
+sentry-sdk[fastapi]>=2.0.0,<3.0.0
+python-json-logger>=2.0.0,<3.0.0
+
 # Optional: For future features
 # celery==5.3.4  # Background tasks
 # flower==2.0.1  # Celery monitoring
-# sentry-sdk==1.38.0  # Error tracking
 # python-socketio==5.10.0  # WebSocket support (if needed beyond FastAPI)
 # Export functionality
 openpyxl==3.1.2

@@ -118,6 +118,9 @@ class Settings(BaseSettings):
     # SEC-016: Password Hashing Configuration
     BCRYPT_ROUNDS: int = 12
     
+    # Sentry Error Tracking (Phase 3: Production Observability)
+    SENTRY_DSN: Optional[str] = None
+
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"

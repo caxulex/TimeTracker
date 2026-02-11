@@ -1,9 +1,23 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { readFileSync } from 'fs'
+import { resolve } from 'path'
+
+// Read version from package.json for Sentry release tagging
+const packageJson = JSON.parse(
+  readFileSync(resolve(__dirname, 'package.json'), 'utf-8')
+);
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
+  define: {
+    __APP_VERSION__: JSON.stringify(packageJson.version),
+  },
+  // Phase 3: Strip console.log and debugger in production builds only
+  esbuild: mode === 'production'
+    ? { drop: ['console', 'debugger'] }
+    : undefined,
   server: {
     port: 5173,
     host: true,
@@ -49,5 +63,5 @@ export default defineConfig({
       '@': '/src',
     },
   },
-})
+}))
 

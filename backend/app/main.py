@@ -29,13 +29,19 @@ from app.routers import work_sessions  # Micro-task management: Work sessions, b
 from app.ai import ai_router  # AI Services (suggestions, anomalies)
 from app.middleware import RateLimitMiddleware, rate_limiter, SecurityHeadersMiddleware, RequestValidationMiddleware
 from app.exceptions import AppException
+from app.integrations.sentry import init_sentry
 
-# Configure logging
-logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL.upper()),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+# Phase 3: Configure structured logging BEFORE anything else logs
+from app.logging_config import configure_logging, request_id_var
+configure_logging(
+    log_level=settings.LOG_LEVEL,
+    environment=settings.ENVIRONMENT,
+    log_format=getattr(settings, 'LOG_FORMAT', 'json'),
 )
 logger = logging.getLogger(__name__)
+
+# Phase 3: Initialize Sentry (captures startup errors)
+init_sentry()
 
 
 @asynccontextmanager
@@ -243,8 +249,15 @@ async def add_security_headers(request: Request, call_next):
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())[:8]
 
+    # Phase 3: Set request_id in contextvars so all log messages include it
+    token = request_id_var.set(request_id)
+
     start_time = time.time()
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    finally:
+        # Reset the context var after request completes
+        request_id_var.reset(token)
     process_time = time.time() - start_time
 
     response.headers["X-Process-Time"] = str(process_time)

@@ -1,12 +1,15 @@
 // ============================================
 // TIME TRACKER - ERROR BOUNDARY COMPONENT
 // Phase 1: Critical Safety Net
+// Phase 3: Sentry Integration
 // ============================================
 // Catches rendering errors in child components,
 // logs them, and displays a user-friendly fallback UI.
 // Prevents a crash in one page from taking down the whole app.
+// Reports errors to Sentry when configured.
 // ============================================
 import { Component, ErrorInfo, ReactNode } from 'react';
+import { captureException } from '../lib/sentry';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -38,7 +41,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       error,
       errorInfo
     );
-    // Future: Send to Sentry or other error tracking service
+
+    // Phase 3: Report to Sentry with boundary context
+    captureException(error, {
+      boundaryName,
+      componentStack: errorInfo.componentStack || 'unavailable',
+    });
   }
 
   handleReload = (): void => {

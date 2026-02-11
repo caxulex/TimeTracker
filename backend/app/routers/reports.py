@@ -3,7 +3,7 @@ Reports and analytics router
 """
 
 import logging
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
 from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -423,7 +423,7 @@ async def get_time_by_project(
     )
     
     # Group by project and calculate totals - only count time within the period
-    project_data = defaultdict(lambda: {"name": "", "seconds": 0, "count": 0})
+    project_data: Dict[int, Dict[str, Any]] = defaultdict(lambda: {"name": "", "seconds": 0, "count": 0})
     
     for entry, project_name in result.all():
         pid = entry.project_id or 0  # Group meeting entries (NULL project) under key 0
@@ -491,7 +491,7 @@ async def get_time_by_task(
     result = await db.execute(query)
     
     # Group by task and calculate totals - only count time within period
-    task_data = defaultdict(lambda: {"task_name": "", "project_name": "", "status": "", "seconds": 0})
+    task_data: Dict[int, Dict[str, Any]] = defaultdict(lambda: {"task_name": "", "project_name": "", "status": "", "seconds": 0})
     
     for entry, task_name, task_status, project_name in result.all():
         tid = entry.task_id
@@ -582,8 +582,8 @@ async def get_team_report(
     # Calculate totals with proper period overlap
     total_seconds = 0
     total_entries = 0
-    project_data = defaultdict(lambda: {"name": "", "seconds": 0, "count": 0})
-    user_data = defaultdict(lambda: {"name": "", "seconds": 0, "count": 0})
+    project_data: Dict[int, Dict[str, Any]] = defaultdict(lambda: {"name": "", "seconds": 0, "count": 0})
+    user_data: Dict[int, Dict[str, Any]] = defaultdict(lambda: {"name": "", "seconds": 0, "count": 0})
     
     for entry, project_name, user_name in all_entries:
         entry_seconds = calculate_entry_duration_for_period(entry, start_datetime, end_datetime, now)
@@ -1734,6 +1734,7 @@ async def export_team_timesheet_excel(
     # Create workbook
     wb = Workbook()
     ws = wb.active
+    assert ws is not None, "Workbook has no active worksheet"
     ws.title = "Team Timesheet"
     
     # Styles
@@ -1835,7 +1836,8 @@ async def export_team_timesheet_excel(
     ws.column_dimensions['A'].width = 25
     ws.column_dimensions['B'].width = 15
     for col_idx in range(3, len(timesheet.dates) + 4):
-        ws.column_dimensions[chr(64 + col_idx) if col_idx <= 26 else None].width = 10
+        col_letter = chr(64 + col_idx) if col_idx <= 26 else chr(64 + (col_idx - 26))
+        ws.column_dimensions[col_letter].width = 10
     
     # Save to BytesIO
     output = BytesIO()
@@ -2265,6 +2267,7 @@ async def _generate_time_report(
         
         wb = Workbook()
         ws = wb.active
+        assert ws is not None, "Workbook has no active worksheet"
         ws.title = "Time Report"
         
         # Headers
@@ -2384,6 +2387,7 @@ async def _generate_team_timesheet_report(
         
         wb = Workbook()
         ws = wb.active
+        assert ws is not None, "Workbook has no active worksheet"
         ws.title = "Team Timesheet"
         
         # Title row
