@@ -17,7 +17,8 @@ function BadChild(): JSX.Element {
 }
 
 describe('ErrorBoundary', () => {
-  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let consoleErrorSpy: any;
 
   beforeEach(() => {
     // Suppress console.error output during tests since we expect errors
@@ -79,8 +80,8 @@ describe('ErrorBoundary', () => {
     );
 
     expect(consoleErrorSpy).toHaveBeenCalled();
-    const calls = consoleErrorSpy.mock.calls.map((c) => String(c[0]));
-    expect(calls.some((msg) => msg.includes('[ErrorBoundary:MySection]'))).toBe(true);
+    const calls = consoleErrorSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(calls.some((msg: string) => msg.includes('[ErrorBoundary:MySection]'))).toBe(true);
   });
 
   it('renders custom fallback when provided', () => {
