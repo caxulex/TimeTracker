@@ -7,6 +7,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
+import type { User } from '../types';
 
 // ============================================
 // MOCKS — must be declared before component import
@@ -47,7 +48,7 @@ const mockRegularUser = {
   created_at: new Date().toISOString(),
 };
 
-let currentMockUser = mockAdminUser;
+let currentMockUser: User = mockAdminUser;
 
 vi.mock('../stores/authStore', () => ({
   useAuthStore: vi.fn(() => ({
@@ -110,7 +111,7 @@ vi.mock('../utils/helpers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../utils/helpers')>();
   return {
     ...actual,
-    isAdminUser: vi.fn((user: { role?: string } | null) =>
+    isAdminUser: vi.fn((user: User | null | undefined) =>
       user?.role === 'super_admin' || user?.role === 'admin' || user?.role === 'company_admin'
     ),
     formatDate: vi.fn((d: string) => d),
@@ -481,7 +482,7 @@ describe('StaffPage', () => {
 
       // Restore isAdminUser (previous test may have mocked it to return false)
       vi.mocked(helpers.isAdminUser).mockImplementation(
-        (user: { role?: string } | null) =>
+        (user: User | null | undefined) =>
           user?.role === 'super_admin' || user?.role === 'admin' || user?.role === 'company_admin'
       );
 
