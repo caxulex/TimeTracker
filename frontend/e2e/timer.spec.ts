@@ -7,9 +7,11 @@ import { test, expect, Page } from '@playwright/test';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 
+// Test credentials - loaded from environment variables
+// See frontend/e2e/.env.example for required variables.
 const TEST_USER = {
-  email: 'demo@example.com',
-  password: 'DemoPass123!',
+  email: process.env.TEST_USER_EMAIL || 'demo@example.com',
+  password: process.env.TEST_USER_PASSWORD || 'DemoPass123!',
 };
 
 const selectors = {

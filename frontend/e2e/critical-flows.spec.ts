@@ -11,17 +11,19 @@ import { test, expect, Page } from '@playwright/test';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 
-// Test credentials - should match seeded demo data
+// Test credentials - loaded from environment variables
+// Fallbacks provided for local development; CI should always set env vars.
+// See frontend/e2e/.env.example for required variables.
 const TEST_USER = {
-  email: 'demo@example.com',
-  password: 'DemoPass123!',
-  name: 'Demo User'
+  email: process.env.TEST_USER_EMAIL || 'demo@example.com',
+  password: process.env.TEST_USER_PASSWORD || 'DemoPass123!',
+  name: process.env.TEST_USER_NAME || 'Demo User'
 };
 
 const ADMIN_USER = {
-  email: 'admin@example.com',
-  password: 'AdminPass123!',
-  name: 'Admin User'
+  email: process.env.TEST_ADMIN_EMAIL || 'admin@example.com',
+  password: process.env.TEST_ADMIN_PASSWORD || 'AdminPass123!',
+  name: process.env.TEST_ADMIN_NAME || 'Admin User'
 };
 
 // Selectors - centralized for maintenance

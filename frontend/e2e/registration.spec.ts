@@ -7,6 +7,10 @@ import { test, expect, Page } from '@playwright/test';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 
+// Known existing user email for duplicate registration test
+// See frontend/e2e/.env.example for required variables.
+const EXISTING_USER_EMAIL = process.env.TEST_USER_EMAIL || 'demo@example.com';
+
 // Test data for registration
 const generateUniqueEmail = () => `test-${Date.now()}@example.com`;
 
@@ -166,7 +170,7 @@ test.describe('Registration Flow', () => {
       await nameInput.fill('Test User');
     }
     
-    await page.fill(selectors.emailInput, 'demo@example.com'); // Existing user
+    await page.fill(selectors.emailInput, EXISTING_USER_EMAIL); // Existing user
     await page.fill(selectors.passwordInput, 'Password123!');
     
     const confirmPassword = page.locator(selectors.confirmPasswordInput);

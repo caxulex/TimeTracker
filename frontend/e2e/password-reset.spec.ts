@@ -7,6 +7,10 @@ import { test, expect, Page } from '@playwright/test';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 
+// Known existing user email for password reset test
+// See frontend/e2e/.env.example for required variables.
+const TEST_USER_EMAIL = process.env.TEST_USER_EMAIL || 'demo@example.com';
+
 const selectors = {
   // Forgot password page
   emailInput: 'input[type="email"], input[name="email"]',
@@ -88,7 +92,7 @@ test.describe('Password Reset Flow', () => {
     await page.waitForLoadState('networkidle');
 
     // Fill with valid email (existing user)
-    await page.fill(selectors.emailInput, 'demo@example.com');
+    await page.fill(selectors.emailInput, TEST_USER_EMAIL);
     await page.click(selectors.submitButton);
 
     // Should show success message or redirect

@@ -14,6 +14,22 @@ Or with docker:
     docker compose exec backend python -m scripts.seed_demo_data
 """
 
+import os
+import sys
+
+# ============================================
+# PRODUCTION SAFETY GUARD
+# ============================================
+_environment = os.environ.get("ENVIRONMENT", "").lower()
+if _environment == "production":
+    print("=" * 60)
+    print("ERROR: Seed scripts must NOT be run in production!")
+    print(f"  ENVIRONMENT={os.environ.get('ENVIRONMENT')}")
+    print("  This script creates users with known passwords and")
+    print("  test data that is not suitable for production use.")
+    print("=" * 60)
+    sys.exit(1)
+
 import asyncio
 import random
 from datetime import datetime, timedelta, timezone

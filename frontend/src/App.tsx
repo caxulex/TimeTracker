@@ -12,6 +12,7 @@ import { WebSocketProvider } from './contexts/WebSocketContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { BrandingProvider } from './contexts/BrandingContext';
 import { useAuthStore } from './stores/authStore';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import './App.css';
 
 // Helper to get login path with company slug preserved
@@ -173,6 +174,7 @@ function App() {
         <NotificationProvider>
           <WebSocketProvider>
           <BrowserRouter>
+          <ErrorBoundary name="App">
           <Suspense fallback={<PageLoader />}>
           <Routes>
             {/* White-label company routes - handles /:companySlug/login etc */}
@@ -180,7 +182,7 @@ function App() {
               path="/:companySlug/login"
               element={
                 <PublicRoute>
-                  <LoginPage />
+                  <ErrorBoundary name="LoginPage"><LoginPage /></ErrorBoundary>
                 </PublicRoute>
               }
             />
@@ -188,7 +190,7 @@ function App() {
               path="/:companySlug/register"
               element={
                 <PublicRoute>
-                  <RegisterPage />
+                  <ErrorBoundary name="RegisterPage"><RegisterPage /></ErrorBoundary>
                 </PublicRoute>
               }
             />
@@ -202,7 +204,7 @@ function App() {
               path="/login"
               element={
                 <PublicRoute>
-                  <LoginPage />
+                  <ErrorBoundary name="LoginPage"><LoginPage /></ErrorBoundary>
                 </PublicRoute>
               }
             />
@@ -210,7 +212,7 @@ function App() {
               path="/register"
               element={
                 <PublicRoute>
-                  <RegisterPage />
+                  <ErrorBoundary name="RegisterPage"><RegisterPage /></ErrorBoundary>
                 </PublicRoute>
               }
             />
@@ -218,7 +220,7 @@ function App() {
               path="/forgot-password"
               element={
                 <PublicRoute>
-                  <ForgotPasswordPage />
+                  <ErrorBoundary name="ForgotPasswordPage"><ForgotPasswordPage /></ErrorBoundary>
                 </PublicRoute>
               }
             />
@@ -226,7 +228,7 @@ function App() {
               path="/reset-password"
               element={
                 <PublicRoute>
-                  <ResetPasswordPage />
+                  <ErrorBoundary name="ResetPasswordPage"><ResetPasswordPage /></ErrorBoundary>
                 </PublicRoute>
               }
             />
@@ -236,7 +238,7 @@ function App() {
               path="/dashboard"
               element={
                 <ProtectedRoute>
-                  <DashboardPage />
+                  <ErrorBoundary name="DashboardPage"><DashboardPage /></ErrorBoundary>
                 </ProtectedRoute>
               }
             />
@@ -244,7 +246,7 @@ function App() {
               path="/projects"
               element={
                 <ProtectedRoute>
-                  <ProjectsPage />
+                  <ErrorBoundary name="ProjectsPage"><ProjectsPage /></ErrorBoundary>
                 </ProtectedRoute>
               }
             />
@@ -252,7 +254,7 @@ function App() {
               path="/tasks"
               element={
                 <ProtectedRoute>
-                  <TasksPage />
+                  <ErrorBoundary name="TasksPage"><TasksPage /></ErrorBoundary>
                 </ProtectedRoute>
               }
             />
@@ -260,7 +262,7 @@ function App() {
               path="/time"
               element={
                 <ProtectedRoute>
-                  <TimePage />
+                  <ErrorBoundary name="TimePage"><TimePage /></ErrorBoundary>
                 </ProtectedRoute>
               }
             />
@@ -268,7 +270,7 @@ function App() {
               path="/teams"
               element={
                 <ProtectedRoute>
-                  <TeamsPage />
+                  <ErrorBoundary name="TeamsPage"><TeamsPage /></ErrorBoundary>
                 </ProtectedRoute>
               }
             />
@@ -276,7 +278,7 @@ function App() {
               path="/reports"
               element={
                 <ProtectedRoute>
-                  <ReportsPage />
+                  <ErrorBoundary name="ReportsPage"><ReportsPage /></ErrorBoundary>
                 </ProtectedRoute>
               }
             />
@@ -284,7 +286,7 @@ function App() {
               path="/settings"
               element={
                 <ProtectedRoute>
-                  <SettingsPage />
+                  <ErrorBoundary name="SettingsPage"><SettingsPage /></ErrorBoundary>
                 </ProtectedRoute>
               }
             />
@@ -292,7 +294,7 @@ function App() {
               path="/admin"
               element={
                 <AdminRoute>
-                  <AdminPage />
+                  <ErrorBoundary name="AdminPage"><AdminPage /></ErrorBoundary>
                 </AdminRoute>
               }
             />
@@ -302,7 +304,7 @@ function App() {
               path="/payroll/rates"
               element={
                 <AdminRoute>
-                  <PayRatesPage />
+                  <ErrorBoundary name="PayRatesPage"><PayRatesPage /></ErrorBoundary>
                 </AdminRoute>
               }
             />
@@ -310,7 +312,7 @@ function App() {
               path="/payroll/periods"
               element={
                 <AdminRoute>
-                  <PayrollPeriodsPage />
+                  <ErrorBoundary name="PayrollPeriodsPage"><PayrollPeriodsPage /></ErrorBoundary>
                 </AdminRoute>
               }
             />
@@ -318,7 +320,7 @@ function App() {
               path="/payroll/reports"
               element={
                 <AdminRoute>
-                  <PayrollReportsPage />
+                  <ErrorBoundary name="PayrollReportsPage"><PayrollReportsPage /></ErrorBoundary>
                 </AdminRoute>
               }
             />
@@ -328,7 +330,7 @@ function App() {
               path="/users"
               element={
                 <AdminRoute>
-                  <UsersPage />
+                  <ErrorBoundary name="UsersPage"><UsersPage /></ErrorBoundary>
                 </AdminRoute>
               }
             />
@@ -338,7 +340,7 @@ function App() {
               path="/staff"
               element={
                 <AdminRoute>
-                  <StaffPage />
+                  <ErrorBoundary name="StaffPage"><StaffPage /></ErrorBoundary>
                 </AdminRoute>
               }
             />
@@ -348,7 +350,7 @@ function App() {
               path="/account-requests"
               element={
                 <AdminRoute>
-                  <AccountRequestsPage />
+                  <ErrorBoundary name="AccountRequestsPage"><AccountRequestsPage /></ErrorBoundary>
                 </AdminRoute>
               }
             />
@@ -358,7 +360,7 @@ function App() {
               path="/admin/email-logs"
               element={
                 <AdminRoute>
-                  <EmailLogsPage />
+                  <ErrorBoundary name="EmailLogsPage"><EmailLogsPage /></ErrorBoundary>
                 </AdminRoute>
               }
             />
@@ -368,7 +370,7 @@ function App() {
               path="/admin/audit-logs"
               element={
                 <AdminRoute>
-                  <AuditLogsPage />
+                  <ErrorBoundary name="AuditLogsPage"><AuditLogsPage /></ErrorBoundary>
                 </AdminRoute>
               }
             />
@@ -377,7 +379,7 @@ function App() {
               path="/staff/:id"
               element={
                 <AdminRoute>
-                  <StaffDetailPage />
+                  <ErrorBoundary name="StaffDetailPage"><StaffDetailPage /></ErrorBoundary>
                 </AdminRoute>
               }
             />
@@ -387,7 +389,7 @@ function App() {
               path="/admin/reports"
               element={
                 <AdminRoute>
-                  <AdminReportsPage />
+                  <ErrorBoundary name="AdminReportsPage"><AdminReportsPage /></ErrorBoundary>
                 </AdminRoute>
               }
             />
@@ -395,7 +397,7 @@ function App() {
               path="/admin/user/:userId"
               element={
                 <AdminRoute>
-                  <UserDetailPage />
+                  <ErrorBoundary name="UserDetailPage"><UserDetailPage /></ErrorBoundary>
                 </AdminRoute>
               }
             />
@@ -405,13 +407,13 @@ function App() {
               path="/admin/settings"
               element={
                 <SuperAdminRoute>
-                  <AdminSettingsPage />
+                  <ErrorBoundary name="AdminSettingsPage"><AdminSettingsPage /></ErrorBoundary>
                 </SuperAdminRoute>
               }
             />
 
             {/* Public Account Request */}
-            <Route path="/request-account" element={<AccountRequestPage />} />
+            <Route path="/request-account" element={<ErrorBoundary name="AccountRequestPage"><AccountRequestPage /></ErrorBoundary>} />
 
             {/* Default redirect */}
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -420,6 +422,7 @@ function App() {
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
           </Suspense>
+          </ErrorBoundary>
         </BrowserRouter>
         </WebSocketProvider>
       </NotificationProvider>

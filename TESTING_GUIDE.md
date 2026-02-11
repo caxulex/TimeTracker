@@ -79,6 +79,36 @@ npm run test:ui
 
 ### E2E Tests
 
+#### Environment Variables for Credentials
+
+E2E tests load credentials from environment variables to avoid hardcoding secrets in source control. Fallback defaults are provided for local development.
+
+**Setup:**
+```bash
+cp frontend/e2e/.env.example frontend/e2e/.env
+# Edit frontend/e2e/.env with credentials matching your seeded test data
+```
+
+**Required variables:**
+
+| Variable | Description | Default (local dev) |
+|----------|-------------|---------------------|
+| `BASE_URL` | Application URL | `http://localhost:5173` |
+| `API_URL` | Backend API URL | `http://localhost:8080` |
+| `TEST_USER_EMAIL` | Regular user email | `demo@example.com` |
+| `TEST_USER_PASSWORD` | Regular user password | `DemoPass123!` |
+| `TEST_USER_NAME` | Regular user display name | `Demo User` |
+| `TEST_ADMIN_EMAIL` | Admin user email | `admin@example.com` |
+| `TEST_ADMIN_PASSWORD` | Admin user password | `AdminPass123!` |
+| `TEST_ADMIN_NAME` | Admin user display name | `Admin User` |
+| `TEST_COMPANY2_EMAIL` | Multi-tenant user email | `user@xyz-corp.com` |
+| `TEST_COMPANY2_PASSWORD` | Multi-tenant user password | `XyzPass123!` |
+| `TEST_COMPANY2_SLUG` | Multi-tenant company slug | `xyz-corp` |
+
+> **Note:** In CI/CD pipelines, always set these variables explicitly and never commit the `.env` file.
+
+#### Running E2E Tests
+
 ```bash
 cd frontend
 

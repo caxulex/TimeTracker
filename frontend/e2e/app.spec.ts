@@ -8,11 +8,12 @@ import { test, expect, Page } from '@playwright/test';
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 const API_URL = process.env.API_URL || 'http://localhost:8080';
 
-// Test user credentials
+// Test credentials - loaded from environment variables
+// See frontend/e2e/.env.example for required variables.
 const TEST_USER = {
-  email: 'e2e-test@example.com',
-  password: 'TestPassword123!',
-  name: 'E2E Test User'
+  email: process.env.TEST_APP_USER_EMAIL || 'e2e-test@example.com',
+  password: process.env.TEST_APP_USER_PASSWORD || 'TestPassword123!',
+  name: process.env.TEST_APP_USER_NAME || 'E2E Test User'
 };
 
 // Helper to login

@@ -15,6 +15,19 @@ import asyncio
 import sys
 import os
 
+# ============================================
+# PRODUCTION SAFETY GUARD
+# ============================================
+_environment = os.environ.get("ENVIRONMENT", "").lower()
+if _environment == "production":
+    print("=" * 60)
+    print("ERROR: Seed scripts must NOT be run in production!")
+    print(f"  ENVIRONMENT={os.environ.get('ENVIRONMENT')}")
+    print("  This script creates users with known passwords and")
+    print("  test data that is not suitable for production use.")
+    print("=" * 60)
+    sys.exit(1)
+
 # Add backend to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
