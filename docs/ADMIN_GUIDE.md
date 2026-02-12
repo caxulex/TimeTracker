@@ -33,7 +33,7 @@ Complete guide for administrators managing TimeTracker deployments.
 2. **Configure Super Admin**
    ```env
    FIRST_SUPER_ADMIN_EMAIL=admin@yourcompany.com
-   FIRST_SUPER_ADMIN_PASSWORD=YourSecurePassword123!
+   FIRST_SUPER_ADMIN_PASSWORD=<SECURE_PASSWORD_HERE>
    ```
 
 3. **Start Services**

@@ -291,9 +291,62 @@ When deploying for a new client:
 
 ---
 
+## Email Template Branding
+
+All outgoing emails (welcome, password reset, account notifications) automatically use your configured branding. No additional email-specific configuration is needed.
+
+### How It Works
+
+The email branding system (`backend/app/services/email_branding.py`) loads values from three sources in priority order:
+
+| Priority | Source | When Used |
+|----------|--------|-----------|
+| 1 (highest) | `white_label_configs` table | Multi-tenant: per-company branding |
+| 2 | Environment variables (`VITE_*`) | Single-tenant or default branding |
+| 3 (lowest) | Hardcoded defaults | Fallback when nothing is configured |
+
+### What Gets Branded in Emails
+
+| Element | Source Variable | Default |
+|---------|----------------|---------|
+| App name in header | `VITE_APP_NAME` / `app_name` | Time Tracker |
+| Header background color | `VITE_PRIMARY_COLOR` / `primary_color` | `#2563eb` |
+| Logo in header | `VITE_LOGO_URL` / `logo_url` | (none — text only) |
+| Footer company name | `VITE_COMPANY_NAME` / `company_name` | (none) |
+| Support email in footer | `VITE_SUPPORT_EMAIL` / `support_email` | (none) |
+| Terms link in footer | `VITE_TERMS_URL` / `terms_url` | (none) |
+| Privacy link in footer | `VITE_PRIVACY_URL` / `privacy_url` | (none) |
+
+### Email Templates Available
+
+| Template | Trigger | Key Variables |
+|----------|---------|---------------|
+| Welcome | New user created via Staff wizard | `user_name`, `user_email`, `temp_password` |
+| Password Reset | User requests reset | `user_name`, `reset_url`, `expiry_minutes` |
+| Account Request | Public registration | `requester_name`, `requester_email`, `requester_company` |
+| Account Approved | Admin approves request | `user_name`, `login_url` |
+| Account Rejected | Admin rejects request | `user_name` |
+
+### Testing Email Branding
+
+```bash
+cd backend
+pytest tests/test_email_branding.py -v
+```
+
+The tests verify that:
+- Custom branding values appear in rendered emails (not defaults)
+- Missing logo URLs produce no `<img>` tag
+- Footer links only appear when URLs are configured
+- Database branding overrides environment variables
+- Template rendering gracefully handles missing variables
+
+---
+
 ## Related Files
 
-- `frontend/src/config/branding.ts` - Branding configuration
+- `frontend/src/config/branding.ts` - Frontend branding configuration
+- `backend/app/services/email_branding.py` - Email template branding service
 - `frontend/.env.local` - Local development variables
 - `frontend/.env.example` - Example environment template
 - `frontend/public/logo.svg` - Default logo
@@ -302,4 +355,4 @@ When deploying for a new client:
 
 ---
 
-*Document created: January 6, 2026*
+*Document updated: February 12, 2026*

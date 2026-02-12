@@ -3,8 +3,8 @@
 ## Accessing the Feature
 
 1. **Login** as admin user:
-   - Email: `admin@timetracker.com`
-   - Password: `admin123`
+   - Email: `admin@your-domain.com`
+   - Password: (your admin password, set during initial setup)
 
 2. **Navigate** to Admin Reports:
    - Open sidebar

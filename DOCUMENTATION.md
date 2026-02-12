@@ -76,8 +76,8 @@ npm run dev
 ```
 
 ### Default Credentials
-- Admin: `admin@timetracker.com` / (set during initial setup)
-- Worker: `worker@timetracker.com` / (set during initial setup)
+- Admin: `admin@your-domain.com` / (set during initial setup via `FIRST_SUPER_ADMIN_PASSWORD`)
+- Worker: Created via Admin panel or Staff wizard
 
 ---
 

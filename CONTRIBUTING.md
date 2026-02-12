@@ -328,6 +328,34 @@ Fixes #123
 
 ---
 
+## Security Checks
+
+Before submitting a PR, run the dependency vulnerability scanner:
+
+### Frontend
+```bash
+cd frontend
+npm run security:check        # Production deps only (HIGH/CRITICAL — blocking)
+npm run security:check:all    # All deps including devDependencies (informational)
+```
+
+### Backend
+```bash
+cd backend
+pip install pip-audit
+pip-audit --requirement requirements.txt --desc
+```
+
+### CI Integration
+The GitHub Actions workflow at `.github/workflows/ci-cd.yml` includes a `security-audit` job that runs automatically:
+- On every push to `master`, `main`, or `develop`
+- On every pull request
+
+**Blocking:** HIGH and CRITICAL vulnerabilities in production dependencies will fail the build.
+**Non-blocking:** Lower severity and dev-dependency vulnerabilities are reported as warnings in the GitHub Actions step summary.
+
+---
+
 ## Additional Resources
 
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)

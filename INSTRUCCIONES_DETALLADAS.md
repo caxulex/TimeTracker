@@ -487,8 +487,8 @@ Deberías ver:
 Deberías ver la página de login de TimeTracker.
 
 **Intenta iniciar sesión:**
-- Email: `admin@timetracker.com`
-- Password: `admin123`
+- Email: `admin@your-domain.com`
+- Password: (tu contraseña de admin, configurada durante el setup inicial)
 
 ✅ **Si entras:** ¡PERFECTO! La aplicación funciona
 ❌ **Si no carga:** Lee la sección de "Problemas Comunes" al final
@@ -547,10 +547,10 @@ Deberías ver la página de login de TimeTracker.
 - http://<YOUR_DOMAIN>
 
 ### Credenciales:
-- **Admin:** admin@timetracker.com / admin123
-- **Usuario 1:** john@example.com / password123
-- **Usuario 2:** jane@example.com / password123
-- **Usuario 3:** bob@example.com / password123
+- **Admin:** admin@your-domain.com / <SECURE_PASSWORD_HERE>
+- **Usuario 1:** worker1@your-domain.com / <SECURE_PASSWORD_HERE>
+- **Usuario 2:** worker2@your-domain.com / <SECURE_PASSWORD_HERE>
+- **Usuario 3:** worker3@your-domain.com / <SECURE_PASSWORD_HERE>
 
 ---
 

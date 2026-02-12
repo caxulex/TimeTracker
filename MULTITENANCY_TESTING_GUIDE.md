@@ -157,7 +157,7 @@ curl -X POST http://localhost:8000/api/companies/register \
   -d '{
     "company_name": "Test Company",
     "admin_email": "admin@testcompany.com",
-    "admin_password": "TestPass123!",
+    "admin_password": "<SECURE_PASSWORD_HERE>",
     "admin_name": "Test Admin"
   }'
 ```

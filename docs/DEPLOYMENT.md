@@ -149,7 +149,7 @@ ALLOWED_HOSTS=["yourdomain.com","localhost"]
 
 # Admin Account
 FIRST_SUPER_ADMIN_EMAIL=admin@yourdomain.com
-FIRST_SUPER_ADMIN_PASSWORD=ChangeThisImmediately!
+FIRST_SUPER_ADMIN_PASSWORD=<SECURE_PASSWORD_HERE>
 ```
 
 ### Branding Variables

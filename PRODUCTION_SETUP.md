@@ -34,7 +34,7 @@ cd backend
 **Follow the prompts to:**
 1. Confirm deletion of all data (type `YES`)
 2. Enter admin email (or use default: admin@laboratoriodelolor.com)
-3. Enter admin password (or use default: Admin123!)
+3. Enter admin password (must meet strength requirements — 12+ chars with mixed case, numbers, and symbols)
 4. Enter admin name (or use default: Sistema Administrador)
 
 **⚠️ SAVE THE ADMIN CREDENTIALS SECURELY!**

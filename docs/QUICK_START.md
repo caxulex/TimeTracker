@@ -35,7 +35,7 @@ Edit `backend/.env` with your values:
 # Required changes:
 ALLOWED_ORIGINS=https://yourdomain.com
 FIRST_SUPER_ADMIN_EMAIL=admin@yourdomain.com
-FIRST_SUPER_ADMIN_PASSWORD=YourSecurePassword123!
+FIRST_SUPER_ADMIN_PASSWORD=<SECURE_PASSWORD_HERE>
 
 # Optional branding:
 VITE_APP_NAME=Your Company TimeTracker

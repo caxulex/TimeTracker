@@ -96,13 +96,13 @@ cp frontend/e2e/.env.example frontend/e2e/.env
 | `BASE_URL` | Application URL | `http://localhost:5173` |
 | `API_URL` | Backend API URL | `http://localhost:8080` |
 | `TEST_USER_EMAIL` | Regular user email | `demo@example.com` |
-| `TEST_USER_PASSWORD` | Regular user password | `DemoPass123!` |
+| `TEST_USER_PASSWORD` | Regular user password | `<SECURE_TEST_PASSWORD>` |
 | `TEST_USER_NAME` | Regular user display name | `Demo User` |
 | `TEST_ADMIN_EMAIL` | Admin user email | `admin@example.com` |
-| `TEST_ADMIN_PASSWORD` | Admin user password | `AdminPass123!` |
+| `TEST_ADMIN_PASSWORD` | Admin user password | `<SECURE_TEST_PASSWORD>` |
 | `TEST_ADMIN_NAME` | Admin user display name | `Admin User` |
 | `TEST_COMPANY2_EMAIL` | Multi-tenant user email | `user@xyz-corp.com` |
-| `TEST_COMPANY2_PASSWORD` | Multi-tenant user password | `XyzPass123!` |
+| `TEST_COMPANY2_PASSWORD` | Multi-tenant user password | `<SECURE_TEST_PASSWORD>` |
 | `TEST_COMPANY2_SLUG` | Multi-tenant company slug | `xyz-corp` |
 
 > **Note:** In CI/CD pipelines, always set these variables explicitly and never commit the `.env` file.

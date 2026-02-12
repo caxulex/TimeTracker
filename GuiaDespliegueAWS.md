@@ -410,10 +410,10 @@ Created 20 time entries
 ✅ Database seeded successfully!
 
 Test accounts:
-  Admin: admin@timetracker.com / admin123
-  User:  john@example.com / password123
-  User:  jane@example.com / password123
-  User:  bob@example.com / password123
+  Admin: admin@your-domain.com / <SECURE_PASSWORD_HERE>
+  User:  worker1@your-domain.com / <SECURE_PASSWORD_HERE>
+  User:  worker2@your-domain.com / <SECURE_PASSWORD_HERE>
+  User:  worker3@your-domain.com / <SECURE_PASSWORD_HERE>
 ```
 
 ### 8.3 Verificar Datos en la Base de Datos
@@ -504,8 +504,8 @@ http://44.193.3.170
 ```
 
 **Intenta iniciar sesión:**
-- Email: `admin@timetracker.com`
-- Password: `admin123`
+- Email: `admin@your-domain.com`
+- Password: (tu contraseña de admin, configurada durante el setup inicial)
 
 **✅ Si el login funciona, la aplicación está operativa**
 
@@ -749,7 +749,7 @@ docker compose up -d
 **Verificación:**
 - [ ] Backend responde en http://44.193.3.170:8080/health
 - [ ] Frontend carga en http://44.193.3.170
-- [ ] Login funciona con admin@timetracker.com
+- [ ] Login funciona con admin@your-domain.com
 - [ ] No hay errores en consola del navegador
 
 **Pendiente (próximo paso):**
@@ -776,16 +776,16 @@ docker compose up -d
 ## 👥 Credenciales de Acceso
 
 ### Aplicación Web:
-- **Admin:** admin@timetracker.com / admin123
-- **Usuario 1:** john@example.com / password123
-- **Usuario 2:** jane@example.com / password123
-- **Usuario 3:** bob@example.com / password123
+- **Admin:** admin@your-domain.com / <SECURE_PASSWORD_HERE>
+- **Usuario 1:** worker1@your-domain.com / <SECURE_PASSWORD_HERE>
+- **Usuario 2:** worker2@your-domain.com / <SECURE_PASSWORD_HERE>
+- **Usuario 3:** worker3@your-domain.com / <SECURE_PASSWORD_HERE>
 
 ### Base de Datos PostgreSQL:
-- **Host:** localhost (dentro de contenedores) o 44.193.3.170:5432 (externo)
+- **Host:** localhost (dentro de contenedores) o <YOUR_SERVER_IP>:5432 (externo)
 - **Base de datos:** time_tracker
 - **Usuario:** postgres
-- **Contraseña:** postgres
+- **Contraseña:** <SECURE_DB_PASSWORD_HERE>
 
 ### Redis:
 - **Host:** localhost (dentro de contenedores) o 44.193.3.170:6379 (externo)

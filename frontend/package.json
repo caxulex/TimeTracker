@@ -10,7 +10,10 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 50",
     "preview": "vite preview",
     "test": "vitest",
-    "test:ui": "vitest --ui"
+    "test:ui": "vitest --ui",
+    "security:check": "npm audit --production --audit-level=high",
+    "security:check:all": "npm audit",
+    "security:fix": "npm audit fix"
   },
   "dependencies": {
     "@sentry/react": "^10.38.0",

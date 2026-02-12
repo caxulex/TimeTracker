@@ -86,7 +86,7 @@ A comprehensive, Time tracking application for teams and individuals. Built with
 5. **Access the application**
    - Frontend: http://localhost:5173
    - API Docs: http://localhost:8080/docs
-   - Default Admin: admin@timetracker.com / admin123
+   - Default Admin: admin@your-domain.com / (set via FIRST_SUPER_ADMIN_PASSWORD env var)
 
 ### Production Deployment
 

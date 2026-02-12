@@ -155,8 +155,8 @@ ALLOWED_ORIGINS=["http://localhost:5173","http://localhost:3000"]
 ALLOWED_HOSTS=["localhost","127.0.0.1"]
 
 # Admin Account
-FIRST_SUPER_ADMIN_EMAIL=admin@example.com
-FIRST_SUPER_ADMIN_PASSWORD=AdminPassword123!
+FIRST_SUPER_ADMIN_EMAIL=admin@your-domain.com
+FIRST_SUPER_ADMIN_PASSWORD=<SECURE_PASSWORD_HERE>
 ```
 
 ### Frontend Environment Variables
@@ -220,8 +220,8 @@ docker compose exec backend alembic upgrade head
 The first admin is created automatically on startup using environment variables:
 
 ```env
-FIRST_SUPER_ADMIN_EMAIL=admin@example.com
-FIRST_SUPER_ADMIN_PASSWORD=YourSecurePassword!
+FIRST_SUPER_ADMIN_EMAIL=admin@your-domain.com
+FIRST_SUPER_ADMIN_PASSWORD=<SECURE_PASSWORD_HERE>
 ```
 
 Or create manually:

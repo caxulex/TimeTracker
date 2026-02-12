@@ -214,10 +214,10 @@ export function ReportsPage() {
 Access the application at: **http://localhost**
 
 Login credentials:
-- **Admin:** admin@timetracker.com / admin123
-- **Worker 1:** john@example.com / password123
-- **Worker 2:** jane@example.com / password123
-- **Worker 3:** bob@example.com / password123
+- **Admin:** admin@your-domain.com / <SECURE_PASSWORD_HERE>
+- **Worker 1:** worker1@your-domain.com / <SECURE_PASSWORD_HERE>
+- **Worker 2:** worker2@your-domain.com / <SECURE_PASSWORD_HERE>
+- **Worker 3:** worker3@your-domain.com / <SECURE_PASSWORD_HERE>
 
 ## Future Enhancements
 

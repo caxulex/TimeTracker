@@ -137,7 +137,7 @@ VITE_API_URL=https://client-domain.com
 
 # Admin (for initial setup)
 ADMIN_EMAIL=admin@client-domain.com
-ADMIN_PASSWORD=SecurePassword123!
+ADMIN_PASSWORD=<SECURE_PASSWORD_HERE>
 ```
 
 **Generate secure secrets:**

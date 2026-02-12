@@ -278,6 +278,63 @@ jobs:
         run: npm run lint || true
 
   # ============================================
+  # Security: Dependency Vulnerability Scanning
+  # ============================================
+  security-audit:
+    name: Dependency Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: ./frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      # Blocking: fail on HIGH/CRITICAL in production deps
+      - name: Frontend audit (production - blocking)
+        working-directory: ./frontend
+        run: npm audit --production --audit-level=high
+
+      # Non-blocking: report all vulnerabilities including dev deps
+      - name: Frontend audit (all - informational)
+        working-directory: ./frontend
+        continue-on-error: true
+        run: |
+          echo "## Frontend Full Dependency Audit" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          npm audit 2>&1 | tee -a $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: |
+          pip install -r requirements.txt
+          pip install pip-audit
+
+      # Backend audit
+      - name: Backend audit (blocking)
+        working-directory: ./backend
+        run: |
+          echo "## Backend Dependency Audit" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          pip-audit --requirement requirements.txt --desc 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  # ============================================
   # Build and Push Docker Images to GHCR
   # ============================================
   build-and-push:
