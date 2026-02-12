@@ -10,6 +10,7 @@ import { Button, Input } from '../components/common';
 import { useNotifications } from '../hooks/useNotifications';
 import { useBranding } from '../contexts/BrandingContext';
 import type { UserLogin } from '../types';
+import axios from 'axios';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -72,16 +73,18 @@ export function LoginPage() {
         duration: 3000,
       });
       navigate('/dashboard');
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Extract error message and store in state (also persisted to sessionStorage via useEffect)
-      const detail = error?.response?.data?.detail;
       let message = t('login.loginFailed');
-      if (typeof detail === 'string') {
-        message = detail;
-      } else if (Array.isArray(detail)) {
-        message = detail.map((e: any) => e.msg || e.message || String(e)).join(', ');
-      } else if (detail?.msg) {
-        message = detail.msg;
+      if (axios.isAxiosError(error)) {
+        const detail = error.response?.data?.detail;
+        if (typeof detail === 'string') {
+          message = detail;
+        } else if (Array.isArray(detail)) {
+          message = detail.map((e: Record<string, unknown>) => (typeof e.msg === 'string' ? e.msg : typeof e.message === 'string' ? e.message : String(e))).join(', ');
+        } else if (detail?.msg) {
+          message = detail.msg;
+        }
       }
       setLoginError(message);
     } finally {

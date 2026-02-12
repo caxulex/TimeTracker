@@ -104,8 +104,10 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   // Expose handler for WebSocket context
   useEffect(() => {
     // This will be called by the WebSocket context when a notification message arrives
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).__handleIncomingNotification = handleWebSocketNotification;
     return () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       delete (window as any).__handleIncomingNotification;
     };
   }, [handleWebSocketNotification]);

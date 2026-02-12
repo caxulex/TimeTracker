@@ -11,6 +11,7 @@ import { authApi, companiesApi } from '../api/client';
 import { useNotifications } from '../hooks/useNotifications';
 import { useTheme } from '../contexts/ThemeContext';
 import { isAdminUser } from '../utils/helpers';
+import axios from 'axios';
 
 // Common timezone list
 const TIMEZONES = [
@@ -91,11 +92,11 @@ export function SettingsPage() {
         message: 'Company timezone has been updated successfully',
       });
     },
-    onError: (error: any) => {
+    onError: (error: Error) => {
       addNotification({
         type: 'error',
         title: 'Update Failed',
-        message: error.response?.data?.detail || 'Failed to update timezone',
+        message: axios.isAxiosError(error) ? (error.response?.data?.detail || 'Failed to update timezone') : 'Failed to update timezone',
       });
     },
   });
@@ -138,11 +139,11 @@ export function SettingsPage() {
         title: 'Profile Updated',
         message: 'Your profile has been updated successfully',
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       addNotification({
         type: 'error',
         title: 'Update Failed',
-        message: error.response?.data?.detail || 'Failed to update profile',
+        message: axios.isAxiosError(error) ? (error.response?.data?.detail || 'Failed to update profile') : 'Failed to update profile',
       });
     } finally {
       setProfileLoading(false);
@@ -160,19 +161,21 @@ export function SettingsPage() {
         message: 'Your password has been changed successfully',
       });
       resetPassword();
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Extract error message - check for detailed password requirements
       let errorMessage = 'Failed to change password';
-      const responseData = error.response?.data;
+      if (axios.isAxiosError(error)) {
+        const responseData = error.response?.data;
       
-      if (responseData) {
-        // Check if there are password requirement details
-        if (responseData.details?.requirements && Array.isArray(responseData.details.requirements)) {
-          errorMessage = responseData.details.requirements.join('. ');
-        } else if (responseData.message) {
-          errorMessage = responseData.message;
-        } else if (typeof responseData.detail === 'string') {
-          errorMessage = responseData.detail;
+        if (responseData) {
+          // Check if there are password requirement details
+          if (responseData.details?.requirements && Array.isArray(responseData.details.requirements)) {
+            errorMessage = responseData.details.requirements.join('. ');
+          } else if (responseData.message) {
+            errorMessage = responseData.message;
+          } else if (typeof responseData.detail === 'string') {
+            errorMessage = responseData.detail;
+          }
         }
       }
       

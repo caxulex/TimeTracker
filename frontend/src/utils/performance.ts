@@ -10,6 +10,7 @@
  * @param delay - Minimum time between executions in milliseconds
  * @returns Throttled function
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function throttle<T extends (...args: any[]) => any>(
   func: T,
   delay: number
@@ -43,6 +44,7 @@ export function throttle<T extends (...args: any[]) => any>(
  * @param fn - Function to memoize
  * @returns Memoized function
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function memoize<T extends (...args: any[]) => any>(
   fn: T
 ): T {

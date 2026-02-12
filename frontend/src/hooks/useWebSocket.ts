@@ -8,7 +8,7 @@ import { useAuthStore } from '../stores/authStore';
 
 interface WebSocketMessage {
   type: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 interface UseWebSocketOptions {
@@ -173,13 +173,14 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
               ws.send(JSON.stringify({ type: 'pong' }));
               break;
             case 'active_timers':
-              setActiveTimers(message.timers || []);
+              setActiveTimers((message.timers as typeof activeTimers) || []);
               break;
             case 'online_users':
-              setOnlineUsers(message.users || []);
+              setOnlineUsers((message.users as typeof onlineUsers) || []);
               break;
             case 'timer_started': {
-              const timerData = message.data || message;
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const timerData = (message.data || message) as any;
               setActiveTimers(prev => {
                 const filtered = prev.filter(t => t.user_id !== timerData.user_id);
                 return [...filtered, {
@@ -196,7 +197,8 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
               break;
             }
             case 'timer_stopped': {
-              const stopData = message.data || message;
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const stopData = (message.data || message) as any;
               setActiveTimers(prev => prev.filter(t => t.user_id !== stopData.user_id));
               break;
             }
@@ -206,7 +208,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
             case 'task_created':
               break;
             case 'notification':
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               if (message.data && (window as any).__handleIncomingNotification) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 (window as any).__handleIncomingNotification(message.data);
               }
               break;

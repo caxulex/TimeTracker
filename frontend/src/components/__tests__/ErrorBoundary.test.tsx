@@ -2,7 +2,7 @@
 // TIME TRACKER - ERROR BOUNDARY TESTS
 // Phase 1: Critical Safety Net
 // ============================================
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, type MockInstance, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ErrorBoundary } from '../ErrorBoundary';
 
@@ -17,8 +17,7 @@ function BadChild(): JSX.Element {
 }
 
 describe('ErrorBoundary', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let consoleErrorSpy: any;
+  let consoleErrorSpy: MockInstance;
 
   beforeEach(() => {
     // Suppress console.error output during tests since we expect errors

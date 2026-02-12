@@ -5,6 +5,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { User, UserLogin, UserRegister, AuthToken } from '../types';
 import { authApi } from '../api/client';
+import axios from 'axios';
 
 interface AuthState {
   user: User | null;
@@ -39,16 +40,25 @@ export const useAuthStore = create<AuthState>()(
           // Fetch user data after login
           const user = await authApi.getMe();
           set({ user, isAuthenticated: true, isLoading: false });
-        } catch (error: any) {
-          const detail = error.response?.data?.detail;
-          // Handle FastAPI validation errors (array of objects) vs string errors
+        } catch (error: unknown) {
           let message = 'Login failed';
-          if (typeof detail === 'string') {
-            message = detail;
-          } else if (Array.isArray(detail)) {
-            message = detail.map((e: any) => e.msg || e.message || String(e)).join(', ');
-          } else if (detail?.msg) {
-            message = detail.msg;
+          if (axios.isAxiosError(error)) {
+            const detail = error.response?.data?.detail;
+            if (typeof detail === 'string') {
+              message = detail;
+            } else if (Array.isArray(detail)) {
+              message = detail.map((e: Record<string, unknown>) => (typeof e.msg === 'string' ? e.msg : typeof e.message === 'string' ? e.message : String(e))).join(', ');
+            } else if (detail?.msg) {
+              message = detail.msg;
+            }
+          } else if (error instanceof Error) {
+            message = error.message;
+          } else if (typeof error === 'object' && error !== null) {
+            const resp = (error as Record<string, unknown>).response as Record<string, unknown> | undefined;
+            const data = resp?.data as Record<string, unknown> | undefined;
+            if (typeof data?.detail === 'string') {
+              message = data.detail;
+            }
           }
           set({ error: message, isLoading: false });
           throw error;
@@ -61,16 +71,25 @@ export const useAuthStore = create<AuthState>()(
           await authApi.register(data);
           // After registration, login automatically
           await get().login({ email: data.email, password: data.password });
-        } catch (error: any) {
-          const detail = error.response?.data?.detail;
-          // Handle FastAPI validation errors (array of objects) vs string errors
+        } catch (error: unknown) {
           let message = 'Registration failed';
-          if (typeof detail === 'string') {
-            message = detail;
-          } else if (Array.isArray(detail)) {
-            message = detail.map((e: any) => e.msg || e.message || String(e)).join(', ');
-          } else if (detail?.msg) {
-            message = detail.msg;
+          if (axios.isAxiosError(error)) {
+            const detail = error.response?.data?.detail;
+            if (typeof detail === 'string') {
+              message = detail;
+            } else if (Array.isArray(detail)) {
+              message = detail.map((e: Record<string, unknown>) => (typeof e.msg === 'string' ? e.msg : typeof e.message === 'string' ? e.message : String(e))).join(', ');
+            } else if (detail?.msg) {
+              message = detail.msg;
+            }
+          } else if (error instanceof Error) {
+            message = error.message;
+          } else if (typeof error === 'object' && error !== null) {
+            const resp = (error as Record<string, unknown>).response as Record<string, unknown> | undefined;
+            const data = resp?.data as Record<string, unknown> | undefined;
+            if (typeof data?.detail === 'string') {
+              message = data.detail;
+            }
           }
           set({ error: message, isLoading: false });
           throw error;

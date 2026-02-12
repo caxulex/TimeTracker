@@ -14,6 +14,8 @@ import { useDebounce } from '../hooks/useDebounce';
 import { rateLimiter } from '../utils/security';
 import { isAdminUser } from '../utils/helpers';
 import type { User, UserCreate, Team, TeamMember, PayRate, TimeEntry, Project } from '../types';
+import type { PayRateCreate, RateType } from '../types/payroll';
+import axios from 'axios';
 
 export function StaffPage() {
   const { user: currentUser } = useAuthStore();
@@ -268,7 +270,7 @@ export function StaffPage() {
 
   // Update staff mutation
   const updateStaffMutation = useMutation({
-    mutationFn: async ({ id, data, payRateData }: { id: number; data: Partial<User>; payRateData?: any }) => {
+    mutationFn: async ({ id, data, payRateData }: { id: number; data: Partial<User>; payRateData?: { pay_rate: number; pay_rate_type: RateType; overtime_multiplier: number; currency: string } }) => {
       // Update user profile
       const updatedUser = await usersApi.update(id, data);
       
@@ -278,9 +280,9 @@ export function StaffPage() {
         try {
           // Try to get current pay rate
           currentPayRate = await payRatesApi.getUserCurrentRate(id);
-        } catch (error: any) {
+        } catch (error: unknown) {
           // 404 is expected if no pay rate exists yet
-          if (error?.response?.status !== 404) {
+          if (axios.isAxiosError(error) && error.response?.status !== 404) {
             console.error('Error fetching current pay rate:', error);
           }
         }
@@ -312,7 +314,7 @@ export function StaffPage() {
         } catch (error) {
           console.error('Failed to save pay rate:', error);
           // Throw error so user knows the pay rate wasn't saved
-          throw new Error('Failed to update pay rate: ' + (error as any)?.response?.data?.detail || (error as any)?.message);
+          throw new Error('Failed to update pay rate: ' + (axios.isAxiosError(error) ? (error.response?.data?.detail || error.message) : (error instanceof Error ? error.message : 'Unknown error')));
         }
       }
       
@@ -424,13 +426,14 @@ export function StaffPage() {
       }
       
       // Extract pay rate data from secured data
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { pay_rate, pay_rate_type, overtime_multiplier, currency, ...userUpdateData } = securedData as any;
       
       // Update user profile first
       updateStaffMutation.mutate({ 
         id: selectedStaff.id, 
         data: userUpdateData,
-        payRateData: pay_rate > 0 ? { pay_rate, pay_rate_type, overtime_multiplier, currency: currency || 'USD' } : null
+        payRateData: pay_rate > 0 ? { pay_rate, pay_rate_type, overtime_multiplier, currency: currency || 'USD' } : undefined
       });
     }
   }, [selectedStaff, editForm, permissions, notifications, formValidation, updateStaffMutation]);
@@ -1517,8 +1520,8 @@ export function StaffPage() {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Employment Type</label>
                     <select
-                      value={editForm.employment_type}
-                      onChange={(e) => setEditForm({ ...editForm, employment_type: e.target.value as any })}
+                      value={editForm.employment_type || 'full_time'}
+                      onChange={(e) => setEditForm({ ...editForm, employment_type: e.target.value as 'full_time' | 'part_time' | 'contractor' })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
                     >
                       <option value="full_time">Full Time</option>
@@ -1557,7 +1560,7 @@ export function StaffPage() {
                     <label className="block text-sm font-medium text-gray-700 mb-1">Pay Rate Type</label>
                     <select
                       value={editForm.pay_rate_type}
-                      onChange={(e) => setEditForm({ ...editForm, pay_rate_type: e.target.value as any })}
+                      onChange={(e) => setEditForm({ ...editForm, pay_rate_type: e.target.value as 'hourly' | 'daily' | 'monthly' | 'project_based' })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
                     >
                       <option value="hourly">Hourly</option>
@@ -2009,12 +2012,12 @@ function ManageTeamsModal({ staff, onClose }: { staff: User; onClose: () => void
   };
 
   const availableTeams = teamsData?.items.filter(
-    (team: Team) => !staffTeams?.some((st: any) => st.id === team.id)
+    (team: Team) => !staffTeams?.some((st: { id: number }) => st.id === team.id)
   ) || [];
 
   // Filter projects that belong to staff's teams
   const staffProjects = projectsData?.items.filter((project: Project) =>
-    staffTeams?.some((team: any) => team.id === project.team_id)
+    staffTeams?.some((team: { id: number }) => team.id === project.team_id)
   ) || [];
 
   return (
@@ -2087,7 +2090,7 @@ function ManageTeamsModal({ staff, onClose }: { staff: User; onClose: () => void
                 </div>
               ) : staffTeams && staffTeams.length > 0 ? (
                 <div className="space-y-3">
-                  {staffTeams.map((team: any) => (
+                  {staffTeams.map((team: { id: number; name: string; memberRole?: string; members?: unknown[]; created_at: string; description?: string }) => (
                     <div key={team.id} className="border border-gray-200 rounded-lg p-4 hover:border-green-300 transition-colors">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
@@ -2109,7 +2112,7 @@ function ManageTeamsModal({ staff, onClose }: { staff: User; onClose: () => void
                         </div>
                         <div className="flex gap-2">
                           <button
-                            onClick={() => handleToggleRole(team.id, team.memberRole)}
+                            onClick={() => handleToggleRole(team.id, team.memberRole || 'member')}
                             disabled={updateMemberRoleMutation.isPending}
                             className="px-3 py-1.5 text-sm font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-md transition-colors disabled:opacity-50"
                             title={team.memberRole === 'admin' ? 'Demote to member' : 'Promote to admin'}
@@ -2197,7 +2200,7 @@ function ManageTeamsModal({ staff, onClose }: { staff: User; onClose: () => void
               ) : staffProjects.length > 0 ? (
                 <div className="space-y-3">
                   {staffProjects.map((project: Project) => {
-                    const team = staffTeams?.find((t: any) => t.id === project.team_id);
+                    const team = staffTeams?.find((t: { id: number; name: string }) => t.id === project.team_id);
                     return (
                       <div key={project.id} className="border border-gray-200 rounded-lg p-4 hover:border-purple-300 transition-colors">
                         <div className="flex items-start justify-between">
@@ -2390,7 +2393,7 @@ function PayrollModal({ staff, onClose }: { staff: User; onClose: () => void }) 
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {payRates.map((rate: any) => (
+                    {payRates.map((rate: PayRate) => (
                       <tr key={rate.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">
                           {formatCurrency(rate.base_rate, rate.currency)}
@@ -2537,8 +2540,8 @@ function TimeTrackingModal({ staff, onClose }: { staff: User; onClose: () => voi
     });
   };
 
-  const totalMinutes = timeEntries?.items.reduce((sum: number, entry: any) => {
-    return sum + (entry.duration_minutes || 0);
+  const totalMinutes = timeEntries?.items.reduce((sum: number, entry: TimeEntry) => {
+    return sum + ((entry.duration_seconds || 0) / 60);
   }, 0) || 0;
 
   const totalHours = (totalMinutes / 60).toFixed(1);
@@ -2647,7 +2650,7 @@ function TimeTrackingModal({ staff, onClose }: { staff: User; onClose: () => voi
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {timeEntries.items.map((entry: any) => (
+                  {timeEntries.items.map((entry: TimeEntry) => (
                     <tr key={entry.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                         {formatDate(entry.start_time)}
@@ -2659,7 +2662,7 @@ function TimeTrackingModal({ staff, onClose }: { staff: User; onClose: () => voi
                         {entry.task?.name || '—'}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-indigo-600">
-                        {formatDuration(entry.duration_minutes)}
+                        {formatDuration(entry.duration_seconds)}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">
                         {entry.description || '—'}
@@ -2737,13 +2740,13 @@ function AnalyticsModal({ staff, onClose }: { staff: User; onClose: () => void }
 
   // Calculate analytics
   const analytics = {
-    totalHours: timeEntries?.items.reduce((sum: number, entry: any) => sum + (entry.duration_minutes / 60), 0) || 0,
+    totalHours: timeEntries?.items.reduce((sum: number, entry: TimeEntry) => sum + ((entry.duration_seconds || 0) / 3600), 0) || 0,
     totalEntries: timeEntries?.items.length || 0,
     expectedHours: (staff.expected_hours_per_week || 40) * (dateRange === 'week' ? 1 : dateRange === 'month' ? 4 : 52),
     avgHoursPerEntry: timeEntries?.items.length ? 
-      ((timeEntries.items.reduce((sum: number, entry: any) => sum + (entry.duration_minutes / 60), 0) || 0) / timeEntries.items.length) : 0,
-    projectCount: new Set(timeEntries?.items.map((e: any) => e.project_id).filter(Boolean)).size,
-    daysWorked: new Set(timeEntries?.items.map((e: any) => e.start_time?.split('T')[0]).filter(Boolean)).size,
+      ((timeEntries.items.reduce((sum: number, entry: TimeEntry) => sum + ((entry.duration_seconds || 0) / 3600), 0) || 0) / timeEntries.items.length) : 0,
+    projectCount: new Set(timeEntries?.items.map((e: TimeEntry) => e.project_id).filter(Boolean)).size,
+    daysWorked: new Set(timeEntries?.items.map((e: TimeEntry) => e.start_time?.split('T')[0]).filter(Boolean)).size,
   };
 
   // Calculate productivity score (0-100)
@@ -2761,15 +2764,15 @@ function AnalyticsModal({ staff, onClose }: { staff: User; onClose: () => void }
     : 0;
 
   // Group by project
-  const projectBreakdown = timeEntries?.items.reduce((acc: any, entry: any) => {
+  const projectBreakdown = timeEntries?.items.reduce((acc: Record<string, { hours: number; entries: number }>, entry: TimeEntry) => {
     const projectName = entry.project?.name || 'No Project';
     if (!acc[projectName]) {
       acc[projectName] = { hours: 0, entries: 0 };
     }
-    acc[projectName].hours += entry.duration_minutes / 60;
+    acc[projectName].hours += (entry.duration_seconds || 0) / 3600;
     acc[projectName].entries += 1;
     return acc;
-  }, {}) || {};
+  }, {} as Record<string, { hours: number; entries: number }>) || {};
 
   // Export data
   const handleExport = (format: 'csv' | 'json') => {
@@ -2792,11 +2795,11 @@ function AnalyticsModal({ staff, onClose }: { staff: User; onClose: () => void }
         productivity_score: productivityScore,
         estimated_earnings: estimatedEarnings,
         project_breakdown: projectBreakdown,
-        time_entries: timeEntries?.items.map((entry: any) => ({
+        time_entries: timeEntries?.items.map((entry: TimeEntry) => ({
           date: entry.start_time,
           project: entry.project?.name,
           task: entry.task?.name,
-          duration_hours: (entry.duration_minutes / 60).toFixed(2),
+          duration_hours: ((entry.duration_seconds || 0) / 3600).toFixed(2),
           description: entry.description,
         })),
       };
@@ -2833,7 +2836,7 @@ function AnalyticsModal({ staff, onClose }: { staff: User; onClose: () => void }
           [''],
           ['Project Breakdown'],
           ['Project', 'Hours', 'Entries'],
-          ...Object.entries(projectBreakdown).map(([project, data]: [string, any]) => 
+          ...Object.entries(projectBreakdown).map(([project, data]: [string, { hours: number; entries: number }]) => 
             [project, data.hours.toFixed(2), data.entries.toString()]
           ),
         ];
@@ -3034,8 +3037,8 @@ function AnalyticsModal({ staff, onClose }: { staff: User; onClose: () => void }
                     {Object.keys(projectBreakdown).length > 0 ? (
                       <div className="space-y-3">
                         {Object.entries(projectBreakdown)
-                          .sort(([, a]: [string, any], [, b]: [string, any]) => b.hours - a.hours)
-                          .map(([project, data]: [string, any]) => {
+                          .sort(([, a]: [string, { hours: number; entries: number }], [, b]: [string, { hours: number; entries: number }]) => b.hours - a.hours)
+                          .map(([project, data]: [string, { hours: number; entries: number }]) => {
                             const percentage = (data.hours / analytics.totalHours) * 100;
                             return (
                               <div key={project}>

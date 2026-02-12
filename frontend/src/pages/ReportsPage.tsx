@@ -135,9 +135,9 @@ export function ReportsPage() {
         notifications.notifySuccess('Export Complete', `Your ${data.format} report has been downloaded.`);
       }
     },
-    onError: (error: any) => {
+    onError: (error: Error) => {
       console.error('Export failed:', error);
-      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to export report';
+      const errorMessage = error?.message || 'Failed to export report';
       notifications.notifyError('Export Failed', errorMessage);
       setShowExportMenu(false);
     },
@@ -166,9 +166,9 @@ export function ReportsPage() {
     entries: day.entry_count,
   })) || [];
 
-  const totalProjectSeconds = projectData?.reduce((sum: number, p: any) => sum + p.total_seconds, 0) || 0;
+  const totalProjectSeconds = projectData?.reduce((sum: number, p: { total_seconds: number }) => sum + p.total_seconds, 0) || 0;
 
-  const projectChartData = projectData?.map((project: any) => ({
+  const projectChartData = projectData?.map((project: { project_name: string; total_seconds: number }) => ({
     name: project.project_name,
     value: project.total_seconds,
     hours: secondsToHours(project.total_seconds),
@@ -431,7 +431,7 @@ export function ReportsPage() {
                         outerRadius={80}
                         dataKey="value"
                       >
-                        {projectChartData.map((_entry: any, index: number) => (
+                        {projectChartData.map((_entry: { name: string; value: number; hours: number; percentage: number }, index: number) => (
                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                         ))}
                       </Pie>
@@ -473,7 +473,7 @@ export function ReportsPage() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {projectChartData.map((project: any, index: number) => (
+                    {projectChartData.map((project: { name: string; value: number; hours: number; percentage: number }, index: number) => (
                       <tr key={project.name}>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">

@@ -30,6 +30,7 @@ import type {
   WeeklySummary,
   PaginatedResponse,
 } from '../types';
+import type { PayRateCreate, PayRateUpdate } from '../types/payroll';
 
 function normalizeApiBaseUrl(input: string): string {
   const trimmed = (input ?? '').trim();
@@ -474,8 +475,8 @@ export const timeEntriesApi = {
     return response.data;
   },
 
-  getActiveTimers: async (): Promise<any[]> => {
-    const response = await api.get<any[]>('/api/time/active');
+  getActiveTimers: async (): Promise<TimeEntry[]> => {
+    const response = await api.get<TimeEntry[]>('/api/time/active');
     return response.data;
   },
 };
@@ -598,9 +599,9 @@ export const exportApi = {
         responseType: 'blob',
       });
       return response.data;
-    } catch (error: any) {
+    } catch (error: unknown) {
       // If error response is a blob, try to read it as text
-      if (error.response?.data instanceof Blob) {
+      if (axios.isAxiosError(error) && error.response?.data instanceof Blob) {
         const text = await error.response.data.text();
         try {
           const json = JSON.parse(text);
@@ -625,9 +626,9 @@ export const exportApi = {
         responseType: 'blob',
       });
       return response.data;
-    } catch (error: any) {
+    } catch (error: unknown) {
       // If error response is a blob, try to read it as text
-      if (error.response?.data instanceof Blob) {
+      if (axios.isAxiosError(error) && error.response?.data instanceof Blob) {
         const text = await error.response.data.text();
         try {
           const json = JSON.parse(text);
@@ -652,9 +653,9 @@ export const exportApi = {
         responseType: 'blob',
       });
       return response.data;
-    } catch (error: any) {
+    } catch (error: unknown) {
       // If error response is a blob, try to read it as text
-      if (error.response?.data instanceof Blob) {
+      if (axios.isAxiosError(error) && error.response?.data instanceof Blob) {
         const text = await error.response.data.text();
         try {
           const json = JSON.parse(text);
@@ -691,12 +692,12 @@ export const payRatesApi = {
     return response.data;
   },
 
-  create: async (data: any) => {
+  create: async (data: PayRateCreate) => {
     const response = await api.post('/api/pay-rates', data);
     return response.data;
   },
 
-  update: async (id: number, data: any) => {
+  update: async (id: number, data: PayRateUpdate) => {
     const response = await api.put(`/api/pay-rates/${id}`, data);
     return response.data;
   },

@@ -22,7 +22,7 @@ export function ActiveTimers({ teamId, className = '' }: ActiveTimersProps) {
     queryKey: ['active-timers'],
     queryFn: async () => {
       const response = await timeEntriesApi.getActiveTimers();
-      return response as ActiveTimer[];
+      return response as unknown as ActiveTimer[];
     },
     enabled: !isConnected, // Only query if WebSocket is disconnected
     refetchInterval: isConnected ? false : 5000, // Poll every 5 seconds when not connected

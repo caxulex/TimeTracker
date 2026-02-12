@@ -209,7 +209,7 @@ export function StaffDetailPage() {
 
   // Filter projects
   const staffProjects = projectsData?.items.filter((project: Project) =>
-    staffTeams?.some((team: any) => team.id === project.team_id)
+    staffTeams?.some((team: { id: number }) => team.id === project.team_id)
   ) || [];
 
   const formatCurrency = (amount: number, currency: string) => {
@@ -631,7 +631,7 @@ export function StaffDetailPage() {
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {payRates.map((rate: any) => (
+                        {payRates.map((rate: PayRate) => (
                           <tr key={rate.id} className="hover:bg-gray-50">
                             <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">
                               {formatCurrency(rate.base_rate, rate.currency)}
@@ -774,7 +774,7 @@ export function StaffDetailPage() {
             <div className="p-6">
               {staffTeams && staffTeams.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {staffTeams.map((team: any) => (
+                  {staffTeams.map((team: { id: number; name: string; memberRole?: string; members?: unknown[]; created_at: string }) => (
                     <div key={team.id} className="border border-gray-200 rounded-lg p-4 hover:border-green-300 transition-colors">
                       <div className="flex items-center justify-between mb-2">
                         <h4 className="font-semibold text-gray-900">{team.name}</h4>
@@ -809,7 +809,7 @@ export function StaffDetailPage() {
               {staffProjects.length > 0 ? (
                 <div className="space-y-3">
                   {staffProjects.map((project: Project) => {
-                    const team = staffTeams?.find((t: any) => t.id === project.team_id);
+                    const team = staffTeams?.find((t: { id: number; name: string }) => t.id === project.team_id);
                     return (
                       <div key={project.id} className="border border-gray-200 rounded-lg p-4 hover:border-purple-300 transition-colors">
                         <div className="flex items-start justify-between">

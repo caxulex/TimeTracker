@@ -9,7 +9,7 @@ import { ConnectionStatusDot, ReconnectBanner } from './ConnectionStatusIndicato
 // Mock the WebSocket context
 const mockContext = {
   isConnected: true,
-  connectionState: 'connected' as any,
+  connectionState: 'connected' as 'connected' | 'reconnecting' | 'failed' | 'disconnected',
   connect: vi.fn(),
   disconnect: vi.fn(),
   reconnectNow: vi.fn(),

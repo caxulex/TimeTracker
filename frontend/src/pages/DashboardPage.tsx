@@ -99,8 +99,8 @@ export function DashboardPage() {
     hours: Math.round((day.total_seconds / 3600) * 10) / 10,
   })) || [];
 
-  const totalProjectSeconds = projectData?.reduce((sum: number, p: any) => sum + p.total_seconds, 0) || 0;
-  const projectChartData = projectData?.map((project: any) => ({
+  const totalProjectSeconds = projectData?.reduce((sum: number, p: { total_seconds: number }) => sum + p.total_seconds, 0) || 0;
+  const projectChartData = projectData?.map((project: { project_name: string; total_seconds: number }) => ({
     name: project.project_name,
     value: project.total_seconds,
     percentage: totalProjectSeconds > 0 ? Math.round((project.total_seconds / totalProjectSeconds) * 100) : 0,
@@ -274,7 +274,7 @@ export function DashboardPage() {
                 <PieChart>
                   <Pie data={projectChartData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value"
                     label={({ name, percentage }) => name + ' (' + percentage + '%)'}>
-                    {projectChartData.map((_: any, index: number) => (
+                    {projectChartData.map((_: { name: string; value: number; percentage: number }, index: number) => (
                       <Cell key={'cell-' + index} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>

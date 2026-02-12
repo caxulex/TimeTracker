@@ -6,12 +6,12 @@ import { describe, it, expect } from 'vitest';
 import en from '../i18n/locales/en/translation.json';
 
 // Helper to collect all leaf keys from a nested object
-function collectKeys(obj: Record<string, any>, prefix = ''): string[] {
+function collectKeys(obj: Record<string, unknown>, prefix = ''): string[] {
   const keys: string[] = [];
   for (const key in obj) {
     const fullKey = prefix ? `${prefix}.${key}` : key;
     if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
-      keys.push(...collectKeys(obj[key], fullKey));
+      keys.push(...collectKeys(obj[key] as Record<string, unknown>, fullKey));
     } else {
       keys.push(fullKey);
     }
@@ -20,7 +20,7 @@ function collectKeys(obj: Record<string, any>, prefix = ''): string[] {
 }
 
 describe('i18n Translation Completeness', () => {
-  const allKeys = collectKeys(en);
+  const allKeys = collectKeys(en as Record<string, unknown>);
 
   it('should have English translation file loaded', () => {
     expect(en).toBeDefined();
@@ -169,32 +169,32 @@ describe('i18n Translation Completeness', () => {
   it('should have no empty string values', () => {
     const emptyKeys: string[] = [];
     
-    function checkEmpty(obj: Record<string, any>, prefix = '') {
+    function checkEmpty(obj: Record<string, unknown>, prefix = '') {
       for (const key in obj) {
         const fullKey = prefix ? `${prefix}.${key}` : key;
         if (typeof obj[key] === 'object' && obj[key] !== null) {
-          checkEmpty(obj[key], fullKey);
+          checkEmpty(obj[key] as Record<string, unknown>, fullKey);
         } else if (obj[key] === '') {
           emptyKeys.push(fullKey);
         }
       }
     }
 
-    checkEmpty(en);
+    checkEmpty(en as Record<string, unknown>);
     expect(emptyKeys).toEqual([]);
   });
 
   it('should have consistent interpolation syntax ({{variable}})', () => {
     const badKeys: string[] = [];
 
-    function checkInterpolation(obj: Record<string, any>, prefix = '') {
+    function checkInterpolation(obj: Record<string, unknown>, prefix = '') {
       for (const key in obj) {
         const fullKey = prefix ? `${prefix}.${key}` : key;
         if (typeof obj[key] === 'object' && obj[key] !== null) {
-          checkInterpolation(obj[key], fullKey);
+          checkInterpolation(obj[key] as Record<string, unknown>, fullKey);
         } else if (typeof obj[key] === 'string') {
           // Check for single-brace interpolation (common mistake)
-          const singleBrace = obj[key].match(/(?<!\{)\{[a-zA-Z_]+\}(?!\})/g);
+          const singleBrace = (obj[key] as string).match(/(?<!\{)\{[a-zA-Z_]+\}(?!\})/g);
           if (singleBrace) {
             badKeys.push(`${fullKey}: ${singleBrace.join(', ')}`);
           }

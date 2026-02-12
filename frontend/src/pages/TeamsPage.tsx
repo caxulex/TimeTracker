@@ -10,6 +10,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useAuth } from '../hooks/useAuth';
 import { useStaffNotifications } from '../hooks/useStaffNotifications';
 import type { Team, TeamMember, User } from '../types';
+import axios from 'axios';
 
 export function TeamsPage() {
   const queryClient = useQueryClient();
@@ -54,8 +55,8 @@ export function TeamsPage() {
       setShowModal(false);
       notifications.notifySuccess('Team Created', `Team "${team.name}" has been created successfully.`);
     },
-    onError: (error: any) => {
-      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to create team';
+    onError: (error: Error) => {
+      const errorMessage = axios.isAxiosError(error) ? (error.response?.data?.detail || error.message || 'Failed to create team') : (error.message || 'Failed to create team');
       notifications.notifyError('Create Failed', errorMessage);
     },
   });
@@ -71,9 +72,9 @@ export function TeamsPage() {
       setEditingTeam(null);
       notifications.notifySuccess('Team Updated', `Team "${team.name}" has been updated successfully.`);
     },
-    onError: (error: any) => {
-      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to update team';
-      if (error?.response?.status === 403) {
+    onError: (error: Error) => {
+      const errorMessage = axios.isAxiosError(error) ? (error.response?.data?.detail || error.message || 'Failed to update team') : (error.message || 'Failed to update team');
+      if (axios.isAxiosError(error) && error.response?.status === 403) {
         notifications.notifyError('Permission Denied', 'Only team owners and super admins can update teams.');
       } else {
         notifications.notifyError('Update Failed', errorMessage);
@@ -89,9 +90,9 @@ export function TeamsPage() {
       setSelectedTeam(null);
       notifications.notifySuccess('Team Deleted', 'Team has been successfully deleted.');
     },
-    onError: (error: any) => {
-      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to delete team';
-      if (error?.response?.status === 403) {
+    onError: (error: Error) => {
+      const errorMessage = axios.isAxiosError(error) ? (error.response?.data?.detail || error.message || 'Failed to delete team') : (error.message || 'Failed to delete team');
+      if (axios.isAxiosError(error) && error.response?.status === 403) {
         notifications.notifyError('Permission Denied', 'Only team owners and super admins can delete teams.');
       } else {
         notifications.notifyError('Delete Failed', errorMessage);
@@ -110,11 +111,11 @@ export function TeamsPage() {
       const user = users.find(u => u.id === variables.userId);
       notifications.notifySuccess('Member Added', `${user?.name || 'User'} has been added to the team.`);
     },
-    onError: (error: any) => {
-      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to add member';
-      if (error?.response?.status === 403) {
+    onError: (error: Error) => {
+      const errorMessage = axios.isAxiosError(error) ? (error.response?.data?.detail || error.message || 'Failed to add member') : (error.message || 'Failed to add member');
+      if (axios.isAxiosError(error) && error.response?.status === 403) {
         notifications.notifyError('Permission Denied', 'Only team owners and admins can add members.');
-      } else if (error?.response?.status === 400) {
+      } else if (axios.isAxiosError(error) && error.response?.status === 400) {
         notifications.notifyError('Invalid Request', errorMessage);
       } else {
         notifications.notifyError('Add Member Failed', errorMessage);
@@ -132,9 +133,9 @@ export function TeamsPage() {
       const teamMember = teamDetails?.members?.find((m: TeamMember) => m.user_id === variables.userId);
       notifications.notifySuccess('Member Removed', `${teamMember?.user?.name || 'User'} has been removed from the team.`);
     },
-    onError: (error: any) => {
-      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to remove member';
-      if (error?.response?.status === 403) {
+    onError: (error: Error) => {
+      const errorMessage = axios.isAxiosError(error) ? (error.response?.data?.detail || error.message || 'Failed to remove member') : (error.message || 'Failed to remove member');
+      if (axios.isAxiosError(error) && error.response?.status === 403) {
         notifications.notifyError('Permission Denied', 'Only team owners and admins can remove members.');
       } else {
         notifications.notifyError('Remove Member Failed', errorMessage);

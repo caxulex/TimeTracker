@@ -19,10 +19,10 @@ class MockWebSocket {
 
   url: string;
   readyState: number = MockWebSocket.CONNECTING;
-  onopen: ((event: any) => void) | null = null;
-  onclose: ((event: any) => void) | null = null;
-  onmessage: ((event: any) => void) | null = null;
-  onerror: ((event: any) => void) | null = null;
+  onopen: ((event: Event) => void) | null = null;
+  onclose: ((event: CloseEvent) => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
   send = vi.fn();
   close = vi.fn(() => {
     this.readyState = MockWebSocket.CLOSED;
@@ -35,17 +35,17 @@ class MockWebSocket {
 
   simulateOpen() {
     this.readyState = MockWebSocket.OPEN;
-    if (this.onopen) this.onopen({});
+    if (this.onopen) this.onopen({} as Event);
   }
 
   simulateClose(code = 1006, reason = 'Abnormal closure') {
     this.readyState = MockWebSocket.CLOSED;
-    if (this.onclose) this.onclose({ code, reason });
+    if (this.onclose) this.onclose({ code, reason } as CloseEvent);
   }
 
-  simulateMessage(data: any) {
+  simulateMessage(data: Record<string, unknown>) {
     if (this.onmessage) {
-      this.onmessage({ data: JSON.stringify(data) });
+      this.onmessage({ data: JSON.stringify(data) } as MessageEvent);
     }
   }
 }
@@ -117,7 +117,7 @@ describe('useWebSocket', () => {
       });
 
       const ws = mockWebSocketInstances[mockWebSocketInstances.length - 1];
-      const sentTypes = ws.send.mock.calls.map((c: any[]) => JSON.parse(c[0]).type);
+      const sentTypes = ws.send.mock.calls.map((c: [string]) => JSON.parse(c[0]).type);
       expect(sentTypes).toContain('get_active_timers');
       expect(sentTypes).toContain('get_online_users');
     });
@@ -279,7 +279,7 @@ describe('useWebSocket', () => {
       });
 
       const pongSent = ws.send.mock.calls.some(
-        (c: any[]) => JSON.parse(c[0]).type === 'pong'
+        (c: [string]) => JSON.parse(c[0]).type === 'pong'
       );
       expect(pongSent).toBe(true);
     });

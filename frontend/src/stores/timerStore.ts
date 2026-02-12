@@ -6,6 +6,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { TimeEntry, TimerStart } from '../types';
 import { timeEntriesApi } from '../api/client';
+import axios from 'axios';
 
 interface TimerState {
   currentEntry: TimeEntry | null;
@@ -99,16 +100,16 @@ export const useTimerStore = create<TimerState>()(
               lastSyncTime: Date.now(),
             });
           }
-        } catch (error: any) {
+        } catch (error: unknown) {
           // Handle 401/403 (auth errors) and 429 (rate limit) gracefully - just use local state
-          const status = error.response?.status;
+          const status = axios.isAxiosError(error) ? error.response?.status : undefined;
           if (status === 401 || status === 403 || status === 429) {
             console.warn(`[TimerStore] ${status === 429 ? 'Rate limited' : 'Auth error'}, using local state`);
             set({ isLoading: false });
             return;
           }
           console.error('[TimerStore] Error fetching timer:', error);
-          set({ error: error.message, isLoading: false });
+          set({ error: error instanceof Error ? error.message : 'Unknown error', isLoading: false });
         }
       },
 
@@ -124,8 +125,15 @@ export const useTimerStore = create<TimerState>()(
             isLoading: false,
             lastSyncTime: Date.now(),
           });
-        } catch (error: any) {
-          const message = error.response?.data?.detail || 'Failed to start timer';
+        } catch (error: unknown) {
+          let message = 'Failed to start timer';
+          if (axios.isAxiosError(error)) {
+            message = error.response?.data?.detail || message;
+          } else if (typeof error === 'object' && error !== null) {
+            const resp = (error as Record<string, unknown>).response as Record<string, unknown> | undefined;
+            const data = resp?.data as Record<string, unknown> | undefined;
+            if (typeof data?.detail === 'string') message = data.detail;
+          }
           set({ error: message, isLoading: false });
           throw error;
         }
@@ -144,8 +152,15 @@ export const useTimerStore = create<TimerState>()(
             lastSyncTime: Date.now(),
           });
           return entry;
-        } catch (error: any) {
-          const message = error.response?.data?.detail || 'Failed to stop timer';
+        } catch (error: unknown) {
+          let message = 'Failed to stop timer';
+          if (axios.isAxiosError(error)) {
+            message = error.response?.data?.detail || message;
+          } else if (typeof error === 'object' && error !== null) {
+            const resp = (error as Record<string, unknown>).response as Record<string, unknown> | undefined;
+            const data = resp?.data as Record<string, unknown> | undefined;
+            if (typeof data?.detail === 'string') message = data.detail;
+          }
           set({ error: message, isLoading: false });
           throw error;
         }
@@ -163,8 +178,15 @@ export const useTimerStore = create<TimerState>()(
             isLoading: false,
             lastSyncTime: Date.now(),
           });
-        } catch (error: any) {
-          const message = error.response?.data?.detail || 'Failed to switch task';
+        } catch (error: unknown) {
+          let message = 'Failed to switch task';
+          if (axios.isAxiosError(error)) {
+            message = error.response?.data?.detail || message;
+          } else if (typeof error === 'object' && error !== null) {
+            const resp = (error as Record<string, unknown>).response as Record<string, unknown> | undefined;
+            const data = resp?.data as Record<string, unknown> | undefined;
+            if (typeof data?.detail === 'string') message = data.detail;
+          }
           set({ error: message, isLoading: false });
           throw error;
         }
