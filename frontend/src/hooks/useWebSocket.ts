@@ -73,6 +73,8 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMountedRef = useRef(true);
   const manualDisconnectRef = useRef(false);
+  const connectionIdRef = useRef(0);
+  const stabilityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [isConnected, setIsConnected] = useState(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
@@ -112,9 +114,17 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     const token = getToken();
     if (!isAuthenticated || !token) return;
 
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    // Guard: don't create a second socket while one is OPEN or still CONNECTING
+    if (wsRef.current?.readyState === WebSocket.OPEN ||
+        wsRef.current?.readyState === WebSocket.CONNECTING) return;
 
-    // Close any stale connection
+    // Cancel any pending reconnect to avoid duplicate connections
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+
+    // Close any stale connection (e.g. in CLOSING state)
     if (wsRef.current) {
       try { wsRef.current.close(); } catch { /* ignore */ }
       wsRef.current = null;
@@ -129,12 +139,22 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
+      // Track connection instance — stale handlers from closed
+      // sockets will see a mismatched ID and bail out
+      const thisConnectionId = ++connectionIdRef.current;
+
       ws.onopen = () => {
-        if (!isMountedRef.current) return;
+        if (!isMountedRef.current || connectionIdRef.current !== thisConnectionId) return;
         setIsConnected(true);
         setConnectionState('connected');
         setShowReconnectNotification(false);
-        reconnectAttempts.current = 0;
+        // Defer attempt-counter reset until connection has been stable for 5 s.
+        // Prevents an infinite 1-req/s loop when the server immediately rejects.
+        if (stabilityTimerRef.current) clearTimeout(stabilityTimerRef.current);
+        stabilityTimerRef.current = setTimeout(() => {
+          reconnectAttempts.current = 0;
+          stabilityTimerRef.current = null;
+        }, 5000);
         onConnect?.();
 
         // Re-subscribe to channels on (re)connection
@@ -143,7 +163,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       };
 
       ws.onmessage = (event) => {
-        if (!isMountedRef.current) return;
+        if (!isMountedRef.current || connectionIdRef.current !== thisConnectionId) return;
         try {
           const message: WebSocketMessage = JSON.parse(event.data);
           setLastMessage(message);
@@ -199,9 +219,16 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       };
 
       ws.onclose = (_event) => {
-        if (!isMountedRef.current) return;
+        if (!isMountedRef.current || connectionIdRef.current !== thisConnectionId) return;
         setIsConnected(false);
         wsRef.current = null;
+
+        // Cancel stability timer — short-lived connections keep increasing attempts
+        if (stabilityTimerRef.current) {
+          clearTimeout(stabilityTimerRef.current);
+          stabilityTimerRef.current = null;
+        }
+
         onDisconnect?.();
 
         // Don't reconnect if manually disconnected
@@ -228,7 +255,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       };
 
       ws.onerror = (error) => {
-        if (!isMountedRef.current) return;
+        if (!isMountedRef.current || connectionIdRef.current !== thisConnectionId) return;
         onError?.(error);
       };
     } catch (error) {
@@ -242,10 +269,16 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   // ============================================
   const disconnect = useCallback(() => {
     manualDisconnectRef.current = true;
+    connectionIdRef.current++; // invalidate stale event handlers
 
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
+    }
+
+    if (stabilityTimerRef.current) {
+      clearTimeout(stabilityTimerRef.current);
+      stabilityTimerRef.current = null;
     }
 
     if (wsRef.current) {
@@ -266,6 +299,16 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
+    }
+    if (stabilityTimerRef.current) {
+      clearTimeout(stabilityTimerRef.current);
+      stabilityTimerRef.current = null;
+    }
+    // Invalidate stale handlers and close any existing connection
+    connectionIdRef.current++;
+    if (wsRef.current) {
+      try { wsRef.current.close(); } catch { /* ignore */ }
+      wsRef.current = null;
     }
     reconnectAttempts.current = 0;
     setShowReconnectNotification(false);
@@ -339,6 +382,11 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   useEffect(() => {
     const handleOnline = () => {
       if (isAuthenticated && !wsRef.current) {
+        // Clear any pending reconnect to avoid racing with this connect
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = null;
+        }
         reconnectAttempts.current = 0;
         connect();
       }
@@ -370,6 +418,11 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
+      }
+
+      if (stabilityTimerRef.current) {
+        clearTimeout(stabilityTimerRef.current);
+        stabilityTimerRef.current = null;
       }
 
       if (wsRef.current) {

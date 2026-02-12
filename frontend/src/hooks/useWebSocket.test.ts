@@ -331,4 +331,99 @@ describe('useWebSocket', () => {
       expect(mockWebSocketInstances.length).toBeGreaterThanOrEqual(countBeforeOnline);
     });
   });
+
+  describe('Connection storm protection', () => {
+    it('should not create duplicate connections when WS is still CONNECTING', () => {
+      const { result } = renderHook(() => useWebSocket());
+      const countAfterInit = mockWebSocketInstances.length;
+
+      // WS is in CONNECTING state — calling connect() again must NOT spawn another socket
+      act(() => {
+        result.current.connect();
+      });
+
+      expect(mockWebSocketInstances.length).toBe(countAfterInit);
+    });
+
+    it('should stop reconnecting after max attempts even with rapid server rejections', () => {
+      const { result } = renderHook(() =>
+        useWebSocket({ autoReconnect: true, maxReconnectAttempts: 3 })
+      );
+
+      // Simulate server-rejection pattern: open immediately followed by close
+      for (let i = 0; i < 3; i++) {
+        act(() => {
+          mockWebSocketInstances[mockWebSocketInstances.length - 1].simulateOpen();
+        });
+        act(() => {
+          mockWebSocketInstances[mockWebSocketInstances.length - 1].simulateClose();
+        });
+        act(() => { vi.advanceTimersByTime(35000); });
+      }
+
+      // 4th open/close after 3 exhausted attempts → failed
+      act(() => {
+        mockWebSocketInstances[mockWebSocketInstances.length - 1].simulateOpen();
+      });
+      act(() => {
+        mockWebSocketInstances[mockWebSocketInstances.length - 1].simulateClose();
+      });
+
+      expect(result.current.connectionState).toBe('failed');
+    });
+
+    it('should reset attempt counter only after a stable connection (5 s+)', () => {
+      const { result } = renderHook(() =>
+        useWebSocket({ autoReconnect: true, maxReconnectAttempts: 3 })
+      );
+
+      // First connect + immediate close — counter should NOT reset
+      act(() => {
+        mockWebSocketInstances[mockWebSocketInstances.length - 1].simulateOpen();
+      });
+      act(() => {
+        mockWebSocketInstances[mockWebSocketInstances.length - 1].simulateClose();
+      });
+      act(() => { vi.advanceTimersByTime(5000); }); // reconnect fires
+
+      // Second connect — stays stable for 6 s (stability timer fires at 5 s)
+      act(() => {
+        mockWebSocketInstances[mockWebSocketInstances.length - 1].simulateOpen();
+      });
+      act(() => { vi.advanceTimersByTime(6000); }); // stability timer resets counter
+
+      // Now close — counter is back at 0, so state should be reconnecting (not failed)
+      act(() => {
+        mockWebSocketInstances[mockWebSocketInstances.length - 1].simulateClose();
+      });
+
+      expect(result.current.connectionState).toBe('reconnecting');
+    });
+
+    it('should ignore events from stale WebSocket instances', () => {
+      const { result } = renderHook(() =>
+        useWebSocket({ autoReconnect: true, maxReconnectAttempts: 5 })
+      );
+
+      // Open first WS
+      const firstWs = mockWebSocketInstances[mockWebSocketInstances.length - 1];
+      act(() => { firstWs.simulateOpen(); });
+
+      // reconnectNow creates a new WS and invalidates the old one
+      act(() => { result.current.reconnectNow(); });
+
+      const secondWs = mockWebSocketInstances[mockWebSocketInstances.length - 1];
+      expect(secondWs).not.toBe(firstWs);
+
+      // Open the new WS
+      act(() => { secondWs.simulateOpen(); });
+      expect(result.current.connectionState).toBe('connected');
+
+      // Stale WS fires onclose — should be ignored entirely
+      act(() => { firstWs.simulateClose(); });
+
+      expect(result.current.connectionState).toBe('connected');
+      expect(result.current.isConnected).toBe(true);
+    });
+  });
 });
