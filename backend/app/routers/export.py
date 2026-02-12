@@ -329,3 +329,262 @@ async def export_csv(
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
+
+# ============================================
+# TASK 6.3: STREAMING EXPORTS FOR LARGE DATASETS
+# ============================================
+
+# Maximum rows for PDF exports (reportlab builds entire document in memory)
+PDF_MAX_ROWS = 10_000
+# Batch size for Excel streaming
+EXCEL_BATCH_SIZE = 500
+
+
+@router.get("/streaming/excel")
+async def export_streaming_excel(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    project_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Export time entries as Excel using write-only mode for reduced memory.
+    Processes data in batches of 500 rows instead of loading everything at once.
+    """
+    if not EXCEL_AVAILABLE:
+        raise HTTPException(status_code=500, detail="Excel export not available. Install openpyxl.")
+
+    # Build base query with multi-tenancy
+    company_filter = get_company_filter(current_user)
+
+    base_where = []
+    if company_filter == FILTER_NULL_COMPANY:
+        base_where.append(User.company_id.is_(None))
+    else:
+        base_where.append(User.company_id == company_filter)
+
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
+        if user_id and user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        base_where.append(TimeEntry.user_id == current_user.id)
+    elif user_id:
+        base_where.append(TimeEntry.user_id == user_id)
+
+    if start_date:
+        base_where.append(TimeEntry.start_time >= datetime.combine(start_date, datetime.min.time()))
+    if end_date:
+        base_where.append(TimeEntry.start_time <= datetime.combine(end_date, datetime.max.time()))
+    if project_id:
+        base_where.append(TimeEntry.project_id == project_id)
+
+    # Count total rows
+    count_query = (
+        select(func.count(TimeEntry.id))
+        .join(User, TimeEntry.user_id == User.id)
+        .where(and_(*base_where, TimeEntry.end_time.isnot(None)))
+    )
+    count_result = await db.execute(count_query)
+    total_rows = count_result.scalar() or 0
+
+    # Create workbook in write-only mode for memory efficiency
+    wb = Workbook(write_only=True)
+    ws = wb.create_sheet("Time Entries")
+
+    # Header row
+    ws.append(["Date", "Start Time", "End Time", "Duration", "Project", "Task", "Description"])
+
+    # Process in batches
+    offset = 0
+    while offset < total_rows or offset == 0:
+        query = (
+            select(
+                TimeEntry,
+                Project.name.label("project_name"),
+                Task.name.label("task_name"),
+            )
+            .join(User, TimeEntry.user_id == User.id)
+            .outerjoin(Project, TimeEntry.project_id == Project.id)
+            .outerjoin(Task, TimeEntry.task_id == Task.id)
+            .where(and_(*base_where, TimeEntry.end_time.isnot(None)))
+            .order_by(TimeEntry.start_time.desc())
+            .offset(offset)
+            .limit(EXCEL_BATCH_SIZE)
+        )
+
+        result = await db.execute(query)
+        rows = result.all()
+
+        if not rows:
+            break
+
+        for row in rows:
+            entry = row[0]
+            duration = 0
+            if entry.end_time and entry.start_time:
+                duration = int((entry.end_time - entry.start_time).total_seconds())
+
+            ws.append([
+                entry.start_time.strftime("%Y-%m-%d"),
+                entry.start_time.strftime("%H:%M:%S"),
+                entry.end_time.strftime("%H:%M:%S") if entry.end_time else "Running",
+                format_duration(duration),
+                row[1] or "No Project",
+                row[2] or "No Task",
+                entry.description or "",
+            ])
+
+        offset += EXCEL_BATCH_SIZE
+
+    # Summary
+    ws.append([])
+    ws.append(["", "", "", f"Total rows: {total_rows}"])
+
+    # Save to buffer and return
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    filename = f"time_entries_streaming_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get("/streaming/pdf")
+async def export_streaming_pdf(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    project_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Export time entries as PDF with row limit protection.
+
+    ReportLab does not support true streaming — the entire PDF is built in memory.
+    To prevent excessive memory usage, this endpoint limits exports to 10,000 rows.
+    For larger datasets, use /streaming/excel instead.
+    """
+    if not PDF_AVAILABLE:
+        raise HTTPException(status_code=500, detail="PDF export not available. Install reportlab.")
+
+    # Count total matching rows first
+    company_filter = get_company_filter(current_user)
+    base_where = []
+    if company_filter == FILTER_NULL_COMPANY:
+        base_where.append(User.company_id.is_(None))
+    else:
+        base_where.append(User.company_id == company_filter)
+
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
+        if user_id and user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        base_where.append(TimeEntry.user_id == current_user.id)
+    elif user_id:
+        base_where.append(TimeEntry.user_id == user_id)
+
+    if start_date:
+        base_where.append(TimeEntry.start_time >= datetime.combine(start_date, datetime.min.time()))
+    if end_date:
+        base_where.append(TimeEntry.start_time <= datetime.combine(end_date, datetime.max.time()))
+    if project_id:
+        base_where.append(TimeEntry.project_id == project_id)
+
+    count_query = (
+        select(func.count(TimeEntry.id))
+        .join(User, TimeEntry.user_id == User.id)
+        .where(and_(*base_where, TimeEntry.end_time.isnot(None)))
+    )
+    count_result = await db.execute(count_query)
+    total_rows = count_result.scalar() or 0
+
+    if total_rows > PDF_MAX_ROWS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"PDF export is limited to {PDF_MAX_ROWS:,} rows for memory safety. "
+                f"Your query returned {total_rows:,} rows. "
+                f"Please narrow your date range or use /api/export/streaming/excel for large datasets."
+            ),
+        )
+
+    # Fetch all data within limit using existing helper
+    entries = await get_user_time_entries(db, current_user, start_date, end_date, project_id, user_id)
+
+    # Build PDF
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+
+    elements = []
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "CustomTitle",
+        parent=styles["Heading1"],
+        fontSize=18,
+        spaceAfter=20,
+        textColor=colors.HexColor("#4F46E5"),
+    )
+    elements.append(Paragraph("Time Tracking Report (Streaming)", title_style))
+
+    date_range = ""
+    if start_date and end_date:
+        date_range = f"Period: {start_date} to {end_date}"
+    elif start_date:
+        date_range = f"From: {start_date}"
+    elif end_date:
+        date_range = f"Until: {end_date}"
+    else:
+        date_range = "All Time"
+
+    elements.append(Paragraph(date_range, styles["Normal"]))
+    elements.append(Paragraph(f"Total entries: {len(entries)} | Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}", styles["Normal"]))
+    elements.append(Spacer(1, 20))
+
+    table_data = [["Date", "Start", "End", "Duration", "Project", "Task"]]
+    for entry in entries:
+        table_data.append([
+            entry["date"],
+            entry["start_time"],
+            entry["end_time"],
+            entry["duration"],
+            entry["project"][:15] + "..." if len(entry["project"]) > 15 else entry["project"],
+            entry["task"][:15] + "..." if len(entry["task"]) > 15 else entry["task"],
+        ])
+
+    total_seconds = sum(e["duration_seconds"] for e in entries)
+    table_data.append(["", "", "Total:", format_duration(total_seconds), "", ""])
+
+    table = Table(table_data, colWidths=[70, 55, 55, 60, 100, 100])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4F46E5")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
+        ("BACKGROUND", (0, 1), (-1, -2), colors.white),
+        ("TEXTCOLOR", (0, 1), (-1, -1), colors.black),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 1), (-1, -1), 8),
+        ("GRID", (0, 0), (-1, -2), 0.5, colors.grey),
+        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#F3F4F6")),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+    ]))
+    elements.append(table)
+
+    doc.build(elements)
+    buffer.seek(0)
+
+    filename = f"time_report_streaming_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.pdf"
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+

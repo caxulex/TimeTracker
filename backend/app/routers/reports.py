@@ -1373,13 +1373,17 @@ async def get_user_metrics(
     )
 
 
-@router.get("/admin/users", response_model=List[UserSummary])
+@router.get("/admin/users")
 async def get_all_users_summary(
     period: str = Query("week", regex="^(today|week|month)$"),
+    page: Optional[int] = Query(None, ge=1, description="Page number (1-indexed). Omit for all results."),
+    page_size: Optional[int] = Query(None, ge=1, le=200, description="Results per page. Omit for all results."),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    '''Get summary of all users sorted by time tracked (admin and super_admin only, filtered by company)'''
+    '''Get summary of all users sorted by time tracked (admin and super_admin only, filtered by company).
+    Supports optional pagination via page/page_size query params.
+    If omitted, returns full list for backward compatibility.'''
     if current_user.role not in ["super_admin", "admin", "company_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1457,7 +1461,33 @@ async def get_all_users_summary(
             entry_count=data["entry_count"]
         ))
 
-    return users_summary
+    # If no pagination params, return full list (backward compatible)
+    if page is None or page_size is None:
+        return users_summary
+
+    # Paginated response
+    total = len(users_summary)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+
+    if page > total_pages and total > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Page {page} exceeds total pages ({total_pages})"
+        )
+
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    page_data = users_summary[start_idx:end_idx]
+
+    return {
+        "data": page_data,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "has_next": page < total_pages,
+        "has_prev": page > 1,
+        "total_pages": total_pages,
+    }
 
 
 @router.get("/team-timesheet", response_model=TeamTimesheetReport)

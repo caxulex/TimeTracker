@@ -2,11 +2,14 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
-import { PayrollForecastPanel } from '../components/ai/PayrollForecastPanel';
-import { OvertimeRiskPanel } from '../components/ai/OvertimeRiskPanel';
-import { ProjectBudgetPanel } from '../components/ai/ProjectBudgetPanel';
-import { CashFlowChart } from '../components/ai/CashFlowChart';
-import BurnoutRiskPanel from '../components/ai/BurnoutRiskPanel';
+// Use lazy-loaded AI components to reduce initial bundle size (Task 6.1)
+import {
+  LazyPayrollForecastPanel as PayrollForecastPanel,
+  LazyOvertimeRiskPanel as OvertimeRiskPanel,
+  LazyProjectBudgetPanel as ProjectBudgetPanel,
+  LazyCashFlowChart as CashFlowChart,
+  LazyBurnoutRiskPanel as BurnoutRiskPanel,
+} from '../components/ai/lazy';
 import { useFeatureEnabled } from '../hooks/useAIFeatures';
 import {
   ChartBarIcon,
@@ -104,6 +107,9 @@ export default function AdminReportsPage() {
   const [activeTab, setActiveTab] = useState<'overview' | 'teams' | 'individuals'>('overview');
   const [userPeriod, setUserPeriod] = useState<'today' | 'week' | 'month'>('week');
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  // Task 6.2: Pagination state
+  const [usersPage, setUsersPage] = useState(1);
+  const usersPageSize = 50;
 
   // AI Feature flags
   const { data: payrollForecastEnabled } = useFeatureEnabled('ai_payroll_forecast');
@@ -144,11 +150,11 @@ export default function AdminReportsPage() {
     enabled: isAdminUser(user), // Only fetch if admin
   });
 
-  // Fetch all users summary
-  const { data: usersData, isLoading: isUsersLoading, isError: isUsersError } = useQuery<UserSummary[]>({
-    queryKey: ['admin-users', userPeriod],
+  // Fetch all users summary — with pagination (Task 6.2)
+  const { data: usersResponse, isLoading: isUsersLoading, isError: isUsersError } = useQuery<UserSummary[] | { data: UserSummary[]; total: number; page: number; page_size: number; has_next: boolean; has_prev: boolean; total_pages: number }>({
+    queryKey: ['admin-users', userPeriod, usersPage],
     queryFn: async () => {
-      const response = await fetch(`/api/reports/admin/users?period=${userPeriod}`, {
+      const response = await fetch(`/api/reports/admin/users?period=${userPeriod}&page=${usersPage}&page_size=${usersPageSize}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
         },
@@ -157,8 +163,23 @@ export default function AdminReportsPage() {
       return response.json();
     },
     refetchInterval: 30000,
-    enabled: isAdminUser(user), // Only fetch if admin
+    enabled: isAdminUser(user),
   });
+
+  // Handle both paginated and legacy array responses
+  const usersData: UserSummary[] = Array.isArray(usersResponse)
+    ? usersResponse
+    : usersResponse?.data ?? [];
+  const usersPagination = usersResponse && !Array.isArray(usersResponse) && usersResponse.total != null
+    ? {
+        total: usersResponse.total,
+        page: usersResponse.page,
+        pageSize: usersResponse.page_size,
+        hasNext: usersResponse.has_next,
+        hasPrev: usersResponse.has_prev,
+        totalPages: usersResponse.total_pages,
+      }
+    : null;
 
   // Fetch selected user detail
   const { data: selectedUserDetail, isLoading: isSelectedUserLoading } = useQuery<SelectedUserDetail>({
@@ -602,7 +623,7 @@ export default function AdminReportsPage() {
                   {(['today', 'week', 'month'] as const).map((period) => (
                     <button
                       key={period}
-                      onClick={() => setUserPeriod(period)}
+                      onClick={() => { setUserPeriod(period); setUsersPage(1); }}
                       className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                         userPeriod === period
                           ? 'bg-blue-600 text-white'
@@ -775,22 +796,26 @@ export default function AdminReportsPage() {
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {usersData.map((user, index) => (
+                    {usersData.map((user, index) => {
+                      const globalRank = usersPagination
+                        ? (usersPagination.page - 1) * usersPagination.pageSize + index
+                        : index;
+                      return (
                       <tr key={user.user_id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
-                            {index < 3 ? (
+                            {globalRank < 3 ? (
                               <TrophyIcon
                                 className={`h-5 w-5 ${
-                                  index === 0
+                                  globalRank === 0
                                     ? 'text-yellow-500'
-                                    : index === 1
+                                    : globalRank === 1
                                     ? 'text-gray-400'
                                     : 'text-orange-600'
                                 }`}
                               />
                             ) : (
-                              <span className="text-sm text-gray-500 dark:text-gray-400">#{index + 1}</span>
+                              <span className="text-sm text-gray-500 dark:text-gray-400">#{globalRank + 1}</span>
                             )}
                           </div>
                         </td>
@@ -820,11 +845,52 @@ export default function AdminReportsPage() {
                           </button>
                         </td>
                       </tr>
-                    ))}
+                    );
+                    })}
                   </tbody>
                 </table>
               </div>
             </div>
+
+            {/* Pagination Controls (Task 6.2) */}
+            {usersPagination && (
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-gray-600 dark:text-gray-400">
+                    Showing {((usersPagination.page - 1) * usersPagination.pageSize) + 1}–
+                    {Math.min(usersPagination.page * usersPagination.pageSize, usersPagination.total)} of{' '}
+                    {usersPagination.total} users
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setUsersPage((p) => Math.max(1, p - 1))}
+                      disabled={!usersPagination.hasPrev}
+                      className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                        usersPagination.hasPrev
+                          ? 'bg-blue-600 text-white hover:bg-blue-700'
+                          : 'bg-gray-200 text-gray-400 cursor-not-allowed dark:bg-gray-700 dark:text-gray-500'
+                      }`}
+                    >
+                      Previous
+                    </button>
+                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                      Page {usersPagination.page} of {usersPagination.totalPages}
+                    </span>
+                    <button
+                      onClick={() => setUsersPage((p) => p + 1)}
+                      disabled={!usersPagination.hasNext}
+                      className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                        usersPagination.hasNext
+                          ? 'bg-blue-600 text-white hover:bg-blue-700'
+                          : 'bg-gray-200 text-gray-400 cursor-not-allowed dark:bg-gray-700 dark:text-gray-500'
+                      }`}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
               </>
             )}
           </div>
