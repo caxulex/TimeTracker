@@ -138,12 +138,91 @@ cd backend
 pytest tests/ -v
 ```
 
+### Frontend Unit Tests
+```bash
+cd frontend
+npx vitest run
+```
+
+### Frontend Type Check
+```bash
+cd frontend
+npx tsc --noEmit
+```
+
+### Load Tests
+```bash
+# Create test users first
+cd backend && python setup_load_test_users.py
+
+# Run Phase 9B load test (115 concurrent users)
+cd .. && locust -f locustfile_phase9b.py --host=http://127.0.0.1:8000
+# Open http://localhost:8089, set 115 users, spawn rate 10/s, run 5 min
+```
+
 **Test Coverage:**
-- ✅ Authentication (register, login, tokens)
-- ✅ Projects (CRUD, permissions)
-- ✅ Time Entries (create, start/stop, update)
+- ✅ Authentication (register, login, tokens, password reset)
+- ✅ Projects (CRUD, permissions, budgets)
+- ✅ Time Entries (create, start/stop, update, delete)
 - ✅ Teams (CRUD, membership)
-- ✅ Reports (dashboard, weekly, export)
+- ✅ Reports (dashboard, weekly, project, admin, export)
+- ✅ Payroll (pay rates, periods, processing)
+- ✅ Multi-tenancy (company isolation, branding)
+- ✅ AI Features (NLP, estimation, toggles)
+- ✅ Security (audit logs, rate limiting, encryption)
+- ✅ i18n (translation completeness, component rendering)
+- ✅ WebSocket (real-time updates, reconnection)
+
+## 🌐 Internationalization (i18n)
+
+The app uses `react-i18next` for internationalization. English is the default language.
+
+### Adding a New Language
+
+1. Copy the English translation file:
+   ```bash
+   mkdir -p frontend/src/i18n/locales/es
+   cp frontend/src/i18n/locales/en/translation.json frontend/src/i18n/locales/es/translation.json
+   ```
+
+2. Translate all string values (keep keys unchanged).
+
+3. Register in `frontend/src/i18n/config.ts`:
+   ```typescript
+   import es from './locales/es/translation.json';
+   // add to resources: es: { translation: es }
+   ```
+
+See [docs/I18N_GUIDE.md](docs/I18N_GUIDE.md) for the full guide.
+
+## 🔧 Environment Variables
+
+### Backend (`backend/.env`)
+
+| Variable                     | Required | Description                              |
+|------------------------------|----------|------------------------------------------|
+| `SECRET_KEY`                 | ✅       | JWT signing key (64+ chars)              |
+| `DATABASE_URL`               | ✅       | PostgreSQL connection string             |
+| `REDIS_URL`                  | ✅       | Redis connection string                  |
+| `ALLOWED_ORIGINS`            | ✅       | CORS origins (JSON array)                |
+| `FIRST_SUPER_ADMIN_EMAIL`    | ✅       | Initial admin email                      |
+| `FIRST_SUPER_ADMIN_PASSWORD` | ✅       | Initial admin password                   |
+| `SENTRY_DSN`                 | Optional | Sentry error tracking DSN                |
+| `API_KEY_ENCRYPTION_KEY`     | Optional | Fernet key for AI API key encryption     |
+| `OPENAI_API_KEY`             | Optional | OpenAI API key for AI features           |
+| `ANTHROPIC_API_KEY`          | Optional | Anthropic API key for AI features        |
+| `SMTP_HOST`                  | Optional | SMTP server for emails                   |
+| `SMTP_PORT`                  | Optional | SMTP port (default: 587)                 |
+| `SMTP_USER`                  | Optional | SMTP username                            |
+| `SMTP_PASSWORD`              | Optional | SMTP password                            |
+
+### Frontend (`frontend/.env.local`)
+
+| Variable                  | Required | Description                   |
+|---------------------------|----------|-------------------------------|
+| `VITE_API_URL`            | ✅       | Backend API URL               |
+| `VITE_SENTRY_DSN`         | Optional | Sentry DSN for frontend       |
+| `VITE_SENTRY_ENVIRONMENT` | Optional | Sentry environment tag        |
 
 ## 📚 API Documentation
 
