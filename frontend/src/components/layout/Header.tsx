@@ -7,6 +7,7 @@ import { getInitials } from '../../utils/helpers';
 import { NotificationBell } from '../Notifications';
 import { ThemeToggle } from '../common';
 import { useBranding } from '../../contexts/BrandingContext';
+import { ConnectionStatusDot } from '../ConnectionStatusIndicator';
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -50,6 +51,9 @@ export function Header({ onMenuClick }: HeaderProps) {
 
         {/* Right side */}
         <div className="flex items-center space-x-4">
+          {/* WebSocket connection status */}
+          <ConnectionStatusDot />
+
           {/* Theme Toggle */}
           <ThemeToggle />
           

@@ -6,6 +6,7 @@ import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 import { KeyboardShortcutsModal } from '../KeyboardShortcutsModal';
+import { ReconnectBanner } from '../ConnectionStatusIndicator';
 
 interface LayoutProps {
   children: ReactNode;
@@ -19,6 +20,9 @@ export function Layout({ children }: LayoutProps) {
 
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
+      {/* WebSocket reconnection banner */}
+      <ReconnectBanner />
+
       {/* Sidebar */}
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 

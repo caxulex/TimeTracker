@@ -3,16 +3,19 @@
 // App-wide real-time state management
 // ============================================
 import { createContext, useContext, type ReactNode } from 'react';
-import { useWebSocket, type WebSocketMessage, type ActiveTimer } from '../hooks/useWebSocket';
+import { useWebSocket, type WebSocketMessage, type ActiveTimer, type ConnectionState } from '../hooks/useWebSocket';
 
 interface WebSocketContextValue {
   isConnected: boolean;
+  connectionState: ConnectionState;
   connect: () => void;
   disconnect: () => void;
+  reconnectNow: () => void;
   send: (message: WebSocketMessage) => boolean;
   activeTimers: ActiveTimer[];
   onlineUsers: number[];
   lastMessage: WebSocketMessage | null;
+  showReconnectNotification: boolean;
   notifyTimerStart: (timer: {
     project_id?: number;
     project_name?: string;
@@ -71,6 +74,6 @@ export function useWebSocketContext(): WebSocketContextValue {
 }
 
 // Re-export types for convenience
-export type { WebSocketMessage, ActiveTimer } from '../hooks/useWebSocket';
+export type { WebSocketMessage, ActiveTimer, ConnectionState } from '../hooks/useWebSocket';
 
 export type { WebSocketContextValue };
