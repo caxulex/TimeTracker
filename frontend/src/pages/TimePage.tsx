@@ -393,6 +393,7 @@ interface TimeEntryCardProps {
 }
 
 function TimeEntryCard({ entry, projects, onEdit, onDelete }: TimeEntryCardProps) {
+  const { t } = useTranslation();
   const project = projects.find((p) => p.id === entry.project_id);
 
   return (
