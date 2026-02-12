@@ -166,6 +166,22 @@ export default function AdminReportsPage() {
     enabled: isAdminUser(user),
   });
 
+  // Separate unpaginated query for the staff dropdown (always shows all users)
+  const { data: allUsersForDropdown } = useQuery<UserSummary[]>({
+    queryKey: ['admin-users-all', userPeriod],
+    queryFn: async () => {
+      const response = await fetch(`/api/reports/admin/users?period=${userPeriod}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      });
+      if (!response.ok) throw new Error('Failed to fetch users list');
+      return response.json();
+    },
+    staleTime: 60000, // cache for 1 minute to avoid extra requests
+    enabled: isAdminUser(user),
+  });
+
   // Handle both paginated and legacy array responses
   const usersData: UserSummary[] = Array.isArray(usersResponse)
     ? usersResponse
@@ -608,7 +624,7 @@ export default function AdminReportsPage() {
                     className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none min-w-[200px]"
                   >
                     <option value="">-- All Staff Comparison --</option>
-                    {usersData.map((u) => (
+                    {(allUsersForDropdown ?? usersData).map((u) => (
                       <option key={u.user_id} value={u.user_id}>
                         {u.user_name}
                       </option>
