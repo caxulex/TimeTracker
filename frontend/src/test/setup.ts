@@ -1,11 +1,15 @@
 // ============================================
 // TIME TRACKER - VITEST SETUP
 // TASK-049: Frontend unit tests configuration
+// Phase 9A: i18n test support
 // ============================================
 /// <reference types="@testing-library/jest-dom" />
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
+
+// Initialize i18n for tests (same config as production)
+import '../i18n/config';
 
 // Cleanup after each test
 afterEach(() => {

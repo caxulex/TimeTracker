@@ -4,6 +4,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { Card, CardHeader, LoadingOverlay } from '../components/common';
 import { TimerWidget } from '../components/time/TimerWidget';
 import { SessionWidget } from '../components/sessions';
@@ -56,6 +57,7 @@ export function DashboardPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isAdmin = isAdminUser(user);
+  const { t } = useTranslation();
 
   // Get WebSocket context - connection is managed by WebSocketProvider
   const { isConnected } = useWebSocketContext();
@@ -89,7 +91,7 @@ export function DashboardPage() {
   });
 
   if (statsLoading || weeklyLoading || (isAdmin && adminLoading)) {
-    return <LoadingOverlay message="Loading dashboard..." />;
+    return <LoadingOverlay message={t('dashboard.loadingDashboard')} />;
   }
 
   const dailyChartData = weekly?.daily_breakdown?.map((day) => ({
@@ -110,38 +112,38 @@ export function DashboardPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('dashboard.title')}</h1>
         <p className="text-gray-500">
-          {isAdmin ? 'Team overview and your personal time tracking' : 'Track your time and see your progress'}
+          {isAdmin ? t('dashboard.subtitleAdmin') : t('dashboard.subtitleUser')}
         </p>
       </div>
 
       {isAdmin && adminStats && (
         <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl p-6 text-white">
-          <h2 className="text-lg font-semibold mb-4">Team Overview (All Users)</h2>
+          <h2 className="text-lg font-semibold mb-4">{t('dashboard.teamOverview')}</h2>
           {hasTeamActivity ? (
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-white/20 rounded-lg p-3">
-                  <p className="text-white/80 text-sm">Team Today</p>
+                  <p className="text-white/80 text-sm">{t('dashboard.teamToday')}</p>
                   <p className="text-2xl font-bold">{formatDuration(adminStats.total_today_seconds)}</p>
                 </div>
                 <div className="bg-white/20 rounded-lg p-3">
-                  <p className="text-white/80 text-sm">Team This Week</p>
+                  <p className="text-white/80 text-sm">{t('dashboard.teamThisWeek')}</p>
                   <p className="text-2xl font-bold">{formatDuration(adminStats.total_week_seconds)}</p>
                 </div>
                 <div className="bg-white/20 rounded-lg p-3">
-                  <p className="text-white/80 text-sm">Active Users Today</p>
+                  <p className="text-white/80 text-sm">{t('dashboard.activeUsersToday')}</p>
                   <p className="text-2xl font-bold">{adminStats.active_users_today}</p>
                 </div>
                 <div className="bg-white/20 rounded-lg p-3">
-                  <p className="text-white/80 text-sm">Running Timers</p>
+                  <p className="text-white/80 text-sm">{t('dashboard.runningTimers')}</p>
                   <p className="text-2xl font-bold">{adminStats.running_timers}</p>
                 </div>
               </div>
               {adminStats.by_user.length > 0 && (
                 <div className="mt-4">
-                  <h3 className="text-sm font-medium text-white/80 mb-2">Today's Activity by User</h3>
+                  <h3 className="text-sm font-medium text-white/80 mb-2">{t('dashboard.todayActivityByUser')}</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                     {adminStats.by_user.map((userStat) => (
                       <div key={userStat.user_id} className="bg-white/10 rounded-lg p-2 flex justify-between items-center">
@@ -161,8 +163,8 @@ export function DashboardPage() {
               <svg className="w-12 h-12 mx-auto mb-3 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <p className="text-white/80 text-lg">No time tracked yet today</p>
-              <p className="text-white/60 text-sm mt-1">Team members haven't started tracking time</p>
+              <p className="text-white/80 text-lg">{t('dashboard.noTimeTrackedToday')}</p>
+              <p className="text-white/60 text-sm mt-1">{t('dashboard.teamNotStarted')}</p>
             </div>
           )}
         </div>
@@ -176,19 +178,19 @@ export function DashboardPage() {
 
       <div>
         <h2 className="text-lg font-semibold text-gray-700 mb-3">
-          {isAdmin ? 'Your Personal Stats' : 'Your Stats'}
+          {isAdmin ? t('dashboard.yourPersonalStats') : t('dashboard.yourStats')}
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard title="Today" value={formatDuration(stats?.today_seconds || 0)}
+          <StatCard title={t('dashboard.today')} value={formatDuration(stats?.today_seconds || 0)}
             icon={<svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
             color="blue" />
-          <StatCard title="This Week" value={formatDuration(stats?.week_seconds || 0)}
+          <StatCard title={t('dashboard.thisWeek')} value={formatDuration(stats?.week_seconds || 0)}
             icon={<svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>}
             color="green" />
-          <StatCard title="This Month" value={formatDuration(stats?.month_seconds || 0)}
+          <StatCard title={t('dashboard.thisMonth')} value={formatDuration(stats?.month_seconds || 0)}
             icon={<svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>}
             color="amber" />
-          <StatCard title="Active Projects" value={String(stats?.active_projects || 0)}
+          <StatCard title={t('dashboard.activeProjects')} value={String(stats?.active_projects || 0)}
             icon={<svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>}
             color="purple" />
         </div>
@@ -208,7 +210,7 @@ export function DashboardPage() {
       {isAdmin && anomalyEnabled && (
         <div className="mt-6">
           <h2 className="text-lg font-semibold text-gray-700 mb-3 flex items-center gap-2">
-            <span>🤖</span> AI Anomaly Detection
+            <span>🤖</span> {t('dashboard.aiAnomalyDetection')}
           </h2>
           <AnomalyAlertPanel 
             isAdmin={true}
@@ -222,7 +224,7 @@ export function DashboardPage() {
       {weeklySummaryEnabled && (
         <div className="mt-6">
           <h2 className="text-lg font-semibold text-gray-700 mb-3 flex items-center gap-2">
-            <span>📊</span> AI Weekly Summary
+            <span>📊</span> {t('dashboard.aiWeeklySummary')}
           </h2>
           <WeeklySummaryPanel collapsible={true} defaultExpanded={false} />
         </div>
@@ -232,7 +234,7 @@ export function DashboardPage() {
       {userInsightsEnabled && (
         <div className="mt-6">
           <h2 className="text-lg font-semibold text-gray-700 mb-3 flex items-center gap-2">
-            <span>🧠</span> AI Productivity Insights
+            <span>🧠</span> {t('dashboard.aiProductivityInsights')}
           </h2>
           <UserInsightsPanel periodDays={30} showHeader={false} />
         </div>
@@ -240,7 +242,7 @@ export function DashboardPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2">
-          <CardHeader title="Weekly Activity" subtitle="Hours tracked per day" />
+          <CardHeader title={t('dashboard.weeklyActivity')} subtitle={t('dashboard.hoursTrackedPerDay')} />
           <div className="h-64">
             {dailyChartData.some(d => d.hours > 0) ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -259,13 +261,13 @@ export function DashboardPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                 </svg>
                 <p>No time tracked this week</p>
-                <p className="text-sm text-gray-400">Start tracking to see your activity</p>
+                <p className="text-sm text-gray-400">{t('dashboard.startTrackingToSee')}</p>
               </div>
             )}
           </div>
         </Card>
         <Card>
-          <CardHeader title="Time by Project" subtitle="This week breakdown" />
+          <CardHeader title={t('dashboard.timeByProject')} subtitle={t('dashboard.thisWeekBreakdown')} />
           <div className="h-64">
             {projectChartData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -286,7 +288,7 @@ export function DashboardPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
                 </svg>
                 <p>No time tracked this week</p>
-                <p className="text-sm text-gray-400">Track time on projects to see distribution</p>
+                <p className="text-sm text-gray-400">{t('dashboard.trackTimeOnProjects')}</p>
               </div>
             )}
           </div>

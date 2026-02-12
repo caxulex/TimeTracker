@@ -9,6 +9,9 @@ import App from './App.tsx'
 import './index.css'
 import { applyBrandingStyles, setDocumentTitle } from './config/branding'
 
+// Phase 9A: Initialize i18n
+import './i18n/config'
+
 // Initialize branding on app start
 applyBrandingStyles()
 setDocumentTitle()

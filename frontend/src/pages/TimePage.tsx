@@ -7,6 +7,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Card, Button, Modal, LoadingOverlay, Input } from '../components/common';
 import { TimerWidget } from '../components/time/TimerWidget';
 import { SuggestionDropdown, ChatInterface } from '../components/ai';
@@ -22,6 +23,7 @@ export function TimePage() {
   const { user } = useAuth();
   const { addNotification } = useNotifications();
   const [searchParams] = useSearchParams();
+  const { t } = useTranslation();
   const [showModal, setShowModal] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
@@ -116,15 +118,15 @@ export function TimePage() {
       setShowManualModal(false);
       addNotification({
         type: 'success',
-        title: 'Entry Created',
-        message: `${formatDuration(entry.duration_seconds)} logged successfully`,
+        title: t('time.entryCreated'),
+        message: t('time.entryCreatedMsg', { duration: formatDuration(entry.duration_seconds) }),
       });
     },
     onError: () => {
       addNotification({
         type: 'error',
-        title: 'Failed to Create Entry',
-        message: 'Please try again',
+        title: t('time.failedToCreate'),
+        message: t('common.tryAgain'),
       });
     },
   });
@@ -137,15 +139,15 @@ export function TimePage() {
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       addNotification({
         type: 'info',
-        title: 'Entry Deleted',
-        message: 'Time entry has been removed',
+        title: t('time.entryDeleted'),
+        message: t('time.entryDeletedMsg'),
       });
     },
     onError: () => {
       addNotification({
         type: 'error',
-        title: 'Failed to Delete',
-        message: 'Could not delete the entry',
+        title: t('time.failedToDelete'),
+        message: t('time.couldNotDelete'),
       });
     },
   });
@@ -161,15 +163,15 @@ export function TimePage() {
       setEditingEntry(null);
       addNotification({
         type: 'success',
-        title: 'Entry Updated',
-        message: 'Changes have been saved',
+        title: t('time.entryUpdated'),
+        message: t('time.entryUpdatedMsg'),
       });
     },
     onError: () => {
       addNotification({
         type: 'error',
-        title: 'Failed to Update',
-        message: 'Could not save changes',
+        title: t('time.failedToUpdate'),
+        message: t('time.couldNotUpdate'),
       });
     },
   });
@@ -191,7 +193,7 @@ export function TimePage() {
   };
 
   if (isLoading) {
-    return <LoadingOverlay message="Loading time entries..." />;
+    return <LoadingOverlay message={t('time.loadingEntries')} />;
   }
 
   return (
@@ -199,14 +201,14 @@ export function TimePage() {
       {/* Page header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Time Tracker</h1>
-          <p className="text-gray-500">Track your work and view your time entries</p>
+          <h1 className="text-2xl font-bold text-gray-900">{t('time.title')}</h1>
+          <p className="text-gray-500">{t('time.subtitle')}</p>
         </div>
         <Button onClick={() => setShowManualModal(true)}>
           <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          Add Manual Entry
+          {t('time.addManualEntry')}
         </Button>
       </div>
 
@@ -219,7 +221,7 @@ export function TimePage() {
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <span className="text-lg">✨</span>
-              <h3 className="font-semibold text-gray-800">Quick Entry with AI</h3>
+              <h3 className="font-semibold text-gray-800">{t('time.quickEntryWithAI')}</h3>
             </div>
             <button
               onClick={() => setShowChatInterface(!showChatInterface)}
@@ -230,20 +232,20 @@ export function TimePage() {
           </div>
           {showChatInterface ? (
             <ChatInterface 
-              placeholder='Try: "2 hours yesterday on Project Alpha fixing bugs"'
+              placeholder={t('time.nlpPlaceholder')}
               onEntryCreated={() => {
                 queryClient.invalidateQueries({ queryKey: ['time-entries'] });
                 queryClient.invalidateQueries({ queryKey: ['dashboard'] });
                 addNotification({
                   type: 'success',
-                  title: 'Entry Created',
-                  message: 'Time entry created via AI assistant',
+                title: t('time.entryCreated'),
+                message: t('time.entryCreatedViaAI'),
                 });
               }}
             />
           ) : (
             <p className="text-sm text-gray-600">
-              Type naturally to create time entries, e.g., "3 hours on marketing yesterday"
+              {t('time.nlpHint')}
             </p>
           )}
         </Card>
@@ -253,13 +255,13 @@ export function TimePage() {
       <Card padding="sm">
         <div className="flex flex-wrap gap-4 items-end">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Project</label>
+            <label className="block text-xs text-gray-500 mb-1">{t('time.filterProject')}</label>
             <select
               value={filterProject}
               onChange={(e) => setFilterProject(e.target.value ? Number(e.target.value) : '')}
               className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="">All Projects</option>
+              <option value="">{t('time.allProjects')}</option>
               {projects.map((project: Project) => (
                 <option key={project.id} value={project.id}>
                   {project.name}
@@ -269,24 +271,24 @@ export function TimePage() {
           </div>
           
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Date Range</label>
+            <label className="block text-xs text-gray-500 mb-1">{t('time.filterDateRange')}</label>
             <select
               value={filterDateRange}
               onChange={(e) => setFilterDateRange(e.target.value)}
               className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="all">All Time</option>
-              <option value="today">Today</option>
-              <option value="week">Last 7 Days</option>
-              <option value="month">Last 30 Days</option>
-              <option value="custom">Custom Range</option>
+              <option value="all">{t('time.allTime')}</option>
+              <option value="today">{t('time.todayFilter')}</option>
+              <option value="week">{t('time.last7Days')}</option>
+              <option value="month">{t('time.last30Days')}</option>
+              <option value="custom">{t('time.customRange')}</option>
             </select>
           </div>
 
           {filterDateRange === 'custom' && (
             <>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Start Date</label>
+                <label className="block text-xs text-gray-500 mb-1">{t('time.startDate')}</label>
                 <input
                   type="date"
                   value={customStartDate}
@@ -295,7 +297,7 @@ export function TimePage() {
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">End Date</label>
+                <label className="block text-xs text-gray-500 mb-1">{t('time.endDate')}</label>
                 <input
                   type="date"
                   value={customEndDate}
@@ -314,10 +316,10 @@ export function TimePage() {
           <svg className="mx-auto w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          <h3 className="mt-4 text-lg font-medium text-gray-900">No time entries yet</h3>
-          <p className="mt-2 text-gray-500">Start the timer or add a manual entry to begin tracking.</p>
+          <h3 className="mt-4 text-lg font-medium text-gray-900">{t('time.noEntries')}</h3>
+          <p className="mt-2 text-gray-500">{t('time.noEntriesHint')}</p>
           <Button className="mt-4" onClick={() => setShowManualModal(true)}>
-            Add Manual Entry
+            {t('time.addManualEntry')}
           </Button>
         </Card>
       ) : (
@@ -333,7 +335,7 @@ export function TimePage() {
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-semibold text-gray-900">{date}</h3>
                   <span className="text-sm text-gray-500">
-                    Total: {formatDuration(totalSeconds)}
+                    {t('time.total')}: {formatDuration(totalSeconds)}
                   </span>
                 </div>
                 <div className="space-y-2">
@@ -407,16 +409,16 @@ function TimeEntryCard({ entry, projects, onEdit, onDelete }: TimeEntryCardProps
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <p className="font-medium text-gray-900 truncate">
-                {entry.description || 'No description'}
+                {entry.description || t('time.noDescription')}
               </p>
               {entry.is_running && (
                 <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full animate-pulse">
-                  Running
+                  {t('time.running')}
                 </span>
               )}
               {entry.is_manual && (
                 <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs rounded-full">
-                  Manual
+                  {t('time.manual')}
                 </span>
               )}
             </div>
@@ -477,6 +479,7 @@ interface TimeEntryModalProps {
 }
 
 function TimeEntryModal({ isOpen, onClose, entry, projects, onSubmit, isLoading }: TimeEntryModalProps) {
+  const { t } = useTranslation();
   const [description, setDescription] = useState('');
   const [projectId, setProjectId] = useState<number | ''>('');
 
@@ -513,24 +516,24 @@ function TimeEntryModal({ isOpen, onClose, entry, projects, onSubmit, isLoading 
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Edit Time Entry">
+    <Modal isOpen={isOpen} onClose={onClose} title={t('time.editTimeEntry')}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Description
+            {t('time.descriptionLabel')}
           </label>
           <input
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="What were you working on?"
+            placeholder={t('time.descriptionPlaceholder')}
             className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
         </div>
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Project
+            {t('time.projectLabel')}
           </label>
           <select
             value={projectId}
@@ -540,7 +543,7 @@ function TimeEntryModal({ isOpen, onClose, entry, projects, onSubmit, isLoading 
             }}
             className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
-            <option value="">No project</option>
+            <option value="">{t('time.noProject')}</option>
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.name}
@@ -571,10 +574,10 @@ function TimeEntryModal({ isOpen, onClose, entry, projects, onSubmit, isLoading 
 
         <div className="flex justify-end gap-2 pt-4">
           <Button type="button" variant="secondary" onClick={onClose}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button type="submit" isLoading={isLoading}>
-            Save Changes
+            {t('common.saveChanges')}
           </Button>
         </div>
       </form>
@@ -592,6 +595,7 @@ interface ManualEntryModalProps {
 }
 
 function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: ManualEntryModalProps) {
+  const { t } = useTranslation();
   const [description, setDescription] = useState('');
   const [projectId, setProjectId] = useState<number | ''>('');
   const [taskId, setTaskId] = useState<number | ''>('');
@@ -676,17 +680,17 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
     const endDateTime = new Date(date + 'T' + endTime);
 
     if (endDateTime <= startDateTime) {
-      setError('End time must be after start time');
+      setError(t('time.endAfterStart'));
       return;
     }
 
     if (!projectId) {
-      setError('Please select a project');
+      setError(t('time.selectProjectError'));
       return;
     }
 
     onSubmit({
-      description: description || 'Manual entry',
+      description: description || t('time.manualEntryDefault'),
       project_id: projectId as number,
       task_id: taskId ? (taskId as number) : undefined,
       start_time: startDateTime.toISOString(),
@@ -698,7 +702,7 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
   const durationSeconds = calculateDuration();
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Add Manual Time Entry" size="md">
+    <Modal isOpen={isOpen} onClose={onClose} title={t('time.addManualTimeEntry')} size="md">
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && (
           <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
@@ -727,27 +731,27 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
             onClick={() => setShowSuggestions(true)}
             className="w-full p-2 text-sm text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"
           >
-            <span>✨</span> Show AI Suggestions
+            <span>✨</span> {t('time.showAISuggestions')}
           </button>
         )}
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Description
+            {t('time.descriptionLabel')}
           </label>
           <input
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             onFocus={() => suggestionsEnabled && !projectId && setShowSuggestions(true)}
-            placeholder="What did you work on?"
+            placeholder={t('time.manualDescPlaceholder')}
             className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
         </div>
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Project <span className="text-red-500">*</span>
+            {t('time.projectLabel')} <span className="text-red-500">*</span>
           </label>
           <select
             value={projectId}
@@ -759,7 +763,7 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
             className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             required
           >
-            <option value="">Select a project</option>
+            <option value="">{t('time.selectProject')}</option>
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.name}
@@ -771,14 +775,14 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
         {projectId && tasks.length > 0 && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Task
+              {t('time.taskLabel')}
             </label>
             <select
               value={taskId}
               onChange={(e) => setTaskId(e.target.value ? Number(e.target.value) : '')}
               className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
-              <option value="">No task</option>
+              <option value="">{t('time.noTask')}</option>
               {tasks.map((task: Task) => (
                 <option key={task.id} value={task.id}>
                   {task.name}
@@ -790,7 +794,7 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Date <span className="text-red-500">*</span>
+            {t('time.dateLabel')} <span className="text-red-500">*</span>
           </label>
           <input
             type="date"
@@ -804,7 +808,7 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Start Time <span className="text-red-500">*</span>
+              {t('time.startTimeLabel')} <span className="text-red-500">*</span>
             </label>
             <input
               type="time"
@@ -816,7 +820,7 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              End Time <span className="text-red-500">*</span>
+              {t('time.endTimeLabel')} <span className="text-red-500">*</span>
             </label>
             <input
               type="time"
@@ -831,17 +835,17 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
         {durationSeconds > 0 && (
           <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
             <p className="text-sm text-blue-700">
-              Duration: <span className="font-semibold">{formatDuration(durationSeconds)}</span>
+              {t('time.durationLabel')} <span className="font-semibold">{formatDuration(durationSeconds)}</span>
             </p>
           </div>
         )}
 
         <div className="flex justify-end gap-2 pt-4">
           <Button type="button" variant="secondary" onClick={onClose}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button type="submit" isLoading={isLoading}>
-            Add Entry
+            {t('time.addEntry')}
           </Button>
         </div>
       </form>

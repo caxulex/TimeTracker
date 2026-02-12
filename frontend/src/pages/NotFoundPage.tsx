@@ -2,10 +2,12 @@
 // TIME TRACKER - 404 NOT FOUND PAGE
 // ============================================
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../stores/authStore';
 
 export function NotFoundPage() {
   const { isAuthenticated } = useAuthStore();
+  const { t } = useTranslation();
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
@@ -31,14 +33,13 @@ export function NotFoundPage() {
 
         {/* Error Message */}
         <h1 className="text-6xl font-bold text-gray-900 dark:text-white mb-4">
-          404
+          {t('notFound.code')}
         </h1>
         <h2 className="text-2xl font-semibold text-gray-700 dark:text-gray-300 mb-4">
-          Page Not Found
+          {t('notFound.title')}
         </h2>
         <p className="text-gray-500 dark:text-gray-400 mb-8">
-          Oops! The page you're looking for doesn't exist or has been moved.
-          Don't worry, let's get you back on track.
+          {t('notFound.description')}
         </p>
 
         {/* Action Buttons */}
@@ -60,7 +61,7 @@ export function NotFoundPage() {
                 d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"
               />
             </svg>
-            {isAuthenticated ? 'Go to Dashboard' : 'Go to Login'}
+            {isAuthenticated ? t('notFound.goToDashboard') : t('notFound.goToLogin')}
           </Link>
 
           <button
@@ -80,18 +81,18 @@ export function NotFoundPage() {
                 d="M10 19l-7-7m0 0l7-7m-7 7h18"
               />
             </svg>
-            Go Back
+            {t('notFound.goBack')}
           </button>
         </div>
 
         {/* Help Link */}
         <p className="mt-8 text-sm text-gray-500 dark:text-gray-400">
-          Need help?{' '}
+          {t('notFound.needHelp')}{' '}
           <a
             href="mailto:support@timetracker.com"
             className="text-blue-600 dark:text-blue-400 hover:underline"
           >
-            Contact Support
+            {t('notFound.contactSupport')}
           </a>
         </p>
       </div>

@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
+import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../stores/authStore';
 import { Button, Input } from '../components/common';
 import { useNotifications } from '../hooks/useNotifications';
@@ -19,6 +20,7 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const { branding, setCompany, isWhiteLabeled } = useBranding();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { t } = useTranslation();
   
   // Use sessionStorage to persist error across component remounts
   const [loginError, setLoginError] = useState<string | null>(() => {
@@ -65,15 +67,15 @@ export function LoginPage() {
       await login(data);
       addNotification({
         type: 'success',
-        title: 'Welcome back!',
-        message: 'You have signed in successfully',
+        title: t('login.welcomeNotification'),
+        message: t('login.signedInSuccess'),
         duration: 3000,
       });
       navigate('/dashboard');
     } catch (error: any) {
       // Extract error message and store in state (also persisted to sessionStorage via useEffect)
       const detail = error?.response?.data?.detail;
-      let message = 'Login failed. Please check your credentials.';
+      let message = t('login.loginFailed');
       if (typeof detail === 'string') {
         message = detail;
       } else if (Array.isArray(detail)) {
@@ -116,10 +118,10 @@ export function LoginPage() {
             </div>
           )}
           <h2 className="mt-6 text-3xl font-bold text-gray-900">
-            Welcome back
+            {t('login.welcomeBack')}
           </h2>
           <p className="mt-2 text-sm text-gray-600">
-            Sign in to your {branding.app_name} account
+            {t('login.signInTo', { appName: branding.app_name })}
           </p>
           {branding.tagline && (
             <p className="mt-1 text-xs text-gray-500 italic">{branding.tagline}</p>
@@ -145,7 +147,7 @@ export function LoginPage() {
                   type="button"
                   onClick={() => setLoginError(null)}
                   className="text-red-500 hover:text-red-700 font-bold text-xl leading-none"
-                  aria-label="Dismiss error"
+                  aria-label={t('login.dismissError')}
                 >
                   ×
                 </button>
@@ -155,29 +157,29 @@ export function LoginPage() {
 
           <div className="space-y-4">
             <Input
-              label="Email address"
+              label={t('login.emailLabel')}
               type="email"
               autoComplete="email"
-              placeholder="you@example.com"
+              placeholder={t('login.emailPlaceholder')}
               error={errors.email?.message}
               {...register('email', {
-                required: 'Email is required',
+                required: t('login.emailRequired'),
                 pattern: {
                   value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
-                  message: 'Invalid email address',
+                  message: t('login.emailInvalid'),
                 },
               })}
             />
 
             <div className="relative">
               <Input
-                label="Password"
+                label={t('login.passwordLabel')}
                 type={showPassword ? 'text' : 'password'}
                 autoComplete="current-password"
-                placeholder="••••••••"
+                placeholder={t('login.passwordPlaceholder')}
                 error={errors.password?.message}
                 {...register('password', {
-                  required: 'Password is required',
+                  required: t('login.passwordRequired'),
                 })}
               />
               <button
@@ -209,7 +211,7 @@ export function LoginPage() {
                 style={{ accentColor: branding.primary_color }}
               />
               <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-900">
-                Remember me
+                {t('login.rememberMe')}
               </label>
             </div>
 
@@ -219,7 +221,7 @@ export function LoginPage() {
                 className="font-medium hover:opacity-80"
                 style={{ color: branding.primary_color }}
               >
-                Forgot your password?
+                {t('login.forgotPassword')}
               </Link>
             </div>
           </div>
@@ -231,17 +233,17 @@ export function LoginPage() {
             isLoading={isLoading}
             style={{ backgroundColor: branding.primary_color }}
           >
-            Sign in
+            {t('login.signIn')}
           </Button>
 
           <p className="mt-2 text-center text-sm text-gray-600">
-            Need an account?{' '}
+            {t('login.needAccount')}{' '}
             <Link 
               to="/request-account" 
               className="font-medium hover:opacity-80"
               style={{ color: branding.primary_color }}
             >
-              Request Access
+              {t('login.requestAccess')}
             </Link>
           </p>
         </form>
@@ -251,19 +253,19 @@ export function LoginPage() {
           <p>© {new Date().getFullYear()} {branding.company_name}</p>
           {branding.support_email && (
             <p>
-              Need help?{' '}
+              {t('login.needHelp')}{' '}
               <a 
                 href={`mailto:${branding.support_email}`}
                 className="hover:underline"
                 style={{ color: branding.primary_color }}
               >
-                Contact Support
+                {t('login.contactSupport')}
               </a>
             </p>
           )}
           {branding.show_powered_by && (
             <p className="text-gray-400 text-[10px] mt-2">
-              Powered by Time Tracker
+              {t('login.poweredBy')}
             </p>
           )}
         </div>
