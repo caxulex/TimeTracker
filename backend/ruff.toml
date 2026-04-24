@@ -40,4 +40,6 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 # Like Black, respect magic trailing commas
-docstring-code-format = true
+# NOTE: `docstring-code-format = true` was removed because it requires
+# ruff >= 0.3 and this project currently pins ruff 0.1.6. Restore the
+# line once ruff is upgraded (tracked for the dependency-bump prompt).

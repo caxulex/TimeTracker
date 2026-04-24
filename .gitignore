@@ -6,6 +6,13 @@ __pycache__/
 # C extensions
 *.so
 
+# Phase 0 baseline re-run artifacts (local only, never commit)
+baseline_phase0_rerun/
+baseline_tsc.txt
+baseline_eslint.txt
+baseline_vitest.txt
+baseline_mypy.txt
+
 # Distribution / packaging
 .Python
 build/

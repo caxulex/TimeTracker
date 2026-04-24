@@ -1,7 +1,9 @@
 # ============================================
 # TIME TRACKER - TEST CONFIGURATION
-# Uses PostgreSQL test database (requires Docker containers running)
+# Uses PostgreSQL test database. Connection string is env-driven;
+# see backend/.env.example and backend/scripts/DEV_SETUP.md.
 # ============================================
+import logging
 import os
 from typing import AsyncGenerator
 import pytest_asyncio
@@ -17,15 +19,23 @@ from app.database import get_db
 from app.models import User
 from app.services.auth_service import AuthService
 
-# Use the real database (running in Docker)
-# Try DATABASE_URL first (used in CI), then TEST_DATABASE_URL (local), then default
-TEST_DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    os.getenv(
-        "TEST_DATABASE_URL",
-        "postgresql+asyncpg://postgres:postgres@localhost:5434/time_tracker"
-    )
+logger = logging.getLogger(__name__)
+
+# Resolve the test database URL in this order:
+#   1. TEST_DATABASE_URL (explicit, preferred for local dev + CI)
+#   2. DATABASE_URL       (legacy CI compatibility)
+#   3. Hardcoded fallback  (debug-logged; should be avoided)
+_DEFAULT_TEST_DATABASE_URL = (
+    "postgresql+asyncpg://postgres:postgres@localhost:5432/time_tracker_test"
 )
+TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL")
+if not TEST_DATABASE_URL:
+    logger.debug(
+        "conftest: TEST_DATABASE_URL / DATABASE_URL unset, "
+        "falling back to default %s",
+        _DEFAULT_TEST_DATABASE_URL,
+    )
+    TEST_DATABASE_URL = _DEFAULT_TEST_DATABASE_URL
 
 
 @pytest_asyncio.fixture(scope="function")
