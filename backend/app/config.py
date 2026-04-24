@@ -4,6 +4,7 @@ SEC-001, SEC-009, SEC-012: Secure Configuration with Validation
 """
 
 import json
+import os
 import secrets
 from typing import List, Optional, Union
 from pydantic_settings import BaseSettings
@@ -190,7 +191,20 @@ class Settings(BaseSettings):
     @field_validator('BCRYPT_ROUNDS')
     @classmethod
     def validate_bcrypt_rounds(cls, v: int) -> int:
-        """SEC-016: Ensure sufficient bcrypt rounds"""
+        """SEC-016: Ensure sufficient bcrypt rounds.
+
+        In the test environment (``TESTING=1``) the lower bound is relaxed
+        to ``bcrypt``'s hard minimum (4) so the suite can run in a
+        reasonable time without changing the production-safe default
+        (12). Production code paths never set ``TESTING``; attempts to
+        configure a low rounds value outside of tests still fail.
+        """
+        if os.getenv("TESTING") == "1":
+            if v < 4:
+                raise ValueError('BCRYPT_ROUNDS must be at least 4 (bcrypt minimum)')
+            if v > 15:
+                raise ValueError('BCRYPT_ROUNDS above 15 may cause performance issues')
+            return v
         if v < 10:
             raise ValueError('BCRYPT_ROUNDS must be at least 10 for security')
         if v > 15:

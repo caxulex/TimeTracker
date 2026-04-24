@@ -14,6 +14,11 @@ from sqlalchemy.pool import NullPool
 
 # Set test environment before importing app
 os.environ["TESTING"] = "1"
+# Lower bcrypt work factor for tests (prod default is 12). Must be set
+# before any ``app.*`` import so the Settings validator sees TESTING=1
+# and accepts the sub-10 value. Production is untouched: this env var
+# is only exported by the test harness.
+os.environ.setdefault("BCRYPT_ROUNDS", "4")
 
 from app.main import app
 from app.database import get_db
