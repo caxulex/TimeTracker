@@ -8,6 +8,7 @@ import os
 from typing import AsyncGenerator
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.pool import NullPool
 
@@ -50,24 +51,56 @@ async def async_engine():
     await engine.dispose()
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _truncate_tables_around_test(async_engine) -> AsyncGenerator[None, None]:
+    """
+    Test isolation via TRUNCATE-before-test (Option B).
+
+    Individual tests exercise FastAPI route handlers that call
+    ``session.commit()`` directly, which means a naive
+    ``begin()``/``rollback()`` wrapper in ``db_session`` cannot
+    prevent cross-test data leakage. Running TRUNCATE against every
+    user table (except ``alembic_version``) *before* each test
+    guarantees a clean slate regardless of what the previous test or
+    a previous pytest run committed. ``CASCADE`` handles FK chains;
+    ``RESTART IDENTITY`` resets sequences so autoincrement IDs do
+    not drift.
+    """
+    async with async_engine.begin() as conn:
+        result = await conn.execute(
+            text(
+                "SELECT tablename "
+                "FROM pg_tables "
+                "WHERE schemaname = 'public' "
+                "  AND tablename <> 'alembic_version'"
+            )
+        )
+        tables = [row[0] for row in result.fetchall()]
+        if tables:
+            quoted = ", ".join(f'"{t}"' for t in tables)
+            await conn.execute(
+                text(f"TRUNCATE {quoted} RESTART IDENTITY CASCADE")
+            )
+
+    yield
+
+
 @pytest_asyncio.fixture(scope="function")
 async def db_session(async_engine) -> AsyncGenerator[AsyncSession, None]:
-    """Create a test database session with transaction rollback."""
+    """
+    Test DB session. No transaction wrapping: app handlers commit
+    their own work, and the ``_truncate_tables_after_test`` autouse
+    fixture guarantees isolation by wiping all rows after each test.
+    """
     async_session_factory = async_sessionmaker(
         async_engine,
         class_=AsyncSession,
         expire_on_commit=False,
         autoflush=False,
     )
-    
+
     async with async_session_factory() as session:
-        # Start a transaction
-        await session.begin()
-        try:
-            yield session
-        finally:
-            # Rollback to clean up test data
-            await session.rollback()
+        yield session
 
 
 @pytest_asyncio.fixture(scope="function")
