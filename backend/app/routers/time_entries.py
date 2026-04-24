@@ -6,16 +6,21 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from datetime import datetime, date, timedelta, timezone
+import logging
+import uuid as _uuid
 
 from sqlalchemy.orm import selectinload
 
+from app.config import settings
 from app.database import get_db
 from app.models import User, Team, TeamMember, Project, Task, TimeEntry, WorkSession, SessionMeeting, SessionBreak
 from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY
 from app.schemas.auth import Message
 from app.routers.websocket import manager as ws_manager
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -31,9 +36,25 @@ class TimeEntryCreate(BaseModel):
     @field_validator('duration_seconds')
     @classmethod
     def validate_duration(cls, v):
+        # B1/B10: retain the 60s floor ONLY for explicitly user-submitted
+        # manual durations. Computed durations from start/stop go through
+        # ``calculate_duration_seconds`` and are no longer clamped.
         if v is not None and v < 60:
             raise ValueError('Duration must be at least 60 seconds')
         return v
+
+    @model_validator(mode='after')
+    def validate_chronology_and_bounds(self) -> "TimeEntryCreate":
+        """B10: cross-field sanity checks on manual time entries."""
+        start = self.start_time
+        end = self.end_time
+        if start is not None and end is not None:
+            if end <= start:
+                raise ValueError('end_time must be greater than start_time')
+            # 24h cap, inclusive of the exact-24h boundary case.
+            if (end - start) > timedelta(hours=24):
+                raise ValueError('Manual entry cannot exceed 24 hours')
+        return self
 
 
 class TimeEntryUpdate(BaseModel):
@@ -42,6 +63,18 @@ class TimeEntryUpdate(BaseModel):
     end_time: Optional[datetime] = None
     project_id: Optional[int] = None
     task_id: Optional[int] = None
+
+    @model_validator(mode='after')
+    def validate_chronology(self) -> "TimeEntryUpdate":
+        """B3: when both fields are supplied, reject start > end at the
+        schema layer (422). Handler-level checks still apply for the
+        single-field-update case, where the other value comes from the
+        existing row."""
+        start = self.start_time
+        end = self.end_time
+        if start is not None and end is not None and end < start:
+            raise ValueError('end_time must be greater than or equal to start_time')
+        return self
 
 
 class TimeEntryResponse(BaseModel):
@@ -112,14 +145,21 @@ async def check_project_access(db: AsyncSession, project_id: int, user: User) ->
             return project
 
     return None
-def calculate_duration_seconds(start: datetime, end: datetime) -> int:
-    """Calculate duration in seconds"""
+def calculate_duration_seconds(start: datetime, end: datetime, pause_seconds: int = 0) -> int:
+    """Return actual elapsed seconds between ``start`` and ``end``.
+
+    B1: no 60-second clamp — short sessions stored verbatim. The 60s floor
+    now lives on ``TimeEntryCreate.duration_seconds`` for explicit manual
+    entries only.
+    B14: defensively clamp negatives (clock skew, corrupted pause_seconds)
+    so we never persist a negative duration.
+    """
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
     if end.tzinfo is None:
         end = end.replace(tzinfo=timezone.utc)
-    delta = end - start
-    return max(60, int(delta.total_seconds()))
+    total_elapsed = int((end - start).total_seconds())
+    return max(0, total_elapsed - (pause_seconds or 0))
 
 
 def make_entry_response(entry: TimeEntry, project_name: str = None, task_name: str = None, user_name: str = None) -> TimeEntryResponse:
@@ -168,7 +208,11 @@ async def get_timer_status(
     )
     active_session = session_result.scalar_one_or_none()
     
-    # If no active session, auto-stop any orphaned running timers and return not running
+    # If no active session, there may still be orphan running TimeEntries
+    # (rows with end_time IS NULL but no open WorkSession). Historically
+    # we auto-closed them on every GET /timer. That silently mutated state
+    # on a read and was a B14 finding. Now gated behind a feature flag
+    # (default off) — when disabled we log + return the orphan as-is.
     if not active_session:
         orphan_result = await db.execute(
             select(TimeEntry)
@@ -176,18 +220,55 @@ async def get_timer_status(
         )
         orphan_entries = orphan_result.scalars().all()
         if orphan_entries:
-            now = datetime.now(timezone.utc)
-            for entry in orphan_entries:
-                entry.end_time = now
-                entry.is_running = False
-                entry.is_paused = False
-                if entry.start_time:
-                    start = entry.start_time
-                    if start.tzinfo is None:
-                        start = start.replace(tzinfo=timezone.utc)
-                    total_elapsed = int((now - start).total_seconds())
-                    entry.duration_seconds = total_elapsed - (entry.pause_seconds or 0)
-            await db.commit()
+            if settings.TIMER_ORPHAN_AUTOCLOSE_ON_READ:
+                now = datetime.now(timezone.utc)
+                for entry in orphan_entries:
+                    entry.end_time = now
+                    entry.is_running = False
+                    entry.is_paused = False
+                    if entry.start_time:
+                        entry.duration_seconds = calculate_duration_seconds(
+                            entry.start_time, now, entry.pause_seconds or 0
+                        )
+                await db.commit()
+            else:
+                correlation_id = _uuid.uuid4().hex
+                for entry in orphan_entries:
+                    logger.warning(
+                        "Orphan running time entry detected on GET /timer "
+                        "(auto-close disabled). user_id=%s entry_id=%s "
+                        "correlation_id=%s",
+                        current_user.id,
+                        entry.id,
+                        correlation_id,
+                    )
+                # Return the first orphan running entry as-is so the client
+                # still sees its active timer; no DB mutation.
+                orphan = orphan_entries[0]
+                project_name = None
+                if orphan.project_id:
+                    proj_r = await db.execute(
+                        select(Project.name).where(Project.id == orphan.project_id)
+                    )
+                    project_name = proj_r.scalar()
+                task_name = None
+                if orphan.task_id:
+                    task_r = await db.execute(
+                        select(Task.name).where(Task.id == orphan.task_id)
+                    )
+                    task_name = task_r.scalar()
+                now = datetime.now(timezone.utc)
+                start = orphan.start_time
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=timezone.utc)
+                elapsed = max(0, int((now - start).total_seconds()) - (orphan.pause_seconds or 0))
+                return TimerStatus(
+                    is_running=True,
+                    current_entry=make_entry_response(
+                        orphan, project_name, task_name, current_user.name  # type: ignore[arg-type]
+                    ),
+                    elapsed_seconds=elapsed,
+                )
         return TimerStatus(is_running=False)
     
     # Check if user is in a meeting — if so, find the PAUSED task entry, not the meeting entry
@@ -263,7 +344,9 @@ async def get_timer_status(
     start = running_entry.start_time
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
-    elapsed = int((now - start).total_seconds())
+    # B14: clamp defensively — clock skew or corrupted pause_seconds must
+    # never surface as a negative elapsed value to the client.
+    elapsed = max(0, int((now - start).total_seconds()) - (running_entry.pause_seconds or 0))
     
     return TimerStatus(
         is_running=True,
@@ -814,10 +897,12 @@ async def list_time_entries(
         sum_query = sum_query.where(TimeEntry.start_time >= start_datetime)
     
     if end_date:
-        end_datetime = datetime.combine(end_date, datetime.max.time())
-        base_query = base_query.where(TimeEntry.start_time <= end_datetime)
-        count_query = count_query.where(TimeEntry.start_time <= end_datetime)
-        sum_query = sum_query.where(TimeEntry.start_time <= end_datetime)
+        # B20: half-open range [start_of_day, next_day_midnight) — matches
+        # reports.py and avoids the microsecond cliff of datetime.max.time().
+        end_datetime = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+        base_query = base_query.where(TimeEntry.start_time < end_datetime)
+        count_query = count_query.where(TimeEntry.start_time < end_datetime)
+        sum_query = sum_query.where(TimeEntry.start_time < end_datetime)
     
     # Get counts
     total_result = await db.execute(count_query)
@@ -955,6 +1040,24 @@ async def update_time_entry(
     
     if entry_data.end_time is not None:
         entry.end_time = entry_data.end_time
+
+    # B3: after applying any partial update, validate chronology against
+    # the merged state. The schema model_validator already rejects payloads
+    # that carry both fields out of order; this handles the case where only
+    # one field is updated and the other comes from the existing row. We
+    # raise 400 here — clearer than relying on the DB CHECK constraint.
+    if entry.end_time is not None and entry.start_time is not None:
+        start = entry.start_time
+        end = entry.end_time
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+        if end < start:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="end_time must be greater than or equal to start_time",
+            )
     
     if entry_data.project_id is not None:
         # Verify project exists and belongs to same company

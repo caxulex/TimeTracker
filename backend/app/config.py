@@ -130,6 +130,13 @@ class Settings(BaseSettings):
     SLOW_QUERY_THRESHOLD_MS: int = 500  # Log queries taking longer than this (milliseconds)
     ENABLE_QUERY_LOGGING: bool = True
 
+    # Timer housekeeping (B14):
+    # When True, GET /api/time/timer will auto-close orphan running
+    # TimeEntry rows (running entry with no open WorkSession). When
+    # False (default, production-safe) the endpoint is side-effect-free
+    # and only logs a warning.
+    TIMER_ORPHAN_AUTOCLOSE_ON_READ: bool = False
+
     # File Upload
     UPLOAD_DIR: str = "uploads/"
 
