@@ -56,6 +56,18 @@ async def lifespan(app: FastAPI):
     from app.database import log_pool_config
     log_pool_config()
 
+    # B13: warm the realtime active-timers cache once at startup. This
+    # function is best-effort: on failure it logs ``app.warm_cache_failed``
+    # and returns 0 so the app starts with an empty cache rather than
+    # crashing. Per-connection loads later refresh the cache per tenant.
+    try:
+        from app.routers.websocket import load_active_timers_from_db
+        await load_active_timers_from_db(company_id=None)
+    except Exception as e:
+        logger.error(
+            "app.warm_cache_failed: startup hook crashed: %s", e, exc_info=True
+        )
+
     # Auto-seed AI features if not present
     try:
         await seed_ai_features_on_startup()

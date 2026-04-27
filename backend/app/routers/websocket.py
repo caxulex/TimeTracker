@@ -1,5 +1,17 @@
 """
 Time Tracker API - WebSocket Router for Real-time Features
+
+WebSocket lifecycle (per connection):
+  1. Connect: client opens ``/api/ws/ws?token=...``.
+  2. Auth: token validated via ``get_current_user_ws`` (fail-closed on Redis down).
+  3. Load team_ids: query ``TeamMember`` for the user once; cached on the
+     manager for the life of this connection (stale across team changes).
+  4. Tenant-scoped warm of ``manager.active_timers`` for the user's company
+     (does NOT overwrite entries belonging to other tenants).
+  5. Subscribe: register the socket in the connection manager.
+  6. Loop: receive_json with timeout; on timeout send ping. Targeted
+     exception handling — ``CancelledError`` is re-raised, disconnects break.
+  7. Disconnect: cleanup connection + team membership entries.
 """
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
@@ -8,6 +20,15 @@ import json
 import logging
 import asyncio
 from datetime import datetime
+
+try:  # websockets is a transitive dep of starlette/uvicorn
+    from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
+except ImportError:  # pragma: no cover - safety net only
+    class ConnectionClosedError(Exception):  # type: ignore[no-redef]
+        pass
+
+    class ConnectionClosedOK(Exception):  # type: ignore[no-redef]
+        pass
 
 from app.dependencies import (
     get_current_user_ws,
@@ -229,37 +250,51 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-async def load_active_timers_from_db():
-    """Load all active timers from the database into the connection manager"""
-    from app.database import get_db
+async def load_active_timers_from_db(company_id: Optional[int] = None) -> int:
+    """Load active (running) timers from the database into the manager cache.
+
+    B13: tenant-scoped cache writes.
+      * ``company_id=None`` — startup warm cache. Loads every tenant's
+        running timers in a single pass; intended to run ONCE at app
+        startup from ``main.py`` lifespan.
+      * ``company_id=<int>`` — per-connection load. Loads only rows whose
+        owning user's ``company_id`` matches. The cache is updated via
+        ``dict.update`` so entries for other tenants are never touched.
+
+    The function is best-effort and never raises. Failures are logged with
+    the ``app.warm_cache_failed`` identifier so the app can continue with
+    a (possibly empty) cache instead of crashing the WS connect path or
+    the FastAPI startup hook.
+    Returns the number of rows loaded (0 on failure).
+    """
+    from app.database import async_session
     from app.models import TimeEntry, User, Project, Task
     from sqlalchemy import select
-    from datetime import timezone, datetime as dt
+    from datetime import timezone
 
-    # Get a database session
-    async for db in get_db():
-        try:
-            # Query all active time entries
-            result = await db.execute(
+    try:
+        async with async_session() as db:
+            stmt = (
                 select(TimeEntry, User, Project, Task)
                 .join(User, TimeEntry.user_id == User.id)
                 .outerjoin(Project, TimeEntry.project_id == Project.id)
                 .outerjoin(Task, TimeEntry.task_id == Task.id)
-                .where(TimeEntry.end_time == None)
+                .where(TimeEntry.end_time.is_(None))
             )
+            if company_id is not None:
+                stmt = stmt.where(User.company_id == company_id)
 
+            result = await db.execute(stmt)
             rows = result.all()
 
-            # Update the manager's active_timers dictionary
+            new_entries: Dict[int, dict] = {}
             for entry, user, project, task in rows:
-                # Calculate elapsed seconds
                 start = entry.start_time
                 if start.tzinfo is None:
                     start = start.replace(tzinfo=timezone.utc)
-                now = dt.now(timezone.utc)
-                elapsed = int((now - start).total_seconds())
+                elapsed = int((now_utc() - start).total_seconds())
 
-                timer_info = {
+                new_entries[user.id] = {
                     "user_id": user.id,
                     "user_name": user.name,
                     "company_id": user.company_id,  # For multi-tenant filtering
@@ -269,18 +304,26 @@ async def load_active_timers_from_db():
                     "task_name": task.name if task else None,
                     "description": entry.description,
                     "start_time": entry.start_time.isoformat(),
-                    "elapsed_seconds": elapsed
+                    "elapsed_seconds": elapsed,
                 }
 
-                manager.active_timers[user.id] = timer_info
-
-            logger.info(f"Loaded {len(rows)} active timers from database")
-
-        except Exception as e:
-            logger.error(f"Error loading active timers: {e}")
-        finally:
-            await db.close()
-        break  # Only need one iteration of the async generator
+            # Merge — never replace the entire cache. Entries for tenants
+            # not in this query keep their existing values.
+            manager.active_timers.update(new_entries)
+            logger.info(
+                "Loaded %d active timers from database (company_id=%s)",
+                len(rows),
+                company_id,
+            )
+            return len(rows)
+    except Exception as e:
+        logger.error(
+            "app.warm_cache_failed: company_id=%s error=%s",
+            company_id,
+            e,
+            exc_info=True,
+        )
+        return 0
 
 
 @router.websocket("/ws")
@@ -317,14 +360,22 @@ async def websocket_endpoint(
             await websocket.close(code=4001, reason="Authentication failed")
             return
 
-        # Get user's team IDs (simplified - in production, fetch from DB)
-        team_ids = []  # Could be populated from user's teams
+        # B8 Part 2: populate team_ids from TeamMember at connect time.
+        # The list is cached on the manager via ``connect()`` for the lifetime
+        # of this connection. It is intentionally NOT refreshed during the
+        # connection — team-membership changes mid-session won't propagate
+        # until the client reconnects. This is acceptable for a realtime WS
+        # path; see "Risks observed" in POST_LAUNCH_TODO.md.
+        team_ids = await _load_user_team_ids(user.id)
 
         # Connect with company_id for multi-tenant broadcast filtering
         await manager.connect(websocket, user.id, team_ids, company_id=user.company_id)
 
-        # Load active timers from database and populate the manager
-        await load_active_timers_from_db()
+        # B13: tenant-scoped cache load. Only rows for the connecting user's
+        # company are merged into ``manager.active_timers``; entries for
+        # other tenants are not touched. The full cross-tenant warm runs
+        # once at startup from ``main.py`` lifespan.
+        await load_active_timers_from_db(company_id=user.company_id)
 
         # Send initial state
         await websocket.send_json({
@@ -339,19 +390,66 @@ async def websocket_endpoint(
                 data = await asyncio.wait_for(websocket.receive_json(), timeout=60)
                 await handle_message(websocket, user, data)
             except asyncio.TimeoutError:
-                # Send ping to keep connection alive
+                # Send ping to keep connection alive. B8/B21: targeted
+                # exception handling — never swallow CancelledError, treat
+                # protocol close as a clean exit, log everything else.
                 try:
                     await websocket.send_json({"type": "ping"})
-                except:
+                except asyncio.CancelledError:
+                    raise
+                except WebSocketDisconnect:
                     break
+                except (ConnectionClosedError, ConnectionClosedOK):
+                    break
+                except Exception as e:
+                    logger.error(
+                        "ws.ping_send_failed user_id=%s company_id=%s: %s",
+                        user.id,
+                        user.company_id,
+                        e,
+                        exc_info=True,
+                    )
+                    break
+            except asyncio.CancelledError:
+                raise
+            except WebSocketDisconnect:
+                break
+            except (ConnectionClosedError, ConnectionClosedOK):
+                break
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for user {user.id if user else 'unknown'}")
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
+        logger.error(f"WebSocket error: {e}", exc_info=True)
     finally:
         if user:
             manager.disconnect(websocket, user.id)
+
+
+async def _load_user_team_ids(user_id: int) -> list[int]:
+    """Fetch the team IDs the user currently belongs to.
+
+    Best-effort: on DB failure, returns an empty list and logs at ERROR.
+    Team-scoped broadcasts will then simply not reach this connection
+    until the client reconnects.
+    """
+    from app.database import async_session
+    from app.models import TeamMember
+    from sqlalchemy import select
+
+    try:
+        async with async_session() as db:
+            result = await db.execute(
+                select(TeamMember.team_id).where(TeamMember.user_id == user_id)
+            )
+            return [row[0] for row in result.all()]
+    except Exception as e:
+        logger.error(
+            "ws.team_ids_load_failed user_id=%s: %s", user_id, e, exc_info=True
+        )
+        return []
 
 
 async def handle_message(websocket: WebSocket, user: User, data: dict):

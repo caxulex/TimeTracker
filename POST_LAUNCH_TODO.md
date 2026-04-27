@@ -182,3 +182,56 @@ single persistent loop, so no equivalent change is needed in production
 code. If that ever changes (e.g., subprocess workers each running their
 own loop), the same defensive reset pattern should be applied to
 token_blacklist.get_redis().
+
+
+## Deploy notes — Prompt 5 (B8 / B13 / B21 — WS hardening)
+
+### Behavior change at startup
+The FastAPI lifespan now calls `load_active_timers_from_db(company_id=None)`
+once at boot to warm `manager.active_timers` for every tenant in a single
+DB pass. The call is wrapped in try/except: if the warm-cache query fails
+the app logs `app.warm_cache_failed` at ERROR and **continues startup with
+an empty cache**. The first per-connection load for each tenant will then
+populate that tenant's slice on demand. Operators should grep for
+`app.warm_cache_failed` in startup logs after deploy.
+
+### WS connect cost
+Pre-Prompt 5: every new WebSocket connection ran an unfiltered
+`SELECT * FROM time_entries WHERE end_time IS NULL` and overwrote
+`manager.active_timers` (cross-tenant leak risk + N full scans on
+reconnect storms during deploy churn).
+
+Post-Prompt 5: each connection runs a company-scoped query
+(`WHERE end_time IS NULL AND users.company_id = :cid`) and merges
+results via `dict.update`. Per-connection DB cost is now bounded by
+the number of running timers for the connecting user's tenant, not the
+global running-timer count. Reconnect storms after a deploy now scale
+with per-tenant load instead of global load.
+
+### WS auth surface unchanged
+Prompt 3's fail-closed Redis behavior in `get_current_user_ws` is
+preserved — Prompt 5 did not touch the auth path.
+
+## Risks observed but not fixed during Prompt 5
+
+- backend/app/routers/websocket.py — `team_ids` cached on the connection
+  manager at connect time is intentionally **stale across team-membership
+  changes during the connection**. A user added to or removed from a team
+  while their WS is open won't see / will continue to see team-scoped
+  broadcasts until they reconnect. By design for the realtime path; document
+  in the admin guide if this surprises ops.
+- backend/app/routers/websocket.py:91 — `ConnectionManager.disconnect`
+  iterates `self.team_members.items()` with an unused loop variable
+  (`team_id`). Pre-existing B007 ruff finding; cosmetic.
+- backend/app/routers/websocket.py — `manager.active_timers` is in-process
+  state. Multi-worker deploys (uvicorn workers > 1) will keep separate
+  caches per worker. Out of scope for Prompt 5 (would need Redis-backed
+  shared state); not a correctness issue per se because per-connection
+  loads ensure each worker's view is tenant-correct.
+- Local-only env wobble: on Windows hosts, `redis.asyncio` against a
+  Redis instance running in WSL Ubuntu can intermittently fail with
+  `Error 22` even when `redis-cli ping` succeeds, due to the
+  proactor-loop / WSL networking interaction. This affects any auth-
+  protected test that exercises the JWT blacklist; CI (Linux) is
+  unaffected. Documented for future contributors so a flaky local run
+  isn't mistaken for a regression.
