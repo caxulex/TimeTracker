@@ -271,3 +271,10 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+# Lint/test output dumps (audit finding B27)
+current_*.txt
+baseline_*.txt
+*_output.txt
+*_results*.txt
+pytest_*.txt
+test_out.txt
