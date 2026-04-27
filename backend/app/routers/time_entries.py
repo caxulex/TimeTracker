@@ -17,7 +17,8 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.database import get_db
 from app.models import User, Team, TeamMember, Project, Task, TimeEntry, WorkSession, SessionMeeting, SessionBreak
-from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY
+from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY, get_company_timezone
+from app.utils.timewindow import day_bounds, range_bounds
 from app.schemas.auth import Message
 from app.routers.websocket import manager as ws_manager
 
@@ -854,7 +855,8 @@ async def list_time_entries(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
 ):
     """List time entries (filtered by company for multi-tenancy)"""
     # Multi-tenancy: join with user to filter by company
@@ -904,15 +906,17 @@ async def list_time_entries(
         sum_query = sum_query.where(TimeEntry.task_id == task_id)
     
     if start_date:
-        start_datetime = datetime.combine(start_date, datetime.min.time())
+        # B7: tenant-local midnight as half-open range start.
+        start_datetime, _ = day_bounds(start_date, tz)
         base_query = base_query.where(TimeEntry.start_time >= start_datetime)
         count_query = count_query.where(TimeEntry.start_time >= start_datetime)
         sum_query = sum_query.where(TimeEntry.start_time >= start_datetime)
     
     if end_date:
-        # B20: half-open range [start_of_day, next_day_midnight) — matches
-        # reports.py and avoids the microsecond cliff of datetime.max.time().
-        end_datetime = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+        # B7+B20: half-open range [start_of_local_day, next_local_day_midnight).
+        # Matches reports.py and avoids both the microsecond cliff of
+        # datetime.max.time() and the UTC-vs-local mismatch.
+        _, end_datetime = day_bounds(end_date, tz)
         base_query = base_query.where(TimeEntry.start_time < end_datetime)
         count_query = count_query.where(TimeEntry.start_time < end_datetime)
         sum_query = sum_query.where(TimeEntry.start_time < end_datetime)

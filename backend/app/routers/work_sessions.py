@@ -21,8 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
-from app.dependencies import get_current_active_user
+from app.dependencies import get_current_active_user, get_company_timezone
 from app.models import User, WorkSession, SessionBreak, SessionMeeting, TimeEntry
+from app.utils.timewindow import day_bounds, range_bounds, local_today, now_utc
 from app.schemas.sessions import (
     WorkSessionCreate,
     WorkSessionResponse,
@@ -675,7 +676,8 @@ async def end_meeting(
 async def get_daily_session_report(
     report_date: Optional[date] = None,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    tz: str = Depends(get_company_timezone),
 ):
     """
     Get a daily session report showing work, break, and meeting breakdown.
@@ -684,11 +686,10 @@ async def get_daily_session_report(
     This is ADDITIVE - does not modify existing reports.
     """
     if report_date is None:
-        report_date = datetime.now(timezone.utc).date()
-    
-    # Get session for the date
-    day_start = datetime.combine(report_date, time.min).replace(tzinfo=timezone.utc)
-    day_end = datetime.combine(report_date, time.max).replace(tzinfo=timezone.utc)
+        report_date = local_today(tz)
+
+    # Half-open tenant-local day bounds (B7).
+    day_start, day_end = day_bounds(report_date, tz)
     
     result = await db.execute(
         select(WorkSession)
@@ -696,7 +697,7 @@ async def get_daily_session_report(
             and_(
                 WorkSession.user_id == current_user.id,
                 WorkSession.start_time >= day_start,
-                WorkSession.start_time <= day_end
+                WorkSession.start_time < day_end,
             )
         )
         .options(
@@ -749,7 +750,8 @@ async def get_session_summary(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    tz: str = Depends(get_company_timezone),
 ):
     """
     Get a session summary for a date range.
@@ -758,13 +760,13 @@ async def get_session_summary(
     This is ADDITIVE - does not modify existing reports.
     """
     if end_date is None:
-        end_date = datetime.now(timezone.utc).date()
+        end_date = local_today(tz)
     if start_date is None:
         # Default to start of current week (Monday)
         start_date = end_date - timedelta(days=end_date.weekday())
-    
-    range_start = datetime.combine(start_date, time.min).replace(tzinfo=timezone.utc)
-    range_end = datetime.combine(end_date, time.max).replace(tzinfo=timezone.utc)
+
+    # Half-open tenant-local range bounds (B7).
+    range_start, range_end = range_bounds(start_date, end_date, tz)
     
     result = await db.execute(
         select(WorkSession)
@@ -772,7 +774,7 @@ async def get_session_summary(
             and_(
                 WorkSession.user_id == current_user.id,
                 WorkSession.start_time >= range_start,
-                WorkSession.start_time <= range_end
+                WorkSession.start_time < range_end,
             )
         )
     )

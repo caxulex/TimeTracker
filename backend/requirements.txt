@@ -60,3 +60,8 @@ python-json-logger>=2.0.0,<3.0.0
 # Export functionality
 openpyxl==3.1.2
 reportlab==4.0.8
+
+# Timezone data for stdlib zoneinfo (Windows + Alpine/slim Linux containers
+# lack a system tz database; PEP 615 designates tzdata as the companion).
+tzdata==2026.2
+

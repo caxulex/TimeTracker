@@ -17,6 +17,7 @@ from app.dependencies import (
     BlacklistUnavailableError,
 )
 from app.models import User
+from app.utils.timewindow import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,7 @@ class ConnectionManager:
         self.active_timers[user_id] = {
             **timer_info,
             "user_id": user_id,
-            "updated_at": datetime.utcnow().isoformat()
+            "updated_at": now_utc().isoformat()
         }
 
     def clear_active_timer(self, user_id: int):
@@ -373,7 +374,7 @@ async def handle_message(websocket: WebSocket, user: User, data: dict):
             "task_id": data.get("task_id"),
             "task_name": data.get("task_name"),
             "description": data.get("description"),
-            "start_time": data.get("start_time", datetime.utcnow().isoformat())
+            "start_time": data.get("start_time", now_utc().isoformat())
         }
         manager.set_active_timer(user.id, timer_info)
 

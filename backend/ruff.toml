@@ -13,6 +13,8 @@ select = [
     "B",      # flake8-bugbear
     "C4",     # flake8-comprehensions
     "UP",     # pyupgrade
+    "DTZ003", # flake8-datetimez: ban datetime.utcnow()
+    "DTZ005", # flake8-datetimez: ban datetime.now() without tz
 ]
 
 ignore = [
@@ -26,8 +28,33 @@ fixable = ["ALL"]
 unfixable = []
 
 [lint.per-file-ignores]
-"tests/*" = ["B011", "S101"]  # Allow assert in tests
+"tests/*" = ["B011", "S101", "DTZ003", "DTZ005"]  # Allow assert + naive UTC in tests
 "__init__.py" = ["F401"]      # Allow unused imports in __init__.py
+# B6/B7/B9 / Prompt 4b deferred sweep. Each file below still contains
+# datetime.utcnow() / naive datetime.now() call sites that are scheduled
+# for migration in Prompt 4b. Rules DTZ003/DTZ005 are temporarily
+# silenced per file (no globs per Modification 2) so 4a CI stays green.
+# TODO(4b): remove each entry below once that file is migrated to
+# app.utils.timewindow.now_utc / day_bounds / range_bounds.
+"app/routers/admin.py" = ["DTZ003", "DTZ005"]                          # TODO(4b): remove after sweep
+"app/routers/export.py" = ["DTZ003", "DTZ005"]                         # TODO(4b): remove after sweep
+"app/routers/email_logs.py" = ["DTZ003", "DTZ005"]                     # TODO(4b): remove after sweep
+"app/routers/monitoring.py" = ["DTZ003", "DTZ005"]                     # TODO(4b): remove after sweep
+"app/ai/router.py" = ["DTZ003", "DTZ005"]                              # TODO(4b): remove after sweep
+"app/ai/models/feature_engineering.py" = ["DTZ003", "DTZ005"]          # TODO(4b): remove after sweep
+"app/ai/services/anomaly_service.py" = ["DTZ003", "DTZ005"]            # TODO(4b): remove after sweep
+"app/ai/services/forecasting_service.py" = ["DTZ003", "DTZ005"]        # TODO(4b): remove after sweep
+"app/ai/services/ml_anomaly_service.py" = ["DTZ003", "DTZ005"]         # TODO(4b): remove after sweep
+"app/ai/services/nlp_service.py" = ["DTZ003", "DTZ005"]                # TODO(4b): remove after sweep
+"app/ai/services/reporting_service.py" = ["DTZ003", "DTZ005"]          # TODO(4b): remove after sweep
+"app/ai/services/semantic_search_service.py" = ["DTZ003", "DTZ005"]    # TODO(4b): remove after sweep
+"app/ai/services/suggestion_service.py" = ["DTZ003", "DTZ005"]         # TODO(4b): remove after sweep
+"app/ai/services/task_estimation_service.py" = ["DTZ003", "DTZ005"]    # TODO(4b): remove after sweep
+"app/ai/services/team_analytics_service.py" = ["DTZ003", "DTZ005"]     # TODO(4b): remove after sweep
+"app/services/ip_security.py" = ["DTZ003", "DTZ005"]                   # TODO(4b): remove after sweep
+"app/services/payroll_report_service.py" = ["DTZ003", "DTZ005"]        # TODO(4b): remove after sweep
+"app/services/payslip_pdf_service.py" = ["DTZ003", "DTZ005"]           # TODO(4b): remove after sweep
+"app/services/slack_service.py" = ["DTZ003", "DTZ005"]                 # TODO(4b): remove after sweep
 
 [lint.isort]
 known-first-party = ["app"]

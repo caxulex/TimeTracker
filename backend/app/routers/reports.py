@@ -13,8 +13,9 @@ from datetime import datetime, date, timedelta, timezone, time
 
 from app.database import get_db
 from app.models import User, Team, TeamMember, Project, Task, TimeEntry
-from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY
+from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY, get_company_timezone
 from app.services.email_log_utils import log_email_sent, log_email_failed
+from app.utils.timewindow import day_bounds, range_bounds, week_bounds, month_bounds, now_utc, local_today
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -184,20 +185,20 @@ def calculate_entry_duration_for_period(entry: TimeEntry, period_start: datetime
 @router.get("/dashboard", response_model=DashboardStats)
 async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
 ):
-    """Get dashboard statistics for current user (filtered by company for multi-tenancy)"""
-    now = datetime.now(timezone.utc)
-    today_start = datetime.combine(now.date(), datetime.min.time()).replace(tzinfo=timezone.utc)
-    today_end = today_start + timedelta(days=1)
-    week_start = today_start - timedelta(days=now.weekday())
-    week_end = week_start + timedelta(days=7)
-    month_start = today_start.replace(day=1)
-    # Calculate month end (first day of next month)
-    if month_start.month == 12:
-        month_end = month_start.replace(year=month_start.year + 1, month=1)
-    else:
-        month_end = month_start.replace(month=month_start.month + 1)
+    """Get dashboard statistics for current user (filtered by company for multi-tenancy).
+
+    B6/B7: All day/week/month bounds are computed in the company's local
+    timezone, then converted to UTC for SQL filters. This is what the user
+    perceives as "today" in their tenancy.
+    """
+    now = now_utc()
+    today_local = local_today(tz)
+    today_start, today_end = day_bounds(today_local, tz)
+    week_start, week_end = week_bounds(today_local, tz)
+    month_start, month_end = month_bounds(today_local, tz)
     
     # Multi-tenancy: get company filter
     company_id = get_company_filter(current_user)
@@ -294,21 +295,23 @@ async def get_weekly_summary(
     start_date: Optional[date] = None,
     week_offset: int = Query(0, ge=-52, le=0, description="Weeks ago (0 = current week)"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
 ):
     """Get weekly time summary (filtered by company for multi-tenancy)"""
-    now = datetime.now(timezone.utc)
-    
-    # Use start_date if provided, otherwise calculate from week_offset
+    now = now_utc()
+    today_local = local_today(tz)
+
+    # Use start_date if provided, otherwise calculate from week_offset (in local tz)
     if start_date:
         week_start = start_date
     else:
-        week_start = (now - timedelta(days=now.weekday()) - timedelta(weeks=abs(week_offset))).date()
-    
+        week_start = today_local - timedelta(days=today_local.weekday()) - timedelta(weeks=abs(week_offset))
+
     week_end = week_start + timedelta(days=6)
-    
-    start_datetime = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
-    end_datetime = datetime.combine(week_end + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)  # Midnight after week ends
+
+    # Half-open bounds in tenant local time (B7)
+    start_datetime, end_datetime = range_bounds(week_start, week_end, tz)
     
     # Multi-tenancy: get company filter
     company_id = get_company_filter(current_user)
@@ -346,8 +349,7 @@ async def get_weekly_summary(
     daily_breakdown = []
     for i in range(7):
         day = week_start + timedelta(days=i)
-        day_start = datetime.combine(day, datetime.min.time()).replace(tzinfo=timezone.utc)
-        day_end = datetime.combine(day + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
+        day_start, day_end = day_bounds(day, tz)
         
         # Calculate seconds for this day from ALL entries that overlap with this day
         day_seconds = sum(calculate_entry_duration_for_period(e, day_start, day_end, now) for e in all_entries)
@@ -375,19 +377,20 @@ async def get_time_by_project(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
 ):
     """Get time summary grouped by project with multi-tenant filtering"""
-    now = datetime.now(timezone.utc)
-    
-    # Default to current month
+    now = now_utc()
+    today_local = local_today(tz)
+
+    # Default to current local month
     if not start_date:
-        start_date = now.replace(day=1).date()
+        start_date = today_local.replace(day=1)
     if not end_date:
-        end_date = now.date()
-    
-    start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
-    end_datetime = datetime.combine(end_date + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)  # Day after end_date at midnight
+        end_date = today_local
+
+    start_datetime, end_datetime = range_bounds(start_date, end_date, tz)
     
     # Get company filter for multi-tenant data isolation
     company_filter = get_company_filter(current_user)
@@ -458,19 +461,20 @@ async def get_time_by_task(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
 ):
     """Get time summary grouped by task"""
-    now = datetime.now(timezone.utc)
-    
-    # Default to current month
+    now = now_utc()
+    today_local = local_today(tz)
+
+    # Default to current local month
     if not start_date:
-        start_date = now.replace(day=1).date()
+        start_date = today_local.replace(day=1)
     if not end_date:
-        end_date = now.date()
-    
-    start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
-    end_datetime = datetime.combine(end_date + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
+        end_date = today_local
+
+    start_datetime, end_datetime = range_bounds(start_date, end_date, tz)
     
     # Fetch entries that OVERLAP with the period
     query = (
@@ -523,7 +527,8 @@ async def get_team_report(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
 ):
     """Get team time report (team admin/owner only, filtered by company for multi-tenancy)"""
     # Multi-tenancy: verify team belongs to user's company
@@ -547,16 +552,14 @@ async def get_team_report(
         if not member_check.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Team admin access required")
     
-    # Default to current month
+    # Default to current local month
     if not start_date:
-        now = datetime.now(timezone.utc)
-        start_date = now.replace(day=1).date()
+        start_date = local_today(tz).replace(day=1)
     if not end_date:
-        end_date = datetime.now(timezone.utc).date()
-    
-    now = datetime.now(timezone.utc)
-    start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
-    end_datetime = datetime.combine(end_date + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
+        end_date = local_today(tz)
+
+    now = now_utc()
+    start_datetime, end_datetime = range_bounds(start_date, end_date, tz)
     
     # Get team members
     team_members = select(TeamMember.user_id).where(TeamMember.team_id == team_id)
@@ -628,8 +631,7 @@ async def get_team_report(
     by_day = []
     current_date = start_date
     while current_date <= end_date:
-        day_start = datetime.combine(current_date, datetime.min.time()).replace(tzinfo=timezone.utc)
-        day_end = datetime.combine(current_date + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
+        day_start, day_end = day_bounds(current_date, tz)
         
         day_seconds = 0
         day_count = 0
@@ -667,11 +669,11 @@ async def export_time_entries(
     project_id: Optional[int] = None,
     format: str = Query("json", pattern="^(json|csv)$"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
 ):
     """Export time entries (JSON or CSV format)"""
-    start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
-    end_datetime = datetime.combine(end_date + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
+    start_datetime, end_datetime = range_bounds(start_date, end_date, tz)
     
     # Fetch entries that OVERLAP with the export period
     query = (
@@ -808,7 +810,8 @@ class IndividualUserMetrics(BaseModel):
 @router.get("/admin/dashboard", response_model=AdminDashboardStats)
 async def get_admin_dashboard(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
 ):
     '''Get admin dashboard with all team members time (admin and super_admin, filtered by company)'''
     if current_user.role not in ["super_admin", "admin", "company_admin"]:
@@ -817,16 +820,11 @@ async def get_admin_dashboard(
             detail="Admin access required"
         )
     
-    now = datetime.now(timezone.utc)
-    today_start = datetime.combine(now.date(), time.min).replace(tzinfo=timezone.utc)
-    today_end = today_start + timedelta(days=1)
-    week_start = (today_start - timedelta(days=now.weekday()))
-    week_end = week_start + timedelta(days=7)
-    month_start = today_start.replace(day=1)
-    if month_start.month == 12:
-        month_end = month_start.replace(year=month_start.year + 1, month=1)
-    else:
-        month_end = month_start.replace(month=month_start.month + 1)
+    now = now_utc()
+    today_local = local_today(tz)
+    today_start, today_end = day_bounds(today_local, tz)
+    week_start, week_end = week_bounds(today_local, tz)
+    month_start, month_end = month_bounds(today_local, tz)
 
     # Multi-tenancy: get company filter
     company_id = get_company_filter(current_user)
@@ -957,7 +955,8 @@ async def get_admin_dashboard(
 @router.get("/admin/teams", response_model=List[TeamAnalytics])
 async def get_team_analytics(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
 ):
     '''Get analytics for all teams (admin and super_admin only, filtered by company)'''
     if current_user.role not in ["super_admin", "admin", "company_admin"]:
@@ -966,10 +965,11 @@ async def get_team_analytics(
             detail="Admin access required"
         )
     
-    now = datetime.now(timezone.utc)
-    today_start = datetime.combine(now.date(), time.min).replace(tzinfo=timezone.utc)
-    week_start = (today_start - timedelta(days=now.weekday()))
-    month_start = today_start.replace(day=1)
+    now = now_utc()
+    today_local = local_today(tz)
+    today_start, _ = day_bounds(today_local, tz)
+    week_start, _ = week_bounds(today_local, tz)
+    month_start, _ = month_bounds(today_local, tz)
 
     # Multi-tenancy: filter teams by company
     company_id = get_company_filter(current_user)
@@ -1158,7 +1158,8 @@ async def get_team_analytics(
 async def get_user_metrics(
     user_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
 ):
     '''Get detailed metrics for a specific user (admin and super_admin only, filtered by company)'''
     if current_user.role not in ["super_admin", "admin", "company_admin"]:
@@ -1180,10 +1181,11 @@ async def get_user_metrics(
             detail="User not found"
         )
 
-    now = datetime.now(timezone.utc)
-    today_start = datetime.combine(now.date(), time.min).replace(tzinfo=timezone.utc)
-    week_start = (today_start - timedelta(days=now.weekday()))
-    month_start = today_start.replace(day=1)
+    now = now_utc()
+    today_local = local_today(tz)
+    today_start, _ = day_bounds(today_local, tz)
+    week_start, _ = week_bounds(today_local, tz)
+    month_start, _ = month_bounds(today_local, tz)
 
     # Get user's teams
     teams_result = await db.execute(
@@ -1379,7 +1381,8 @@ async def get_all_users_summary(
     page: Optional[int] = Query(None, ge=1, description="Page number (1-indexed). Omit for all results."),
     page_size: Optional[int] = Query(None, ge=1, le=200, description="Results per page. Omit for all results."),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
 ):
     '''Get summary of all users sorted by time tracked (admin and super_admin only, filtered by company).
     Supports optional pagination via page/page_size query params.
@@ -1390,10 +1393,11 @@ async def get_all_users_summary(
             detail="Admin access required"
         )
     
-    now = datetime.now(timezone.utc)
-    today_start = datetime.combine(now.date(), time.min).replace(tzinfo=timezone.utc)
-    week_start = (today_start - timedelta(days=now.weekday()))
-    month_start = today_start.replace(day=1)
+    now = now_utc()
+    today_local = local_today(tz)
+    today_start, _ = day_bounds(today_local, tz)
+    week_start, _ = week_bounds(today_local, tz)
+    month_start, _ = month_bounds(today_local, tz)
 
     # Determine start time based on period
     if period == "today":
@@ -1496,7 +1500,8 @@ async def get_team_timesheet(
     end_date: date,
     team_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
 ):
     """
     Get Team Timesheet report - shows hours worked per user per day in a grid format.
@@ -1539,9 +1544,8 @@ async def get_team_timesheet(
                 detail="Admin access required to view all teams"
             )
     
-    now = datetime.now(timezone.utc)
-    start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
-    end_datetime = datetime.combine(end_date + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
+    now = now_utc()
+    start_datetime, end_datetime = range_bounds(start_date, end_date, tz)
     
     # Multi-tenancy: filter by company
     company_id = get_company_filter(current_user)
@@ -1618,8 +1622,7 @@ async def get_team_timesheet(
         user_id = entry.user_id
         # Calculate seconds for each day this entry overlaps
         for day in dates_list:
-            day_start = datetime.combine(day, datetime.min.time()).replace(tzinfo=timezone.utc)
-            day_end = datetime.combine(day + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
+            day_start, day_end = day_bounds(day, tz)
             day_seconds = calculate_entry_duration_for_period(entry, day_start, day_end, now)
             if day_seconds > 0:
                 user_day_seconds[user_id][day] += day_seconds
@@ -2088,7 +2091,8 @@ class EmailReportResponse(BaseModel):
 async def email_report(
     data: EmailReportRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
 ):
     """
     Send a report via email to specified recipients.
@@ -2138,7 +2142,8 @@ async def email_report(
                 user=current_user,
                 start_date=data.start_date,
                 end_date=data.end_date,
-                format=data.format
+                format=data.format,
+                tz=tz,
             )
             report_name = "Time Report"
             
@@ -2148,7 +2153,8 @@ async def email_report(
                 user=current_user,
                 start_date=data.start_date,
                 end_date=data.end_date,
-                format=data.format
+                format=data.format,
+                tz=tz,
             )
             report_name = "Team Timesheet"
             
@@ -2242,11 +2248,18 @@ async def _generate_time_report(
     user: User,
     start_date: date,
     end_date: date,
-    format: str
+    format: str,
+    tz: str = "UTC",
 ) -> tuple:
-    """Generate time report and return (data, filename, mimetype)"""
+    """Generate time report and return (data, filename, mimetype).
+
+    ``tz``: IANA timezone for interpreting ``start_date`` / ``end_date`` as
+    local civil dates (B7).
+    """
     from io import BytesIO
-    
+
+    start_dt, end_dt = range_bounds(start_date, end_date, tz)
+
     # Get time entries
     query = select(TimeEntry, Project.name.label("project_name"), Task.name.label("task_name")).outerjoin(
         Project, TimeEntry.project_id == Project.id
@@ -2254,8 +2267,8 @@ async def _generate_time_report(
         Task, TimeEntry.task_id == Task.id
     ).where(
         TimeEntry.user_id == user.id,
-        TimeEntry.start_time >= datetime.combine(start_date, datetime.min.time()),
-        TimeEntry.start_time <= datetime.combine(end_date, datetime.max.time())
+        TimeEntry.start_time >= start_dt,
+        TimeEntry.start_time < end_dt,
     ).order_by(TimeEntry.start_time.desc())
     
     result = await db.execute(query)
@@ -2372,13 +2385,14 @@ async def _generate_team_timesheet_report(
     user: User,
     start_date: date,
     end_date: date,
-    format: str
+    format: str,
+    tz: str = "UTC",
 ) -> tuple:
     """Generate team timesheet report and return (data, filename, mimetype)"""
     from io import BytesIO
-    
+
     # Get the timesheet data using existing function
-    timesheet = await _get_team_timesheet_data(db, user, start_date, end_date, None)
+    timesheet = await _get_team_timesheet_data(db, user, start_date, end_date, None, tz=tz)
     
     if format == "csv":
         import csv
@@ -2552,12 +2566,13 @@ async def _get_team_timesheet_data(
     user: User,
     start_date: date,
     end_date: date,
-    team_id: Optional[int]
+    team_id: Optional[int],
+    tz: str = "UTC",
 ) -> TeamTimesheetReport:
     """Helper to get team timesheet data - shared between endpoint and email generator"""
     from app.dependencies import get_company_filter, FILTER_NULL_COMPANY
     
-    now = datetime.now(timezone.utc)
+    now = now_utc()
     
     # Generate list of all dates in range
     dates_in_range = []
@@ -2584,9 +2599,8 @@ async def _get_team_timesheet_data(
     result = await db.execute(users_query)
     users = result.scalars().all()
     
-    # Fetch time entries for date range
-    start_datetime = datetime.combine(start_date, time.min).replace(tzinfo=timezone.utc)
-    end_datetime = datetime.combine(end_date + timedelta(days=1), time.min).replace(tzinfo=timezone.utc)
+    # Fetch time entries for date range (B7: tenant-local bounds)
+    start_datetime, end_datetime = range_bounds(start_date, end_date, tz)
     
     user_ids = [u.id for u in users]
     if not user_ids:
@@ -2614,8 +2628,7 @@ async def _get_team_timesheet_data(
     
     for entry in entries:
         for d in dates_in_range:
-            day_start = datetime.combine(d, time.min).replace(tzinfo=timezone.utc)
-            day_end = datetime.combine(d + timedelta(days=1), time.min).replace(tzinfo=timezone.utc)
+            day_start, day_end = day_bounds(d, tz)
             seconds = calculate_entry_duration_for_period(entry, day_start, day_end, now)
             if seconds > 0:
                 user_daily_seconds[entry.user_id][d] += seconds

@@ -30,14 +30,73 @@ for launch but should be addressed afterward.
 
 ## Timer-domain risks deferred from B1/B3/B10/B14/B20 session
 
-- backend/app/routers/time_entries.py:list_time_entries date filter is still
-  naive-datetime based. `datetime.combine(..., datetime.min.time())` returns
-  a tzinfo-less datetime whose interpretation depends on the Postgres session
-  TimeZone. Two tests in tests/test_time_entries_findings.py::TestB20 are
-  marked NEEDS_VERIFICATION for this reason — B20's half-open change removes
-  the 23:59:59.999999 microsecond cliff but not the TZ ambiguity. Prompt 4
-  (timezone-aware rewrite of time_entries + reports date filters) is the
-  proper fix.
+- ~~backend/app/routers/time_entries.py:list_time_entries date filter is still
+  naive-datetime based.~~ **RESOLVED in Prompt 4a** — replaced with
+  `app.utils.timewindow.day_bounds` / `range_bounds` that interpret the
+  client-supplied `start_date` / `end_date` as tenant-local civil dates and
+  produce tz-aware half-open UTC bounds. See `backend/tests/test_timezone_correctness.py`
+  for the cross-endpoint LA midnight-straddle proof.
+
+## Prompt 4b — remaining timezone correctness sweep
+
+The 4a pass focused on the user-visible date-range surface (reports.py,
+work_sessions.py, time_entries.py) and the highest-value `datetime.utcnow()`
+call sites (account_requests.py, approvals.py, websocket.py,
+scheduled_reports.py, payroll_service.py:600, report_templates.py). The
+following call sites remain on naive `datetime.now()` / `datetime.utcnow()`
+and must be migrated to `app.utils.timewindow.now_utc` in Prompt 4b. Each
+is currently silenced individually in `backend/ruff.toml`
+`[lint.per-file-ignores]` (DTZ003 + DTZ005) — the `# TODO(4b): remove
+after sweep` comment marks each entry. **Remove the entry from
+ruff.toml as you migrate each file.**
+
+- `app/routers/admin.py`
+- `app/routers/export.py`
+- `app/routers/email_logs.py`
+- `app/routers/monitoring.py`
+- `app/ai/router.py`
+- `app/ai/models/feature_engineering.py`
+- `app/ai/services/anomaly_service.py`
+- `app/ai/services/forecasting_service.py`
+- `app/ai/services/ml_anomaly_service.py`
+- `app/ai/services/nlp_service.py`
+- `app/ai/services/reporting_service.py`
+- `app/ai/services/semantic_search_service.py`
+- `app/ai/services/suggestion_service.py`
+- `app/ai/services/task_estimation_service.py`
+- `app/ai/services/team_analytics_service.py`
+- `app/services/ip_security.py`
+- `app/services/payroll_report_service.py`
+- `app/services/payslip_pdf_service.py`
+- `app/services/slack_service.py`
+
+## Prompt 4 follow-ups
+
+- **Per-user timezone override (future enhancement).** 4a treats the
+  *company* timezone (`Company.timezone`) as the single source of truth for
+  every report rendered to every user in that tenant. A user travelling
+  across timezones, or a multi-region team that does not share a single
+  civil day, will see boundaries pinned to the company's IANA zone.
+  Adding `User.timezone` (nullable, IANA, falls back to company tz) and
+  threading it through `get_company_timezone` would resolve this without
+  any further changes to `app.utils.timewindow`. Out of scope for 4a.
+- **Frontend datetime audit (Prompt 7).** All client-side `Date` /
+  `Intl.DateTimeFormat` rendering still relies on the browser local zone.
+  After 4a/4b, the API contract is canonically tenant-local; the
+  frontend must (a) display UTC instants in the company's IANA tz, and
+  (b) submit `start_date` / `end_date` as plain `YYYY-MM-DD` civil dates
+  (the backend already interprets them in tenant-local time). Track in
+  Prompt 7 frontend pass.
+- **Operational deploy note.** Companies are created with
+  `timezone='UTC'` (DB default). Tenant admins must `PATCH /companies/me`
+  with `{"timezone": "<IANA>"}` to switch. The `CompanyUpdate` schema
+  rejects non-IANA values via `zoneinfo.available_timezones()` so a typo
+  is caught at the API boundary instead of silently corrupting bounds.
+- **Production tzdata pin.** `tzdata==2026.2` was added to
+  `backend/requirements.txt` because Alpine and minimal Linux base
+  images do not ship the IANA tz database that `zoneinfo` reads at
+  runtime. Removing this pin will break every report on every
+  non-Debian production image — keep it.
 - backend/app/routers/time_entries.py:get_timer_status — audit referenced
   `get_timer`; current function is `get_timer_status` (same route path
   `/timer`). No code impact, flagging for documentation parity.

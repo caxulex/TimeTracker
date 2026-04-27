@@ -140,6 +140,36 @@ async def get_current_admin_user(
     return current_user
 
 
+async def get_company_timezone(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> str:
+    """Resolve the IANA timezone string for ``current_user``'s company.
+
+    B6/B7: All day/week/month boundary computations across reports,
+    work_sessions, and time_entries should be tenant-local. Falls back
+    to ``"UTC"`` when:
+      - The user has no ``company_id`` (platform super_admin).
+      - The company row has a NULL/empty timezone (defensive — schema
+        defaults to ``"UTC"``).
+
+    This is async-safe: the relationship ``User.company`` uses default
+    lazy loading which doesn't work in async contexts; we issue an
+    explicit scalar query instead.
+    """
+    if current_user.company_id is None:
+        return "UTC"
+    # Lazy import to avoid a circular dependency between dependencies.py and
+    # models/__init__.py at startup.
+    from app.models import Company
+
+    result = await db.execute(
+        select(Company.timezone).where(Company.id == current_user.company_id)
+    )
+    tz = result.scalar_one_or_none()
+    return tz or "UTC"
+
+
 def require_role(allowed_roles: list[str]):
     """Dependency factory for role-based access control.
 

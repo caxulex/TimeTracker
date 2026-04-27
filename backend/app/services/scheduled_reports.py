@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from dataclasses import dataclass, asdict
 from app.config import settings
+from app.utils.timewindow import now_utc
 
 redis_client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
 
@@ -66,7 +67,7 @@ class ScheduledReportService:
     @staticmethod
     def _calculate_next_run(frequency: str) -> str:
         """Calculate next run time based on frequency"""
-        now = datetime.utcnow()
+        now = now_utc()
         
         if frequency == ScheduleFrequency.DAILY.value:
             next_run = now.replace(hour=8, minute=0, second=0, microsecond=0)
@@ -109,7 +110,7 @@ class ScheduledReportService:
             enabled=True,
             next_run=ScheduledReportService._calculate_next_run(frequency),
             params=params,
-            created_at=datetime.utcnow().isoformat()
+            created_at=now_utc().isoformat()
         )
         
         redis_client.hset(SCHEDULED_REPORTS_KEY, report.id, json.dumps(report.to_dict()))
@@ -178,7 +179,7 @@ class ScheduledReportService:
     @staticmethod
     def get_due_reports() -> List[ScheduledReport]:
         """Get reports that are due to run"""
-        now = datetime.utcnow()
+        now = now_utc()
         due_reports = []
         
         all_reports = ScheduledReportService.get_all_scheduled_reports()
@@ -197,7 +198,7 @@ class ScheduledReportService:
         if not report:
             return None
         
-        report.last_sent = datetime.utcnow().isoformat()
+        report.last_sent = now_utc().isoformat()
         report.next_run = ScheduledReportService._calculate_next_run(report.frequency)
         
         redis_client.hset(SCHEDULED_REPORTS_KEY, report.id, json.dumps(report.to_dict()))

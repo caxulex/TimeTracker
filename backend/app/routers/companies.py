@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel, EmailStr, Field, field_validator
 import re
+from zoneinfo import available_timezones
 
 from app.database import get_db
 from app.models import User, Company, WhiteLabelConfig
@@ -32,7 +33,8 @@ class CompanyRegister(BaseModel):
     admin_password: str = Field(..., min_length=8)
     admin_name: str = Field(..., min_length=2, max_length=255)
     phone: Optional[str] = None
-    
+    timezone: str = "UTC"
+
     @field_validator('company_slug')
     @classmethod
     def validate_slug(cls, v):
@@ -40,6 +42,23 @@ class CompanyRegister(BaseModel):
             return v
         if not re.match(r'^[a-z0-9-]+$', v):
             raise ValueError('Slug must contain only lowercase letters, numbers, and hyphens')
+        return v
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, v):
+        """Reject non-IANA timezone identifiers (B7 correctness gate).
+
+        Mirrors :class:`CompanyUpdate.validate_timezone` so create-side and
+        update-side rules cannot drift.
+        """
+        if v is None:
+            return v
+        if v not in available_timezones():
+            raise ValueError(
+                f"Invalid IANA timezone: {v!r}. "
+                "Use values like 'UTC', 'America/Los_Angeles', 'Europe/Madrid'."
+            )
         return v
 
 
@@ -67,6 +86,19 @@ class CompanyUpdate(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
     timezone: Optional[str] = None
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, v):
+        """Reject non-IANA timezone identifiers (B7 correctness gate)."""
+        if v is None:
+            return v
+        if v not in available_timezones():
+            raise ValueError(
+                f"Invalid IANA timezone: {v!r}. "
+                "Use values like 'UTC', 'America/Los_Angeles', 'Europe/Madrid'."
+            )
+        return v
 
 
 class WhiteLabelConfigCreate(BaseModel):
@@ -201,6 +233,7 @@ async def register_company(
         slug=slug,
         email=data.admin_email,
         phone=data.phone,
+        timezone=data.timezone,
         subscription_tier="trial",
         status="trial",
         trial_ends_at=trial_end,

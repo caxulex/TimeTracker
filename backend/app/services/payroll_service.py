@@ -21,6 +21,7 @@ from app.schemas.payroll import (
     PayrollReportFilters, PeriodStatusEnum, EntryStatusEnum
 )
 from app.dependencies import FILTER_NULL_COMPANY
+from app.utils.timewindow import now_utc
 
 
 class PayRateService:
@@ -597,7 +598,7 @@ class PayrollPeriodService:
         
         period.status = PeriodStatusEnum.APPROVED.value
         period.approved_by = approved_by_id
-        period.approved_at = datetime.utcnow()
+        period.approved_at = now_utc()
         
         # Approve all entries
         stmt = select(PayrollEntry).where(PayrollEntry.payroll_period_id == period_id)

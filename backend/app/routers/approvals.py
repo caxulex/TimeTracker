@@ -15,6 +15,7 @@ from app.database import get_db
 from app.models import User
 from app.models import TimeEntry
 from app.dependencies import get_current_user, require_role, get_company_filter, apply_company_filter
+from app.utils.timewindow import now_utc
 
 router = APIRouter()
 
@@ -123,7 +124,7 @@ async def approve_time_entry(
     
     entry.approval_status = "approved"
     entry.approved_by = current_user.id
-    entry.approved_at = datetime.utcnow()
+    entry.approved_at = now_utc()
     
     await db.commit()
     await db.refresh(entry)
@@ -167,7 +168,7 @@ async def reject_time_entry(
     
     entry.approval_status = "rejected"
     entry.approved_by = current_user.id
-    entry.approved_at = datetime.utcnow()
+    entry.approved_at = now_utc()
     
     await db.commit()
     await db.refresh(entry)
@@ -215,7 +216,7 @@ async def bulk_approval(
         )
     
     # Update all entries
-    now = datetime.utcnow()
+    now = now_utc()
     updated_count = 0
     
     for entry in entries:

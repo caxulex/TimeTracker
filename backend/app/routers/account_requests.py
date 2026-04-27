@@ -19,6 +19,7 @@ from app.schemas.account_requests import (
 )
 from app.dependencies import get_current_admin_user
 from app.utils.sanitize import sanitize_string, get_client_ip
+from app.utils.timewindow import now_utc
 from app.middleware.rate_limit import rate_limiter
 from app.services.audit_logger import AuditLogger, AuditAction
 from app.services.email_service import email_service
@@ -269,7 +270,7 @@ async def approve_account_request(
     
     # Update request status
     account_request.status = "approved"
-    account_request.reviewed_at = datetime.utcnow()
+    account_request.reviewed_at = now_utc().replace(tzinfo=None)
     account_request.reviewed_by = current_user.id
     account_request.admin_notes = decision.admin_notes
     
@@ -309,7 +310,7 @@ async def approve_account_request(
         )
         # Update email tracking fields
         account_request.email_notification_sent = True
-        account_request.email_sent_at = datetime.utcnow()
+        account_request.email_sent_at = now_utc().replace(tzinfo=None)
         account_request.email_error = None
         logger.info(f"Approval notification email sent to {account_request.email}")
     except Exception as e:
@@ -381,7 +382,7 @@ async def reject_account_request(
     
     # Update request status
     account_request.status = "rejected"
-    account_request.reviewed_at = datetime.utcnow()
+    account_request.reviewed_at = now_utc().replace(tzinfo=None)
     account_request.reviewed_by = current_user.id
     account_request.admin_notes = decision.admin_notes
     
@@ -419,7 +420,7 @@ async def reject_account_request(
         )
         # Update email tracking fields
         account_request.email_notification_sent = True
-        account_request.email_sent_at = datetime.utcnow()
+        account_request.email_sent_at = now_utc().replace(tzinfo=None)
         account_request.email_error = None
         logger.info(f"Rejection notification email sent to {account_request.email}")
     except Exception as e:

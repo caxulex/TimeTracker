@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 
 from app.models import TimeEntry, Project, Task, User
+from app.utils.timewindow import now_utc
 
 
 class ReportType(str, Enum):
@@ -152,7 +153,7 @@ class ReportService:
                 ],
                 "total_hours": round(sum((row.total_seconds or 0) for row in daily_data) / 3600, 2)
             },
-            "generated_at": datetime.utcnow().isoformat()
+            "generated_at": now_utc().isoformat()
         }
     
     @staticmethod
@@ -208,7 +209,7 @@ class ReportService:
                 ],
                 "total_hours": round(sum((row.total_seconds or 0) for row in project_data) / 3600, 2)
             },
-            "generated_at": datetime.utcnow().isoformat()
+            "generated_at": now_utc().isoformat()
         }
     
     @staticmethod
@@ -265,7 +266,7 @@ class ReportService:
                 ],
                 "total_hours": round(sum((row.total_seconds or 0) for row in user_data) / 3600, 2)
             },
-            "generated_at": datetime.utcnow().isoformat()
+            "generated_at": now_utc().isoformat()
         }
     
     @staticmethod
@@ -316,7 +317,7 @@ class ReportService:
                     for row in daily_data
                 ]
             },
-            "generated_at": datetime.utcnow().isoformat()
+            "generated_at": now_utc().isoformat()
         }
 
 
