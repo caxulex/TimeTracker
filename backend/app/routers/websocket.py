@@ -9,7 +9,13 @@ import logging
 import asyncio
 from datetime import datetime
 
-from app.dependencies import get_current_user_ws, get_current_user, get_company_filter, FILTER_NULL_COMPANY
+from app.dependencies import (
+    get_current_user_ws,
+    get_current_user,
+    get_company_filter,
+    FILTER_NULL_COMPANY,
+    BlacklistUnavailableError,
+)
 from app.models import User
 
 logger = logging.getLogger(__name__)
@@ -19,7 +25,7 @@ router = APIRouter()
 
 class ConnectionManager:
     """Manages WebSocket connections for real-time updates"""
-    
+
     def __init__(self):
         # user_id -> set of WebSocket connections
         self.active_connections: Dict[int, Set[WebSocket]] = {}
@@ -29,27 +35,27 @@ class ConnectionManager:
         self.active_timers: Dict[int, dict] = {}
         # user_id -> company_id (for multi-tenant filtering)
         self.user_companies: Dict[int, Optional[int]] = {}
-    
+
     async def connect(self, websocket: WebSocket, user_id: int, team_ids: list[int] = None, company_id: int = None):
         """Accept a new WebSocket connection"""
         await websocket.accept()
-        
+
         if user_id not in self.active_connections:
             self.active_connections[user_id] = set()
         self.active_connections[user_id].add(websocket)
-        
+
         # Track user's company for multi-tenant broadcasts
         self.user_companies[user_id] = company_id
-        
+
         # Register user in teams
         if team_ids:
             for team_id in team_ids:
                 if team_id not in self.team_members:
                     self.team_members[team_id] = set()
                 self.team_members[team_id].add(user_id)
-        
+
         logger.info(f"User {user_id} (company={company_id}) connected via WebSocket")
-    
+
     def disconnect(self, websocket: WebSocket, user_id: int):
         """Remove a WebSocket connection"""
         if user_id in self.active_connections:
@@ -62,9 +68,9 @@ class ConnectionManager:
                 # Remove from teams
                 for team_id, members in self.team_members.items():
                     members.discard(user_id)
-        
+
         logger.info(f"User {user_id} disconnected from WebSocket")
-    
+
     async def send_personal_message(self, message: dict, user_id: int):
         """Send a message to a specific user"""
         if user_id in self.active_connections:
@@ -75,18 +81,18 @@ class ConnectionManager:
                 except Exception as e:
                     logger.error(f"Error sending message to user {user_id}: {e}")
                     disconnected.append(connection)
-            
+
             # Clean up disconnected sockets
             for conn in disconnected:
                 self.active_connections[user_id].discard(conn)
-    
+
     async def broadcast_to_team(self, message: dict, team_id: int, exclude_user: int = None):
         """Broadcast a message to all team members"""
         if team_id in self.team_members:
             for user_id in self.team_members[team_id]:
                 if user_id != exclude_user:
                     await self.send_personal_message(message, user_id)
-    
+
     async def broadcast_to_company(self, message: dict, company_id: int | None, exclude_user: int = None):
         """Broadcast a message to all users in the same company (multi-tenant safe)"""
         for user_id in list(self.active_connections.keys()):
@@ -95,13 +101,13 @@ class ConnectionManager:
                 # Match company_id exactly (both None or same value)
                 if user_company == company_id:
                     await self.send_personal_message(message, user_id)
-    
+
     async def broadcast_to_all(self, message: dict, exclude_user: int = None):
         """Broadcast a message to all connected users - USE WITH CAUTION (only for system-wide messages)"""
         for user_id in list(self.active_connections.keys()):
             if user_id != exclude_user:
                 await self.send_personal_message(message, user_id)
-    
+
     def set_active_timer(self, user_id: int, timer_info: dict):
         """Set active timer for a user"""
         self.active_timers[user_id] = {
@@ -109,15 +115,15 @@ class ConnectionManager:
             "user_id": user_id,
             "updated_at": datetime.utcnow().isoformat()
         }
-    
+
     def clear_active_timer(self, user_id: int):
         """Clear active timer for a user"""
         if user_id in self.active_timers:
             del self.active_timers[user_id]
-    
+
     def get_active_timers(self, team_id: int = None, company_filter = None) -> list[dict]:
         """Get all active timers, optionally filtered by team or company
-        
+
         Args:
             team_id: Filter by team (optional)
             company_filter: Company filter from get_company_filter():
@@ -126,7 +132,7 @@ class ConnectionManager:
                 - int: company-scoped users see only their company
         """
         timers = list(self.active_timers.values())
-        
+
         # Filter by company for multi-tenant isolation
         if company_filter is not None:
             if company_filter == FILTER_NULL_COMPANY:
@@ -136,14 +142,14 @@ class ConnectionManager:
                 # Company-scoped users see only their company's timers
                 timers = [t for t in timers if t.get("company_id") == company_filter]
         # If company_filter is None (super_admin), return all timers
-        
+
         # Filter by team if specified
         if team_id and team_id in self.team_members:
             team_user_ids = self.team_members[team_id]
             timers = [t for t in timers if t.get("user_id") in team_user_ids]
-        
+
         return timers
-    
+
     def get_online_users(self, team_id: int = None) -> list[int]:
         """Get list of online user IDs"""
         if team_id and team_id in self.team_members:
@@ -153,7 +159,7 @@ class ConnectionManager:
     # ============================================
     # MICRO-TASK SESSION BROADCASTS
     # ============================================
-    
+
     async def broadcast_session_started(self, company_id: int | None, user_id: int, user_name: str, session_data: dict):
         """Broadcast when a user starts their work session."""
         await self.broadcast_to_company({
@@ -228,7 +234,7 @@ async def load_active_timers_from_db():
     from app.models import TimeEntry, User, Project, Task
     from sqlalchemy import select
     from datetime import timezone, datetime as dt
-    
+
     # Get a database session
     async for db in get_db():
         try:
@@ -240,9 +246,9 @@ async def load_active_timers_from_db():
                 .outerjoin(Task, TimeEntry.task_id == Task.id)
                 .where(TimeEntry.end_time == None)
             )
-            
+
             rows = result.all()
-            
+
             # Update the manager's active_timers dictionary
             for entry, user, project, task in rows:
                 # Calculate elapsed seconds
@@ -251,7 +257,7 @@ async def load_active_timers_from_db():
                     start = start.replace(tzinfo=timezone.utc)
                 now = dt.now(timezone.utc)
                 elapsed = int((now - start).total_seconds())
-                
+
                 timer_info = {
                     "user_id": user.id,
                     "user_name": user.name,
@@ -264,11 +270,11 @@ async def load_active_timers_from_db():
                     "start_time": entry.start_time.isoformat(),
                     "elapsed_seconds": elapsed
                 }
-                
+
                 manager.active_timers[user.id] = timer_info
-                
+
             logger.info(f"Loaded {len(rows)} active timers from database")
-            
+
         except Exception as e:
             logger.error(f"Error loading active timers: {e}")
         finally:
@@ -283,9 +289,9 @@ async def websocket_endpoint(
 ):
     """
     WebSocket endpoint for real-time updates.
-    
+
     Connect with: ws://localhost:8080/api/ws/ws?token=<jwt_token>
-    
+
     Message types:
     - ping: Keep-alive ping
     - timer_start: User started a timer
@@ -297,27 +303,35 @@ async def websocket_endpoint(
     user = None
     try:
         # Authenticate user from token
-        user = await get_current_user_ws(token)
+        try:
+            user = await get_current_user_ws(token)
+        except BlacklistUnavailableError:
+            # B4: fail-closed when JWT blacklist backend (Redis) is down.
+            # Logged inside _check_blacklist_or_fail_closed.
+            await websocket.close(
+                code=1011, reason="Authentication service temporarily unavailable"
+            )
+            return
         if not user:
             await websocket.close(code=4001, reason="Authentication failed")
             return
-        
+
         # Get user's team IDs (simplified - in production, fetch from DB)
         team_ids = []  # Could be populated from user's teams
-        
+
         # Connect with company_id for multi-tenant broadcast filtering
         await manager.connect(websocket, user.id, team_ids, company_id=user.company_id)
-        
+
         # Load active timers from database and populate the manager
         await load_active_timers_from_db()
-        
+
         # Send initial state
         await websocket.send_json({
             "type": "connected",
             "user_id": user.id,
             "message": "Connected to Time Tracker real-time service"
         })
-        
+
         # Main message loop
         while True:
             try:
@@ -329,7 +343,7 @@ async def websocket_endpoint(
                     await websocket.send_json({"type": "ping"})
                 except:
                     break
-                    
+
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for user {user.id if user else 'unknown'}")
     except Exception as e:
@@ -342,13 +356,13 @@ async def websocket_endpoint(
 async def handle_message(websocket: WebSocket, user: User, data: dict):
     """Handle incoming WebSocket messages"""
     msg_type = data.get("type")
-    
+
     if msg_type == "ping":
         await websocket.send_json({"type": "pong"})
-    
+
     elif msg_type == "pong":
         pass  # Client responded to our ping
-    
+
     elif msg_type == "timer_start":
         # User started a timer
         timer_info = {
@@ -362,7 +376,7 @@ async def handle_message(websocket: WebSocket, user: User, data: dict):
             "start_time": data.get("start_time", datetime.utcnow().isoformat())
         }
         manager.set_active_timer(user.id, timer_info)
-        
+
         # Broadcast to SAME COMPANY ONLY (multi-tenant isolation)
         await manager.broadcast_to_company({
             "type": "timer_started",
@@ -370,17 +384,17 @@ async def handle_message(websocket: WebSocket, user: User, data: dict):
             "user_name": user.name,
             **timer_info
         }, company_id=user.company_id, exclude_user=user.id)
-        
+
         # Confirm to sender
         await websocket.send_json({
             "type": "timer_start_confirmed",
             "timer": timer_info
         })
-    
+
     elif msg_type == "timer_stop":
         # User stopped a timer
         manager.clear_active_timer(user.id)
-        
+
         # Broadcast to SAME COMPANY ONLY (multi-tenant isolation)
         await manager.broadcast_to_company({
             "type": "timer_stopped",
@@ -390,17 +404,17 @@ async def handle_message(websocket: WebSocket, user: User, data: dict):
             "project_name": data.get("project_name"),
             "task_name": data.get("task_name")
         }, company_id=user.company_id, exclude_user=user.id)
-        
+
         # Confirm to sender
         await websocket.send_json({
             "type": "timer_stop_confirmed"
         })
-    
+
     elif msg_type == "timer_update":
         # Periodic timer duration update
         if user.id in manager.active_timers:
             manager.active_timers[user.id]["elapsed_seconds"] = data.get("elapsed_seconds", 0)
-    
+
     elif msg_type == "get_active_timers":
         # Request list of active timers with company filtering
         team_id = data.get("team_id")
@@ -411,7 +425,7 @@ async def handle_message(websocket: WebSocket, user: User, data: dict):
             "type": "active_timers",
             "timers": active_timers
         })
-    
+
     elif msg_type == "get_online_users":
         # Request list of online users
         team_id = data.get("team_id")
@@ -420,7 +434,7 @@ async def handle_message(websocket: WebSocket, user: User, data: dict):
             "type": "online_users",
             "users": online_users
         })
-    
+
     else:
         await websocket.send_json({
             "type": "error",

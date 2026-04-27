@@ -243,7 +243,11 @@ export const authApi = {
   },
 
   logout: async (): Promise<void> => {
-    await api.post('/api/auth/logout');
+    // B15: Send the refresh token so the backend can revoke it. If the
+    // token is missing from storage, the backend still revokes the
+    // access token and logs a warning.
+    const refreshToken = localStorage.getItem('refresh_token');
+    await api.post('/api/auth/logout', refreshToken ? { refresh_token: refreshToken } : {});
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
   },

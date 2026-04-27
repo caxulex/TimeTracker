@@ -75,3 +75,51 @@ for launch but should be addressed afterward.
 
 - backend/app/routers/work_sessions.py:537 and :639 build TimeEntry(is_running=True, ...) and commit. After B2 (migration 021_unique_running_timer), if a user already has a running timer when a meeting/resume code path fires, the commit will now raise IntegrityError instead of silently creating a duplicate. The new partial unique index is the correct invariant; these two call sites should be wrapped in the same try/except IntegrityError -> 409 pattern used in start_timer. Risk is low (these paths assume no manual timer running) but should be hardened.
 - backend/app/database.py: _build_engine does not currently honor a hypothetical staging ENVIRONMENT distinctly — anything other than literal production falls through to NullPool. Acceptable for now; revisit if a staging tier ever needs the pooled engine.
+
+## Deploy notes — Prompt 3
+
+### Required env vars now mandatory in production
+The following env vars previously had silent auto-generation fallbacks. As of
+this commit, they raise at startup if unset/empty when ENVIRONMENT=production:
+- SECRET_KEY
+- API_KEY_ENCRYPTION_KEY
+
+Verify both are explicitly set in the Lightsail deploy environment before
+deploying this commit. If they are not, the app will fail to start with a
+clear ValueError instead of silently rotating keys per restart.
+
+### Behavior change during Redis outage
+Before this commit: revoked JWTs continued to work if Redis was unreachable
+(except Exception: pass swallowed the error — fail-open).
+
+After this commit: revoked JWTs are rejected (HTTP 401, WS close 1011 — fail-closed).
+
+Operational implication: a Redis outage now manifests as elevated 401 rates
+on authenticated endpoints. Operators should:
+- Treat sustained 401 spikes as a Redis health signal.
+- Monitor for the log identifier `auth.blacklist_unavailable` (HTTP path) and
+  the WS close-code-1011 pattern.
+
+### Frontend ↔ backend deploy ordering for B15 logout
+Backend can deploy first. The new logout handler accepts an optional
+LogoutRequest body containing refresh_token; if missing, it logs a WARNING
+(`auth.logout_missing_refresh`) and proceeds with access-token-only
+revocation. An older frontend (without refresh_token in the logout body)
+continues to work but leaves refresh tokens valid until natural expiry.
+
+After frontend deploys: refresh tokens are revoked on logout as intended.
+
+### Skip-count environmental wobble (informational)
+Local pytest skip count varies (4 vs 6) depending on whether redis-server
+is running on the dev host. Two tests in test_password_reset.py are gated
+by @skip_without_redis. CI uses a Redis service container so its skip count
+is stable. Document in eventual deploy runbook so any team member running
+local tests doesn't think "6 → 4" is a regression.
+
+### Test infrastructure note (not a deploy concern)
+conftest.py now resets token_blacklist._redis between tests to handle
+pytest-asyncio function-scoped event-loop binding. Production runs a
+single persistent loop, so no equivalent change is needed in production
+code. If that ever changes (e.g., subprocess workers each running their
+own loop), the same defensive reset pattern should be applied to
+token_blacklist.get_redis().

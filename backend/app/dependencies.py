@@ -4,6 +4,7 @@ SEC-002: Token blacklist checking integrated
 SEC-013: Enhanced WebSocket authentication
 """
 
+import logging
 from typing import Optional
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -15,7 +16,41 @@ from app.models import User
 from app.services.auth_service import auth_service
 from app.services.token_blacklist import token_blacklist
 
+logger = logging.getLogger(__name__)
+
 security = HTTPBearer()
+
+
+class BlacklistUnavailableError(Exception):
+    """B4: Raised when the JWT blacklist backend (Redis) is unreachable.
+
+    The auth path treats blacklist availability as a hard dependency —
+    when we can't verify whether a token has been revoked, we refuse
+    the request (fail-closed). Callers translate this into the
+    appropriate transport-level error (HTTP 401 or WS 1011).
+    """
+
+
+async def _check_blacklist_or_fail_closed(jti: str) -> bool:
+    """B4: Check the JWT blacklist with fail-closed semantics.
+
+    Returns True if the JTI is blacklisted, False otherwise.
+    Raises ``BlacklistUnavailableError`` on any backend failure
+    (connection error, timeout, etc.). Callers MUST translate this
+    exception into a transport-level rejection — never let it
+    propagate as an unauthenticated success.
+    """
+    try:
+        redis_client = await token_blacklist.get_redis()
+        key = f"{token_blacklist._prefix}{jti}"
+        return bool(await redis_client.exists(key))
+    except Exception as exc:
+        logger.error(
+            "auth.blacklist_unavailable: %s: %s",
+            type(exc).__name__,
+            exc,
+        )
+        raise BlacklistUnavailableError(str(exc)) from exc
 
 
 async def get_current_user(
@@ -43,20 +78,23 @@ async def get_current_user(
     if payload.get("type") != "access":
         raise credentials_exception
 
-    # SEC-002: Check if token is blacklisted
+    # SEC-002 / B4: Check token blacklist (fail-closed on Redis outage).
     jti = payload.get("jti")
     if jti:
         try:
-            if await token_blacklist.is_blacklisted(jti):
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Token has been revoked",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-        except Exception:
-            # If Redis is unavailable, continue (fail open for availability)
-            # In high-security environments, you might want to fail closed
-            pass
+            is_blacklisted = await _check_blacklist_or_fail_closed(jti)
+        except BlacklistUnavailableError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication service temporarily unavailable",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if is_blacklisted:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
     user_id: str = payload.get("sub")
     if user_id is None:
@@ -104,14 +142,14 @@ async def get_current_admin_user(
 
 def require_role(allowed_roles: list[str]):
     """Dependency factory for role-based access control.
-    
+
     Note: company_admin is treated as equivalent to admin for permission checks.
     """
     async def role_checker(current_user: User = Depends(get_current_user)) -> User:
         user_role = current_user.role
         # Treat company_admin as equivalent to admin for permission purposes
         effective_role = 'admin' if user_role == 'company_admin' else user_role
-        
+
         # Check both the actual role and effective role
         if user_role not in allowed_roles and effective_role not in allowed_roles:
             raise HTTPException(
@@ -137,14 +175,13 @@ async def get_current_user_ws(token: str) -> Optional[User]:
     if payload.get("type") != "access":
         return None
 
-    # SEC-002: Check if token is blacklisted
+    # SEC-002 / B4: Check token blacklist (fail-closed on Redis outage).
+    # The WebSocket caller is responsible for closing the socket with
+    # code 1011 when this raises ``BlacklistUnavailableError``.
     jti = payload.get("jti")
     if jti:
-        try:
-            if await token_blacklist.is_blacklisted(jti):
-                return None
-        except Exception:
-            pass  # Fail open for WebSocket connections
+        if await _check_blacklist_or_fail_closed(jti):
+            return None
 
     user_id = payload.get("sub")
     if user_id is None:
@@ -170,22 +207,22 @@ FILTER_NULL_COMPANY = "FILTER_NULL"
 def get_company_filter(user: User):
     """
     Get company filter for multi-tenant data isolation.
-    
+
     ALL users are scoped to their company for strict data isolation:
     - Users with company_id see only their company's data
     - Users with NULL company_id see only NULL company_id data (platform users)
-    
+
     This ensures white-label companies NEVER see each other's data,
     regardless of user role.
-    
+
     Returns:
-        - company_id (int) for company-scoped users  
+        - company_id (int) for company-scoped users
         - FILTER_NULL_COMPANY sentinel for platform users without a company
     """
     # Users with a company are scoped to their company
     if user.company_id is not None:
         return user.company_id
-    
+
     # Platform users (no company) see only NULL company data
     return FILTER_NULL_COMPANY
 
@@ -194,12 +231,12 @@ def apply_company_filter(query, company_column, company_id):
     """
     Apply company filter to a query.
     Handles the NULL company_id case correctly.
-    
+
     Args:
         query: SQLAlchemy query to filter
         company_column: The column to filter on (e.g., Team.company_id)
         company_id: The company_id from get_company_filter()
-        
+
     Returns:
         Filtered query
     """

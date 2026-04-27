@@ -12,7 +12,13 @@ from datetime import datetime, date, timedelta, timezone
 
 from app.database import get_db
 from app.models import User, Team, TeamMember, Project, Task, TimeEntry
-from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY
+from app.dependencies import (
+    get_current_active_user,
+    get_company_filter,
+    apply_company_filter,
+    FILTER_NULL_COMPANY,
+    require_admin,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -61,14 +67,8 @@ class AdminWorkersReportResponse(BaseModel):
     period_end: date
 
 
-def require_admin(current_user: User = Depends(get_current_active_user)):
-    """Dependency to require admin role"""
-    if current_user.role not in ["super_admin", "admin", "company_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required"
-        )
-    return current_user
+# B11: require_admin is now imported from app.dependencies (canonical).
+# Previous inline definition removed to eliminate drift.
 
 
 @router.get("/time-entries", response_model=AdminTimeEntriesResponse)
@@ -86,7 +86,7 @@ async def get_admin_time_entries(
     """Get all time entries for admin (TASK-009) with multi-tenant filtering"""
     start_datetime = datetime.combine(start_date, datetime.min.time())
     end_datetime = datetime.combine(end_date, datetime.max.time())
-    
+
     # Get company filter for multi-tenant data isolation
     company_filter = get_company_filter(current_user)
 
@@ -106,7 +106,7 @@ async def get_admin_time_entries(
             TimeEntry.start_time <= end_datetime
         )
     )
-    
+
     # Apply company filter for multi-tenant isolation
     query = apply_company_filter(query, User.company_id, company_filter)
 
@@ -194,14 +194,14 @@ async def get_workers_report(
     start_datetime = datetime.combine(start_date, datetime.min.time())
     end_datetime = datetime.combine(end_date, datetime.max.time())
     days_in_period = (end_date - start_date).days + 1
-    
+
     # Get company filter for multi-tenant data isolation
     company_filter = get_company_filter(current_user)
 
     # Base user filter with company filtering
     user_query = select(User).where(User.is_active == True)
     user_query = apply_company_filter(user_query, User.company_id, company_filter)
-    
+
     if team_id:
         team_users = select(TeamMember.user_id).where(TeamMember.team_id == team_id)
         user_query = user_query.where(User.id.in_(team_users))
@@ -233,7 +233,7 @@ async def get_workers_report(
 
         user_seconds = row.total_seconds or 0
         total_seconds += user_seconds
-        
+
         workers.append(WorkerReport(
             user_id=user.id,
             user_name=user.name,
@@ -267,10 +267,10 @@ async def get_activity_alerts(
     """Get activity alerts for admin (TASK-022) with multi-tenant filtering"""
     now = datetime.now(timezone.utc)
     today_start = datetime.combine(now.date(), datetime.min.time()).replace(tzinfo=timezone.utc)
-    
+
     # Get company filter for multi-tenant data isolation
     company_filter = get_company_filter(current_user)
-    
+
     alerts = []
 
     # Alert: Long running timers (> 8 hours) - WITH COMPANY FILTERING
@@ -306,7 +306,7 @@ async def get_activity_alerts(
     active_users_query = apply_company_filter(active_users_query, User.company_id, company_filter)
     active_users_result = await db.execute(active_users_query)
     active_users = active_users_result.all()
-    
+
     # Get users active today - filter by company through User join
     active_today_query = (
         select(func.distinct(TimeEntry.user_id))
@@ -325,7 +325,7 @@ async def get_activity_alerts(
                 .where(TimeEntry.user_id == user_id)
             )
             last_entry = last_entry_result.scalar()
-            
+
             if last_entry:
                 last = last_entry
                 if last.tzinfo is None:

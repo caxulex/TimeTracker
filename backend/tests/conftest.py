@@ -57,6 +57,28 @@ async def async_engine():
 
 
 @pytest_asyncio.fixture(autouse=True)
+async def _reset_token_blacklist_redis_cache() -> AsyncGenerator[None, None]:
+    """Drop the ``token_blacklist`` module's cached Redis client before
+    each test.
+
+    The ``redis.asyncio`` client binds itself to the event loop on which
+    it was first created. ``pytest-asyncio`` (mode=auto, function-scope)
+    creates a fresh event loop per test, so a client cached on a
+    previous test's loop raises ``RuntimeError: Event loop is closed``
+    on subsequent calls. Pre-B4 this was silently swallowed by the
+    fail-open ``is_blacklisted`` and ignored; post-B4 (fail-closed) the
+    same situation correctly returns 401, which would mass-break the
+    suite. Reseting the singleton between tests forces each test to
+    instantiate a fresh client on its own event loop.
+    """
+    from app.services import token_blacklist as _tb_module
+
+    _tb_module.token_blacklist._redis = None
+    yield
+    _tb_module.token_blacklist._redis = None
+
+
+@pytest_asyncio.fixture(autouse=True)
 async def _truncate_tables_around_test(async_engine) -> AsyncGenerator[None, None]:
     """
     Test isolation via TRUNCATE-before-test (Option B).
@@ -111,18 +133,18 @@ async def db_session(async_engine) -> AsyncGenerator[AsyncSession, None]:
 @pytest_asyncio.fixture(scope="function")
 async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     """Create test client with database session override."""
-    
+
     async def override_get_db():
         yield db_session
-    
+
     app.dependency_overrides[get_db] = override_get_db
-    
+
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test"
     ) as ac:
         yield ac
-    
+
     app.dependency_overrides.clear()
 
 
