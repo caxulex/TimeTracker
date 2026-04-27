@@ -130,6 +130,17 @@ class Settings(BaseSettings):
     SLOW_QUERY_THRESHOLD_MS: int = 500  # Log queries taking longer than this (milliseconds)
     ENABLE_QUERY_LOGGING: bool = True
 
+    # B12: Production async DB pool configuration. NullPool is kept for
+    # development/test (predictable, no connection-reuse surprises).
+    # Production switches to AsyncAdaptedQueuePool with these defaults
+    # — every value is overridable via env so an operator can tune
+    # without a code change.
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 20
+    DB_POOL_TIMEOUT: int = 30
+    DB_POOL_RECYCLE: int = 1800
+    DB_POOL_PRE_PING: bool = True
+
     # Timer housekeeping (B14):
     # When True, GET /api/time/timer will auto-close orphan running
     # TimeEntry rows (running entry with no open WorkSession). When

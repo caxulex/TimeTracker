@@ -50,7 +50,12 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Time Tracker API...")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info(f"Debug mode: {settings.DEBUG}")
-    
+
+    # B12: surface effective DB pool config at startup so operators
+    # can verify production isn't accidentally running NullPool.
+    from app.database import log_pool_config
+    log_pool_config()
+
     # Auto-seed AI features if not present
     try:
         await seed_ai_features_on_startup()

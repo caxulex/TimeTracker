@@ -6,6 +6,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
+from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel, Field, field_validator, model_validator
 from datetime import datetime, date, timedelta, timezone
 import logging
@@ -477,7 +478,19 @@ async def start_timer(
     # === END MICRO-TASK INTEGRATION ===
     
     db.add(entry)
-    await db.commit()
+    # B2: the SELECT above is racy — two concurrent requests can both see
+    # "no running timer" and try to INSERT. The unique partial index
+    # ``ux_time_entries_one_running_per_user`` (migration
+    # 021_unique_running_timer) makes the DB the source of truth. The
+    # second concurrent INSERT raises IntegrityError; convert to 409.
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A timer is already running for this user.",
+        ) from exc
     await db.refresh(entry)
     
     # Broadcast timer start to SAME COMPANY ONLY for real-time "Who's Working Now" updates

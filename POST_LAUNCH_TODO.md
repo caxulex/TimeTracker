@@ -20,6 +20,7 @@ for launch but should be addressed afterward.
 - ruff: 4,313 pre-existing errors (4,099 auto-fixable). Deferred to Prompt 7.5.
 - mypy: 761 pre-existing errors across 66 files. Deferred to Prompt 7.5.
 - Both currently non-fatal in CI; flip to strict after Prompt 7.5 clears them.
+- Partial indexes (ux_time_entries_one_running_per_user, ix_time_entries_running) are declared in raw SQL only, not in SQLAlchemy models. alembic check reports them as drift. Consider declaring them in models.py during Prompt 7.5 lint/type cleanup so the model is the source of truth.
 
 ## Dev experience
 
@@ -69,3 +70,8 @@ for launch but should be addressed afterward.
   database not available" on Windows local despite pg16 being reachable.
   Predates Prompt 1. Probe mechanism likely differs from the main conftest
   fixture chain. Low priority — tests run and pass in CI.
+
+## Discovered while implementing B2 / B12 (2026-01-…)
+
+- backend/app/routers/work_sessions.py:537 and :639 build TimeEntry(is_running=True, ...) and commit. After B2 (migration 021_unique_running_timer), if a user already has a running timer when a meeting/resume code path fires, the commit will now raise IntegrityError instead of silently creating a duplicate. The new partial unique index is the correct invariant; these two call sites should be wrapped in the same try/except IntegrityError -> 409 pattern used in start_timer. Risk is low (these paths assume no manual timer running) but should be hardened.
+- backend/app/database.py: _build_engine does not currently honor a hypothetical staging ENVIRONMENT distinctly — anything other than literal production falls through to NullPool. Acceptable for now; revisit if a staging tier ever needs the pooled engine.
