@@ -14,12 +14,11 @@ WebSocket lifecycle (per connection):
   7. Disconnect: cleanup connection + team membership entries.
 """
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
-from typing import Dict, Set, Optional
-import json
-import logging
 import asyncio
-from datetime import datetime
+import logging
+from typing import Dict, Optional, Set
+
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
 try:  # websockets is a transitive dep of starlette/uvicorn
     from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
@@ -31,11 +30,11 @@ except ImportError:  # pragma: no cover - safety net only
         pass
 
 from app.dependencies import (
-    get_current_user_ws,
-    get_current_user,
-    get_company_filter,
     FILTER_NULL_COMPANY,
     BlacklistUnavailableError,
+    get_company_filter,
+    get_current_user,
+    get_current_user_ws,
 )
 from app.models import User
 from app.utils.timewindow import now_utc
@@ -267,10 +266,12 @@ async def load_active_timers_from_db(company_id: Optional[int] = None) -> int:
     the FastAPI startup hook.
     Returns the number of rows loaded (0 on failure).
     """
-    from app.database import async_session
-    from app.models import TimeEntry, User, Project, Task
-    from sqlalchemy import select
     from datetime import timezone
+
+    from sqlalchemy import select
+
+    from app.database import async_session
+    from app.models import Project, Task, TimeEntry, User
 
     try:
         async with async_session() as db:
@@ -435,9 +436,10 @@ async def _load_user_team_ids(user_id: int) -> list[int]:
     Team-scoped broadcasts will then simply not reach this connection
     until the client reconnects.
     """
+    from sqlalchemy import select
+
     from app.database import async_session
     from app.models import TeamMember
-    from sqlalchemy import select
 
     try:
         async with async_session() as db:

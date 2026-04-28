@@ -36,9 +36,15 @@ def init_sentry() -> bool:
 
     try:
         import sentry_sdk  # type: ignore[import-untyped]
-        from sentry_sdk.integrations.fastapi import FastApiIntegration  # type: ignore[import-untyped]
-        from sentry_sdk.integrations.starlette import StarletteIntegration  # type: ignore[import-untyped]
-        from sentry_sdk.integrations.logging import LoggingIntegration  # type: ignore[import-untyped]
+        from sentry_sdk.integrations.fastapi import (
+            FastApiIntegration,  # type: ignore[import-untyped]
+        )
+        from sentry_sdk.integrations.logging import (
+            LoggingIntegration,  # type: ignore[import-untyped]
+        )
+        from sentry_sdk.integrations.starlette import (
+            StarletteIntegration,  # type: ignore[import-untyped]
+        )
 
         environment = getattr(settings, "ENVIRONMENT", "development")
         app_version = getattr(settings, "APP_VERSION", "unknown")

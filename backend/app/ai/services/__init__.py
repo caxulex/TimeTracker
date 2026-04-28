@@ -12,45 +12,45 @@ Contains all AI-powered service implementations:
 
 from app.ai.services.ai_client import (
     AIClient,
+    AIProviderError,
+    RateLimitError,
     get_ai_client,
     reset_ai_client,
-    AIProviderError,
-    RateLimitError
-)
-from app.ai.services.suggestion_service import (
-    SuggestionService,
-    SuggestionResult,
-    get_suggestion_service
 )
 from app.ai.services.anomaly_service import (
-    AnomalyService,
     Anomaly,
-    AnomalyType,
+    AnomalyService,
     AnomalySeverity,
-    get_anomaly_service
+    AnomalyType,
+    get_anomaly_service,
 )
 from app.ai.services.forecasting_service import (
     ForecastingService,
-    PayrollForecast,
-    OvertimeRisk,
-    ProjectBudgetForecast,
     ForecastType,
+    OvertimeRisk,
+    PayrollForecast,
+    ProjectBudgetForecast,
     RiskLevel,
-    get_forecasting_service
+    get_forecasting_service,
 )
 from app.ai.services.nlp_service import (
-    NLPService,
     NLPParseResult,
+    NLPService,
     ParseConfidence,
-    get_nlp_service
+    get_nlp_service,
 )
 from app.ai.services.reporting_service import (
     AIReportingService,
-    ReportSummary,
     Insight,
-    InsightType,
     InsightSeverity,
-    get_reporting_service
+    InsightType,
+    ReportSummary,
+    get_reporting_service,
+)
+from app.ai.services.suggestion_service import (
+    SuggestionResult,
+    SuggestionService,
+    get_suggestion_service,
 )
 
 __all__ = [

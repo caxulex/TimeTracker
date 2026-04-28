@@ -12,14 +12,15 @@ the canonical helpers from ``app.dependencies``. ``RoleChecker`` /
 """
 
 from typing import List
+
 from fastapi import Depends, HTTPException, status
 
-from app.models import User
 from app.dependencies import (
     get_current_active_user,
     require_admin,  # canonical: super_admin | admin | company_admin
-    require_role,   # canonical: list[str] arg
+    require_role,  # canonical: list[str] arg
 )
+from app.models import User
 
 __all__ = [
     "require_admin",

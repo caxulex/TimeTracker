@@ -5,9 +5,10 @@
 # ============================================
 
 from datetime import datetime
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class NotificationTypeEnum(str, Enum):

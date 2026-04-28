@@ -8,32 +8,32 @@ Provides:
 - Usage statistics and monitoring
 """
 
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import User
 from app.dependencies import get_current_active_user
-from app.services.ai_feature_service import AIFeatureManager
+from app.models import User
 from app.schemas.ai_features import (
-    AIFeatureSettingResponse,
-    AIFeatureSettingUpdate,
-    UserAIPreferenceResponse,
-    UserAIPreferenceUpdate,
-    FeatureStatusResponse,
-    UserFeaturesResponse,
     AdminFeaturesResponse,
     AdminFeatureSummary,
-    FeatureUsageStats,
-    UserPreferenceAdminView,
     AdminOverrideRequest,
-    UsageSummaryResponse,
-    UserUsageSummaryResponse,
-    BatchUserOverrideRequest,
+    AIFeatureSettingResponse,
+    AIFeatureSettingUpdate,
     BatchUpdateResponse,
+    BatchUserOverrideRequest,
+    FeatureStatusResponse,
+    FeatureUsageStats,
+    UsageSummaryResponse,
+    UserAIPreferenceUpdate,
+    UserFeaturesResponse,
+    UserPreferenceAdminView,
+    UserUsageSummaryResponse,
 )
+from app.services.ai_feature_service import AIFeatureManager
 
 router = APIRouter(prefix="/ai/features", tags=["ai-features"])
 
@@ -73,7 +73,7 @@ async def list_all_features(
 ):
     """
     List all available AI features.
-    
+
     Returns list of all AI features with their global settings.
     Does not include user-specific status.
     """
@@ -89,7 +89,7 @@ async def get_my_features(
 ):
     """
     Get all AI features with status for current user.
-    
+
     Returns complete list of features with:
     - Final computed status (is_enabled)
     - Global setting
@@ -114,7 +114,7 @@ async def get_my_feature_status(
     Get status of a specific feature for current user.
     """
     manager = AIFeatureManager(db)
-    
+
     # Verify feature exists
     global_setting = await manager.get_global_setting(feature_id)
     if not global_setting:
@@ -122,7 +122,7 @@ async def get_my_feature_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Feature '{feature_id}' not found"
         )
-    
+
     status_info = await manager.get_feature_status_for_user(feature_id, current_user.id)
     return FeatureStatusResponse(
         feature_id=feature_id,
@@ -142,12 +142,12 @@ async def toggle_my_feature(
 ):
     """
     Toggle a feature for yourself.
-    
+
     Note: If admin has overridden your setting, this won't have any effect.
     The response will indicate if admin override is in place.
     """
     manager = AIFeatureManager(db)
-    
+
     # Verify feature exists
     global_setting = await manager.get_global_setting(feature_id)
     if not global_setting:
@@ -155,7 +155,7 @@ async def toggle_my_feature(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Feature '{feature_id}' not found"
         )
-    
+
     # Check if admin override is in place
     existing_pref = await manager.get_user_preference(current_user.id, feature_id)
     if existing_pref and existing_pref.admin_override:
@@ -163,14 +163,14 @@ async def toggle_my_feature(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This setting has been locked by an administrator"
         )
-    
+
     # Update user preference
     await manager.set_user_preference(
         user_id=current_user.id,
         feature_id=feature_id,
         is_enabled=update.is_enabled
     )
-    
+
     # Return updated status
     status_info = await manager.get_feature_status_for_user(feature_id, current_user.id)
     return FeatureStatusResponse(
@@ -190,7 +190,7 @@ async def check_feature_enabled(
 ) -> dict:
     """
     Quick check if a feature is enabled for current user.
-    
+
     Use this endpoint from AI services before making API calls.
     Returns simple boolean response for performance.
     """
@@ -210,7 +210,7 @@ async def get_admin_features_summary(
 ):
     """
     Get admin-level features summary.
-    
+
     Returns all features with:
     - Global settings
     - User adoption stats
@@ -218,7 +218,7 @@ async def get_admin_features_summary(
     """
     manager = AIFeatureManager(db)
     features = await manager.get_admin_features_summary()
-    
+
     return AdminFeaturesResponse(
         features=[
             AdminFeatureSummary(
@@ -246,7 +246,7 @@ async def toggle_global_feature(
 ):
     """
     Toggle a feature globally (super_admin or platform admin only).
-    
+
     When disabled globally, no user can access the feature.
     Note: Company admins cannot modify global settings - they can only
     set user overrides for their company's users.
@@ -257,21 +257,21 @@ async def toggle_global_feature(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only platform administrators can modify global AI feature settings. Company admins can set user overrides instead."
         )
-    
+
     manager = AIFeatureManager(db)
-    
+
     setting = await manager.update_global_setting(
         feature_id=feature_id,
         is_enabled=update.is_enabled,
         updated_by=current_user.id
     )
-    
+
     if not setting:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Feature '{feature_id}' not found"
         )
-    
+
     return AIFeatureSettingResponse.model_validate(setting)
 
 
@@ -293,23 +293,23 @@ async def get_user_preferences_admin(
     query = select(User).where(User.id == user_id)
     result = await db.execute(query)
     user = result.scalar_one_or_none()
-    
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User {user_id} not found"
         )
-    
+
     # Multi-tenancy: admin and company_admin can only see users from their company
     if current_user.role in ["admin", "company_admin"] and user.company_id != current_user.company_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only view users from your own company"
         )
-    
+
     manager = AIFeatureManager(db)
     features = await manager.get_user_features_summary(user_id)
-    
+
     return UserPreferenceAdminView(
         user_id=user.id,
         user_name=user.name,
@@ -328,7 +328,7 @@ async def set_user_override(
 ):
     """
     Set admin override for a user's feature (admin only).
-    
+
     This locks the setting so the user cannot change it.
     Company admins can only set overrides for users in their company.
     """
@@ -336,22 +336,22 @@ async def set_user_override(
     query = select(User).where(User.id == user_id)
     result = await db.execute(query)
     user = result.scalar_one_or_none()
-    
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User {user_id} not found"
         )
-    
+
     # Multi-tenancy: admin and company_admin can only modify users from their company
     if current_user.role in ["admin", "company_admin"] and user.company_id != current_user.company_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only modify AI settings for users in your own company"
         )
-    
+
     manager = AIFeatureManager(db)
-    
+
     # Verify feature exists
     global_setting = await manager.get_global_setting(feature_id)
     if not global_setting:
@@ -359,14 +359,14 @@ async def set_user_override(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Feature '{feature_id}' not found"
         )
-    
+
     await manager.set_admin_override(
         user_id=user_id,
         feature_id=feature_id,
         is_enabled=override.is_enabled,
         admin_id=current_user.id
     )
-    
+
     status_info = await manager.get_feature_status_for_user(feature_id, user_id)
     return FeatureStatusResponse(
         feature_id=feature_id,
@@ -386,7 +386,7 @@ async def remove_user_override(
 ):
     """
     Remove admin override for a user's feature.
-    
+
     This restores the user's ability to control the setting.
     Company admins can only remove overrides for users in their company.
     """
@@ -394,30 +394,30 @@ async def remove_user_override(
     query = select(User).where(User.id == user_id)
     result = await db.execute(query)
     user = result.scalar_one_or_none()
-    
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User {user_id} not found"
         )
-    
+
     # Multi-tenancy: admin and company_admin can only modify users from their company
     if current_user.role in ["admin", "company_admin"] and user.company_id != current_user.company_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only modify AI settings for users in your own company"
         )
-    
+
     manager = AIFeatureManager(db)
-    
+
     pref = await manager.remove_admin_override(user_id, feature_id)
-    
+
     if not pref:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No override found for user {user_id} on feature '{feature_id}'"
         )
-    
+
     return {"message": "Override removed", "feature_id": feature_id, "user_id": user_id}
 
 
@@ -432,7 +432,7 @@ async def batch_set_user_overrides(
     Company admins can only set overrides for users in their company.
     """
     manager = AIFeatureManager(db)
-    
+
     # Verify feature exists
     global_setting = await manager.get_global_setting(request.feature_id)
     if not global_setting:
@@ -440,24 +440,24 @@ async def batch_set_user_overrides(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Feature '{request.feature_id}' not found"
         )
-    
+
     # Multi-tenancy: verify all users belong to company_admin's company
     if current_user.role == "company_admin":
         # Fetch all users to check their company
         user_query = select(User).where(User.id.in_(request.user_ids))
         result = await db.execute(user_query)
         users = result.scalars().all()
-        
+
         for user in users:
             if user.company_id != current_user.company_id:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"You can only modify AI settings for users in your own company (user {user.id} is in a different company)"
                 )
-    
+
     updated = 0
     failed = 0
-    
+
     for user_id in request.user_ids:
         try:
             await manager.set_admin_override(
@@ -469,7 +469,7 @@ async def batch_set_user_overrides(
             updated += 1
         except Exception:
             failed += 1
-    
+
     return BatchUpdateResponse(
         success=failed == 0,
         updated_count=updated,
@@ -489,23 +489,23 @@ async def seed_ai_features(
 ):
     """
     Seed default AI features into the database.
-    
+
     Run this if the ai_feature_settings table is empty.
     Only admins can run this endpoint.
     """
     from sqlalchemy import text
-    
+
     # Check if features already exist
     result = await db.execute(text("SELECT COUNT(*) FROM ai_feature_settings"))
     count = result.scalar()
-    
+
     if count > 0:
         return {
             "status": "already_seeded",
             "message": f"AI features already exist ({count} features found)",
             "count": count
         }
-    
+
     features = [
         ("ai_suggestions", "Time Entry Suggestions", "AI-powered suggestions for projects and tasks based on your work patterns", True, True, "gemini"),
         ("ai_anomaly_alerts", "Anomaly Detection", "Automatic detection of unusual work patterns like overtime or missing entries", True, True, "gemini"),
@@ -514,11 +514,11 @@ async def seed_ai_features(
         ("ai_report_summaries", "AI Report Summaries", "AI-generated insights and summaries in your reports", False, True, "gemini"),
         ("ai_task_estimation", "Task Duration Estimation", "AI-powered estimates for how long tasks will take", False, True, "gemini"),
     ]
-    
+
     for feature in features:
         await db.execute(
             text("""
-                INSERT INTO ai_feature_settings 
+                INSERT INTO ai_feature_settings
                 (feature_id, feature_name, description, is_enabled, requires_api_key, api_provider)
                 VALUES (:fid, :fname, :desc, :enabled, :req_key, :provider)
                 ON CONFLICT (feature_id) DO NOTHING
@@ -532,9 +532,9 @@ async def seed_ai_features(
                 "provider": feature[5]
             }
         )
-    
+
     await db.commit()
-    
+
     return {
         "status": "success",
         "message": f"Seeded {len(features)} AI features",

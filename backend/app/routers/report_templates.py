@@ -3,16 +3,17 @@ Reports Templates Router - TASK-030 & TASK-031
 Endpoints for report templates and scheduled reports
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List, Optional
 from datetime import date
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import User
 from app.dependencies import get_current_user, require_role
-from app.services.report_templates import ReportService, ReportType
+from app.models import User
+from app.services.report_templates import ReportService
 from app.services.scheduled_reports import ScheduledReportService, ScheduleFrequency
 
 router = APIRouter()
@@ -78,7 +79,7 @@ async def generate_weekly_report(
     # Users can only generate their own reports unless admin/manager
     if user_id and user_id != current_user.id and current_user.role not in ["admin", "manager"]:
         raise HTTPException(status_code=403, detail="Cannot generate reports for other users")
-    
+
     target_user_id = user_id or current_user.id
     return await ReportService.generate_weekly_summary(db, target_user_id, week_offset)
 
@@ -94,7 +95,7 @@ async def generate_monthly_report(
     """Generate a monthly summary report"""
     if user_id and user_id != current_user.id and current_user.role not in ["admin", "manager"]:
         raise HTTPException(status_code=403, detail="Cannot generate reports for other users")
-    
+
     target_user_id = user_id or current_user.id
     return await ReportService.generate_monthly_summary(db, target_user_id, year, month)
 
@@ -121,7 +122,7 @@ async def generate_productivity_report(
     """Generate a productivity analysis report"""
     if user_id and user_id != current_user.id and current_user.role not in ["admin", "manager"]:
         raise HTTPException(status_code=403, detail="Cannot generate reports for other users")
-    
+
     target_user_id = user_id or current_user.id
     return await ReportService.generate_productivity_analysis(db, target_user_id, days)
 
@@ -155,11 +156,11 @@ async def create_scheduled_report(
     template = ReportService.get_template(request.template_id)
     if not template:
         raise HTTPException(status_code=400, detail="Invalid template ID")
-    
+
     # Validate frequency
     if request.frequency not in [f.value for f in ScheduleFrequency]:
         raise HTTPException(status_code=400, detail="Invalid frequency")
-    
+
     report = ScheduledReportService.create_scheduled_report(
         name=request.name,
         template_id=request.template_id,
@@ -168,7 +169,7 @@ async def create_scheduled_report(
         user_id=current_user.id,
         params=request.params
     )
-    
+
     return report.to_dict()
 
 
@@ -181,11 +182,11 @@ async def get_scheduled_report(
     report = ScheduledReportService.get_scheduled_report(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Scheduled report not found")
-    
+
     # Check ownership
     if report.user_id != current_user.id and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
     return report.to_dict()
 
 
@@ -199,10 +200,10 @@ async def update_scheduled_report(
     report = ScheduledReportService.get_scheduled_report(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Scheduled report not found")
-    
+
     if report.user_id != current_user.id and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
     updated = ScheduledReportService.update_scheduled_report(
         report_id=report_id,
         name=request.name,
@@ -211,7 +212,7 @@ async def update_scheduled_report(
         enabled=request.enabled,
         params=request.params
     )
-    
+
     return updated.to_dict()
 
 
@@ -224,10 +225,10 @@ async def delete_scheduled_report(
     report = ScheduledReportService.get_scheduled_report(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Scheduled report not found")
-    
+
     if report.user_id != current_user.id and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
     ScheduledReportService.delete_scheduled_report(report_id)
     return {"message": "Scheduled report deleted"}
 
@@ -241,10 +242,10 @@ async def toggle_scheduled_report(
     report = ScheduledReportService.get_scheduled_report(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Scheduled report not found")
-    
+
     if report.user_id != current_user.id and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
     updated = ScheduledReportService.toggle_report(report_id)
     return {"enabled": updated.enabled}
 

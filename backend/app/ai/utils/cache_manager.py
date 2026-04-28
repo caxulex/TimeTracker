@@ -5,20 +5,20 @@ Manages Redis caching for AI responses to reduce API costs and improve latency.
 Uses existing Redis infrastructure from the application.
 """
 
-import json
 import hashlib
-from typing import Optional, Any, Dict
-from datetime import datetime, timezone
+import json
+from typing import Any, Dict, Optional
+
 import redis.asyncio as redis
 
-from app.config import settings
 from app.ai.config import ai_settings
+from app.config import settings
 
 
 class AICacheManager:
     """
     Manages caching of AI responses using Redis.
-    
+
     Cache key patterns:
     - ai:suggestions:{user_id}:{context_hash}
     - ai:anomalies:{date}
@@ -63,7 +63,7 @@ class AICacheManager:
             r = await self.get_redis()
             context_hash = self._hash_context(context)
             key = self._make_key("suggestions", user_id, context_hash)
-            
+
             data = await r.get(key)
             if data:
                 return json.loads(data)
@@ -82,7 +82,7 @@ class AICacheManager:
             r = await self.get_redis()
             context_hash = self._hash_context(context)
             key = self._make_key("suggestions", user_id, context_hash)
-            
+
             await r.setex(
                 key,
                 ai_settings.CACHE_TTL_SUGGESTIONS,
@@ -108,7 +108,7 @@ class AICacheManager:
                 key = self._make_key("anomalies", date, user_id)
             else:
                 key = self._make_key("anomalies", date, "all")
-            
+
             data = await r.get(key)
             if data:
                 return json.loads(data)
@@ -129,7 +129,7 @@ class AICacheManager:
                 key = self._make_key("anomalies", date, user_id)
             else:
                 key = self._make_key("anomalies", date, "all")
-            
+
             await r.setex(
                 key,
                 ai_settings.CACHE_TTL_ANOMALIES,
@@ -148,7 +148,7 @@ class AICacheManager:
         try:
             r = await self.get_redis()
             key = self._make_key("user_context", user_id)
-            
+
             data = await r.get(key)
             if data:
                 return json.loads(data)
@@ -165,7 +165,7 @@ class AICacheManager:
         try:
             r = await self.get_redis()
             key = self._make_key("user_context", user_id)
-            
+
             await r.setex(
                 key,
                 ai_settings.CACHE_TTL_USER_CONTEXT,
@@ -188,7 +188,7 @@ class AICacheManager:
         try:
             r = await self.get_redis()
             key = self._make_key("forecast", forecast_type, entity_id)
-            
+
             data = await r.get(key)
             if data:
                 return json.loads(data)
@@ -206,7 +206,7 @@ class AICacheManager:
         try:
             r = await self.get_redis()
             key = self._make_key("forecast", forecast_type, entity_id)
-            
+
             await r.setex(
                 key,
                 ai_settings.CACHE_TTL_FORECASTS,
@@ -232,19 +232,19 @@ class AICacheManager:
         try:
             r = await self.get_redis()
             key = self._make_key("ratelimit", user_id, window_minutes)
-            
+
             current = await r.get(key)
             if current is None:
                 # First request in window
                 await r.setex(key, window_minutes * 60, "1")
                 return True, 1
-            
+
             count = int(current)
             limit = ai_settings.REQUESTS_PER_MINUTE if window_minutes == 1 else ai_settings.REQUESTS_PER_HOUR
-            
+
             if count >= limit:
                 return False, count
-            
+
             await r.incr(key)
             return True, count + 1
         except Exception:
@@ -256,7 +256,7 @@ class AICacheManager:
         try:
             r = await self.get_redis()
             key = self._make_key("ratelimit", user_id, 1)
-            
+
             # Use pipeline for atomic operation
             pipe = r.pipeline()
             pipe.incr(key)
@@ -274,16 +274,16 @@ class AICacheManager:
         """Invalidate all cache for a user."""
         try:
             r = await self.get_redis()
-            
+
             # Find all keys for this user
             pattern = self._make_key("*", user_id, "*")
             keys = []
             async for key in r.scan_iter(match=pattern):
                 keys.append(key)
-            
+
             # Also check user context
             keys.append(self._make_key("user_context", user_id))
-            
+
             if keys:
                 await r.delete(*keys)
             return True
@@ -294,14 +294,14 @@ class AICacheManager:
         """Get cache statistics for monitoring."""
         try:
             r = await self.get_redis()
-            
+
             stats = {
                 "suggestion_keys": 0,
                 "anomaly_keys": 0,
                 "user_context_keys": 0,
                 "ratelimit_keys": 0,
             }
-            
+
             async for key in r.scan_iter(match=f"{self._prefix}:suggestions:*"):
                 stats["suggestion_keys"] += 1
             async for key in r.scan_iter(match=f"{self._prefix}:anomalies:*"):
@@ -310,7 +310,7 @@ class AICacheManager:
                 stats["user_context_keys"] += 1
             async for key in r.scan_iter(match=f"{self._prefix}:ratelimit:*"):
                 stats["ratelimit_keys"] += 1
-            
+
             return stats
         except Exception as e:
             return {"error": str(e)}

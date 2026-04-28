@@ -3,19 +3,33 @@ Reports and analytics router
 """
 
 import logging
-from typing import Any, Dict, Optional, List
 from collections import defaultdict
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from datetime import datetime, date, timedelta, timezone, time
+from sqlalchemy import and_, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import User, Team, TeamMember, Project, Task, TimeEntry
-from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY, get_company_timezone
-from app.services.email_log_utils import log_email_sent, log_email_failed
-from app.utils.timewindow import day_bounds, range_bounds, week_bounds, month_bounds, now_utc, local_today
+from app.dependencies import (
+    FILTER_NULL_COMPANY,
+    apply_company_filter,
+    get_company_filter,
+    get_company_timezone,
+    get_current_active_user,
+)
+from app.models import Project, Task, Team, TeamMember, TimeEntry, User
+from app.services.email_log_utils import log_email_failed, log_email_sent
+from app.utils.timewindow import (
+    day_bounds,
+    local_today,
+    month_bounds,
+    now_utc,
+    range_bounds,
+    week_bounds,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -148,13 +162,13 @@ def calculate_entry_duration_for_period(entry: TimeEntry, period_start: datetime
     """
     Calculate duration of a time entry that overlaps with a specific period.
     This handles entries that span multiple days by only counting time within the period.
-    
+
     Args:
         entry: The time entry
         period_start: Start of the period (e.g., start of day)
         period_end: End of the period (e.g., end of day)
         now: Current time (for running timers)
-    
+
     Returns:
         Seconds of the entry that fall within the period
     """
@@ -162,7 +176,7 @@ def calculate_entry_duration_for_period(entry: TimeEntry, period_start: datetime
     entry_start = entry.start_time
     if entry_start.tzinfo is None:
         entry_start = entry_start.replace(tzinfo=timezone.utc)
-    
+
     # Get entry end time (or now for running timers)
     if entry.end_time is None:
         entry_end = now
@@ -170,15 +184,15 @@ def calculate_entry_duration_for_period(entry: TimeEntry, period_start: datetime
         entry_end = entry.end_time
         if entry_end.tzinfo is None:
             entry_end = entry_end.replace(tzinfo=timezone.utc)
-    
+
     # Calculate overlap between entry and period
     overlap_start = max(entry_start, period_start)
     overlap_end = min(entry_end, period_end)
-    
+
     # If no overlap, return 0
     if overlap_start >= overlap_end:
         return 0
-    
+
     return int((overlap_end - overlap_start).total_seconds())
 
 
@@ -199,10 +213,10 @@ async def get_dashboard_stats(
     today_start, today_end = day_bounds(today_local, tz)
     week_start, week_end = week_bounds(today_local, tz)
     month_start, month_end = month_bounds(today_local, tz)
-    
+
     # Multi-tenancy: get company filter
     company_id = get_company_filter(current_user)
-    
+
     # Base filter: admins see all in company, regular users see team data
     if current_user.role in ["super_admin", "admin"]:
         if company_id is None:
@@ -220,7 +234,7 @@ async def get_dashboard_stats(
         user_teams_query = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
         team_members = select(TeamMember.user_id).where(TeamMember.team_id.in_(user_teams_query))
         user_filter = TimeEntry.user_id.in_(team_members)
-    
+
     # Today's time - fetch entries that OVERLAP with today (started before today end AND ended after today start or still running)
     # This includes: entries that started today, entries from yesterday still running, entries spanning midnight
     today_query = select(TimeEntry).where(
@@ -233,7 +247,7 @@ async def get_dashboard_stats(
     today_entries = today_result.scalars().all()
     # Calculate only the portion that falls within today
     today_seconds = sum(calculate_entry_duration_for_period(e, today_start, today_end, now) for e in today_entries)
-    
+
     # This week's time - fetch entries that overlap with this week
     week_query = select(TimeEntry).where(
         TimeEntry.start_time < week_end,
@@ -244,7 +258,7 @@ async def get_dashboard_stats(
     week_result = await db.execute(week_query)
     week_entries = week_result.scalars().all()
     week_seconds = sum(calculate_entry_duration_for_period(e, week_start, week_end, now) for e in week_entries)
-    
+
     # This month's time - fetch entries that overlap with this month
     month_query = select(TimeEntry).where(
         TimeEntry.start_time < month_end,
@@ -255,11 +269,11 @@ async def get_dashboard_stats(
     month_result = await db.execute(month_query)
     month_entries = month_result.scalars().all()
     month_seconds = sum(calculate_entry_duration_for_period(e, month_start, month_end, now) for e in month_entries)
-    
+
     # Active projects (user has access to, within company)
     user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
     project_query = select(func.count(Project.id)).join(Team, Project.team_id == Team.id).where(
-        Project.team_id.in_(user_teams), 
+        Project.team_id.in_(user_teams),
         Project.is_archived == False
     )
     if company_id is None:
@@ -270,13 +284,13 @@ async def get_dashboard_stats(
         project_query = project_query.where(Team.company_id == company_id)
     active_projects_result = await db.execute(project_query)
     active_projects = active_projects_result.scalar() or 0
-    
+
     # Pending tasks assigned to user
     pending_tasks = 0  # Simplified for now
-    
+
     # Check for running timer
     running_timer = any(e.end_time is None for e in today_entries)
-    
+
     return DashboardStats(
         today_seconds=today_seconds,
         today_hours=round(today_seconds / 3600, 2),
@@ -312,10 +326,10 @@ async def get_weekly_summary(
 
     # Half-open bounds in tenant local time (B7)
     start_datetime, end_datetime = range_bounds(week_start, week_end, tz)
-    
+
     # Multi-tenancy: get company filter
     company_id = get_company_filter(current_user)
-    
+
     # Build user filter: admins see all in company, regular users see team data
     if current_user.role in ["super_admin", "admin"]:
         if company_id is None:
@@ -331,7 +345,7 @@ async def get_weekly_summary(
         user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
         team_members = select(TeamMember.user_id).where(TeamMember.team_id.in_(user_teams))
         user_filter = TimeEntry.user_id.in_(team_members)
-    
+
     # Fetch entries that OVERLAP with this week (not just started within)
     entries_query = select(TimeEntry).where(
         TimeEntry.start_time < end_datetime,  # Started before week ends
@@ -341,28 +355,28 @@ async def get_weekly_summary(
         entries_query = entries_query.where(user_filter)
     entries_result = await db.execute(entries_query)
     all_entries = entries_result.scalars().all()
-    
+
     # Calculate total seconds for the week using period overlap
     total_seconds = sum(calculate_entry_duration_for_period(e, start_datetime, end_datetime, now) for e in all_entries)
-    
+
     # Daily breakdown - calculate overlap for each day
     daily_breakdown = []
     for i in range(7):
         day = week_start + timedelta(days=i)
         day_start, day_end = day_bounds(day, tz)
-        
+
         # Calculate seconds for this day from ALL entries that overlap with this day
         day_seconds = sum(calculate_entry_duration_for_period(e, day_start, day_end, now) for e in all_entries)
         # Count entries that have any overlap with this day
         day_count = sum(1 for e in all_entries if calculate_entry_duration_for_period(e, day_start, day_end, now) > 0)
-        
+
         daily_breakdown.append(DailySummary(
             date=day,
             total_seconds=day_seconds,
             total_hours=round(day_seconds / 3600, 2),
             entry_count=day_count
         ))
-    
+
     return WeeklySummary(
         week_start=week_start,
         week_end=week_end,
@@ -391,10 +405,10 @@ async def get_time_by_project(
         end_date = today_local
 
     start_datetime, end_datetime = range_bounds(start_date, end_date, tz)
-    
+
     # Get company filter for multi-tenant data isolation
     company_filter = get_company_filter(current_user)
-    
+
     # Get accessible projects and users for current user
     if current_user.role in ["super_admin", "admin", "company_admin"]:
         # For admins, get projects within their company
@@ -409,7 +423,7 @@ async def get_time_by_project(
         # Get all team members from user's teams
         team_members = select(TeamMember.user_id).where(TeamMember.team_id.in_(user_teams))
         user_filter = TimeEntry.user_id.in_(team_members)
-    
+
     # Fetch entries that OVERLAP with the period (not just started within)
     query_filters = [
         TimeEntry.start_time < end_datetime,  # Started before period ends
@@ -418,16 +432,16 @@ async def get_time_by_project(
     ]
     if user_filter is not True:
         query_filters.append(user_filter)
-    
+
     result = await db.execute(
         select(TimeEntry, Project.name)
         .outerjoin(Project, TimeEntry.project_id == Project.id)
         .where(*query_filters)
     )
-    
+
     # Group by project and calculate totals - only count time within the period
     project_data: Dict[int, Dict[str, Any]] = defaultdict(lambda: {"name": "", "seconds": 0, "count": 0})
-    
+
     for entry, project_name in result.all():
         pid = entry.project_id or 0  # Group meeting entries (NULL project) under key 0
         project_data[pid]["name"] = project_name or "Meeting"
@@ -436,7 +450,7 @@ async def get_time_by_project(
         if entry_seconds > 0:
             project_data[pid]["seconds"] += entry_seconds
             project_data[pid]["count"] += 1
-    
+
     summaries = []
     for project_id, data in sorted(project_data.items(), key=lambda x: x[1]["seconds"], reverse=True):
         total_seconds = data["seconds"]
@@ -475,7 +489,7 @@ async def get_time_by_task(
         end_date = today_local
 
     start_datetime, end_datetime = range_bounds(start_date, end_date, tz)
-    
+
     # Fetch entries that OVERLAP with the period
     query = (
         select(TimeEntry, Task.name.label("task_name"), Task.status, Project.name.label("project_name"))
@@ -488,15 +502,15 @@ async def get_time_by_task(
             (TimeEntry.end_time >= start_datetime) | (TimeEntry.end_time.is_(None))
         )
     )
-    
+
     if project_id:
         query = query.where(TimeEntry.project_id == project_id)
-    
+
     result = await db.execute(query)
-    
+
     # Group by task and calculate totals - only count time within period
     task_data: Dict[int, Dict[str, Any]] = defaultdict(lambda: {"task_name": "", "project_name": "", "status": "", "seconds": 0})
-    
+
     for entry, task_name, task_status, project_name in result.all():
         tid = entry.task_id
         task_data[tid]["task_name"] = task_name
@@ -505,7 +519,7 @@ async def get_time_by_task(
         entry_seconds = calculate_entry_duration_for_period(entry, start_datetime, end_datetime, now)
         if entry_seconds > 0:
             task_data[tid]["seconds"] += entry_seconds
-    
+
     summaries = []
     for task_id, data in sorted(task_data.items(), key=lambda x: x[1]["seconds"], reverse=True):
         total_seconds = data["seconds"]
@@ -517,7 +531,7 @@ async def get_time_by_task(
             total_hours=round(total_seconds / 3600, 2),
             status=data["status"]
         ))
-    
+
     return summaries
 
 
@@ -539,7 +553,7 @@ async def get_team_report(
     team = team_result.scalar_one_or_none()
     if not team:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
-    
+
     # Check team access
     if current_user.role not in ["super_admin", "admin", "company_admin"]:
         member_check = await db.execute(
@@ -551,7 +565,7 @@ async def get_team_report(
         )
         if not member_check.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Team admin access required")
-    
+
     # Default to current local month
     if not start_date:
         start_date = local_today(tz).replace(day=1)
@@ -560,13 +574,13 @@ async def get_team_report(
 
     now = now_utc()
     start_datetime, end_datetime = range_bounds(start_date, end_date, tz)
-    
+
     # Get team members
     team_members = select(TeamMember.user_id).where(TeamMember.team_id == team_id)
-    
+
     # Get team projects
     team_projects = select(Project.id).where(Project.team_id == team_id)
-    
+
     # Fetch all entries that OVERLAP with the period (instead of using SQL aggregates)
     entries_query = (
         select(TimeEntry, Project.name.label("project_name"), User.name.label("user_name"))
@@ -581,13 +595,13 @@ async def get_team_report(
     )
     entries_result = await db.execute(entries_query)
     all_entries = entries_result.all()
-    
+
     # Calculate totals with proper period overlap
     total_seconds = 0
     total_entries = 0
     project_data: Dict[int, Dict[str, Any]] = defaultdict(lambda: {"name": "", "seconds": 0, "count": 0})
     user_data: Dict[int, Dict[str, Any]] = defaultdict(lambda: {"name": "", "seconds": 0, "count": 0})
-    
+
     for entry, project_name, user_name in all_entries:
         entry_seconds = calculate_entry_duration_for_period(entry, start_datetime, end_datetime, now)
         if entry_seconds > 0:
@@ -599,7 +613,7 @@ async def get_team_report(
             user_data[entry.user_id]["name"] = user_name
             user_data[entry.user_id]["seconds"] += entry_seconds
             user_data[entry.user_id]["count"] += 1
-    
+
     # Build by_project list
     by_project = []
     for pid, data in sorted(project_data.items(), key=lambda x: x[1]["seconds"], reverse=True):
@@ -614,7 +628,7 @@ async def get_team_report(
             budget_hours=None,
             budget_used_percent=None
         ))
-    
+
     # Build by_user list
     by_user = []
     for uid, data in sorted(user_data.items(), key=lambda x: x[1]["seconds"], reverse=True):
@@ -626,13 +640,13 @@ async def get_team_report(
             total_hours=round(seconds / 3600, 2),
             entry_count=data["count"]
         ))
-    
+
     # By day - calculate overlap for each day
     by_day = []
     current_date = start_date
     while current_date <= end_date:
         day_start, day_end = day_bounds(current_date, tz)
-        
+
         day_seconds = 0
         day_count = 0
         for entry, _, _ in all_entries:
@@ -640,16 +654,16 @@ async def get_team_report(
             if entry_day_seconds > 0:
                 day_seconds += entry_day_seconds
                 day_count += 1
-        
+
         by_day.append(DailySummary(
             date=current_date,
             total_seconds=day_seconds,
             total_hours=round(day_seconds / 3600, 2),
             entry_count=day_count
         ))
-        
+
         current_date += timedelta(days=1)
-    
+
     return TimeReport(
         start_date=start_date,
         end_date=end_date,
@@ -674,7 +688,7 @@ async def export_time_entries(
 ):
     """Export time entries (JSON or CSV format)"""
     start_datetime, end_datetime = range_bounds(start_date, end_date, tz)
-    
+
     # Fetch entries that OVERLAP with the export period
     query = (
         select(
@@ -693,25 +707,26 @@ async def export_time_entries(
         )
         .order_by(TimeEntry.start_time.desc())
     )
-    
+
     if project_id:
         query = query.where(TimeEntry.project_id == project_id)
-    
+
     result = await db.execute(query)
     rows = result.all()
-    
+
     if format == "csv":
         import csv
         import io
+
         from fastapi.responses import StreamingResponse
-        
+
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow([
             "Date", "Start Time", "End Time", "Duration (hours)",
             "Project", "Task", "Description"
         ])
-        
+
         for row in rows:
             entry = row[0]
             writer.writerow([
@@ -723,14 +738,14 @@ async def export_time_entries(
                 row.task_name or "",
                 entry.description or ""
             ])
-        
+
         output.seek(0)
         return StreamingResponse(
             iter([output.getvalue()]),
             media_type="text/csv",
             headers={"Content-Disposition": f"attachment; filename=time_entries_{start_date}_{end_date}.csv"}
         )
-    
+
     # JSON format
     entries = []
     for row in rows:
@@ -745,7 +760,7 @@ async def export_time_entries(
             "task": row.task_name,
             "description": entry.description
         })
-    
+
     return {
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
@@ -819,7 +834,7 @@ async def get_admin_dashboard(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
         )
-    
+
     now = now_utc()
     today_local = local_today(tz)
     today_start, today_end = day_bounds(today_local, tz)
@@ -828,7 +843,7 @@ async def get_admin_dashboard(
 
     # Multi-tenancy: get company filter
     company_id = get_company_filter(current_user)
-    
+
     # Build company user filter
     if company_id is None:
         user_filter = True  # Platform super_admin sees all
@@ -848,12 +863,12 @@ async def get_admin_dashboard(
         today_query = today_query.where(user_filter)
     today_entries_result = await db.execute(today_query)
     today_entries = today_entries_result.scalars().all()
-    
+
     logger.info(f"Found {len(today_entries)} time entries overlapping with today")
-    
+
     # Calculate only the portion that falls within today
     total_today = sum(calculate_entry_duration_for_period(e, today_start, today_end, now) for e in today_entries)
-    
+
     logger.info(f"FINAL total_today={total_today}")
 
     # Total time this week - entries that overlap with this week
@@ -865,7 +880,7 @@ async def get_admin_dashboard(
         week_query = week_query.where(user_filter)
     week_entries_result = await db.execute(week_query)
     week_entries = week_entries_result.scalars().all()
-    
+
     total_week = sum(calculate_entry_duration_for_period(e, week_start, week_end, now) for e in week_entries)
 
     # Total time this month - entries that overlap with this month
@@ -877,7 +892,7 @@ async def get_admin_dashboard(
         month_query = month_query.where(user_filter)
     month_entries_result = await db.execute(month_query)
     month_entries = month_entries_result.scalars().all()
-    
+
     total_month = sum(calculate_entry_duration_for_period(e, month_start, month_end, now) for e in month_entries)
 
     # Active users today - count distinct users from entries overlapping with today
@@ -905,7 +920,7 @@ async def get_admin_dashboard(
     user_totals = {}
     for entry in today_entries:
         user_id = entry.user_id
-        
+
         if user_id not in user_totals:
             # Need to fetch user name
             user_totals[user_id] = {
@@ -913,13 +928,13 @@ async def get_admin_dashboard(
                 "total_seconds": 0,
                 "entry_count": 0
             }
-        
+
         # Calculate only the portion that falls within today
         entry_seconds = calculate_entry_duration_for_period(entry, today_start, today_end, now)
         if entry_seconds > 0:
             user_totals[user_id]["total_seconds"] += entry_seconds
             user_totals[user_id]["entry_count"] += 1
-    
+
     # Fetch user names for users with entries
     if user_totals:
         user_names_query = select(User.id, User.name).where(User.id.in_(list(user_totals.keys())))
@@ -964,7 +979,7 @@ async def get_team_analytics(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
         )
-    
+
     now = now_utc()
     today_local = local_today(tz)
     today_start, _ = day_bounds(today_local, tz)
@@ -1005,7 +1020,7 @@ async def get_team_analytics(
             )
         )
         today_entries = today_entries_result.scalars().all()
-        
+
         total_today = 0
         for entry in today_entries:
             if entry.end_time is None:
@@ -1027,7 +1042,7 @@ async def get_team_analytics(
             )
         )
         week_entries = week_entries_result.scalars().all()
-        
+
         total_week = 0
         for entry in week_entries:
             if entry.end_time is None:
@@ -1049,7 +1064,7 @@ async def get_team_analytics(
             )
         )
         month_entries = month_entries_result.scalars().all()
-        
+
         total_month = 0
         for entry in month_entries:
             if entry.end_time is None:
@@ -1107,14 +1122,14 @@ async def get_team_analytics(
         for row in user_result.all():
             user_id = row.user_id
             user_name = row.name
-            
+
             if user_id not in user_totals:
                 user_totals[user_id] = {
                     "user_name": user_name,
                     "total_seconds": 0,
                     "entry_count": 0
                 }
-            
+
             if row.end_time is None:
                 start = row.start_time
                 if start.tzinfo is None:
@@ -1122,7 +1137,7 @@ async def get_team_analytics(
                 user_totals[user_id]["total_seconds"] += int((now - start).total_seconds())
             else:
                 user_totals[user_id]["total_seconds"] += (row.duration_seconds or 0)
-            
+
             user_totals[user_id]["entry_count"] += 1
 
         # Get top 3 performers
@@ -1167,12 +1182,12 @@ async def get_user_metrics(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
         )
-    
+
     # Multi-tenancy: filter user by company
     company_id = get_company_filter(current_user)
     user_query = select(User).where(User.id == user_id)
     user_query = apply_company_filter(user_query, User.company_id, company_id)
-    
+
     user_result = await db.execute(user_query)
     user = user_result.scalar_one_or_none()
     if not user:
@@ -1206,7 +1221,7 @@ async def get_user_metrics(
         )
     )
     today_entries = today_entries_result.scalars().all()
-    
+
     today_seconds = 0
     for entry in today_entries:
         if entry.end_time is None:
@@ -1228,7 +1243,7 @@ async def get_user_metrics(
         )
     )
     week_entries = week_entries_result.scalars().all()
-    
+
     week_seconds = 0
     for entry in week_entries:
         if entry.end_time is None:
@@ -1250,7 +1265,7 @@ async def get_user_metrics(
         )
     )
     month_entries = month_entries_result.scalars().all()
-    
+
     month_seconds = 0
     for entry in month_entries:
         if entry.end_time is None:
@@ -1317,14 +1332,14 @@ async def get_user_metrics(
     for row in project_result.all():
         project_id = row.project_id or 0  # Group meeting entries under key 0
         project_name = row.name or "Meeting"
-        
+
         if project_id not in project_totals:
             project_totals[project_id] = {
                 "project_name": project_name,
                 "total_seconds": 0,
                 "entry_count": 0
             }
-        
+
         if row.end_time is None:
             start = row.start_time
             if start.tzinfo is None:
@@ -1332,7 +1347,7 @@ async def get_user_metrics(
             project_totals[project_id]["total_seconds"] += int((now - start).total_seconds())
         else:
             project_totals[project_id]["total_seconds"] += (row.duration_seconds or 0)
-        
+
         project_totals[project_id]["entry_count"] += 1
 
     projects = []
@@ -1392,7 +1407,7 @@ async def get_all_users_summary(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
         )
-    
+
     now = now_utc()
     today_local = local_today(tz)
     today_start, _ = day_bounds(today_local, tz)
@@ -1414,7 +1429,7 @@ async def get_all_users_summary(
     all_users_query = select(User.id, User.name).where(User.is_active == True)
     all_users_query = apply_company_filter(all_users_query, User.company_id, company_id)
     all_users_result = await db.execute(all_users_query)
-    
+
     # Initialize all users with zero time
     user_totals = {}
     for row in all_users_result.all():
@@ -1432,18 +1447,18 @@ async def get_all_users_summary(
         TimeEntry.start_time,
         TimeEntry.end_time
     ).join(User, TimeEntry.user_id == User.id).where(TimeEntry.start_time >= start_time)
-    
+
     entries_query = apply_company_filter(entries_query, User.company_id, company_id)
-    
+
     entries_result = await db.execute(entries_query)
 
     for row in entries_result.all():
         user_id = row.user_id
-        
+
         # Only update if user exists in our list (active users)
         if user_id not in user_totals:
             continue
-        
+
         if row.end_time is None:
             start = row.start_time
             if start.tzinfo is None:
@@ -1451,7 +1466,7 @@ async def get_all_users_summary(
             user_totals[user_id]["total_seconds"] += int((now - start).total_seconds())
         else:
             user_totals[user_id]["total_seconds"] += (row.duration_seconds or 0)
-        
+
         user_totals[user_id]["entry_count"] += 1
 
     # Sort by total time descending
@@ -1505,7 +1520,7 @@ async def get_team_timesheet(
 ):
     """
     Get Team Timesheet report - shows hours worked per user per day in a grid format.
-    
+
     This report displays:
     - Rows: Each team member with their name and role
     - Columns: Each day in the date range
@@ -1513,12 +1528,12 @@ async def get_team_timesheet(
     - Horizontal totals: User's total across all days
     - Vertical totals: Team total for each day
     - Grand total: Total hours for entire team across date range
-    
+
     Args:
         start_date: Start of the reporting period (inclusive)
         end_date: End of the reporting period (inclusive)
         team_id: Optional filter by specific team (admins see all teams otherwise)
-    
+
     Returns:
         TeamTimesheetReport with user rows, daily columns, and totals
     """
@@ -1543,13 +1558,13 @@ async def get_team_timesheet(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Admin access required to view all teams"
             )
-    
+
     now = now_utc()
     start_datetime, end_datetime = range_bounds(start_date, end_date, tz)
-    
+
     # Multi-tenancy: filter by company
     company_id = get_company_filter(current_user)
-    
+
     # Build user query based on team filter and company
     if team_id:
         # Specific team selected
@@ -1559,7 +1574,7 @@ async def get_team_timesheet(
         team = team_result.scalar_one_or_none()
         if not team:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
-        
+
         # Get team members
         users_query = (
             select(User.id, User.name, User.role)
@@ -1571,10 +1586,10 @@ async def get_team_timesheet(
         # All users in company (admin view)
         users_query = select(User.id, User.name, User.role).where(User.is_active == True)
         users_query = apply_company_filter(users_query, User.company_id, company_id)
-    
+
     users_result = await db.execute(users_query)
     users = users_result.all()
-    
+
     if not users:
         # Return empty report
         dates_list = []
@@ -1582,7 +1597,7 @@ async def get_team_timesheet(
         while current <= end_date:
             dates_list.append(current)
             current += timedelta(days=1)
-        
+
         return TeamTimesheetReport(
             start_date=start_date,
             end_date=end_date,
@@ -1592,10 +1607,10 @@ async def get_team_timesheet(
             grand_total_seconds=0,
             grand_total_formatted="0:00"
         )
-    
+
     user_ids = [u.id for u in users]
     user_info = {u.id: {"name": u.name, "role": u.role or "employee"} for u in users}
-    
+
     # Fetch all time entries for these users in the date range
     entries_query = (
         select(TimeEntry)
@@ -1607,17 +1622,17 @@ async def get_team_timesheet(
     )
     entries_result = await db.execute(entries_query)
     all_entries = entries_result.scalars().all()
-    
+
     # Generate list of dates in range
     dates_list = []
     current = start_date
     while current <= end_date:
         dates_list.append(current)
         current += timedelta(days=1)
-    
+
     # Build user-day matrix: user_id -> date -> seconds
     user_day_seconds = defaultdict(lambda: defaultdict(int))
-    
+
     for entry in all_entries:
         user_id = entry.user_id
         # Calculate seconds for each day this entry overlaps
@@ -1626,34 +1641,34 @@ async def get_team_timesheet(
             day_seconds = calculate_entry_duration_for_period(entry, day_start, day_end, now)
             if day_seconds > 0:
                 user_day_seconds[user_id][day] += day_seconds
-    
+
     # Build response data
     timesheet_users = []
     daily_totals_seconds = defaultdict(int)
     grand_total = 0
-    
+
     # Sort users by name for consistent ordering
     sorted_users = sorted(users, key=lambda u: u.name.lower())
-    
+
     for user in sorted_users:
         user_id = user.id
         info = user_info[user_id]
         user_total = 0
         daily_hours = []
-        
+
         for day in dates_list:
             seconds = user_day_seconds[user_id].get(day, 0)
             user_total += seconds
             daily_totals_seconds[day] += seconds
-            
+
             daily_hours.append(TeamTimesheetUserEntry(
                 date=day,
                 seconds=seconds,
                 formatted=format_seconds_to_hhmm(seconds) if seconds > 0 else "-"
             ))
-        
+
         grand_total += user_total
-        
+
         timesheet_users.append(TeamTimesheetUser(
             user_id=user_id,
             user_name=info["name"],
@@ -1662,7 +1677,7 @@ async def get_team_timesheet(
             total_seconds=user_total,
             total_formatted=format_seconds_to_hhmm(user_total)
         ))
-    
+
     # Build daily totals
     daily_totals = []
     for day in dates_list:
@@ -1672,7 +1687,7 @@ async def get_team_timesheet(
             seconds=seconds,
             formatted=format_seconds_to_hhmm(seconds)
         ))
-    
+
     return TeamTimesheetReport(
         start_date=start_date,
         end_date=end_date,
@@ -1696,24 +1711,25 @@ async def export_team_timesheet_csv(
     Export Team Timesheet report as CSV.
     Returns a downloadable CSV file with user hours per day.
     """
-    from fastapi.responses import StreamingResponse
-    from io import StringIO
     import csv
-    
+    from io import StringIO
+
+    from fastapi.responses import StreamingResponse
+
     # Get the timesheet data using the same logic
     timesheet = await get_team_timesheet(start_date, end_date, team_id, db, current_user)
-    
+
     # Create CSV in memory
     output = StringIO()
     writer = csv.writer(output)
-    
+
     # Header row: Member, Role, Date1, Date2, ..., Total
     header = ["Member", "Role"]
     for d in timesheet.dates:
         header.append(d.strftime("%a %m/%d"))
     header.append("Total")
     writer.writerow(header)
-    
+
     # Data rows for each user
     for user in timesheet.users:
         row = [user.user_name, user.role]
@@ -1721,18 +1737,18 @@ async def export_team_timesheet_csv(
             row.append(day_entry.formatted)
         row.append(user.total_formatted)
         writer.writerow(row)
-    
+
     # Daily totals row
     totals_row = ["Daily Total", ""]
     for day_total in timesheet.daily_totals:
         totals_row.append(day_total.formatted)
     totals_row.append(timesheet.grand_total_formatted)
     writer.writerow(totals_row)
-    
+
     # Prepare response
     output.seek(0)
     filename = f"team_timesheet_{start_date}_to_{end_date}.csv"
-    
+
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
@@ -1752,24 +1768,25 @@ async def export_team_timesheet_excel(
     Export Team Timesheet report as Excel.
     Returns a downloadable Excel file with formatted user hours per day.
     """
-    from fastapi.responses import StreamingResponse
     from io import BytesIO
-    
+
+    from fastapi.responses import StreamingResponse
+
     try:
         from openpyxl import Workbook
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     except ImportError:
         raise HTTPException(status_code=500, detail="Excel export not available. Install openpyxl.")
-    
+
     # Get the timesheet data
     timesheet = await get_team_timesheet(start_date, end_date, team_id, db, current_user)
-    
+
     # Create workbook
     wb = Workbook()
     ws = wb.active
     assert ws is not None, "Workbook has no active worksheet"
     ws.title = "Team Timesheet"
-    
+
     # Styles
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="3B82F6", end_color="3B82F6", fill_type="solid")
@@ -1784,27 +1801,27 @@ async def export_team_timesheet_excel(
         top=Side(style="thin"),
         bottom=Side(style="thin")
     )
-    
+
     # Title row
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(timesheet.dates) + 3)
     title_cell = ws.cell(row=1, column=1, value=f"Team Timesheet: {start_date} to {end_date}")
     title_cell.font = Font(bold=True, size=14)
     title_cell.alignment = center_alignment
-    
+
     # Header row
     row = 3
     headers = ["Member", "Role"]
     for d in timesheet.dates:
         headers.append(d.strftime("%a\n%m/%d"))
     headers.append("Total")
-    
+
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=row, column=col, value=header)
         cell.font = header_font
         cell.fill = header_fill
         cell.alignment = center_alignment
         cell.border = thin_border
-    
+
     # Data rows
     row = 4
     for user in timesheet.users:
@@ -1812,43 +1829,43 @@ async def export_team_timesheet_excel(
         name_cell = ws.cell(row=row, column=1, value=user.user_name)
         name_cell.alignment = left_alignment
         name_cell.border = thin_border
-        
+
         # Role cell
         role_cell = ws.cell(row=row, column=2, value=user.role)
         role_cell.alignment = left_alignment
         role_cell.border = thin_border
-        
+
         # Daily hours
         col = 3
         for i, day_entry in enumerate(user.daily_hours):
             cell = ws.cell(row=row, column=col, value=day_entry.formatted)
             cell.alignment = center_alignment
             cell.border = thin_border
-            
+
             # Highlight weekends
             day_date = timesheet.dates[i]
             if day_date.weekday() >= 5:  # Saturday or Sunday
                 cell.fill = weekend_fill
             col += 1
-        
+
         # User total
         total_cell = ws.cell(row=row, column=col, value=user.total_formatted)
         total_cell.alignment = center_alignment
         total_cell.border = thin_border
         total_cell.fill = total_fill
         total_cell.font = Font(bold=True)
-        
+
         row += 1
-    
+
     # Daily totals row
     totals_row = row
     ws.cell(row=totals_row, column=1, value="Daily Total").font = Font(bold=True)
     ws.cell(row=totals_row, column=1).border = thin_border
     ws.cell(row=totals_row, column=1).fill = total_fill
-    
+
     ws.cell(row=totals_row, column=2, value="").border = thin_border
     ws.cell(row=totals_row, column=2).fill = total_fill
-    
+
     col = 3
     for i, day_total in enumerate(timesheet.daily_totals):
         cell = ws.cell(row=totals_row, column=col, value=day_total.formatted)
@@ -1857,28 +1874,28 @@ async def export_team_timesheet_excel(
         cell.fill = total_fill
         cell.font = Font(bold=True)
         col += 1
-    
+
     # Grand total cell
     grand_cell = ws.cell(row=totals_row, column=col, value=timesheet.grand_total_formatted)
     grand_cell.alignment = center_alignment
     grand_cell.border = thin_border
     grand_cell.fill = grand_total_fill
     grand_cell.font = Font(bold=True, size=12)
-    
+
     # Adjust column widths
     ws.column_dimensions['A'].width = 25
     ws.column_dimensions['B'].width = 15
     for col_idx in range(3, len(timesheet.dates) + 4):
         col_letter = chr(64 + col_idx) if col_idx <= 26 else chr(64 + (col_idx - 26))
         ws.column_dimensions[col_letter].width = 10
-    
+
     # Save to BytesIO
     output = BytesIO()
     wb.save(output)
     output.seek(0)
-    
+
     filename = f"team_timesheet_{start_date}_to_{end_date}.xlsx"
-    
+
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1898,25 +1915,32 @@ async def export_team_timesheet_pdf(
     Export Team Timesheet report as PDF.
     Returns a downloadable PDF file with formatted user hours per day.
     """
-    from fastapi.responses import StreamingResponse
     from io import BytesIO
-    
+
+    from fastapi.responses import StreamingResponse
+
     try:
         from reportlab.lib import colors
-        from reportlab.lib.pagesizes import letter, landscape
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.units import inch
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
         from reportlab.lib.enums import TA_CENTER, TA_LEFT
+        from reportlab.lib.pagesizes import landscape, letter
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import inch
+        from reportlab.platypus import (
+            Paragraph,
+            SimpleDocTemplate,
+            Spacer,
+            Table,
+            TableStyle,
+        )
     except ImportError:
         raise HTTPException(status_code=500, detail="PDF export not available. Install reportlab.")
-    
+
     # Get the timesheet data
     timesheet = await get_team_timesheet(start_date, end_date, team_id, db, current_user)
-    
+
     # Create PDF in memory
     output = BytesIO()
-    
+
     # Use landscape orientation for wide tables
     doc = SimpleDocTemplate(
         output,
@@ -1926,10 +1950,10 @@ async def export_team_timesheet_pdf(
         topMargin=0.5*inch,
         bottomMargin=0.5*inch
     )
-    
+
     elements = []
     styles = getSampleStyleSheet()
-    
+
     # Title
     title_style = ParagraphStyle(
         'CustomTitle',
@@ -1938,8 +1962,8 @@ async def export_team_timesheet_pdf(
         spaceAfter=12,
         alignment=TA_CENTER
     )
-    elements.append(Paragraph(f"Team Timesheet Report", title_style))
-    
+    elements.append(Paragraph("Team Timesheet Report", title_style))
+
     # Subtitle with date range
     subtitle_style = ParagraphStyle(
         'Subtitle',
@@ -1951,16 +1975,16 @@ async def export_team_timesheet_pdf(
     )
     elements.append(Paragraph(f"{start_date} to {end_date}", subtitle_style))
     elements.append(Spacer(1, 12))
-    
+
     # Build table data
     # Header row
     header = ["Member", "Role"]
     for d in timesheet.dates:
         header.append(d.strftime("%a\n%m/%d"))
     header.append("Total")
-    
+
     table_data = [header]
-    
+
     # Data rows
     for user in timesheet.users:
         row = [user.user_name, user.role]
@@ -1968,14 +1992,14 @@ async def export_team_timesheet_pdf(
             row.append(day_entry.formatted)
         row.append(user.total_formatted)
         table_data.append(row)
-    
+
     # Totals row
     totals_row = ["Daily Total", ""]
     for day_total in timesheet.daily_totals:
         totals_row.append(day_total.formatted)
     totals_row.append(timesheet.grand_total_formatted)
     table_data.append(totals_row)
-    
+
     # Calculate column widths dynamically
     num_cols = len(header)
     page_width = landscape(letter)[0] - 1*inch  # Total width minus margins
@@ -1984,14 +2008,14 @@ async def export_team_timesheet_pdf(
     total_col_width = 0.7*inch
     remaining_width = page_width - name_col_width - role_col_width - total_col_width
     date_col_width = remaining_width / (num_cols - 3) if num_cols > 3 else 0.6*inch
-    
+
     col_widths = [name_col_width, role_col_width]
     col_widths.extend([date_col_width] * (num_cols - 3))
     col_widths.append(total_col_width)
-    
+
     # Create table
     table = Table(table_data, colWidths=col_widths)
-    
+
     # Table styling
     style_commands = [
         # Header styling
@@ -2001,42 +2025,42 @@ async def export_team_timesheet_pdf(
         ('FONTSIZE', (0, 0), (-1, 0), 8),
         ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
         ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
-        
+
         # Body styling
         ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
         ('FONTSIZE', (0, 1), (-1, -1), 8),
         ('ALIGN', (0, 1), (1, -1), 'LEFT'),  # Name and Role left-aligned
         ('ALIGN', (2, 1), (-1, -1), 'CENTER'),  # Dates and totals centered
         ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
-        
+
         # Grid
         ('GRID', (0, 0), (-1, -1), 0.5, colors.gray),
-        
+
         # Total column styling
         ('BACKGROUND', (-1, 1), (-1, -2), colors.HexColor('#DBEAFE')),
         ('FONTNAME', (-1, 1), (-1, -2), 'Helvetica-Bold'),
-        
+
         # Totals row styling
         ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#DBEAFE')),
         ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-        
+
         # Grand total cell
         ('BACKGROUND', (-1, -1), (-1, -1), colors.HexColor('#93C5FD')),
         ('FONTNAME', (-1, -1), (-1, -1), 'Helvetica-Bold'),
-        
+
         # Alternating row colors
         ('ROWBACKGROUNDS', (0, 1), (-2, -2), [colors.white, colors.HexColor('#F9FAFB')]),
     ]
-    
+
     # Add weekend highlighting (columns where date is Saturday or Sunday)
     for i, d in enumerate(timesheet.dates):
         if d.weekday() >= 5:  # Saturday or Sunday
             col_idx = i + 2  # Offset for Name and Role columns
             style_commands.append(('BACKGROUND', (col_idx, 1), (col_idx, -2), colors.HexColor('#F3F4F6')))
-    
+
     table.setStyle(TableStyle(style_commands))
     elements.append(table)
-    
+
     # Add summary footer
     elements.append(Spacer(1, 20))
     summary_style = ParagraphStyle(
@@ -2051,13 +2075,13 @@ async def export_team_timesheet_pdf(
         f"Total: {timesheet.grand_total_formatted} hours",
         summary_style
     ))
-    
+
     # Build PDF
     doc.build(elements)
     output.seek(0)
-    
+
     filename = f"team_timesheet_{start_date}_to_{end_date}.pdf"
-    
+
     return StreamingResponse(
         output,
         media_type="application/pdf",
@@ -2096,19 +2120,19 @@ async def email_report(
 ):
     """
     Send a report via email to specified recipients.
-    
+
     Supported report types:
     - time_report: Personal or team time report
     - team_timesheet: Team timesheet grid
-    
+
     Supported formats:
     - pdf: PDF document
     - excel: Excel spreadsheet (.xlsx)
     - csv: CSV file
     """
+
     from app.services.email_service import email_service
-    from io import BytesIO
-    
+
     # Validate admin role for team reports
     if data.report_type == "team_timesheet":
         if current_user.role not in ["admin", "company_admin", "super_admin"]:
@@ -2116,14 +2140,14 @@ async def email_report(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only admins can email team timesheets"
             )
-    
+
     # Validate format
     if data.format not in ["pdf", "excel", "csv"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid format. Must be 'pdf', 'excel', or 'csv'"
         )
-    
+
     # Validate recipients (basic email format check)
     import re
     email_pattern = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
@@ -2133,7 +2157,7 @@ async def email_report(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid email addresses: {', '.join(invalid_emails)}"
         )
-    
+
     # Generate report based on type
     try:
         if data.report_type == "time_report":
@@ -2146,7 +2170,7 @@ async def email_report(
                 tz=tz,
             )
             report_name = "Time Report"
-            
+
         elif data.report_type == "team_timesheet":
             attachment_data, attachment_filename, attachment_mimetype = await _generate_team_timesheet_report(
                 db=db,
@@ -2157,23 +2181,23 @@ async def email_report(
                 tz=tz,
             )
             report_name = "Team Timesheet"
-            
+
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Unknown report type: {data.report_type}"
             )
-    
+
     except Exception as e:
         logger.error(f"Failed to generate report: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate report: {str(e)}"
         )
-    
+
     # Format date range for email
     date_range = f"{data.start_date.strftime('%b %d')} - {data.end_date.strftime('%b %d, %Y')}"
-    
+
     # Send emails
     try:
         results = await email_service.send_report_email(
@@ -2187,7 +2211,7 @@ async def email_report(
             company_id=current_user.company_id,
             db=db
         )
-        
+
         # Log email results
         for recipient_email, success in results.items():
             if success:
@@ -2209,10 +2233,10 @@ async def email_report(
                     company_id=current_user.company_id,
                     metadata={"report_type": data.report_type, "format": data.format, "date_range": date_range, "user_id": current_user.id}
                 )
-        
+
         sent = sum(1 for v in results.values() if v)
         failed = len(results) - sent
-        
+
         if sent == 0:
             return EmailReportResponse(
                 success=False,
@@ -2234,7 +2258,7 @@ async def email_report(
                 recipients_sent=sent,
                 recipients_failed=0
             )
-    
+
     except Exception as e:
         logger.error(f"Failed to send report email: {e}")
         raise HTTPException(
@@ -2270,17 +2294,17 @@ async def _generate_time_report(
         TimeEntry.start_time >= start_dt,
         TimeEntry.start_time < end_dt,
     ).order_by(TimeEntry.start_time.desc())
-    
+
     result = await db.execute(query)
     rows = result.all()
-    
+
     entries = []
     for row in rows:
         entry = row[0]
         duration = 0
         if entry.end_time and entry.start_time:
             duration = int((entry.end_time - entry.start_time).total_seconds())
-        
+
         entries.append({
             "date": entry.start_time.strftime("%Y-%m-%d"),
             "start_time": entry.start_time.strftime("%H:%M:%S"),
@@ -2290,7 +2314,7 @@ async def _generate_time_report(
             "task": row[2] or "No Task",
             "notes": entry.notes or "",
         })
-    
+
     if format == "csv":
         import csv
         output = BytesIO()
@@ -2303,16 +2327,16 @@ async def _generate_time_report(
         output.write(text_output.getvalue().encode('utf-8'))
         output.seek(0)
         return output.getvalue(), f"time_report_{start_date}_to_{end_date}.csv", "text/csv"
-    
+
     elif format == "excel":
         from openpyxl import Workbook
-        from openpyxl.styles import Font, PatternFill, Alignment
-        
+        from openpyxl.styles import Font, PatternFill
+
         wb = Workbook()
         ws = wb.active
         assert ws is not None, "Workbook has no active worksheet"
         ws.title = "Time Report"
-        
+
         # Headers
         headers = ["Date", "Start Time", "End Time", "Duration", "Project", "Task", "Notes"]
         for col, header in enumerate(headers, 1):
@@ -2320,7 +2344,7 @@ async def _generate_time_report(
             cell.font = Font(bold=True)
             cell.fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
             cell.font = Font(bold=True, color="FFFFFF")
-        
+
         # Data
         for row_idx, entry in enumerate(entries, 2):
             ws.cell(row=row_idx, column=1, value=entry["date"])
@@ -2330,28 +2354,34 @@ async def _generate_time_report(
             ws.cell(row=row_idx, column=5, value=entry["project"])
             ws.cell(row=row_idx, column=6, value=entry["task"])
             ws.cell(row=row_idx, column=7, value=entry["notes"])
-        
+
         output = BytesIO()
         wb.save(output)
         output.seek(0)
         return output.getvalue(), f"time_report_{start_date}_to_{end_date}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    
+
     else:  # PDF
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import letter
         from reportlab.lib.styles import getSampleStyleSheet
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-        
+        from reportlab.platypus import (
+            Paragraph,
+            SimpleDocTemplate,
+            Spacer,
+            Table,
+            TableStyle,
+        )
+
         output = BytesIO()
         doc = SimpleDocTemplate(output, pagesize=letter)
         elements = []
         styles = getSampleStyleSheet()
-        
+
         # Title
         elements.append(Paragraph(f"Time Report: {start_date} to {end_date}", styles['Heading1']))
         elements.append(Paragraph(f"User: {user.name}", styles['Normal']))
         elements.append(Spacer(1, 20))
-        
+
         # Table
         table_data = [["Date", "Start", "End", "Duration", "Project", "Task"]]
         for entry in entries:
@@ -2363,7 +2393,7 @@ async def _generate_time_report(
                 entry["project"][:20],
                 entry["task"][:20]
             ])
-        
+
         table = Table(table_data)
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2563EB')),
@@ -2374,7 +2404,7 @@ async def _generate_time_report(
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F9FAFB')]),
         ]))
         elements.append(table)
-        
+
         doc.build(elements)
         output.seek(0)
         return output.getvalue(), f"time_report_{start_date}_to_{end_date}.pdf", "application/pdf"
@@ -2393,19 +2423,19 @@ async def _generate_team_timesheet_report(
 
     # Get the timesheet data using existing function
     timesheet = await _get_team_timesheet_data(db, user, start_date, end_date, None, tz=tz)
-    
+
     if format == "csv":
         import csv
         import io
-        
+
         output = BytesIO()
         text_output = io.StringIO()
-        
+
         # Build headers
         headers = ["Name", "Role"] + [d.strftime("%m/%d") for d in timesheet.dates] + ["Total"]
         writer = csv.writer(text_output)
         writer.writerow(headers)
-        
+
         # Write user rows
         for u in timesheet.users:
             row = [u.user_name, u.role]
@@ -2413,32 +2443,32 @@ async def _generate_team_timesheet_report(
                 row.append(dh.formatted if dh.seconds > 0 else "-")
             row.append(u.total_formatted)
             writer.writerow(row)
-        
+
         # Totals row
         totals_row = ["TOTAL", ""]
         for dt in timesheet.daily_totals:
             totals_row.append(dt.formatted)
         totals_row.append(timesheet.grand_total_formatted)
         writer.writerow(totals_row)
-        
+
         output.write(text_output.getvalue().encode('utf-8'))
         output.seek(0)
         return output.getvalue(), f"team_timesheet_{start_date}_to_{end_date}.csv", "text/csv"
-    
+
     elif format == "excel":
         from openpyxl import Workbook
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-        
+        from openpyxl.styles import Alignment, Font, PatternFill
+
         wb = Workbook()
         ws = wb.active
         assert ws is not None, "Workbook has no active worksheet"
         ws.title = "Team Timesheet"
-        
+
         # Title row
         ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(timesheet.dates) + 3)
         ws.cell(row=1, column=1, value=f"Team Timesheet: {start_date} to {end_date}")
         ws.cell(row=1, column=1).font = Font(bold=True, size=14)
-        
+
         # Headers
         headers = ["Name", "Role"] + [d.strftime("%m/%d") for d in timesheet.dates] + ["Total"]
         for col, header in enumerate(headers, 1):
@@ -2446,86 +2476,92 @@ async def _generate_team_timesheet_report(
             cell.font = Font(bold=True, color="FFFFFF")
             cell.fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
             cell.alignment = Alignment(horizontal="center")
-        
+
         # Weekend highlighting
         weekend_fill = PatternFill(start_color="F3F4F6", end_color="F3F4F6", fill_type="solid")
-        
+
         # Data rows
         for row_idx, u in enumerate(timesheet.users, 4):
             ws.cell(row=row_idx, column=1, value=u.user_name)
             ws.cell(row=row_idx, column=2, value=u.role)
-            
+
             for col_idx, dh in enumerate(u.daily_hours, 3):
                 cell = ws.cell(row=row_idx, column=col_idx, value=dh.formatted if dh.seconds > 0 else "-")
                 cell.alignment = Alignment(horizontal="center")
                 if dh.date.weekday() >= 5:
                     cell.fill = weekend_fill
-            
+
             # Total column
             ws.cell(row=row_idx, column=len(timesheet.dates) + 3, value=u.total_formatted)
             ws.cell(row=row_idx, column=len(timesheet.dates) + 3).font = Font(bold=True)
-        
+
         # Totals row
         totals_row = len(timesheet.users) + 4
         ws.cell(row=totals_row, column=1, value="TOTAL")
         ws.cell(row=totals_row, column=1).font = Font(bold=True)
-        
+
         for col_idx, dt in enumerate(timesheet.daily_totals, 3):
             cell = ws.cell(row=totals_row, column=col_idx, value=dt.formatted)
             cell.font = Font(bold=True)
             cell.alignment = Alignment(horizontal="center")
-        
+
         ws.cell(row=totals_row, column=len(timesheet.dates) + 3, value=timesheet.grand_total_formatted)
         ws.cell(row=totals_row, column=len(timesheet.dates) + 3).font = Font(bold=True)
-        
+
         output = BytesIO()
         wb.save(output)
         output.seek(0)
         return output.getvalue(), f"team_timesheet_{start_date}_to_{end_date}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    
+
     else:  # PDF - reuse existing PDF generation logic
         from reportlab.lib import colors
-        from reportlab.lib.pagesizes import letter, landscape
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-        
+        from reportlab.lib.enums import TA_CENTER
+        from reportlab.lib.pagesizes import landscape, letter
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.platypus import (
+            Paragraph,
+            SimpleDocTemplate,
+            Spacer,
+            Table,
+            TableStyle,
+        )
+
         output = BytesIO()
         doc = SimpleDocTemplate(output, pagesize=landscape(letter), leftMargin=20, rightMargin=20)
         elements = []
         styles = getSampleStyleSheet()
-        
+
         # Title
         title_style = ParagraphStyle('Title', parent=styles['Heading1'], alignment=TA_CENTER, fontSize=16)
-        elements.append(Paragraph(f"Team Timesheet", title_style))
-        
+        elements.append(Paragraph("Team Timesheet", title_style))
+
         subtitle_style = ParagraphStyle('Subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12)
         elements.append(Paragraph(f"{start_date.strftime('%B %d')} - {end_date.strftime('%B %d, %Y')}", subtitle_style))
         elements.append(Spacer(1, 20))
-        
+
         # Build table data
         header_row = ["Name", "Role"] + [d.strftime("%m/%d") for d in timesheet.dates] + ["Total"]
         table_data = [header_row]
-        
+
         for u in timesheet.users:
             row = [u.user_name[:15], u.role[:10]]
             for dh in u.daily_hours:
                 row.append(dh.formatted if dh.seconds > 0 else "-")
             row.append(u.total_formatted)
             table_data.append(row)
-        
+
         # Totals row
         totals_row = ["TOTAL", ""]
         for dt in timesheet.daily_totals:
             totals_row.append(dt.formatted)
         totals_row.append(timesheet.grand_total_formatted)
         table_data.append(totals_row)
-        
+
         # Calculate column widths
         col_widths = [80, 60] + [35] * len(timesheet.dates) + [45]
-        
+
         table = Table(table_data, colWidths=col_widths)
-        
+
         style_commands = [
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2563EB')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -2538,16 +2574,16 @@ async def _generate_team_timesheet_report(
             ('FONTNAME', (-1, 0), (-1, -1), 'Helvetica-Bold'),
             ('ROWBACKGROUNDS', (0, 1), (-2, -2), [colors.white, colors.HexColor('#F9FAFB')]),
         ]
-        
+
         # Weekend highlighting
         for i, d in enumerate(timesheet.dates):
             if d.weekday() >= 5:
                 col_idx = i + 2
                 style_commands.append(('BACKGROUND', (col_idx, 1), (col_idx, -2), colors.HexColor('#F3F4F6')))
-        
+
         table.setStyle(TableStyle(style_commands))
         elements.append(table)
-        
+
         # Summary
         elements.append(Spacer(1, 20))
         summary_style = ParagraphStyle('Summary', parent=styles['Normal'], fontSize=10)
@@ -2555,7 +2591,7 @@ async def _generate_team_timesheet_report(
             f"<b>Summary:</b> {len(timesheet.users)} team members | {len(timesheet.dates)} days | Total: {timesheet.grand_total_formatted} hours",
             summary_style
         ))
-        
+
         doc.build(elements)
         output.seek(0)
         return output.getvalue(), f"team_timesheet_{start_date}_to_{end_date}.pdf", "application/pdf"
@@ -2570,17 +2606,17 @@ async def _get_team_timesheet_data(
     tz: str = "UTC",
 ) -> TeamTimesheetReport:
     """Helper to get team timesheet data - shared between endpoint and email generator"""
-    from app.dependencies import get_company_filter, FILTER_NULL_COMPANY
-    
+    from app.dependencies import FILTER_NULL_COMPANY, get_company_filter
+
     now = now_utc()
-    
+
     # Generate list of all dates in range
     dates_in_range = []
     current = start_date
     while current <= end_date:
         dates_in_range.append(current)
         current += timedelta(days=1)
-    
+
     # Build user query based on role
     if user.role == "super_admin":
         users_query = select(User).where(User.is_active == True)
@@ -2590,18 +2626,18 @@ async def _get_team_timesheet_data(
             users_query = select(User).where(User.is_active == True, User.company_id.is_(None))
         else:
             users_query = select(User).where(User.is_active == True, User.company_id == company_filter)
-    
+
     if team_id:
         users_query = users_query.join(TeamMember, User.id == TeamMember.user_id).where(TeamMember.team_id == team_id)
-    
+
     users_query = users_query.order_by(User.name)
-    
+
     result = await db.execute(users_query)
     users = result.scalars().all()
-    
+
     # Fetch time entries for date range (B7: tenant-local bounds)
     start_datetime, end_datetime = range_bounds(start_date, end_date, tz)
-    
+
     user_ids = [u.id for u in users]
     if not user_ids:
         return TeamTimesheetReport(
@@ -2613,35 +2649,35 @@ async def _get_team_timesheet_data(
             grand_total_seconds=0,
             grand_total_formatted="0:00"
         )
-    
+
     entries_query = select(TimeEntry).where(
         TimeEntry.user_id.in_(user_ids),
         TimeEntry.start_time < end_datetime,
         ((TimeEntry.end_time >= start_datetime) | (TimeEntry.end_time.is_(None)))
     )
-    
+
     entries_result = await db.execute(entries_query)
     entries = entries_result.scalars().all()
-    
+
     # Build user-day matrix
     user_daily_seconds: Dict[int, Dict[date, int]] = defaultdict(lambda: defaultdict(int))
-    
+
     for entry in entries:
         for d in dates_in_range:
             day_start, day_end = day_bounds(d, tz)
             seconds = calculate_entry_duration_for_period(entry, day_start, day_end, now)
             if seconds > 0:
                 user_daily_seconds[entry.user_id][d] += seconds
-    
+
     # Build response
     timesheet_users = []
     daily_totals_seconds: Dict[date, int] = defaultdict(int)
     grand_total = 0
-    
+
     for u in users:
         daily_hours = []
         user_total = 0
-        
+
         for d in dates_in_range:
             seconds = user_daily_seconds[u.id][d]
             daily_hours.append(TeamTimesheetUserEntry(
@@ -2651,7 +2687,7 @@ async def _get_team_timesheet_data(
             ))
             daily_totals_seconds[d] += seconds
             user_total += seconds
-        
+
         timesheet_users.append(TeamTimesheetUser(
             user_id=u.id,
             user_name=u.name,
@@ -2661,7 +2697,7 @@ async def _get_team_timesheet_data(
             total_formatted=format_seconds_to_hhmm(user_total)
         ))
         grand_total += user_total
-    
+
     daily_totals = [
         TeamTimesheetDayTotal(
             date=d,
@@ -2670,7 +2706,7 @@ async def _get_team_timesheet_data(
         )
         for d in dates_in_range
     ]
-    
+
     return TeamTimesheetReport(
         start_date=start_date,
         end_date=end_date,

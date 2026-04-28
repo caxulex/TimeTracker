@@ -3,22 +3,22 @@ User invitations and password reset router
 """
 
 import logging
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
 
-from app.database import get_db
-from app.models import User
-from app.dependencies import get_current_active_user, get_current_admin_user
-from app.services.invitation_service import invitation_service
-from app.services.auth_service import auth_service
-from app.services.email_service import email_service
-from app.services.email_log_utils import log_email_sent, log_email_failed
-from app.schemas.auth import Message
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config import settings
+from app.database import get_db
+from app.dependencies import get_current_admin_user
+from app.models import User
+from app.schemas.auth import Message
+from app.services.auth_service import auth_service
+from app.services.email_log_utils import log_email_failed, log_email_sent
+from app.services.email_service import email_service
+from app.services.invitation_service import invitation_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -75,21 +75,21 @@ async def create_invitation(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User with this email already exists"
         )
-    
+
     # Create invitation token
     token = await invitation_service.create_invitation(
         email=invitation.email,
         role=invitation.role,
         created_by=current_user.id
     )
-    
+
     # Build invite URL
     base_url = str(request.base_url).rstrip("/")
     invite_url = f"{base_url.replace(':8080', ':5173')}/accept-invite?token={token}"
-    
+
     # Get invitation details
     inv = await invitation_service.get_invitation(token)
-    
+
     return InvitationResponse(
         email=invitation.email,
         role=invitation.role,
@@ -106,13 +106,13 @@ async def cancel_invitation(
 ):
     """Cancel a pending invitation (admin only)"""
     success = await invitation_service.cancel_invitation(email)
-    
+
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No pending invitation found for this email"
         )
-    
+
     return Message(message="Invitation cancelled successfully")
 
 
@@ -124,13 +124,13 @@ async def accept_invitation(
     """Accept an invitation and create account"""
     # Validate invitation
     invitation = await invitation_service.get_invitation(data.token)
-    
+
     if not invitation:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired invitation token"
         )
-    
+
     # Check if user already exists
     result = await db.execute(select(User).where(User.email == invitation.email))
     if result.scalar_one_or_none():
@@ -138,7 +138,7 @@ async def accept_invitation(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User with this email already exists"
         )
-    
+
     # Create user
     hashed_password = auth_service.hash_password(data.password)
     new_user = User(
@@ -148,17 +148,17 @@ async def accept_invitation(
         role=invitation.role,
         is_active=True
     )
-    
+
     db.add(new_user)
     await db.commit()
     await db.refresh(new_user)
-    
+
     # Consume the invitation
     await invitation_service.consume_invitation(data.token)
-    
+
     # Generate tokens for the new user
     tokens = auth_service.create_tokens(new_user.id, new_user.email)
-    
+
     return {
         "message": "Account created successfully",
         "user": {
@@ -187,14 +187,14 @@ async def request_password_reset(
     # Find user by email
     result = await db.execute(select(User).where(User.email == data.email))
     user = result.scalar_one_or_none()
-    
+
     # Always return success to prevent email enumeration
     if not user:
         return Message(message="If the email exists, a reset link has been sent")
-    
+
     # Create reset token
     token = await invitation_service.create_reset_token(user.id, user.email)
-    
+
     # Build reset URL
     # Try to get the origin from request headers, fall back to settings
     origin = request.headers.get("origin", "")
@@ -205,9 +205,9 @@ async def request_password_reset(
             origin = allowed_origins[0]
         else:
             origin = "http://localhost:5173"
-    
+
     reset_url = f"{origin}/reset-password?token={token}"
-    
+
     # Send password reset email
     try:
         await email_service.send_password_reset_email(
@@ -240,7 +240,7 @@ async def request_password_reset(
         logger.error(f"Failed to send password reset email to {user.email}: {e}")
         # Still log the token for development debugging
         logger.debug(f"Password reset token for {user.email}: {token}")
-    
+
     return Message(message="If the email exists, a reset link has been sent")
 
 
@@ -252,30 +252,30 @@ async def reset_password(
     """Reset password using token"""
     # Validate token
     reset_token = await invitation_service.get_reset_token(data.token)
-    
+
     if not reset_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired reset token"
         )
-    
+
     # Get user
     result = await db.execute(select(User).where(User.id == reset_token.user_id))
     user = result.scalar_one_or_none()
-    
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     # Update password
     user.hashed_password = auth_service.hash_password(data.new_password)
     await db.commit()
-    
+
     # Consume the reset token
     await invitation_service.consume_reset_token(data.token)
-    
+
     return Message(message="Password reset successfully")
 
 
@@ -283,13 +283,13 @@ async def reset_password(
 async def verify_reset_token(token: str):
     """Verify if a reset token is valid"""
     reset_token = await invitation_service.get_reset_token(token)
-    
+
     if not reset_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired reset token"
         )
-    
+
     return {"valid": True, "email": reset_token.email}
 
 
@@ -297,11 +297,11 @@ async def verify_reset_token(token: str):
 async def verify_invite_token(token: str):
     """Verify if an invitation token is valid"""
     invitation = await invitation_service.get_invitation(token)
-    
+
     if not invitation:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired invitation token"
         )
-    
+
     return {"valid": True, "email": invitation.email, "role": invitation.role}

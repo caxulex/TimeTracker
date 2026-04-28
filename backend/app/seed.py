@@ -19,13 +19,14 @@ if _environment == "production":
     print("=" * 60)
     sys.exit(1)
 
-import bcrypt
 from datetime import datetime, timedelta, timezone
+
+import bcrypt
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.models import Base, User, Team, TeamMember, Project, Task, TimeEntry, Company
 from app.config import settings
+from app.models import Company, Project, Task, Team, TeamMember, TimeEntry, User
 
 # Use sync URL for seeding - replace asyncpg with psycopg2
 SYNC_DATABASE_URL = settings.DATABASE_URL.replace("+asyncpg", "").replace("postgresql://", "postgresql+psycopg2://")
@@ -38,15 +39,15 @@ def hash_password(password: str) -> str:
 def seed_database():
     """Seed the database with initial data"""
     engine = create_engine(SYNC_DATABASE_URL)
-    
+
     with Session(engine) as session:
         # Check if data already exists
         if session.query(User).count() > 0:
             print("Database already seeded. Skipping...")
             return
-        
+
         print("Seeding database...")
-        
+
         # Create default company first (required for multi-tenancy)
         default_company = Company(
             name="TimeTracker",
@@ -60,9 +61,9 @@ def seed_database():
         )
         session.add(default_company)
         session.flush()
-        
+
         print(f"Created default company: {default_company.name} (ID: {default_company.id})")
-        
+
         # Create users (all assigned to default company)
         admin = User(
             email="admin@timetracker.com",
@@ -72,7 +73,7 @@ def seed_database():
             is_active=True,
             company_id=default_company.id,
         )
-        
+
         user1 = User(
             email="john@example.com",
             password_hash=hash_password("password123"),
@@ -81,7 +82,7 @@ def seed_database():
             is_active=True,
             company_id=default_company.id,
         )
-        
+
         user2 = User(
             email="jane@example.com",
             password_hash=hash_password("password123"),
@@ -90,7 +91,7 @@ def seed_database():
             is_active=True,
             company_id=default_company.id,
         )
-        
+
         user3 = User(
             email="bob@example.com",
             password_hash=hash_password("password123"),
@@ -99,30 +100,30 @@ def seed_database():
             is_active=True,
             company_id=default_company.id,
         )
-        
+
         session.add_all([admin, user1, user2, user3])
         session.flush()
-        
-        print(f"Created 4 users")
-        
+
+        print("Created 4 users")
+
         # Create teams (assigned to default company)
         team1 = Team(
             name="Development Team",
             owner_id=admin.id,
             company_id=default_company.id,
         )
-        
+
         team2 = Team(
             name="Design Team",
             owner_id=user1.id,
             company_id=default_company.id,
         )
-        
+
         session.add_all([team1, team2])
         session.flush()
-        
-        print(f"Created 2 teams")
-        
+
+        print("Created 2 teams")
+
         # Create team members
         members = [
             TeamMember(team_id=team1.id, user_id=admin.id),
@@ -133,9 +134,9 @@ def seed_database():
         ]
         session.add_all(members)
         session.flush()
-        
+
         print(f"Created {len(members)} team memberships")
-        
+
         # Create projects
         project1 = Project(
             team_id=team1.id,
@@ -143,26 +144,26 @@ def seed_database():
             description="Building the time tracker application",
             color="#3B82F6",
         )
-        
+
         project2 = Project(
             team_id=team1.id,
             name="API Documentation",
             description="Creating comprehensive API docs",
             color="#10B981",
         )
-        
+
         project3 = Project(
             team_id=team2.id,
             name="UI/UX Redesign",
             description="Redesigning the user interface",
             color="#F59E0B",
         )
-        
+
         session.add_all([project1, project2, project3])
         session.flush()
-        
-        print(f"Created 3 projects")
-        
+
+        print("Created 3 projects")
+
         # Create tasks
         tasks = [
             Task(project_id=project1.id, name="Setup project structure", status="DONE"),
@@ -177,16 +178,16 @@ def seed_database():
             Task(project_id=project3.id, name="Design component library", status="IN_PROGRESS"),
             Task(project_id=project3.id, name="Prototype dashboard", status="TODO"),
         ]
-        
+
         session.add_all(tasks)
         session.flush()
-        
+
         print(f"Created {len(tasks)} tasks")
-        
+
         # Create time entries
         now = datetime.now(timezone.utc)
         time_entries = []
-        
+
         for day_offset in range(7):
             date = now - timedelta(days=day_offset)
             start = date.replace(hour=9, minute=0, second=0, microsecond=0)
@@ -202,7 +203,7 @@ def seed_database():
                 description="Working on authentication implementation",
                 is_running=False,
             ))
-            
+
             start = date.replace(hour=14, minute=0, second=0, microsecond=0)
             end = date.replace(hour=17, minute=0, second=0, microsecond=0)
             duration = int((end - start).total_seconds())
@@ -216,7 +217,7 @@ def seed_database():
                 description="Building timer UI component",
                 is_running=False,
             ))
-        
+
         for day_offset in range(5):
             date = now - timedelta(days=day_offset)
             start = date.replace(hour=10, minute=0, second=0, microsecond=0)
@@ -232,7 +233,7 @@ def seed_database():
                 description="Writing API documentation",
                 is_running=False,
             ))
-        
+
         running_entry = TimeEntry(
             user_id=user1.id,
             project_id=project1.id,
@@ -244,10 +245,10 @@ def seed_database():
             is_running=True,
         )
         time_entries.append(running_entry)
-        
+
         session.add_all(time_entries)
         session.commit()
-        
+
         print(f"Created {len(time_entries)} time entries")
         print("\n✅ Database seeded successfully!")
         print("\nTest accounts:")

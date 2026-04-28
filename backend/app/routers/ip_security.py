@@ -3,12 +3,13 @@ IP Security Router - TASK-054
 REST endpoints for IP-based security management
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
-from pydantic import BaseModel, IPvAnyAddress
 
-from app.models import User
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+
 from app.dependencies import require_role
+from app.models import User
 from app.services.ip_security import IPSecurityService
 
 router = APIRouter()
@@ -47,7 +48,7 @@ async def add_to_whitelist(
 ):
     """Add an IP address to the whitelist"""
     result = IPSecurityService.add_to_whitelist(
-        request.ip_address, 
+        request.ip_address,
         added_by=current_user.email
     )
     return {

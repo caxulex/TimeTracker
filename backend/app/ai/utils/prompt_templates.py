@@ -5,8 +5,8 @@ Centralized prompt templates for all AI features.
 Ensures consistent formatting and easy maintenance.
 """
 
-from typing import List, Dict, Any, Optional
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 
 class PromptTemplates:
@@ -19,7 +19,7 @@ class PromptTemplates:
     @staticmethod
     def suggestion_system_prompt() -> str:
         """System prompt for time entry suggestion AI."""
-        return """You are an intelligent assistant for a time tracking application. 
+        return """You are an intelligent assistant for a time tracking application.
 Your job is to suggest the most likely project and task a user wants to work on based on:
 1. Their historical work patterns
 2. Current time of day and day of week
@@ -65,7 +65,7 @@ Rules:
         ]) if recent_entries else "No recent entries"
 
         projects_str = "\n".join([
-            f"- ID:{p['id']} {p['name']}" + 
+            f"- ID:{p['id']} {p['name']}" +
             (f" (Tasks: {', '.join([t['name'] for t in p.get('tasks', [])])})" if p.get('tasks') else "")
             for p in available_projects[:15]
         ]) if available_projects else "No projects available"
@@ -81,7 +81,7 @@ Available projects:
 """
         if partial_description:
             prompt += f"\nUser is typing: \"{partial_description}\"\n"
-        
+
         prompt += "\nSuggest the most likely project/task combinations:"
         return prompt
 
@@ -143,9 +143,9 @@ Provide:
     ) -> str:
         """Generate suggested description for time entry."""
         recent_str = "\n".join([f"- {d}" for d in recent_descriptions[:5]]) if recent_descriptions else "None"
-        
+
         task_info = f" on task '{task_name}'" if task_name else ""
-        
+
         return f"""Project: {project_name}{task_info}
 
 Recent descriptions for similar entries:
@@ -193,7 +193,7 @@ Respond ONLY with valid JSON:
     ) -> str:
         """User prompt for NLP parsing."""
         projects_str = ", ".join([p['name'] for p in available_projects[:20]])
-        
+
         return f"""Current date/time: {current_datetime.isoformat()} ({timezone})
 
 User's input: "{text}"
@@ -220,7 +220,7 @@ Last Week Comparison:
 - Hours: {comparison_data.get('total_hours', 0):.1f}h
 - Projects: {comparison_data.get('project_count', 0)}
 """
-        
+
         return f"""Generate a brief, insightful weekly summary for {user_name}.
 
 This Week:

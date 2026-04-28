@@ -4,13 +4,14 @@ SEC-015: Comprehensive Audit Logging Implementation
 Logs security-relevant events for monitoring and compliance
 """
 
-import logging
 import json
+import logging
 from datetime import datetime, timezone
-from typing import Optional, Any, Dict
 from enum import Enum
-from redis.asyncio import Redis
+from typing import Any, Dict, Optional
+
 import redis.asyncio as redis_module
+from redis.asyncio import Redis
 
 from app.config import settings
 
@@ -26,7 +27,7 @@ class AuditEventType(str, Enum):
     TOKEN_REFRESH = "auth.token.refresh"
     PASSWORD_CHANGE = "auth.password.change"
     PASSWORD_RESET_REQUEST = "auth.password.reset_request"
-    
+
     # User events
     USER_CREATED = "user.created"
     USER_UPDATED = "user.updated"
@@ -34,24 +35,24 @@ class AuditEventType(str, Enum):
     USER_DEACTIVATED = "user.deactivated"
     USER_ACTIVATED = "user.activated"
     USER_ROLE_CHANGED = "user.role.changed"
-    
+
     # Account security events
     ACCOUNT_LOCKED = "security.account.locked"
     ACCOUNT_UNLOCKED = "security.account.unlocked"
     SUSPICIOUS_ACTIVITY = "security.suspicious"
     RATE_LIMITED = "security.rate_limited"
-    
+
     # Data access events
     PAYROLL_ACCESSED = "data.payroll.accessed"
     PAYROLL_EXPORTED = "data.payroll.exported"
     REPORT_GENERATED = "data.report.generated"
     SENSITIVE_DATA_VIEWED = "data.sensitive.viewed"
-    
+
     # Admin events
     ADMIN_ACTION = "admin.action"
     CONFIG_CHANGED = "admin.config.changed"
     SYSTEM_SETTING_CHANGED = "admin.setting.changed"
-    
+
     # API events
     API_ERROR = "api.error"
     PERMISSION_DENIED = "api.permission.denied"
@@ -71,13 +72,13 @@ class AuditLogService:
     Service for creating and querying audit logs.
     Logs to both application logger and Redis for persistence.
     """
-    
+
     def __init__(self):
         self._redis: Optional[Redis] = None
         self._prefix = "audit:"
         self._max_logs_in_memory = 10000
         self._retention_days = 90  # Keep logs for 90 days
-    
+
     async def get_redis(self) -> Redis:
         """Get or create Redis connection"""
         if self._redis is None:
@@ -92,7 +93,7 @@ class AuditLogService:
                 logger.error(f"Failed to connect to Redis for audit logging: {e}")
                 raise
         return self._redis
-    
+
     async def log(
         self,
         event_type: AuditEventType,
@@ -109,7 +110,7 @@ class AuditLogService:
     ) -> str:
         """
         Create an audit log entry.
-        
+
         Args:
             event_type: Type of audit event
             user_id: ID of user performing action
@@ -122,13 +123,13 @@ class AuditLogService:
             details: Additional details (dict)
             severity: Log severity level
             success: Whether the action succeeded
-        
+
         Returns:
             Audit log entry ID
         """
         timestamp = datetime.now(timezone.utc)
         log_id = f"{timestamp.strftime('%Y%m%d%H%M%S%f')}-{event_type.value}"
-        
+
         log_entry = {
             "id": log_id,
             "timestamp": timestamp.isoformat(),
@@ -144,19 +145,19 @@ class AuditLogService:
             "action": action,
             "details": details or {}
         }
-        
+
         # Log to application logger
         log_message = f"AUDIT: {event_type.value} | user={user_email or user_id} | ip={ip_address} | success={success}"
         if details:
             log_message += f" | details={json.dumps(details)}"
-        
+
         log_level = getattr(logging, severity.value.upper(), logging.INFO)
         logger.log(log_level, log_message)
-        
+
         # Store in Redis
         try:
             redis_client = await self.get_redis()
-            
+
             # Store log entry
             key = f"{self._prefix}log:{log_id}"
             await redis_client.setex(
@@ -164,13 +165,13 @@ class AuditLogService:
                 self._retention_days * 24 * 60 * 60,
                 json.dumps(log_entry)
             )
-            
+
             # Add to sorted set for time-based queries
             await redis_client.zadd(
                 f"{self._prefix}timeline",
                 {log_id: timestamp.timestamp()}
             )
-            
+
             # Add to user-specific list if user_id provided
             if user_id:
                 await redis_client.lpush(
@@ -182,7 +183,7 @@ class AuditLogService:
                     0,
                     999  # Keep last 1000 events per user
                 )
-            
+
             # Add to event type list
             await redis_client.lpush(
                 f"{self._prefix}type:{event_type.value}",
@@ -193,12 +194,12 @@ class AuditLogService:
                 0,
                 999
             )
-            
+
         except Exception as e:
             logger.error(f"Failed to store audit log in Redis: {e}")
-        
+
         return log_id
-    
+
     async def log_auth_success(
         self,
         user_id: int,
@@ -216,7 +217,7 @@ class AuditLogService:
             severity=AuditSeverity.INFO,
             success=True
         )
-    
+
     async def log_auth_failure(
         self,
         email: str,
@@ -234,7 +235,7 @@ class AuditLogService:
             severity=AuditSeverity.WARNING,
             success=False
         )
-    
+
     async def log_logout(
         self,
         user_id: int,
@@ -248,7 +249,7 @@ class AuditLogService:
             user_email=user_email,
             ip_address=ip_address
         )
-    
+
     async def log_account_locked(
         self,
         email: str,
@@ -264,7 +265,7 @@ class AuditLogService:
             severity=AuditSeverity.WARNING,
             success=False
         )
-    
+
     async def log_permission_denied(
         self,
         user_id: int,
@@ -284,7 +285,7 @@ class AuditLogService:
             severity=AuditSeverity.WARNING,
             success=False
         )
-    
+
     async def log_payroll_access(
         self,
         user_id: int,
@@ -304,7 +305,7 @@ class AuditLogService:
             action=action,
             severity=AuditSeverity.INFO
         )
-    
+
     async def log_admin_action(
         self,
         admin_id: int,
@@ -326,7 +327,7 @@ class AuditLogService:
             details=details,
             severity=AuditSeverity.INFO
         )
-    
+
     async def get_user_logs(
         self,
         user_id: int,
@@ -340,19 +341,19 @@ class AuditLogService:
                 0,
                 limit - 1
             )
-            
+
             logs = []
             for log_id in log_ids:
                 log_data = await redis_client.get(f"{self._prefix}log:{log_id}")
                 if log_data:
                     logs.append(json.loads(log_data))
-            
+
             return logs
-            
+
         except Exception as e:
             logger.error(f"Failed to get user logs: {e}")
             return []
-    
+
     async def get_recent_logs(
         self,
         event_type: Optional[AuditEventType] = None,
@@ -361,7 +362,7 @@ class AuditLogService:
         """Get recent audit logs, optionally filtered by event type"""
         try:
             redis_client = await self.get_redis()
-            
+
             if event_type:
                 log_ids = await redis_client.lrange(
                     f"{self._prefix}type:{event_type.value}",
@@ -375,19 +376,19 @@ class AuditLogService:
                     0,
                     limit - 1
                 )
-            
+
             logs = []
             for log_id in log_ids:
                 log_data = await redis_client.get(f"{self._prefix}log:{log_id}")
                 if log_data:
                     logs.append(json.loads(log_data))
-            
+
             return logs
-            
+
         except Exception as e:
             logger.error(f"Failed to get recent logs: {e}")
             return []
-    
+
     async def close(self):
         """Close Redis connection"""
         if self._redis:

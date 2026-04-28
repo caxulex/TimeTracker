@@ -4,22 +4,21 @@ API Router for Payroll Reports
 
 from datetime import date
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_admin
 from app.models import User
 from app.schemas.payroll import (
+    PayablesDepartmentReport,
     PayrollReportFilters,
     PayrollSummaryReport,
-    UserPayrollReport,
-    PayablesDepartmentReport,
     PeriodStatusEnum,
-    PeriodTypeEnum
+    PeriodTypeEnum,
 )
 from app.services.payroll_report_service import PayrollReportService
-
 
 router = APIRouter(prefix="/api/payroll/reports", tags=["Payroll Reports"])
 
@@ -36,13 +35,13 @@ async def get_period_summary(
     """
     service = PayrollReportService(db)
     summary = await service.get_period_summary(period_id)
-    
+
     if not summary:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Payroll period not found"
         )
-    
+
     return summary
 
 
@@ -64,7 +63,7 @@ async def get_user_report(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Can only view your own payroll report"
         )
-    
+
     service = PayrollReportService(db)
     reports = await service.get_user_payroll_report(user_id, period_id, start_date, end_date)
     return reports
@@ -83,7 +82,7 @@ async def get_payables_report(
     # Set company_id filter for non-super admins
     if current_user.role != 'super_admin':
         filters.company_id = current_user.company_id
-    
+
     service = PayrollReportService(db)
     report = await service.get_payables_report(filters)
     return report
@@ -106,7 +105,7 @@ async def get_payables_report_query(
     """
     # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
     company_id = current_user.company_id
-    
+
     filters = PayrollReportFilters(
         period_id=period_id,
         user_id=user_id,
@@ -116,7 +115,7 @@ async def get_payables_report_query(
         end_date=end_date,
         company_id=company_id
     )
-    
+
     service = PayrollReportService(db)
     report = await service.get_payables_report(filters)
     return report
@@ -139,7 +138,7 @@ async def export_payables_csv(
     """
     # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
     company_id = current_user.company_id
-    
+
     filters = PayrollReportFilters(
         period_id=period_id,
         user_id=user_id,
@@ -149,13 +148,13 @@ async def export_payables_csv(
         end_date=end_date,
         company_id=company_id
     )
-    
+
     service = PayrollReportService(db)
     report = await service.get_payables_report(filters)
     csv_content = await service.export_to_csv(report)
-    
+
     filename = f"payroll_report_{date.today().isoformat()}.csv"
-    
+
     return Response(
         content=csv_content,
         media_type="text/csv",
@@ -182,7 +181,7 @@ async def export_payables_excel(
     """
     # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
     company_id = current_user.company_id
-    
+
     filters = PayrollReportFilters(
         period_id=period_id,
         user_id=user_id,
@@ -192,20 +191,20 @@ async def export_payables_excel(
         end_date=end_date,
         company_id=company_id
     )
-    
+
     service = PayrollReportService(db)
-    
+
     try:
         report = await service.get_payables_report(filters)
         excel_content = await service.export_to_excel(report)
-    except ImportError as e:
+    except ImportError:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail="Excel export not available. Install openpyxl: pip install openpyxl"
         )
-    
+
     filename = f"payroll_report_{date.today().isoformat()}.xlsx"
-    
+
     return Response(
         content=excel_content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -243,28 +242,29 @@ async def generate_payslip_pdf(
     Generate a PDF payslip for a specific user and period.
     Users can download their own payslip, admins can download anyone's.
     """
-    from app.services.payslip_pdf_service import payslip_generator
-    from app.models import PayrollPeriod, Company
     from sqlalchemy import select
-    
+
+    from app.models import Company
+    from app.services.payslip_pdf_service import payslip_generator
+
     # Permission check
     if current_user.role not in ["super_admin", "admin", "company_admin"] and current_user.id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Can only download your own payslip"
         )
-    
+
     service = PayrollReportService(db)
     reports = await service.get_user_payroll_report(user_id, period_id)
-    
+
     if not reports:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Payroll entry not found for this user and period"
         )
-    
+
     report = reports[0]
-    
+
     # Get company info for the payslip header
     company_name = "Time Tracker"
     company_address = None
@@ -276,7 +276,7 @@ async def generate_payslip_pdf(
             company_name = company.name
             # Use custom domain or build address from available info
             company_address = getattr(company, 'address', None)
-    
+
     # Convert adjustments to dict format
     adjustments = [
         {
@@ -286,7 +286,7 @@ async def generate_payslip_pdf(
         }
         for adj in report.adjustments
     ]
-    
+
     # Generate PDF
     pdf_bytes = payslip_generator.generate_payslip(
         employee_name=report.user_name,
@@ -306,9 +306,9 @@ async def generate_payslip_pdf(
         company_name=company_name,
         company_address=company_address,
     )
-    
+
     filename = f"payslip_{report.user_name.replace(' ', '_')}_{report.period_name.replace(' ', '_')}.pdf"
-    
+
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -328,21 +328,22 @@ async def download_my_payslip_pdf(
     Download current user's own payslip as PDF.
     Available to all authenticated users.
     """
-    from app.services.payslip_pdf_service import payslip_generator
-    from app.models import Company
     from sqlalchemy import select
-    
+
+    from app.models import Company
+    from app.services.payslip_pdf_service import payslip_generator
+
     service = PayrollReportService(db)
     reports = await service.get_user_payroll_report(current_user.id, period_id)
-    
+
     if not reports:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No payroll entry found for this period"
         )
-    
+
     report = reports[0]
-    
+
     # Get company info
     company_name = "Time Tracker"
     company_address = None
@@ -352,7 +353,7 @@ async def download_my_payslip_pdf(
         company = result.scalar_one_or_none()
         if company:
             company_name = company.name
-    
+
     # Convert adjustments
     adjustments = [
         {
@@ -362,7 +363,7 @@ async def download_my_payslip_pdf(
         }
         for adj in report.adjustments
     ]
-    
+
     # Generate PDF
     pdf_bytes = payslip_generator.generate_payslip(
         employee_name=report.user_name,
@@ -382,9 +383,9 @@ async def download_my_payslip_pdf(
         company_name=company_name,
         company_address=company_address,
     )
-    
+
     filename = f"payslip_{report.period_name.replace(' ', '_')}.pdf"
-    
+
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",

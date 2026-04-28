@@ -4,31 +4,32 @@ API Router for Payroll Periods management
 
 import logging
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_admin
 from app.models import User
 from app.schemas.payroll import (
-    PayrollPeriodCreate,
-    PayrollPeriodUpdate,
-    PayrollPeriodResponse,
-    PayrollPeriodWithEntries,
+    PayrollAdjustmentCreate,
+    PayrollAdjustmentResponse,
+    PayrollAdjustmentUpdate,
     PayrollEntryCreate,
+    PayrollEntryResponse,
     PayrollEntryUpdate,
     PayrollEntryWithAdjustments,
-    PayrollEntryResponse,
-    PayrollAdjustmentCreate,
-    PayrollAdjustmentUpdate,
-    PayrollAdjustmentResponse,
-    PeriodStatusEnum
+    PayrollPeriodCreate,
+    PayrollPeriodResponse,
+    PayrollPeriodUpdate,
+    PayrollPeriodWithEntries,
+    PeriodStatusEnum,
 )
 from app.services.payroll_service import (
-    PayrollPeriodService,
-    PayrollEntryService,
+    PayRateService,
     PayrollAdjustmentService,
-    PayRateService
+    PayrollEntryService,
+    PayrollPeriodService,
 )
 from app.services.slack_service import slack_service
 
@@ -86,7 +87,7 @@ async def list_payroll_periods(
     # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
     company_id = current_user.company_id
     periods, total = await service.get_periods(skip, limit, status, company_id)
-    
+
     return {
         "items": [
             PayrollPeriodResponse(
@@ -123,16 +124,16 @@ async def get_payroll_period(
     """
     service = PayrollPeriodService(db)
     period = await service.get_period_with_entries(period_id)
-    
+
     if not period:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Payroll period not found"
         )
-    
+
     # Get pay rate service for rate_type lookup
     pay_rate_service = PayRateService(db)
-    
+
     # Transform entries to include user information
     entries_with_users = []
     for entry in period.entries:
@@ -141,7 +142,7 @@ async def get_payroll_period(
         if entry.user:
             pay_rate = await pay_rate_service.get_user_active_rate(entry.user_id, period.end_date)
             rate_type = pay_rate.rate_type if pay_rate else None
-        
+
         entry_dict = {
             "id": entry.id,
             "payroll_period_id": entry.payroll_period_id,
@@ -162,7 +163,7 @@ async def get_payroll_period(
             "rate_type": rate_type,
         }
         entries_with_users.append(entry_dict)
-    
+
     return {
         "id": period.id,
         "name": period.name,
@@ -193,13 +194,13 @@ async def update_payroll_period(
     """
     service = PayrollPeriodService(db)
     period = await service.update_period(period_id, period_data)
-    
+
     if not period:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Payroll period not found"
         )
-    
+
     return period
 
 
@@ -214,23 +215,23 @@ async def process_payroll_period(
     Admin only. Only processes users from the admin's company.
     """
     service = PayrollPeriodService(db)
-    
+
     # Multi-tenancy: Pass user's company_id to filter users
     result = await service.process_period(period_id, company_id=current_user.company_id)
-    
+
     if result is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot process period. Make sure it exists and is in draft status."
         )
-    
+
     # Check if it's an error dict (no pay rates found)
     if isinstance(result, dict) and result.get("error"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=result.get("message", "Failed to process payroll period")
         )
-    
+
     # Send Slack notification for payroll processed
     try:
         await slack_service.send_payroll_notification(
@@ -243,7 +244,7 @@ async def process_payroll_period(
         )
     except Exception as e:
         logger.warning(f"Failed to send Slack notification for payroll processed: {e}")
-    
+
     return result
 
 
@@ -259,13 +260,13 @@ async def approve_payroll_period(
     """
     service = PayrollPeriodService(db)
     period = await service.approve_period(period_id, current_user.id)
-    
+
     if not period:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot approve period. Make sure it exists and is in draft/processing status."
         )
-    
+
     # Send Slack notification for payroll approved
     try:
         await slack_service.send_payroll_notification(
@@ -277,7 +278,7 @@ async def approve_payroll_period(
         )
     except Exception as e:
         logger.warning(f"Failed to send Slack notification for payroll approved: {e}")
-    
+
     return period
 
 
@@ -293,13 +294,13 @@ async def mark_period_as_paid(
     """
     service = PayrollPeriodService(db)
     period = await service.mark_as_paid(period_id)
-    
+
     if not period:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot mark period as paid. Make sure it exists and is approved."
         )
-    
+
     # Send Slack notification for payroll paid
     try:
         await slack_service.send_payroll_notification(
@@ -311,7 +312,7 @@ async def mark_period_as_paid(
         )
     except Exception as e:
         logger.warning(f"Failed to send Slack notification for payroll paid: {e}")
-    
+
     return period
 
 
@@ -327,7 +328,7 @@ async def delete_payroll_period(
     """
     service = PayrollPeriodService(db)
     deleted = await service.delete_period(period_id)
-    
+
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -366,19 +367,19 @@ async def get_payroll_entry(
     """
     service = PayrollEntryService(db)
     entry = await service.get_entry(entry_id)
-    
+
     if not entry:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Payroll entry not found"
         )
-    
+
     if current_user.role != "super_admin" and current_user.id != entry.user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Can only view your own payroll entries"
         )
-    
+
     return entry
 
 
@@ -414,10 +415,10 @@ async def get_user_payroll_entries(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Can only view your own payroll entries"
         )
-    
+
     service = PayrollEntryService(db)
     entries, total = await service.get_user_entries(user_id, skip, limit)
-    
+
     return {
         "items": entries,
         "total": total,
@@ -439,13 +440,13 @@ async def update_payroll_entry(
     """
     service = PayrollEntryService(db)
     entry = await service.update_entry(entry_id, entry_data)
-    
+
     if not entry:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Payroll entry not found"
         )
-    
+
     return entry
 
 
@@ -480,19 +481,19 @@ async def get_entry_adjustments(
     # First check if user has access to this entry
     entry_service = PayrollEntryService(db)
     entry = await entry_service.get_entry(entry_id)
-    
+
     if not entry:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Payroll entry not found"
         )
-    
+
     if current_user.role != "super_admin" and current_user.id != entry.user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Can only view your own payroll adjustments"
         )
-    
+
     service = PayrollAdjustmentService(db)
     adjustments = await service.get_entry_adjustments(entry_id)
     return adjustments
@@ -511,13 +512,13 @@ async def update_payroll_adjustment(
     """
     service = PayrollAdjustmentService(db)
     adjustment = await service.update_adjustment(adjustment_id, adjustment_data)
-    
+
     if not adjustment:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Payroll adjustment not found"
         )
-    
+
     return adjustment
 
 
@@ -533,7 +534,7 @@ async def delete_payroll_adjustment(
     """
     service = PayrollAdjustmentService(db)
     deleted = await service.delete_adjustment(adjustment_id)
-    
+
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

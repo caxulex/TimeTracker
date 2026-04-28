@@ -4,10 +4,11 @@ Database connection and session management
 
 import logging
 import time
+
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
-from sqlalchemy import event
 
 from app.config import settings
 
@@ -82,13 +83,13 @@ if settings.ENABLE_QUERY_LOGGING:
     def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
         """Record query start time"""
         conn.info.setdefault('query_start_time', []).append(time.time())
-    
+
     @event.listens_for(engine.sync_engine, "after_cursor_execute")
     def after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
         """Log slow queries"""
         total_time = time.time() - conn.info['query_start_time'].pop(-1)
         total_ms = total_time * 1000
-        
+
         if total_ms > settings.SLOW_QUERY_THRESHOLD_MS:
             # Truncate long queries for logging
             truncated_stmt = statement[:500] + "..." if len(statement) > 500 else statement

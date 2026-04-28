@@ -2,20 +2,24 @@
 Teams management router
 """
 
-from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from sqlalchemy.orm import selectinload
-from pydantic import BaseModel, Field
 from datetime import datetime
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import User, Team, TeamMember
-from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY
-from app.schemas.auth import Message
+from app.dependencies import (
+    apply_company_filter,
+    get_company_filter,
+    get_current_active_user,
+)
+from app.models import Team, TeamMember, User
 from app.routers.websocket import manager as ws_manager
-from app.services.audit_logger import AuditLogger, AuditAction
+from app.schemas.auth import Message
+from app.services.audit_logger import AuditAction, AuditLogger
 
 router = APIRouter()
 
@@ -43,7 +47,7 @@ class UserBasicInfo(BaseModel):
     name: str
     email: str
     role: str
-    
+
     class Config:
         from_attributes = True
 
@@ -160,11 +164,11 @@ async def get_team(
 ):
     """Get team details with members"""
     query = select(Team).where(Team.id == team_id)
-    
+
     # Multi-tenancy: filter by company
     company_id = get_company_filter(current_user)
     query = apply_company_filter(query, Team.company_id, company_id)
-    
+
     result = await db.execute(query)
     team = result.scalar_one_or_none()
 
@@ -242,7 +246,7 @@ async def create_team(
     )
     db.add(member)
     await db.commit()
-    
+
     # Audit log
     await AuditLogger.log(
         db=db,
@@ -275,11 +279,11 @@ async def update_team(
 ):
     """Update team (owner/admin only)"""
     query = select(Team).where(Team.id == team_id)
-    
+
     # Multi-tenancy: filter by company
     company_id = get_company_filter(current_user)
     query = apply_company_filter(query, Team.company_id, company_id)
-    
+
     result = await db.execute(query)
     team = result.scalar_one_or_none()
 
@@ -300,11 +304,11 @@ async def update_team(
 
     # Track old values
     old_name = team.name
-    
+
     # Update fields
     if team_data.name:
         team.name = team_data.name
-    
+
     # Audit log if name changed
     if team_data.name and team_data.name != old_name:
         await AuditLogger.log(
@@ -346,11 +350,11 @@ async def delete_team(
 ):
     """Delete team (owner only)"""
     query = select(Team).where(Team.id == team_id)
-    
+
     # Multi-tenancy: filter by company
     company_id = get_company_filter(current_user)
     query = apply_company_filter(query, Team.company_id, company_id)
-    
+
     result = await db.execute(query)
     team = result.scalar_one_or_none()
 
@@ -368,7 +372,7 @@ async def delete_team(
         )
         if not member.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only team owner can delete")
-    
+
     # Audit log before deletion
     await AuditLogger.log(
         db=db,
@@ -397,7 +401,7 @@ async def add_member(
     """Add member to team (owner/admin only)"""
     # Multi-tenancy: filter by company
     company_id = get_company_filter(current_user)
-    
+
     # Verify team exists and belongs to company
     team_query = select(Team).where(Team.id == team_id)
     team_query = apply_company_filter(team_query, Team.company_id, company_id)

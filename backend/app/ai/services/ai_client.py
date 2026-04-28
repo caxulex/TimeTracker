@@ -5,12 +5,11 @@ Unified client for AI providers (Gemini and OpenAI).
 Handles provider switching, fallback, error handling, and response parsing.
 """
 
-import json
 import asyncio
-from typing import Optional, Dict, Any, List, Literal, Union
-from datetime import datetime
+import json
 import logging
 from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Literal, Optional
 
 from app.ai.config import ai_settings
 from app.services.api_key_service import APIKeyService
@@ -88,10 +87,10 @@ class GeminiProvider(BaseAIProvider):
         """Generate response using Gemini."""
         try:
             client = await self._get_client()
-            
+
             # Combine prompts for Gemini
             full_prompt = f"{system_prompt}\n\n{user_prompt}"
-            
+
             # Run generation in thread pool (Gemini client is sync)
             response = await asyncio.get_event_loop().run_in_executor(
                 None,
@@ -103,7 +102,7 @@ class GeminiProvider(BaseAIProvider):
                     }
                 )
             )
-            
+
             # Extract text response
             if hasattr(response, 'text'):
                 text = response.text
@@ -111,14 +110,14 @@ class GeminiProvider(BaseAIProvider):
                 text = response.parts[0].text
             else:
                 raise InvalidResponseError("Empty response from Gemini", "gemini")
-            
+
             # Try to parse as JSON
             try:
                 parsed = json.loads(text)
             except json.JSONDecodeError:
                 # Return raw text if not JSON
                 parsed = {"raw_text": text}
-            
+
             return {
                 "success": True,
                 "provider": "gemini",
@@ -177,7 +176,7 @@ class OpenAIProvider(BaseAIProvider):
         """Generate response using OpenAI."""
         try:
             client = await self._get_client()
-            
+
             response = await asyncio.wait_for(
                 client.chat.completions.create(
                     model=self._model_name,
@@ -190,15 +189,15 @@ class OpenAIProvider(BaseAIProvider):
                 ),
                 timeout=ai_settings.OPENAI_TIMEOUT
             )
-            
+
             text = response.choices[0].message.content
-            
+
             # Try to parse as JSON
             try:
                 parsed = json.loads(text)
             except json.JSONDecodeError:
                 parsed = {"raw_text": text}
-            
+
             return {
                 "success": True,
                 "provider": "openai",
@@ -231,7 +230,7 @@ class OpenAIProvider(BaseAIProvider):
 class AIClient:
     """
     Unified AI client with provider fallback and error handling.
-    
+
     Usage:
         client = AIClient()
         await client.initialize(db)
@@ -251,7 +250,7 @@ class AIClient:
         """Initialize AI clients with API keys from database."""
         try:
             api_key_service = APIKeyService(db)
-            
+
             # Get Gemini key (primary)
             gemini_key = await api_key_service.get_active_key_for_provider("gemini")
             if gemini_key:
@@ -265,10 +264,10 @@ class AIClient:
                 logger.info("OpenAI fallback provider initialized")
 
             self._initialized = self._primary_provider is not None or self._fallback_provider is not None
-            
+
             if not self._initialized:
                 logger.warning("No AI providers configured - AI features will be unavailable")
-            
+
             return self._initialized
 
         except Exception as e:
@@ -286,7 +285,7 @@ class AIClient:
     ) -> Dict[str, Any]:
         """
         Generate AI response with automatic fallback.
-        
+
         Args:
             system_prompt: System/instruction prompt
             user_prompt: User query/context
@@ -294,7 +293,7 @@ class AIClient:
             max_tokens: Override default max tokens
             prefer_provider: Prefer specific provider if available
             feature: Feature name for usage tracking
-            
+
         Returns:
             Dict with response data, provider info, and usage stats
         """
@@ -306,12 +305,12 @@ class AIClient:
 
         # Determine provider order
         providers = self._get_provider_order(prefer_provider)
-        
+
         errors = []
         for provider in providers:
             if provider is None:
                 continue
-            
+
             try:
                 logger.info(f"Attempting AI generation with {provider.__class__.__name__}")
                 response = await provider.generate(
@@ -320,13 +319,13 @@ class AIClient:
                     temperature=temp,
                     max_tokens=tokens
                 )
-                
+
                 # Add feature tracking
                 if feature:
                     response["feature"] = feature
-                
+
                 return response
-                
+
             except RateLimitError as e:
                 logger.warning(f"Rate limit hit on {e.provider}, trying fallback")
                 errors.append(str(e))
@@ -362,13 +361,13 @@ class AIClient:
             "openai": False,
             "any": False
         }
-        
+
         if self._primary_provider:
             result["gemini"] = await self._primary_provider.is_available()
-        
+
         if self._fallback_provider:
             result["openai"] = await self._fallback_provider.is_available()
-        
+
         result["any"] = result["gemini"] or result["openai"]
         return result
 
@@ -385,11 +384,11 @@ _ai_client_instance: Optional[AIClient] = None
 async def get_ai_client(db) -> AIClient:
     """Get or create AI client instance."""
     global _ai_client_instance
-    
+
     if _ai_client_instance is None:
         _ai_client_instance = AIClient()
         await _ai_client_instance.initialize(db)
-    
+
     return _ai_client_instance
 
 

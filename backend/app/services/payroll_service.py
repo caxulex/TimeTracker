@@ -4,35 +4,46 @@ Service layer for Payroll operations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional, List, Tuple, Union
-from sqlalchemy import select, and_, func
+from typing import List, Optional, Tuple, Union
+
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.dependencies import FILTER_NULL_COMPANY
 from app.models import (
-    User, PayRate, PayRateHistory, PayrollPeriod, 
-    PayrollEntry, PayrollAdjustment, TimeEntry
+    PayRate,
+    PayRateHistory,
+    PayrollAdjustment,
+    PayrollEntry,
+    PayrollPeriod,
+    TimeEntry,
+    User,
 )
 from app.schemas.payroll import (
-    PayRateCreate, PayRateUpdate,
-    PayrollPeriodCreate, PayrollPeriodUpdate,
-    PayrollEntryCreate, PayrollEntryUpdate,
-    PayrollAdjustmentCreate, PayrollAdjustmentUpdate,
-    PayrollReportFilters, PeriodStatusEnum, EntryStatusEnum
+    EntryStatusEnum,
+    PayRateCreate,
+    PayRateUpdate,
+    PayrollAdjustmentCreate,
+    PayrollAdjustmentUpdate,
+    PayrollEntryCreate,
+    PayrollEntryUpdate,
+    PayrollPeriodCreate,
+    PayrollPeriodUpdate,
+    PeriodStatusEnum,
 )
-from app.dependencies import FILTER_NULL_COMPANY
 from app.utils.timewindow import now_utc
 
 
 class PayRateService:
     """Service for managing pay rates"""
-    
+
     def __init__(self, db: AsyncSession):
         self.db = db
-    
+
     async def create_pay_rate(
-        self, 
-        pay_rate_data: PayRateCreate, 
+        self,
+        pay_rate_data: PayRateCreate,
         created_by_id: int
     ) -> PayRate:
         """Create a new pay rate for a user"""
@@ -45,11 +56,11 @@ class PayRateService:
         )
         result = await self.db.execute(stmt)
         existing_rates = result.scalars().all()
-        
+
         for rate in existing_rates:
             if rate.effective_to is None:
                 rate.effective_to = pay_rate_data.effective_from
-        
+
         pay_rate = PayRate(
             user_id=pay_rate_data.user_id,
             rate_type=pay_rate_data.rate_type.value,
@@ -65,22 +76,22 @@ class PayRateService:
         await self.db.commit()
         await self.db.refresh(pay_rate)
         return pay_rate
-    
+
     async def get_pay_rate(self, pay_rate_id: int) -> Optional[PayRate]:
         """Get a pay rate by ID"""
         stmt = select(PayRate).where(PayRate.id == pay_rate_id)
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
-    
+
     async def get_user_active_rate(
-        self, 
-        user_id: int, 
+        self,
+        user_id: int,
         as_of_date: Optional[date] = None
     ) -> Optional[PayRate]:
         """Get the active pay rate for a user as of a specific date"""
         if as_of_date is None:
             as_of_date = date.today()
-        
+
         stmt = select(PayRate).where(
             and_(
                 PayRate.user_id == user_id,
@@ -89,12 +100,12 @@ class PayRateService:
                 (PayRate.effective_to.is_(None) | (PayRate.effective_to >= as_of_date))
             )
         ).order_by(PayRate.effective_from.desc()).limit(1)
-        
+
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
-    
+
     async def get_user_pay_rates(
-        self, 
+        self,
         user_id: int,
         include_inactive: bool = False
     ) -> List[PayRate]:
@@ -102,20 +113,20 @@ class PayRateService:
         conditions = [PayRate.user_id == user_id]
         if not include_inactive:
             conditions.append(PayRate.is_active == True)
-        
+
         stmt = select(PayRate).where(and_(*conditions)).order_by(PayRate.effective_from.desc())
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
-    
+
     async def get_all_pay_rates(
-        self, 
-        skip: int = 0, 
+        self,
+        skip: int = 0,
         limit: int = 100,
         active_only: bool = True,
         company_id: Optional[Union[int, str]] = None
     ) -> Tuple[List[PayRate], int]:
         """Get all pay rates with pagination, optionally filtered by company_id.
-        
+
         Args:
             company_id: None = super_admin (no filter), FILTER_NULL_COMPANY = platform users (NULL filter),
                        int = specific company filter
@@ -123,7 +134,7 @@ class PayRateService:
         conditions = []
         if active_only:
             conditions.append(PayRate.is_active == True)
-        
+
         # Filter by company_id via User relationship
         need_user_join = False
         if company_id is None:
@@ -137,7 +148,7 @@ class PayRateService:
             # Company-scoped users
             conditions.append(User.company_id == company_id)
             need_user_join = True
-        
+
         # Get total count with User join for company filtering
         if need_user_join:
             count_stmt = select(func.count(PayRate.id)).join(User, PayRate.user_id == User.id)
@@ -146,7 +157,7 @@ class PayRateService:
         if conditions:
             count_stmt = count_stmt.where(and_(*conditions))
         total = (await self.db.execute(count_stmt)).scalar() or 0
-        
+
         # Get paginated results with User join
         stmt = select(PayRate).options(selectinload(PayRate.user))
         if need_user_join:
@@ -154,10 +165,10 @@ class PayRateService:
         if conditions:
             stmt = stmt.where(and_(*conditions))
         stmt = stmt.order_by(PayRate.created_at.desc()).offset(skip).limit(limit)
-        
+
         result = await self.db.execute(stmt)
         return list(result.scalars().all()), total
-    
+
     async def update_pay_rate(
         self,
         pay_rate_id: int,
@@ -168,7 +179,7 @@ class PayRateService:
         pay_rate = await self.get_pay_rate(pay_rate_id)
         if not pay_rate:
             return None
-        
+
         # Create history record if rate changed
         if pay_rate_data.base_rate is not None or pay_rate_data.overtime_multiplier is not None:
             history = PayRateHistory(
@@ -181,7 +192,7 @@ class PayRateService:
                 change_reason=pay_rate_data.change_reason
             )
             self.db.add(history)
-        
+
         # Update fields
         update_data = pay_rate_data.model_dump(exclude_unset=True, exclude={'change_reason'})
         for field, value in update_data.items():
@@ -190,51 +201,51 @@ class PayRateService:
                     setattr(pay_rate, field, value.value)
                 else:
                     setattr(pay_rate, field, value)
-        
+
         await self.db.commit()
         await self.db.refresh(pay_rate)
         return pay_rate
-    
+
     async def delete_pay_rate(self, pay_rate_id: int) -> bool:
         """Soft delete a pay rate"""
         pay_rate = await self.get_pay_rate(pay_rate_id)
         if not pay_rate:
             return False
-        
+
         pay_rate.is_active = False
         pay_rate.effective_to = date.today()
         await self.db.commit()
         return True
-    
+
     async def get_pay_rate_history(self, pay_rate_id: int) -> List[PayRateHistory]:
         """Get history for a pay rate"""
         stmt = select(PayRateHistory).where(
             PayRateHistory.pay_rate_id == pay_rate_id
         ).order_by(PayRateHistory.changed_at.desc())
-        
+
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
 
 class PayrollPeriodService:
     """Service for managing payroll periods"""
-    
+
     def __init__(self, db: AsyncSession):
         self.db = db
         self.pay_rate_service = PayRateService(db)
-    
+
     async def create_period(self, period_data: PayrollPeriodCreate) -> PayrollPeriod:
         """Create a new payroll period with optional employee selection criteria"""
         # Convert user_ids list to comma-separated string for storage
         selected_user_ids = None
         if period_data.user_ids and len(period_data.user_ids) > 0:
             selected_user_ids = ','.join(str(uid) for uid in period_data.user_ids)
-        
+
         # Get rate type filter value
         rate_type_filter = None
         if period_data.rate_type_filter:
             rate_type_filter = period_data.rate_type_filter.value
-        
+
         period = PayrollPeriod(
             name=period_data.name,
             period_type=period_data.period_type.value,
@@ -248,13 +259,13 @@ class PayrollPeriodService:
         await self.db.commit()
         await self.db.refresh(period)
         return period
-    
+
     async def get_period(self, period_id: int) -> Optional[PayrollPeriod]:
         """Get a payroll period by ID"""
         stmt = select(PayrollPeriod).where(PayrollPeriod.id == period_id)
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
-    
+
     async def get_period_with_entries(self, period_id: int) -> Optional[PayrollPeriod]:
         """Get a payroll period with all entries"""
         stmt = select(PayrollPeriod).options(
@@ -263,7 +274,7 @@ class PayrollPeriodService:
         ).where(PayrollPeriod.id == period_id)
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
-    
+
     async def get_periods(
         self,
         skip: int = 0,
@@ -272,18 +283,18 @@ class PayrollPeriodService:
         company_id: Optional[Union[int, str]] = None
     ) -> Tuple[List[PayrollPeriod], int]:
         """Get all payroll periods with pagination, optionally filtered by company_id.
-        
+
         Args:
             company_id: None = super_admin (no filter), FILTER_NULL_COMPANY = platform users (NULL filter),
                        int = specific company filter
-        
+
         Note: Since PayrollPeriod doesn't have company_id directly, we filter via entries.
               Draft periods without entries are shown to all admins in their company.
         """
         conditions = []
         if status:
             conditions.append(PayrollPeriod.status == status.value)
-        
+
         # Filter by company_id via PayrollEntry -> User relationship
         # Also include periods with NO entries (newly created drafts)
         if company_id is None:
@@ -328,22 +339,22 @@ class PayrollPeriodService:
                 PayrollPeriod.id.in_(subquery),
                 PayrollPeriod.id.in_(no_entries_subquery)
             ))
-        
+
         # Get total count
         count_stmt = select(func.count(PayrollPeriod.id))
         if conditions:
             count_stmt = count_stmt.where(and_(*conditions))
         total = (await self.db.execute(count_stmt)).scalar() or 0
-        
+
         # Get paginated results
         stmt = select(PayrollPeriod)
         if conditions:
             stmt = stmt.where(and_(*conditions))
         stmt = stmt.order_by(PayrollPeriod.start_date.desc()).offset(skip).limit(limit)
-        
+
         result = await self.db.execute(stmt)
         return list(result.scalars().all()), total
-    
+
     async def update_period(
         self,
         period_id: int,
@@ -353,7 +364,7 @@ class PayrollPeriodService:
         period = await self.get_period(period_id)
         if not period:
             return None
-        
+
         update_data = period_data.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             if value is not None:
@@ -361,35 +372,35 @@ class PayrollPeriodService:
                     setattr(period, field, value.value)
                 else:
                     setattr(period, field, value)
-        
+
         await self.db.commit()
         await self.db.refresh(period)
         return period
-    
+
     async def process_period(
-        self, 
+        self,
         period_id: int,
         company_id: Optional[int] = None
     ) -> Union[PayrollPeriod, dict, None]:
         """
         Process a payroll period - calculate all entries based on pay rate type and selection criteria.
-        
+
         Args:
             period_id: ID of the period to process
             company_id: Company ID for multi-tenancy filtering. If provided, only users from this company are included.
-        
+
         Returns:
             PayrollPeriod if successful, dict with error if no users found, None if period invalid
         """
         period = await self.get_period_with_entries(period_id)
         if not period or period.status != PeriodStatusEnum.DRAFT.value:
             return None
-        
+
         period.status = PeriodStatusEnum.PROCESSING.value
-        
+
         # Calculate period duration for prorating
         period_days = (period.end_date - period.start_date).days + 1
-        
+
         # Calculate overtime threshold based on period type (for hourly workers)
         # Standard is 40 hours/week
         period_weeks = {
@@ -400,38 +411,38 @@ class PayrollPeriodService:
         }
         weeks_in_period = period_weeks.get(period.period_type, Decimal("2"))
         overtime_threshold = Decimal("40") * weeks_in_period
-        
+
         # Parse selection criteria from the period
         selected_user_ids = None
         if period.selected_user_ids:
             selected_user_ids = [int(uid.strip()) for uid in period.selected_user_ids.split(',') if uid.strip()]
-        
+
         rate_type_filter = period.rate_type_filter  # e.g., 'hourly', 'monthly', etc.
-        
+
         # Build query for users with active pay rates
         conditions = [PayRate.is_active == True, User.is_active == True]
-        
+
         # Multi-tenancy: Filter by company (strict - even NULL company)
         if company_id is not None:
             conditions.append(User.company_id == company_id)
         elif company_id is None:
             # If company_id is explicitly None, filter for NULL company users
             conditions.append(User.company_id.is_(None))
-        
+
         # Filter by specific user IDs if provided
         if selected_user_ids:
             conditions.append(User.id.in_(selected_user_ids))
-        
+
         # Filter by rate type if provided
         if rate_type_filter:
             conditions.append(PayRate.rate_type == rate_type_filter)
-        
+
         stmt = select(User).join(PayRate, User.id == PayRate.user_id).where(
             and_(*conditions)
         ).distinct()
         result = await self.db.execute(stmt)
         users = result.scalars().all()
-        
+
         # Check if any users with pay rates were found
         if not users:
             # Reset status back to draft
@@ -442,20 +453,20 @@ class PayrollPeriodService:
                 "message": "No users with active pay rates found. Please configure pay rates for employees before processing payroll.",
                 "period_id": period_id
             }
-        
+
         total_amount = Decimal("0.00")
         entries_processed = 0
-        
+
         for user in users:
             # Get active pay rate for the period end date
             pay_rate = await self.pay_rate_service.get_user_active_rate(user.id, period.end_date)
             if not pay_rate:
                 continue
-            
+
             # Double-check rate type filter (in case user has multiple rates)
             if rate_type_filter and pay_rate.rate_type != rate_type_filter:
                 continue
-            
+
             # Get user's time entries for this period (needed for hourly/daily calculations)
             time_stmt = select(TimeEntry).where(
                 and_(
@@ -467,10 +478,10 @@ class PayrollPeriodService:
             )
             time_result = await self.db.execute(time_stmt)
             time_entries = time_result.scalars().all()
-            
+
             # Calculate based on rate type
             rate_type = pay_rate.rate_type.lower() if pay_rate.rate_type else 'hourly'
-            
+
             if rate_type == 'monthly':
                 # MONTHLY SALARY CALCULATION
                 # =========================
@@ -486,26 +497,26 @@ class PayrollPeriodService:
                 #
                 # Example: $1,200/month salary = $14,400/year
                 # - Weekly:       $14,400 ÷ 52 = $276.92/paycheck
-                # - Bi-Weekly:    $14,400 ÷ 26 = $553.85/paycheck  
+                # - Bi-Weekly:    $14,400 ÷ 26 = $553.85/paycheck
                 # - Semi-Monthly: $14,400 ÷ 24 = $600.00/paycheck
                 # - Monthly:      $14,400 ÷ 12 = $1,200.00/paycheck
-                
+
                 periods_per_year = {
                     'weekly': Decimal("52"),        # Paid every week
                     'bi_weekly': Decimal("26"),     # Paid every 2 weeks
                     'semi_monthly': Decimal("24"),  # Paid twice per month (fixed dates)
                     'monthly': Decimal("12"),       # Paid once per month
                 }
-                
+
                 annual_salary = pay_rate.base_rate * Decimal("12")
                 periods = periods_per_year.get(period.period_type, Decimal("12"))
                 gross_amount = (annual_salary / periods).quantize(Decimal("0.01"))
-                
+
                 regular_hours = Decimal("0")  # Hours not tracked for salaried employees
                 overtime_hours = Decimal("0")
                 regular_rate = pay_rate.base_rate
                 overtime_rate = pay_rate.base_rate  # No overtime for monthly salary
-                    
+
             elif rate_type == 'daily':
                 # Daily rate - calculate based on days worked (time entries)
                 # Count unique days with time entries
@@ -513,13 +524,13 @@ class PayrollPeriodService:
                 for te in time_entries:
                     worked_days.add(te.start_time.date())
                 days_worked = Decimal(len(worked_days))
-                
+
                 gross_amount = days_worked * pay_rate.base_rate
                 regular_hours = days_worked * Decimal("8")  # Assume 8 hours/day for display
                 overtime_hours = Decimal("0")
                 regular_rate = pay_rate.base_rate / Decimal("8")  # Convert to hourly for display
                 overtime_rate = regular_rate * pay_rate.overtime_multiplier
-                
+
             elif rate_type == 'project_based':
                 # Project-based - pay the agreed amount
                 gross_amount = pay_rate.base_rate
@@ -527,25 +538,25 @@ class PayrollPeriodService:
                 overtime_hours = Decimal("0")
                 regular_rate = pay_rate.base_rate
                 overtime_rate = pay_rate.base_rate
-                
+
             else:  # hourly (default)
                 # Hourly rate - calculate based on actual hours worked
                 total_seconds = sum(te.duration_seconds or 0 for te in time_entries)
                 total_hours = Decimal(total_seconds) / Decimal("3600")
-                
+
                 # Calculate regular and overtime hours
                 regular_hours = min(total_hours, overtime_threshold)
                 overtime_hours = max(total_hours - overtime_threshold, Decimal("0"))
-                
+
                 regular_rate = pay_rate.base_rate
                 overtime_rate = pay_rate.base_rate * pay_rate.overtime_multiplier
                 gross_amount = (regular_hours * regular_rate) + (overtime_hours * overtime_rate)
-            
+
             # Round to 2 decimal places
             regular_hours = regular_hours.quantize(Decimal("0.01"))
             overtime_hours = overtime_hours.quantize(Decimal("0.01"))
             gross_amount = gross_amount.quantize(Decimal("0.01"))
-            
+
             # Check if entry exists
             existing_entry_stmt = select(PayrollEntry).where(
                 and_(
@@ -555,7 +566,7 @@ class PayrollPeriodService:
             )
             existing_result = await self.db.execute(existing_entry_stmt)
             entry = existing_result.scalar_one_or_none()
-            
+
             if entry:
                 entry.regular_hours = regular_hours
                 entry.overtime_hours = overtime_hours
@@ -575,69 +586,69 @@ class PayrollPeriodService:
                     net_amount=gross_amount
                 )
                 self.db.add(entry)
-            
+
             total_amount += entry.net_amount
             entries_processed += 1
-        
+
         period.total_amount = total_amount.quantize(Decimal("0.01"))
         period.status = PeriodStatusEnum.DRAFT.value  # Back to draft for review
-        
+
         await self.db.commit()
         await self.db.refresh(period)
         return period
-    
+
     async def approve_period(
-        self, 
-        period_id: int, 
+        self,
+        period_id: int,
         approved_by_id: int
     ) -> Optional[PayrollPeriod]:
         """Approve a payroll period"""
         period = await self.get_period(period_id)
         if not period or period.status not in (PeriodStatusEnum.DRAFT.value, PeriodStatusEnum.PROCESSING.value):
             return None
-        
+
         period.status = PeriodStatusEnum.APPROVED.value
         period.approved_by = approved_by_id
         period.approved_at = now_utc()
-        
+
         # Approve all entries
         stmt = select(PayrollEntry).where(PayrollEntry.payroll_period_id == period_id)
         result = await self.db.execute(stmt)
         entries = result.scalars().all()
-        
+
         for entry in entries:
             entry.status = EntryStatusEnum.APPROVED.value
-        
+
         await self.db.commit()
         await self.db.refresh(period)
         return period
-    
+
     async def mark_as_paid(self, period_id: int) -> Optional[PayrollPeriod]:
         """Mark a payroll period as paid"""
         period = await self.get_period(period_id)
         if not period or period.status != PeriodStatusEnum.APPROVED.value:
             return None
-        
+
         period.status = PeriodStatusEnum.PAID.value
-        
+
         # Mark all entries as paid
         stmt = select(PayrollEntry).where(PayrollEntry.payroll_period_id == period_id)
         result = await self.db.execute(stmt)
         entries = result.scalars().all()
-        
+
         for entry in entries:
             entry.status = EntryStatusEnum.PAID.value
-        
+
         await self.db.commit()
         await self.db.refresh(period)
         return period
-    
+
     async def delete_period(self, period_id: int) -> bool:
         """Delete a payroll period (any status - admin responsibility)"""
         period = await self.get_period(period_id)
         if not period:
             return False
-        
+
         await self.db.delete(period)
         await self.db.commit()
         return True
@@ -645,10 +656,10 @@ class PayrollPeriodService:
 
 class PayrollEntryService:
     """Service for managing payroll entries"""
-    
+
     def __init__(self, db: AsyncSession):
         self.db = db
-    
+
     async def create_entry(self, entry_data: PayrollEntryCreate) -> PayrollEntry:
         """Create a new payroll entry"""
         entry = PayrollEntry(
@@ -662,7 +673,7 @@ class PayrollEntryService:
         await self.db.commit()
         await self.db.refresh(entry)
         return entry
-    
+
     async def get_entry(self, entry_id: int) -> Optional[PayrollEntry]:
         """Get a payroll entry by ID"""
         stmt = select(PayrollEntry).options(
@@ -671,9 +682,9 @@ class PayrollEntryService:
         ).where(PayrollEntry.id == entry_id)
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
-    
+
     async def get_entries_by_period(
-        self, 
+        self,
         period_id: int
     ) -> List[PayrollEntry]:
         """Get all entries for a payroll period"""
@@ -683,10 +694,10 @@ class PayrollEntryService:
         ).where(
             PayrollEntry.payroll_period_id == period_id
         ).order_by(PayrollEntry.user_id)
-        
+
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
-    
+
     async def get_user_entries(
         self,
         user_id: int,
@@ -698,17 +709,17 @@ class PayrollEntryService:
             PayrollEntry.user_id == user_id
         )
         total = (await self.db.execute(count_stmt)).scalar() or 0
-        
+
         stmt = select(PayrollEntry).options(
             selectinload(PayrollEntry.period),
             selectinload(PayrollEntry.adjustments)
         ).where(
             PayrollEntry.user_id == user_id
         ).order_by(PayrollEntry.created_at.desc()).offset(skip).limit(limit)
-        
+
         result = await self.db.execute(stmt)
         return list(result.scalars().all()), total
-    
+
     async def update_entry(
         self,
         entry_id: int,
@@ -718,7 +729,7 @@ class PayrollEntryService:
         entry = await self.get_entry(entry_id)
         if not entry:
             return None
-        
+
         update_data = entry_data.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             if value is not None:
@@ -726,7 +737,7 @@ class PayrollEntryService:
                     setattr(entry, field, value.value)
                 else:
                     setattr(entry, field, value)
-        
+
         # Recalculate amounts if hours changed
         if entry_data.regular_hours is not None or entry_data.overtime_hours is not None:
             entry.gross_amount = (
@@ -734,22 +745,22 @@ class PayrollEntryService:
                 entry.overtime_hours * entry.overtime_rate
             )
             entry.net_amount = entry.gross_amount + entry.adjustments_amount
-        
+
         await self.db.commit()
         await self.db.refresh(entry)
         return entry
-    
+
     async def recalculate_entry_totals(self, entry_id: int) -> Optional[PayrollEntry]:
         """Recalculate entry totals after adjustment changes"""
         entry = await self.get_entry(entry_id)
         if not entry:
             return None
-        
+
         # Sum all adjustments
         adjustments_total = sum(adj.amount for adj in entry.adjustments)
         entry.adjustments_amount = adjustments_total
         entry.net_amount = entry.gross_amount + adjustments_total
-        
+
         await self.db.commit()
         await self.db.refresh(entry)
         return entry
@@ -757,11 +768,11 @@ class PayrollEntryService:
 
 class PayrollAdjustmentService:
     """Service for managing payroll adjustments"""
-    
+
     def __init__(self, db: AsyncSession):
         self.db = db
         self.entry_service = PayrollEntryService(db)
-    
+
     async def create_adjustment(
         self,
         adjustment_data: PayrollAdjustmentCreate,
@@ -777,28 +788,28 @@ class PayrollAdjustmentService:
         )
         self.db.add(adjustment)
         await self.db.commit()
-        
+
         # Recalculate entry totals
         await self.entry_service.recalculate_entry_totals(adjustment_data.payroll_entry_id)
-        
+
         await self.db.refresh(adjustment)
         return adjustment
-    
+
     async def get_adjustment(self, adjustment_id: int) -> Optional[PayrollAdjustment]:
         """Get an adjustment by ID"""
         stmt = select(PayrollAdjustment).where(PayrollAdjustment.id == adjustment_id)
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
-    
+
     async def get_entry_adjustments(self, entry_id: int) -> List[PayrollAdjustment]:
         """Get all adjustments for an entry"""
         stmt = select(PayrollAdjustment).where(
             PayrollAdjustment.payroll_entry_id == entry_id
         ).order_by(PayrollAdjustment.created_at.desc())
-        
+
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
-    
+
     async def update_adjustment(
         self,
         adjustment_id: int,
@@ -808,7 +819,7 @@ class PayrollAdjustmentService:
         adjustment = await self.get_adjustment(adjustment_id)
         if not adjustment:
             return None
-        
+
         update_data = adjustment_data.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             if value is not None:
@@ -816,27 +827,27 @@ class PayrollAdjustmentService:
                     setattr(adjustment, field, value.value)
                 else:
                     setattr(adjustment, field, value)
-        
+
         await self.db.commit()
-        
+
         # Recalculate entry totals
         await self.entry_service.recalculate_entry_totals(adjustment.payroll_entry_id)
-        
+
         await self.db.refresh(adjustment)
         return adjustment
-    
+
     async def delete_adjustment(self, adjustment_id: int) -> bool:
         """Delete a payroll adjustment"""
         adjustment = await self.get_adjustment(adjustment_id)
         if not adjustment:
             return False
-        
+
         entry_id = adjustment.payroll_entry_id
         await self.db.delete(adjustment)
         await self.db.commit()
-        
+
         # Recalculate entry totals
         await self.entry_service.recalculate_entry_totals(entry_id)
-        
+
         return True
 

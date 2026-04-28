@@ -3,36 +3,59 @@ Time Tracker API - Main FastAPI Application
 SEC-004, SEC-007, SEC-008, SEC-009, SEC-010, SEC-018, SEC-020: Security Hardened
 """
 
+import logging
+import time
+import uuid
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
-import logging
-import time
-import uuid
 
-from app.config import settings
-from app.database import get_db
-from app.routers import auth, users, teams, projects, tasks, time_entries, reports, websocket
-from app.routers import pay_rates, payroll, payroll_reports, monitoring
-from app.routers import admin, export, sessions, invitations, approvals, report_templates
-from app.routers import ip_security as ip_security_router
-from app.routers import account_requests
-from app.routers import api_keys  # SEC-020: API Key management
-from app.routers import ai_features  # AI Feature Toggle System
-from app.routers import companies  # Multi-tenancy / White-label support
-from app.routers import email_logs  # Email delivery monitoring
-from app.routers import notifications  # In-app notifications
-from app.routers import audit_logs  # Audit log viewing
-from app.routers import work_sessions  # Micro-task management: Work sessions, breaks, meetings
 from app.ai import ai_router  # AI Services (suggestions, anomalies)
-from app.middleware import RateLimitMiddleware, rate_limiter, SecurityHeadersMiddleware, RequestValidationMiddleware
+from app.config import settings
 from app.exceptions import AppException
 from app.integrations.sentry import init_sentry
 
 # Phase 3: Configure structured logging BEFORE anything else logs
 from app.logging_config import configure_logging, request_id_var
+from app.middleware import (
+    RateLimitMiddleware,
+    RequestValidationMiddleware,
+    SecurityHeadersMiddleware,
+    rate_limiter,
+)
+from app.routers import (
+    account_requests,
+    admin,
+    ai_features,  # AI Feature Toggle System
+    api_keys,  # SEC-020: API Key management
+    approvals,
+    audit_logs,  # Audit log viewing
+    auth,
+    companies,  # Multi-tenancy / White-label support
+    email_logs,  # Email delivery monitoring
+    export,
+    invitations,
+    ip_security as ip_security_router,
+    monitoring,
+    notifications,  # In-app notifications
+    pay_rates,
+    payroll,
+    payroll_reports,
+    projects,
+    report_templates,
+    reports,
+    sessions,
+    tasks,
+    teams,
+    time_entries,
+    users,
+    websocket,
+    work_sessions,  # Micro-task management: Work sessions, breaks, meetings
+)
+
 configure_logging(
     log_level=settings.LOG_LEVEL,
     environment=settings.ENVIRONMENT,
@@ -85,7 +108,7 @@ async def lifespan(app: FastAPI):
         await seed_ai_features_on_startup()
     except Exception as e:
         logger.warning(f"Could not auto-seed AI features: {e}")
-    
+
     logger.info("Time Tracker API started successfully")
     yield
     logger.info("Shutting down Time Tracker API...")
@@ -94,12 +117,13 @@ async def lifespan(app: FastAPI):
 async def seed_ai_features_on_startup():
     """Automatically seed AI features if the table is empty"""
     from sqlalchemy import text
+
     from app.database import async_session
-    
+
     async with async_session() as db:
         result = await db.execute(text("SELECT COUNT(*) FROM ai_feature_settings"))
         count = result.scalar()
-        
+
         if count == 0:
             logger.info("Seeding AI features...")
             features = [
@@ -110,18 +134,18 @@ async def seed_ai_features_on_startup():
                 ("ai_report_summaries", "AI Report Summaries", "AI-generated insights and summaries in your reports", False, True, "gemini"),
                 ("ai_task_estimation", "Task Duration Estimation", "AI-powered estimates for how long tasks will take", False, True, "gemini"),
             ]
-            
+
             for f in features:
                 await db.execute(
                     text("""
-                        INSERT INTO ai_feature_settings 
+                        INSERT INTO ai_feature_settings
                         (feature_id, feature_name, description, is_enabled, requires_api_key, api_provider)
                         VALUES (:fid, :fname, :desc, :enabled, :req_key, :provider)
                         ON CONFLICT (feature_id) DO NOTHING
                     """),
                     {"fid": f[0], "fname": f[1], "desc": f[2], "enabled": f[3], "req_key": f[4], "provider": f[5]}
                 )
-            
+
             await db.commit()
             logger.info(f"Seeded {len(features)} AI features")
         else:
@@ -207,6 +231,7 @@ _assert_cors_not_fully_closed_in_production(
 # verify production isn't accidentally rejecting tenant subdomains. Logged
 # under a stable structured identifier `cors.config_resolved`.
 from app.utils.timewindow import now_utc as _b25_now_utc
+
 logger.info(
     "cors.config_resolved",
     extra={
@@ -251,7 +276,7 @@ def get_all_allowed_hosts() -> list:
     TrustedHostMiddleware supports wildcard patterns like *.example.com
     """
     hosts = list(settings.ALLOWED_HOSTS)
-    
+
     # Add wildcard patterns for each base domain
     for base_domain in settings.CORS_WILDCARD_DOMAINS:
         wildcard_pattern = f"*.{base_domain}"
@@ -260,7 +285,7 @@ def get_all_allowed_hosts() -> list:
         # Also ensure base domain itself is allowed
         if base_domain not in hosts:
             hosts.append(base_domain)
-    
+
     return hosts
 
 
@@ -318,8 +343,9 @@ async def api_health_check():
     """
     import redis.asyncio as redis_client
     from sqlalchemy import text
+
     from app.database import engine as async_engine
-    
+
     health_status = {
         "status": "healthy",
         "version": settings.APP_VERSION,
@@ -329,7 +355,7 @@ async def api_health_check():
             "redis": "unknown"
         }
     }
-    
+
     # Check database connection
     try:
         async with async_engine.connect() as conn:
@@ -338,7 +364,7 @@ async def api_health_check():
     except Exception as e:
         health_status["checks"]["database"] = f"unhealthy: {str(e)[:50]}"
         health_status["status"] = "degraded"
-    
+
     # Check Redis connection
     try:
         redis = redis_client.from_url(settings.REDIS_URL)
@@ -348,7 +374,7 @@ async def api_health_check():
     except Exception as e:
         health_status["checks"]["redis"] = f"unhealthy: {str(e)[:50]}"
         health_status["status"] = "degraded"
-    
+
     return health_status
 
 
@@ -358,9 +384,9 @@ async def version_info():
     Version and build information endpoint.
     Useful for debugging and deployment verification.
     """
-    import sys
     import platform
-    
+    import sys
+
     return {
         "app_name": settings.APP_NAME,
         "version": settings.APP_VERSION,

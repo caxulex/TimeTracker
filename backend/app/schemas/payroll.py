@@ -4,10 +4,10 @@ Pydantic schemas for Payroll-related models
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional, List
-from pydantic import BaseModel, Field, validator
 from enum import Enum
+from typing import List, Optional
 
+from pydantic import BaseModel, Field, validator
 
 # ============================================
 # ENUMS

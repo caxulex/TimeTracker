@@ -3,12 +3,14 @@ Scheduled Reports Service - TASK-031
 Email digests and scheduled report generation
 """
 
-import redis
 import json
-from typing import List, Dict, Optional
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
-from dataclasses import dataclass, asdict
+from typing import Dict, List, Optional
+
+import redis
+
 from app.config import settings
 from app.utils.timewindow import now_utc
 
@@ -38,7 +40,7 @@ class ScheduledReport:
     next_run: Optional[str] = None
     params: Optional[Dict] = None
     created_at: Optional[str] = None
-    
+
     def to_dict(self) -> Dict:
         return {
             "id": self.id,
@@ -57,18 +59,18 @@ class ScheduledReport:
 
 class ScheduledReportService:
     """Service for managing scheduled reports"""
-    
+
     @staticmethod
     def _generate_id() -> str:
         """Generate unique report ID"""
         import uuid
         return str(uuid.uuid4())[:8]
-    
+
     @staticmethod
     def _calculate_next_run(frequency: str) -> str:
         """Calculate next run time based on frequency"""
         now = now_utc()
-        
+
         if frequency == ScheduleFrequency.DAILY.value:
             next_run = now.replace(hour=8, minute=0, second=0, microsecond=0)
             if next_run <= now:
@@ -87,9 +89,9 @@ class ScheduledReportService:
                 next_run = datetime(now.year, now.month + 1, 1, 8, 0, 0)
         else:
             next_run = now + timedelta(days=1)
-        
+
         return next_run.isoformat()
-    
+
     @staticmethod
     def create_scheduled_report(
         name: str,
@@ -112,10 +114,10 @@ class ScheduledReportService:
             params=params,
             created_at=now_utc().isoformat()
         )
-        
+
         redis_client.hset(SCHEDULED_REPORTS_KEY, report.id, json.dumps(report.to_dict()))
         return report
-    
+
     @staticmethod
     def get_scheduled_report(report_id: str) -> Optional[ScheduledReport]:
         """Get a scheduled report by ID"""
@@ -124,7 +126,7 @@ class ScheduledReportService:
             d = json.loads(data)
             return ScheduledReport(**d)
         return None
-    
+
     @staticmethod
     def get_user_scheduled_reports(user_id: int) -> List[ScheduledReport]:
         """Get all scheduled reports for a user"""
@@ -135,13 +137,13 @@ class ScheduledReportService:
             if d.get("user_id") == user_id:
                 reports.append(ScheduledReport(**d))
         return reports
-    
+
     @staticmethod
     def get_all_scheduled_reports() -> List[ScheduledReport]:
         """Get all scheduled reports (admin)"""
         all_reports = redis_client.hgetall(SCHEDULED_REPORTS_KEY)
         return [ScheduledReport(**json.loads(data)) for data in all_reports.values()]
-    
+
     @staticmethod
     def update_scheduled_report(
         report_id: str,
@@ -155,7 +157,7 @@ class ScheduledReportService:
         report = ScheduledReportService.get_scheduled_report(report_id)
         if not report:
             return None
-        
+
         if name is not None:
             report.name = name
         if frequency is not None:
@@ -167,42 +169,42 @@ class ScheduledReportService:
             report.enabled = enabled
         if params is not None:
             report.params = params
-        
+
         redis_client.hset(SCHEDULED_REPORTS_KEY, report.id, json.dumps(report.to_dict()))
         return report
-    
+
     @staticmethod
     def delete_scheduled_report(report_id: str) -> bool:
         """Delete a scheduled report"""
         return bool(redis_client.hdel(SCHEDULED_REPORTS_KEY, report_id))
-    
+
     @staticmethod
     def get_due_reports() -> List[ScheduledReport]:
         """Get reports that are due to run"""
         now = now_utc()
         due_reports = []
-        
+
         all_reports = ScheduledReportService.get_all_scheduled_reports()
         for report in all_reports:
             if report.enabled and report.next_run:
                 next_run = datetime.fromisoformat(report.next_run)
                 if next_run <= now:
                     due_reports.append(report)
-        
+
         return due_reports
-    
+
     @staticmethod
     def mark_report_sent(report_id: str) -> Optional[ScheduledReport]:
         """Mark a report as sent and update next run time"""
         report = ScheduledReportService.get_scheduled_report(report_id)
         if not report:
             return None
-        
+
         report.last_sent = now_utc().isoformat()
         report.next_run = ScheduledReportService._calculate_next_run(report.frequency)
-        
+
         redis_client.hset(SCHEDULED_REPORTS_KEY, report.id, json.dumps(report.to_dict()))
-        
+
         # Log to history
         history_entry = {
             "report_id": report.id,
@@ -212,22 +214,22 @@ class ScheduledReportService:
         }
         redis_client.lpush(f"{REPORT_HISTORY_KEY}:{report.user_id}", json.dumps(history_entry))
         redis_client.ltrim(f"{REPORT_HISTORY_KEY}:{report.user_id}", 0, 99)
-        
+
         return report
-    
+
     @staticmethod
     def get_report_history(user_id: int, limit: int = 20) -> List[Dict]:
         """Get report sending history for a user"""
         history = redis_client.lrange(f"{REPORT_HISTORY_KEY}:{user_id}", 0, limit - 1)
         return [json.loads(h) for h in history]
-    
+
     @staticmethod
     def toggle_report(report_id: str) -> Optional[ScheduledReport]:
         """Toggle report enabled/disabled status"""
         report = ScheduledReportService.get_scheduled_report(report_id)
         if not report:
             return None
-        
+
         report.enabled = not report.enabled
         redis_client.hset(SCHEDULED_REPORTS_KEY, report.id, json.dumps(report.to_dict()))
         return report

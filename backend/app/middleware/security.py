@@ -4,11 +4,12 @@ SEC-007, SEC-020: Security Headers Implementation
 Adds security headers to all responses
 """
 
+import logging
+from typing import Callable
+
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
-from typing import Callable
-import logging
 
 from app.config import settings
 
@@ -20,10 +21,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     Middleware to add security headers to all responses.
     Implements OWASP security header recommendations.
     """
-    
+
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         response = await call_next(request)
-        
+
         # Content Security Policy (CSP)
         # Adjust based on your application needs
         csp_directives = [
@@ -38,7 +39,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "base-uri 'self'",
             "object-src 'none'",
         ]
-        
+
         if not settings.DEBUG:
             # More restrictive CSP for production
             csp_directives = [
@@ -54,48 +55,48 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "object-src 'none'",
                 "upgrade-insecure-requests",
             ]
-        
+
         # Apply security headers
         security_headers = {
             # Prevent clickjacking
             "X-Frame-Options": "SAMEORIGIN",
-            
+
             # Prevent MIME type sniffing
             "X-Content-Type-Options": "nosniff",
-            
+
             # XSS Protection (legacy, but still useful for older browsers)
             "X-XSS-Protection": "1; mode=block",
-            
+
             # Referrer Policy
             "Referrer-Policy": "strict-origin-when-cross-origin",
-            
+
             # Content Security Policy
             "Content-Security-Policy": "; ".join(csp_directives),
-            
+
             # Permissions Policy (formerly Feature-Policy)
             "Permissions-Policy": "geolocation=(), microphone=(), camera=(), payment=()",
-            
+
             # Cache Control for sensitive data
             "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
             "Pragma": "no-cache",
             "Expires": "0",
         }
-        
+
         # HSTS - Only in production with HTTPS
         if settings.ENVIRONMENT == "production":
             security_headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
-        
+
         # Remove server identification headers
         # Note: Some of these may need to be configured at the web server level
         if "Server" in response.headers:
             del response.headers["Server"]
         if "X-Powered-By" in response.headers:
             del response.headers["X-Powered-By"]
-        
+
         # Apply all security headers
         for header, value in security_headers.items():
             response.headers[header] = value
-        
+
         return response
 
 
@@ -103,9 +104,9 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
     """
     SEC-018: Request size and timeout validation middleware.
     """
-    
+
     MAX_CONTENT_LENGTH = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024  # Convert MB to bytes
-    
+
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         # Check content length
         content_length = request.headers.get("content-length")
@@ -123,6 +124,6 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
                         "max_size_bytes": self.MAX_CONTENT_LENGTH
                     }
                 )
-        
+
         response = await call_next(request)
         return response

@@ -3,15 +3,15 @@ Report Templates Service - TASK-030
 Pre-defined report templates (weekly, monthly, project-based, productivity)
 """
 
-import json
-from typing import List, Dict, Optional, Any
-from datetime import datetime, date, timedelta
-from enum import Enum
 from dataclasses import dataclass
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from datetime import date, timedelta
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
-from app.models import TimeEntry, Project, Task, User
+from sqlalchemy import and_, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import Project, TimeEntry, User
 from app.utils.timewindow import now_utc
 
 
@@ -91,7 +91,7 @@ REPORT_TEMPLATES = {
 
 class ReportService:
     """Service for generating reports from templates"""
-    
+
     @staticmethod
     def get_templates() -> List[Dict]:
         """Get all available report templates"""
@@ -105,12 +105,12 @@ class ReportService:
             }
             for t in REPORT_TEMPLATES.values()
         ]
-    
+
     @staticmethod
     def get_template(template_id: str) -> Optional[ReportTemplate]:
         """Get a specific template by ID"""
         return REPORT_TEMPLATES.get(template_id)
-    
+
     @staticmethod
     async def generate_weekly_summary(
         db: AsyncSession,
@@ -121,7 +121,7 @@ class ReportService:
         today = date.today()
         start_of_week = today - timedelta(days=today.weekday() + (7 * week_offset))
         end_of_week = start_of_week + timedelta(days=6)
-        
+
         query = select(
             func.date(TimeEntry.start_time).label('day'),
             func.sum(TimeEntry.duration_seconds).label('total_seconds')
@@ -131,15 +131,15 @@ class ReportService:
                 func.date(TimeEntry.start_time) <= end_of_week
             )
         )
-        
+
         if user_id:
             query = query.where(TimeEntry.user_id == user_id)
-        
+
         query = query.group_by(func.date(TimeEntry.start_time))
-        
+
         result = await db.execute(query)
         daily_data = result.all()
-        
+
         return {
             "report_type": "weekly_summary",
             "period": {
@@ -155,7 +155,7 @@ class ReportService:
             },
             "generated_at": now_utc().isoformat()
         }
-    
+
     @staticmethod
     async def generate_monthly_summary(
         db: AsyncSession,
@@ -168,13 +168,13 @@ class ReportService:
             year = date.today().year
         if not month:
             month = date.today().month
-        
+
         start_of_month = date(year, month, 1)
         if month == 12:
             end_of_month = date(year + 1, 1, 1) - timedelta(days=1)
         else:
             end_of_month = date(year, month + 1, 1) - timedelta(days=1)
-        
+
         # Get project breakdown
         query = select(
             Project.name.label('project_name'),
@@ -187,13 +187,13 @@ class ReportService:
                 func.date(TimeEntry.start_time) <= end_of_month
             )
         ).group_by(Project.name)
-        
+
         if user_id:
             query = query.where(TimeEntry.user_id == user_id)
-        
+
         result = await db.execute(query)
         project_data = result.all()
-        
+
         return {
             "report_type": "monthly_summary",
             "period": {
@@ -211,7 +211,7 @@ class ReportService:
             },
             "generated_at": now_utc().isoformat()
         }
-    
+
     @staticmethod
     async def generate_project_breakdown(
         db: AsyncSession,
@@ -224,14 +224,14 @@ class ReportService:
             start_date = date.today() - timedelta(days=30)
         if not end_date:
             end_date = date.today()
-        
+
         # Get project info
         project_result = await db.execute(select(Project).where(Project.id == project_id))
         project = project_result.scalar_one_or_none()
-        
+
         if not project:
             return {"error": "Project not found"}
-        
+
         # Get user breakdown
         query = select(
             User.full_name.label('user_name'),
@@ -245,10 +245,10 @@ class ReportService:
                 func.date(TimeEntry.start_time) <= end_date
             )
         ).group_by(User.full_name)
-        
+
         result = await db.execute(query)
         user_data = result.all()
-        
+
         return {
             "report_type": "project_breakdown",
             "project": {
@@ -268,7 +268,7 @@ class ReportService:
             },
             "generated_at": now_utc().isoformat()
         }
-    
+
     @staticmethod
     async def generate_productivity_analysis(
         db: AsyncSession,
@@ -278,7 +278,7 @@ class ReportService:
         """Generate productivity analysis report"""
         end_date = date.today()
         start_date = end_date - timedelta(days=days)
-        
+
         query = select(
             func.date(TimeEntry.start_time).label('day'),
             func.sum(TimeEntry.duration_seconds).label('total_seconds'),
@@ -286,16 +286,16 @@ class ReportService:
         ).where(
             func.date(TimeEntry.start_time) >= start_date
         ).group_by(func.date(TimeEntry.start_time))
-        
+
         if user_id:
             query = query.where(TimeEntry.user_id == user_id)
-        
+
         result = await db.execute(query)
         daily_data = result.all()
-        
+
         total_hours = sum((row.total_seconds or 0) / 3600 for row in daily_data)
         days_worked = len([d for d in daily_data if (d.total_seconds or 0) > 0])
-        
+
         return {
             "report_type": "productivity_analysis",
             "period": {

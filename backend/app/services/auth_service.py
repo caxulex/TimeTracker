@@ -3,18 +3,19 @@ Authentication service for JWT token management
 SEC-002, SEC-016, SEC-017: Enhanced with token blacklist and secure hashing
 """
 
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from jose import JWTError, jwt
+
 import bcrypt
-import uuid
+from jose import JWTError, jwt
 
 from app.config import settings
 
 
 class AuthService:
     """Service for authentication operations"""
-    
+
     @staticmethod
     def hash_password(password: str) -> str:
         """
@@ -33,7 +34,7 @@ class AuthService:
 
     @staticmethod
     def create_access_token(
-        data: dict, 
+        data: dict,
         expires_delta: Optional[timedelta] = None,
         jti: Optional[str] = None
     ) -> str:
@@ -41,34 +42,34 @@ class AuthService:
         SEC-002: Create a JWT access token with JTI for blacklisting
         """
         to_encode = data.copy()
-        
+
         if expires_delta:
             expire = datetime.now(timezone.utc) + expires_delta
         else:
             expire = datetime.now(timezone.utc) + timedelta(
                 minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
             )
-        
+
         # SEC-002: Add unique token identifier for blacklisting
         token_jti = jti or str(uuid.uuid4())
-        
+
         to_encode.update({
             "exp": expire,
             "type": "access",
             "jti": token_jti,
             "iat": datetime.now(timezone.utc)
         })
-        
+
         encoded_jwt = jwt.encode(
-            to_encode, 
-            settings.SECRET_KEY, 
+            to_encode,
+            settings.SECRET_KEY,
             algorithm=settings.ALGORITHM
         )
         return encoded_jwt
 
     @staticmethod
     def create_refresh_token(
-        data: dict, 
+        data: dict,
         expires_delta: Optional[timedelta] = None,
         jti: Optional[str] = None
     ) -> str:
@@ -76,27 +77,27 @@ class AuthService:
         SEC-002: Create a JWT refresh token with JTI for blacklisting
         """
         to_encode = data.copy()
-        
+
         if expires_delta:
             expire = datetime.now(timezone.utc) + expires_delta
         else:
             expire = datetime.now(timezone.utc) + timedelta(
                 days=settings.REFRESH_TOKEN_EXPIRE_DAYS
             )
-        
+
         # SEC-002: Add unique token identifier for blacklisting
         token_jti = jti or str(uuid.uuid4())
-        
+
         to_encode.update({
             "exp": expire,
             "type": "refresh",
             "jti": token_jti,
             "iat": datetime.now(timezone.utc)
         })
-        
+
         encoded_jwt = jwt.encode(
-            to_encode, 
-            settings.SECRET_KEY, 
+            to_encode,
+            settings.SECRET_KEY,
             algorithm=settings.ALGORITHM
         )
         return encoded_jwt
@@ -106,8 +107,8 @@ class AuthService:
         """Decode and validate a JWT token"""
         try:
             payload = jwt.decode(
-                token, 
-                settings.SECRET_KEY, 
+                token,
+                settings.SECRET_KEY,
                 algorithms=[settings.ALGORITHM]
             )
             return payload
@@ -151,14 +152,14 @@ class AuthService:
     def create_tokens(user_id: int, email: str) -> dict:
         """Create both access and refresh tokens with unique JTIs"""
         token_data = {"sub": str(user_id), "email": email}
-        
+
         # Generate unique JTIs for both tokens
         access_jti = str(uuid.uuid4())
         refresh_jti = str(uuid.uuid4())
-        
+
         access_token = AuthService.create_access_token(token_data, jti=access_jti)
         refresh_token = AuthService.create_refresh_token(token_data, jti=refresh_jti)
-        
+
         return {
             "access_token": access_token,
             "refresh_token": refresh_token,

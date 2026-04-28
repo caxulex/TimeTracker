@@ -4,27 +4,27 @@ Account request router - Public and admin endpoints
 
 import logging
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_
-from datetime import datetime
 
 from app.database import get_db
-from app.models import User, AccountRequest
+from app.dependencies import get_current_admin_user
+from app.middleware.rate_limit import rate_limiter
+from app.models import AccountRequest, User
 from app.schemas.account_requests import (
     AccountRequestCreate,
     AccountRequestResponse,
     ApprovalDecision,
-    PaginatedAccountRequests
+    PaginatedAccountRequests,
 )
-from app.dependencies import get_current_admin_user
-from app.utils.sanitize import sanitize_string, get_client_ip
-from app.utils.timewindow import now_utc
-from app.middleware.rate_limit import rate_limiter
-from app.services.audit_logger import AuditLogger, AuditAction
+from app.services.audit_logger import AuditAction, AuditLogger
+from app.services.email_log_utils import log_email_failed, log_email_sent
 from app.services.email_service import email_service
 from app.services.slack_service import slack_service
-from app.services.email_log_utils import log_email_sent, log_email_failed
+from app.utils.sanitize import get_client_ip, sanitize_string
+from app.utils.timewindow import now_utc
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -43,25 +43,25 @@ async def submit_account_request(
     # Get client IP for rate limiting and audit
     client_ip = get_client_ip(request)
     user_agent = request.headers.get("User-Agent", "")
-    
+
     # Custom rate limiting for account requests (3 per hour per IP)
     # Using a custom endpoint path for the rate limiter
     is_allowed, current, limit, remaining, reset = await rate_limiter.check_rate_limit(
         identifier=client_ip,
         path="/api/account-requests:hourly"  # Custom path for hourly limit
     )
-    
+
     # Override with custom limits if needed (3 per hour = 3600 seconds)
     # The default rate limiter uses per-minute windows, so we'll do manual check
     # For now, rely on the global rate limiter and add TODO for custom implementation
     # TODO: Implement custom hourly rate limit for account requests
-    
+
     if not is_allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many account requests. Please try again later."
         )
-    
+
     # Check if email already exists in users table
     existing_user = await db.execute(
         select(User).where(User.email == request_data.email)
@@ -71,7 +71,7 @@ async def submit_account_request(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="An account with this email address already exists"
         )
-    
+
     # Check if there's already a pending request for this email
     existing_request = await db.execute(
         select(AccountRequest).where(
@@ -84,7 +84,7 @@ async def submit_account_request(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="There is already a pending account request for this email address"
         )
-    
+
     # Sanitize input data
     sanitized_data = {
         "email": request_data.email.lower(),
@@ -96,13 +96,13 @@ async def submit_account_request(
         "ip_address": client_ip,
         "user_agent": user_agent[:500] if user_agent else None,  # Truncate long user agents
     }
-    
+
     # Create the account request
     account_request = AccountRequest(**sanitized_data)
     db.add(account_request)
     await db.commit()
     await db.refresh(account_request)
-    
+
     # Send email notification to admins (non-blocking)
     try:
         # Get super admin emails for notification
@@ -110,7 +110,7 @@ async def submit_account_request(
             select(User.email).where(User.is_super_admin == True, User.is_active == True)
         )
         admin_emails = [row[0] for row in admin_result.fetchall()]
-        
+
         for admin_email in admin_emails:
             try:
                 await email_service.send_account_request_notification(
@@ -138,7 +138,7 @@ async def submit_account_request(
                 )
     except Exception as e:
         logger.warning(f"Failed to notify admins of new account request: {e}")
-    
+
     # Send Slack notification for new account request
     try:
         await slack_service.send_user_notification(
@@ -149,7 +149,7 @@ async def submit_account_request(
         )
     except Exception as e:
         logger.warning(f"Failed to send Slack notification for new request: {e}")
-    
+
     return account_request
 
 
@@ -168,7 +168,7 @@ async def list_account_requests(
     """
     query = select(AccountRequest)
     count_query = select(func.count(AccountRequest.id))
-    
+
     # Apply filters
     if status_filter:
         if status_filter not in ["pending", "approved", "rejected"]:
@@ -178,7 +178,7 @@ async def list_account_requests(
             )
         query = query.where(AccountRequest.status == status_filter)
         count_query = count_query.where(AccountRequest.status == status_filter)
-    
+
     if search:
         search_pattern = f"%{search}%"
         query = query.where(
@@ -193,22 +193,22 @@ async def list_account_requests(
                 AccountRequest.email.ilike(search_pattern)
             )
         )
-    
+
     # Get total count
     total_result = await db.execute(count_query)
     total = total_result.scalar()
-    
+
     # Apply pagination and ordering
     query = query.order_by(AccountRequest.submitted_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
-    
+
     # Execute query
     result = await db.execute(query)
     requests_data = result.scalars().all()
-    
+
     # Convert to response models
     items = [AccountRequestResponse.model_validate(req) for req in requests_data]
-    
+
     return PaginatedAccountRequests(
         items=items,
         total=total or 0,
@@ -229,13 +229,13 @@ async def get_account_request(
         select(AccountRequest).where(AccountRequest.id == request_id)
     )
     account_request = result.scalar_one_or_none()
-    
+
     if not account_request:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Account request not found"
         )
-    
+
     return account_request
 
 
@@ -255,25 +255,25 @@ async def approve_account_request(
         select(AccountRequest).where(AccountRequest.id == request_id)
     )
     account_request = result.scalar_one_or_none()
-    
+
     if not account_request:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Account request not found"
         )
-    
+
     if account_request.status != "pending":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Request already {account_request.status}"
         )
-    
+
     # Update request status
     account_request.status = "approved"
     account_request.reviewed_at = now_utc().replace(tzinfo=None)
     account_request.reviewed_by = current_user.id
     account_request.admin_notes = decision.admin_notes
-    
+
     # Audit log
     await AuditLogger.log(
         db=db,
@@ -289,7 +289,7 @@ async def approve_account_request(
 
     await db.commit()
     await db.refresh(account_request)
-    
+
     # Send approval notification email (non-blocking)
     # Note: The actual credentials email is sent from the Staff page after user creation
     try:
@@ -303,7 +303,7 @@ async def approve_account_request(
         await log_email_sent(
             db=db,
             to_email=account_request.email,
-            subject=f"Account Request Approved",
+            subject="Account Request Approved",
             email_type="account_approved",
             company_id=current_user.company_id,
             metadata={"user_name": account_request.name, "approved_by": current_user.email}
@@ -318,7 +318,7 @@ async def approve_account_request(
         await log_email_failed(
             db=db,
             to_email=account_request.email,
-            subject=f"Account Request Approved",
+            subject="Account Request Approved",
             email_type="account_approved",
             error_message=str(e)[:500],
             company_id=current_user.company_id
@@ -326,10 +326,10 @@ async def approve_account_request(
         account_request.email_notification_sent = False
         account_request.email_error = str(e)[:500]
         logger.warning(f"Failed to send approval email to {account_request.email}: {e}")
-    
+
     await db.commit()
     await db.refresh(account_request)
-    
+
     # Send Slack notification (non-blocking)
     try:
         await slack_service.send_user_notification(
@@ -340,7 +340,7 @@ async def approve_account_request(
         )
     except Exception as e:
         logger.debug(f"Slack notification skipped: {e}")
-    
+
     # Return pre-filled data for staff creation wizard
     return {
         "request_id": account_request.id,
@@ -367,25 +367,25 @@ async def reject_account_request(
         select(AccountRequest).where(AccountRequest.id == request_id)
     )
     account_request = result.scalar_one_or_none()
-    
+
     if not account_request:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Account request not found"
         )
-    
+
     if account_request.status != "pending":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Request already {account_request.status}"
         )
-    
+
     # Update request status
     account_request.status = "rejected"
     account_request.reviewed_at = now_utc().replace(tzinfo=None)
     account_request.reviewed_by = current_user.id
     account_request.admin_notes = decision.admin_notes
-    
+
     # Audit log
     await AuditLogger.log(
         db=db,
@@ -401,7 +401,7 @@ async def reject_account_request(
 
     await db.commit()
     await db.refresh(account_request)
-    
+
     # Send rejection email to applicant (non-blocking) with tracking
     try:
         await email_service.send_account_rejected_email(
@@ -413,7 +413,7 @@ async def reject_account_request(
         await log_email_sent(
             db=db,
             to_email=account_request.email,
-            subject=f"Account Request Update",
+            subject="Account Request Update",
             email_type="account_rejected",
             company_id=current_user.company_id,
             metadata={"user_name": account_request.name, "reason": decision.admin_notes}
@@ -428,7 +428,7 @@ async def reject_account_request(
         await log_email_failed(
             db=db,
             to_email=account_request.email,
-            subject=f"Account Request Update",
+            subject="Account Request Update",
             email_type="account_rejected",
             error_message=str(e)[:500],
             company_id=current_user.company_id
@@ -436,7 +436,7 @@ async def reject_account_request(
         account_request.email_notification_sent = False
         account_request.email_error = str(e)[:500]
         logger.warning(f"Failed to send rejection email to {account_request.email}: {e}")
-    
+
     # Send Slack notification for rejection
     try:
         await slack_service.send_user_notification(
@@ -447,10 +447,10 @@ async def reject_account_request(
         )
     except Exception as e:
         logger.warning(f"Failed to send Slack notification for rejection: {e}")
-    
+
     await db.commit()
     await db.refresh(account_request)
-    
+
     return account_request
 
 
@@ -465,13 +465,13 @@ async def delete_account_request(
         select(AccountRequest).where(AccountRequest.id == request_id)
     )
     account_request = result.scalar_one_or_none()
-    
+
     if not account_request:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Account request not found"
         )
-    
+
     # Audit log before deletion
     await AuditLogger.log(
         db=db,
@@ -490,5 +490,5 @@ async def delete_account_request(
 
     await db.delete(account_request)
     await db.commit()
-    
+
     return None

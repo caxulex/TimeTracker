@@ -7,28 +7,37 @@ import logging
 from ipaddress import ip_address, ip_network
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
+from app.dependencies import get_current_user
+from app.exceptions import (
+    AccountLockedError,
+    AuthenticationError,
+    ConflictError,
+    PasswordValidationError,
+    ValidationError,
+)
 from app.models import User
 from app.schemas.auth import (
-    UserRegister, UserLogin, Token, TokenRefresh,
-    UserResponse, UserUpdate, PasswordChange, Message
+    Message,
+    PasswordChange,
+    Token,
+    TokenRefresh,
+    UserLogin,
+    UserRegister,
+    UserResponse,
+    UserUpdate,
 )
+from app.services.audit_log import AuditEventType, audit_log
 from app.services.auth_service import auth_service
-from app.services.token_blacklist import token_blacklist
 from app.services.login_security import login_security
-from app.services.audit_log import audit_log, AuditEventType
-from app.dependencies import get_current_user
+from app.services.token_blacklist import token_blacklist
 from app.utils.password_validator import validate_password_strength
-from app.exceptions import (
-    AuthenticationError, PasswordValidationError, AccountLockedError,
-    ConflictError, ValidationError
-)
 
 logger = logging.getLogger(__name__)
 

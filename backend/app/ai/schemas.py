@@ -4,10 +4,10 @@ AI Schemas
 Pydantic schemas for AI features API endpoints.
 """
 
-from typing import List, Dict, Any, Optional
-from datetime import datetime, date
-from pydantic import BaseModel, Field
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional
 
+from pydantic import BaseModel, Field
 
 # ============================================
 # SUGGESTION SCHEMAS
@@ -504,7 +504,7 @@ class TopProject(BaseModel):
     """Top project by hours."""
     name: str
     hours: float
-    
+
     model_config = {"extra": "allow"}
 
 
@@ -530,7 +530,7 @@ class SummaryMetrics(BaseModel):
     most_productive_day: str = ""
     entry_count: int = 0
     trend: str = "stable"
-    
+
     model_config = {"extra": "allow"}
 
 
@@ -540,7 +540,7 @@ class AttentionItem(BaseModel):
     description: str
     severity: str
     actions: List[str] = []
-    
+
     model_config = {"extra": "allow"}
 
 
@@ -557,7 +557,7 @@ class WeeklySummary(BaseModel):
     insights: List[Insight] = []
     metrics: SummaryMetrics
     generated_at: str
-    
+
     model_config = {"extra": "allow"}
 
 

@@ -5,10 +5,10 @@ Contains data models and feature engineering utilities for AI services.
 """
 
 from app.ai.models.feature_engineering import (
-    UserContext,
-    TimeContext,
-    SuggestionFeatures,
     AnomalyFeatures,
+    SuggestionFeatures,
+    TimeContext,
+    UserContext,
 )
 
 __all__ = [

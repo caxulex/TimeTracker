@@ -2,25 +2,38 @@
 Time entries management router - Core time tracking functionality
 """
 
-from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
-from sqlalchemy.exc import IntegrityError
-from pydantic import BaseModel, Field, field_validator, model_validator
-from datetime import datetime, date, timedelta, timezone
 import logging
 import uuid as _uuid
+from datetime import date, datetime, timedelta, timezone
+from typing import List, Optional
 
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, field_validator, model_validator
+from sqlalchemy import and_, func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.config import settings
 from app.database import get_db
-from app.models import User, Team, TeamMember, Project, Task, TimeEntry, WorkSession, SessionMeeting, SessionBreak
-from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY, get_company_timezone
-from app.utils.timewindow import day_bounds, range_bounds
-from app.schemas.auth import Message
+from app.dependencies import (
+    apply_company_filter,
+    get_company_filter,
+    get_company_timezone,
+    get_current_active_user,
+)
+from app.models import (
+    Project,
+    Task,
+    Team,
+    TeamMember,
+    TimeEntry,
+    User,
+    WorkSession,
+)
 from app.routers.websocket import manager as ws_manager
+from app.schemas.auth import Message
+from app.utils.timewindow import day_bounds
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +138,7 @@ async def check_project_access(db: AsyncSession, project_id: int, user: User) ->
     query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
     company_id = get_company_filter(user)
     query = apply_company_filter(query, Team.company_id, company_id)
-    
+
     result = await db.execute(query)
     project = result.scalar_one_or_none()
 
@@ -168,7 +181,7 @@ def make_entry_response(entry: TimeEntry, project_name: str = None, task_name: s
     """Helper to create TimeEntryResponse"""
     duration_seconds = entry.duration_seconds
     duration_minutes = int(duration_seconds / 60) if duration_seconds else None
-    
+
     return TimeEntryResponse(
         id=entry.id,
         user_id=entry.user_id,
@@ -209,7 +222,7 @@ async def get_timer_status(
         .options(selectinload(WorkSession.meetings), selectinload(WorkSession.breaks))
     )
     active_session = session_result.scalar_one_or_none()
-    
+
     # If no active session, there may still be orphan running TimeEntries
     # (rows with end_time IS NULL but no open WorkSession). Historically
     # we auto-closed them on every GET /timer. That silently mutated state
@@ -272,11 +285,11 @@ async def get_timer_status(
                     elapsed_seconds=elapsed,
                 )
         return TimerStatus(is_running=False)
-    
+
     # Check if user is in a meeting — if so, find the PAUSED task entry, not the meeting entry
     # This way the frontend shows isPaused=true and the task timer freezes
     session_obj = active_session  # Reuse the same eager-loaded session
-    
+
     in_meeting = False
     paused_entry_id = None
     if session_obj:
@@ -285,7 +298,7 @@ async def get_timer_status(
                 in_meeting = True
                 paused_entry_id = mtg.paused_entry_id
                 break
-    
+
     if in_meeting and paused_entry_id:
         # Return the paused task entry so frontend shows isPaused=true
         paused_result = await db.execute(
@@ -302,22 +315,22 @@ async def get_timer_status(
             if paused_entry.task_id:
                 task_r = await db.execute(select(Task.name).where(Task.id == paused_entry.task_id))
                 task_name = task_r.scalar()
-            
+
             # Calculate elapsed from paused entry (it was stopped, so use its duration)
             elapsed = paused_entry.duration_seconds or 0
-            
+
             # Build response — mark as paused so frontend freezes the task timer
             entry_resp = make_entry_response(paused_entry, project_name, task_name, current_user.name)
             # Override is_paused to true for the frontend
             entry_resp.is_paused = True
             entry_resp.is_running = True  # Still "running" conceptually, just paused
-            
+
             return TimerStatus(
                 is_running=True,
                 current_entry=entry_resp,
                 elapsed_seconds=elapsed
             )
-    
+
     # Normal case: find running entry
     result = await db.execute(
         select(TimeEntry)
@@ -325,22 +338,22 @@ async def get_timer_status(
         .order_by(TimeEntry.start_time.desc())
     )
     running_entry = result.scalar_one_or_none()
-    
+
     if not running_entry:
         return TimerStatus(is_running=False)
-    
+
     # Get project name (guard for null project_id — e.g. meeting entries)
     project_name = None
     if running_entry.project_id:
         project_result = await db.execute(select(Project.name).where(Project.id == running_entry.project_id))
         project_name = project_result.scalar()
-    
+
     # Get task name if applicable
     task_name = None
     if running_entry.task_id:
         task_result = await db.execute(select(Task.name).where(Task.id == running_entry.task_id))
         task_name = task_result.scalar()
-    
+
     # Calculate elapsed time
     now = datetime.now(timezone.utc)
     start = running_entry.start_time
@@ -349,7 +362,7 @@ async def get_timer_status(
     # B14: clamp defensively — clock skew or corrupted pause_seconds must
     # never surface as a negative elapsed value to the client.
     elapsed = max(0, int((now - start).total_seconds()) - (running_entry.pause_seconds or 0))
-    
+
     return TimerStatus(
         is_running=True,
         current_entry=make_entry_response(running_entry, project_name, task_name, current_user.name),
@@ -365,7 +378,7 @@ async def get_active_timers(
     """Get all currently active timers (for admin/team view)"""
     # Get company filter for multi-tenant data isolation
     company_filter = get_company_filter(current_user)
-    
+
     # Build base query for active time entries with user, project, and task info
     query = (
         select(TimeEntry, User, Project, Task)
@@ -374,16 +387,16 @@ async def get_active_timers(
         .outerjoin(Task, TimeEntry.task_id == Task.id)
         .where(TimeEntry.end_time == None)
     )
-    
+
     # Apply company filter using proper helper (handles FILTER_NULL_COMPANY sentinel)
     query = apply_company_filter(query, User.company_id, company_filter)
-    
+
     query = query.order_by(TimeEntry.start_time.desc())
     result = await db.execute(query)
-    
+
     rows = result.all()
     active_timers = []
-    
+
     for entry, user, project, task in rows:
         # Calculate elapsed seconds
         start = entry.start_time
@@ -391,7 +404,7 @@ async def get_active_timers(
             start = start.replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
         elapsed = int((now - start).total_seconds())
-        
+
         active_timers.append({
             "user_id": user.id,
             "user_name": user.name,
@@ -403,7 +416,7 @@ async def get_active_timers(
             "start_time": entry.start_time.isoformat(),
             "elapsed_seconds": elapsed
         })
-    
+
     return active_timers
 
 
@@ -423,12 +436,12 @@ async def start_timer(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Timer already running. Stop it first."
         )
-    
+
     # Check project access
     project = await check_project_access(db, entry_data.project_id, current_user)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found or access denied")
-    
+
     # Verify task if provided
     task_name = None
     if entry_data.task_id:
@@ -439,7 +452,7 @@ async def start_timer(
         if not task:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Task not found in this project")
         task_name = task.name
-    
+
     entry = TimeEntry(
         user_id=current_user.id,
         task_id=entry_data.task_id,
@@ -450,7 +463,7 @@ async def start_timer(
         duration_seconds=None,
         is_running=True
     )
-    
+
     # === MICRO-TASK INTEGRATION: Link timer to work session ===
     # Find or create active work session for this user
     session_result = await db.execute(
@@ -463,7 +476,7 @@ async def start_timer(
         )
     )
     active_session = session_result.scalar_one_or_none()
-    
+
     if not active_session:
         # Auto-create session when starting first timer of the day
         active_session = WorkSession(
@@ -473,11 +486,11 @@ async def start_timer(
         )
         db.add(active_session)
         await db.flush()  # Get the ID without committing
-    
+
     # Link time entry to session
     entry.work_session_id = active_session.id
     # === END MICRO-TASK INTEGRATION ===
-    
+
     db.add(entry)
     # B2: the SELECT above is racy — two concurrent requests can both see
     # "no running timer" and try to INSERT. The unique partial index
@@ -493,7 +506,7 @@ async def start_timer(
             detail="A timer is already running for this user.",
         ) from exc
     await db.refresh(entry)
-    
+
     # Broadcast timer start to SAME COMPANY ONLY for real-time "Who's Working Now" updates
     await ws_manager.broadcast_to_company({
         "type": "timer_started",
@@ -510,7 +523,7 @@ async def start_timer(
             "is_running": True
         }
     }, company_id=current_user.company_id)
-    
+
     # Update the WebSocket manager's active timers cache
     ws_manager.set_active_timer(current_user.id, {
         "user_name": current_user.name,
@@ -522,7 +535,7 @@ async def start_timer(
         "description": entry.description,
         "start_time": entry.start_time.isoformat()
     })
-    
+
     return make_entry_response(entry, project.name, task_name, current_user.name)
 
 
@@ -552,35 +565,35 @@ async def stop_timer(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Cannot stop timer during a break. End the break first."
                 )
-    
+
     result = await db.execute(
         select(TimeEntry).where(TimeEntry.user_id == current_user.id, TimeEntry.end_time == None)
     )
     entry = result.scalar_one_or_none()
-    
+
     if not entry:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No running timer found")
-    
+
     # Stop the timer
     end_time = datetime.now(timezone.utc)
     entry.end_time = end_time
     entry.duration_seconds = calculate_duration_seconds(entry.start_time, end_time)
     entry.is_running = False
-    
+
     await db.commit()
     await db.refresh(entry)
-    
+
     # Get names (guard for null project_id — e.g. meeting entries)
     project_name = None
     if entry.project_id:
         project_result = await db.execute(select(Project.name).where(Project.id == entry.project_id))
         project_name = project_result.scalar()
-    
+
     task_name = None
     if entry.task_id:
         task_result = await db.execute(select(Task.name).where(Task.id == entry.task_id))
         task_name = task_result.scalar()
-    
+
     # Broadcast timer stopped to SAME COMPANY for real-time "Who's Working Now" updates
     await ws_manager.broadcast_to_company({
         "type": "timer_stopped",
@@ -592,10 +605,10 @@ async def stop_timer(
             "duration_seconds": entry.duration_seconds
         }
     }, company_id=current_user.company_id)
-    
+
     # Clear the WebSocket manager's active timer cache for this user
     ws_manager.clear_active_timer(current_user.id)
-    
+
     # Also broadcast time entry completion for reports update (SAME COMPANY ONLY)
     await ws_manager.broadcast_to_company({
         "type": "time_entry_completed",
@@ -614,7 +627,7 @@ async def stop_timer(
             "is_running": False
         }
     }, company_id=current_user.company_id)
-    
+
     return make_entry_response(entry, project_name, task_name, current_user.name)
 
 
@@ -637,16 +650,16 @@ async def switch_task(
 ):
     """
     Switch to a different project/task without stopping the session clock.
-    
+
     This atomically:
     1. Stops the current running time entry (finalizes its duration)
     2. Starts a new time entry with the new project/task
     3. Links the new entry to the same work session
-    
+
     The work session (Clock In) keeps running — only the task timer resets.
     """
     now = datetime.now(timezone.utc)
-    
+
     # Guard: block switch during active meeting or break (must end those first)
     guard_session_result = await db.execute(
         select(WorkSession)
@@ -667,7 +680,7 @@ async def switch_task(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Cannot switch tasks during a break. End the break first."
                 )
-    
+
     # 1. Find and stop the current running entry
     result = await db.execute(
         select(TimeEntry).where(
@@ -676,13 +689,13 @@ async def switch_task(
         )
     )
     old_entry = result.scalar_one_or_none()
-    
+
     if not old_entry:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No running timer to switch from. Start a timer first."
         )
-    
+
     # 2. Validate the new project
     new_project = await check_project_access(db, switch_data.project_id, current_user)
     if not new_project:
@@ -690,7 +703,7 @@ async def switch_task(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found or access denied"
         )
-    
+
     # 3. Validate the new task (if provided)
     new_task_name = None
     if switch_data.task_id:
@@ -707,14 +720,14 @@ async def switch_task(
                 detail="Task not found in this project"
             )
         new_task_name = task.name
-    
+
     # 4. Stop the old entry
     old_entry.end_time = now
     old_entry.is_running = False
     old_entry.is_paused = False
     if old_entry.start_time:
         old_entry.duration_seconds = calculate_duration_seconds(old_entry.start_time, now)
-    
+
     # 5. Create the new entry linked to the same work session
     new_entry = TimeEntry(
         user_id=current_user.id,
@@ -730,10 +743,10 @@ async def switch_task(
         work_session_id=old_entry.work_session_id,  # Keep same session!
     )
     db.add(new_entry)
-    
+
     await db.commit()
     await db.refresh(new_entry)
-    
+
     # 6. Broadcast task switch to company
     await ws_manager.broadcast_to_company({
         "type": "timer_started",
@@ -750,7 +763,7 @@ async def switch_task(
             "is_running": True
         }
     }, company_id=current_user.company_id)
-    
+
     # Update WebSocket active timer cache
     ws_manager.set_active_timer(current_user.id, {
         "user_name": current_user.name,
@@ -762,7 +775,7 @@ async def switch_task(
         "description": new_entry.description,
         "start_time": new_entry.start_time.isoformat()
     })
-    
+
     return make_entry_response(new_entry, new_project.name, new_task_name, current_user.name)
 
 
@@ -777,7 +790,7 @@ async def create_manual_entry(
     project = await check_project_access(db, entry_data.project_id, current_user)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found or access denied")
-    
+
     # Verify task if provided
     task_name = None
     if entry_data.task_id:
@@ -788,10 +801,10 @@ async def create_manual_entry(
         if not task:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Task not found in this project")
         task_name = task.name
-    
+
     # Determine start/end/duration
     now = datetime.now(timezone.utc)
-    
+
     if entry_data.duration_seconds:
         # Manual entry with duration
         start_time = entry_data.start_time or now
@@ -807,7 +820,7 @@ async def create_manual_entry(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Provide either duration_seconds or both start_time and end_time"
         )
-    
+
     entry = TimeEntry(
         user_id=current_user.id,
         task_id=entry_data.task_id,
@@ -818,11 +831,11 @@ async def create_manual_entry(
         duration_seconds=duration,
         is_running=False
     )
-    
+
     db.add(entry)
     await db.commit()
     await db.refresh(entry)
-    
+
     # Broadcast manual time entry creation to SAME COMPANY for real-time reports update
     await ws_manager.broadcast_to_company({
         "type": "time_entry_created",
@@ -841,7 +854,7 @@ async def create_manual_entry(
             "is_running": False
         }
     }, company_id=current_user.company_id)
-    
+
     return make_entry_response(entry, project.name, task_name, current_user.name)
 
 
@@ -874,7 +887,7 @@ async def list_time_entries(
     company_id = get_company_filter(current_user)
     base_query = apply_company_filter(base_query, User.company_id, company_id)
     stats_query = apply_company_filter(stats_query, User.company_id, company_id)
-    
+
     # Filter by user (regular users see only their entries, admin sees all in company)
     if current_user.role not in ["super_admin", "admin", "company_admin"]:
         if user_id and user_id != current_user.id:
@@ -972,7 +985,7 @@ async def list_time_entries(
         )
         for entry in entries
     ]
-    
+
     return PaginatedTimeEntries(
         items=items,
         total=total,
@@ -993,7 +1006,7 @@ async def get_time_entry(
     """Get time entry details with multi-tenant validation"""
     # Get company filter for multi-tenant data isolation
     company_filter = get_company_filter(current_user)
-    
+
     # Query with company filter to ensure we only access our company's entries
     query = (
         select(TimeEntry)
@@ -1001,31 +1014,31 @@ async def get_time_entry(
         .where(TimeEntry.id == entry_id)
     )
     query = apply_company_filter(query, User.company_id, company_filter)
-    
+
     result = await db.execute(query)
     entry = result.scalar_one_or_none()
-    
+
     if not entry:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time entry not found or access denied")
-    
+
     # Check access - users can only see their own entries unless admin/company_admin
     if current_user.role not in ["super_admin", "admin", "company_admin"] and entry.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    
+
     # Get names (guard for null project_id — e.g. meeting entries)
     project_name = None
     if entry.project_id:
         project_result = await db.execute(select(Project.name).where(Project.id == entry.project_id))
         project_name = project_result.scalar()
-    
+
     task_name = None
     if entry.task_id:
         task_result = await db.execute(select(Task.name).where(Task.id == entry.task_id))
         task_name = task_result.scalar()
-    
+
     user_result = await db.execute(select(User.name).where(User.id == entry.user_id))
     user_name = user_result.scalar()
-    
+
     return make_entry_response(entry, project_name, task_name, user_name)
 
 
@@ -1039,7 +1052,7 @@ async def update_time_entry(
     """Update time entry with multi-tenant validation"""
     # Get company filter for multi-tenant data isolation
     company_filter = get_company_filter(current_user)
-    
+
     # Query with company filter to ensure we only access our company's entries
     query = (
         select(TimeEntry)
@@ -1047,23 +1060,23 @@ async def update_time_entry(
         .where(TimeEntry.id == entry_id)
     )
     query = apply_company_filter(query, User.company_id, company_filter)
-    
+
     result = await db.execute(query)
     entry = result.scalar_one_or_none()
-    
+
     if not entry:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time entry not found or access denied")
-    
+
     # Only owner can update (super_admin only allowed within their own company now)
     if entry.user_id != current_user.id and current_user.role not in ["super_admin", "admin", "company_admin"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Can only update your own entries")
-    
+
     if entry_data.description is not None:
         entry.description = entry_data.description
-    
+
     if entry_data.start_time is not None:
         entry.start_time = entry_data.start_time
-    
+
     if entry_data.end_time is not None:
         entry.end_time = entry_data.end_time
 
@@ -1084,7 +1097,7 @@ async def update_time_entry(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="end_time must be greater than or equal to start_time",
             )
-    
+
     if entry_data.project_id is not None:
         # Verify project exists and belongs to same company
         project_result = await db.execute(
@@ -1097,7 +1110,7 @@ async def update_time_entry(
         # Clear task if project changed (task may not belong to new project)
         if entry_data.task_id is None:
             entry.task_id = None
-    
+
     if entry_data.task_id is not None:
         # Verify task exists and belongs to the project
         task_result = await db.execute(
@@ -1112,26 +1125,26 @@ async def update_time_entry(
     elif entry_data.task_id == 0 or (entry_data.project_id is not None and entry_data.task_id is None):
         # Allow clearing task by setting to None
         pass  # task_id already handled above
-    
+
     # Recalculate duration if times changed
     if entry.end_time:
         entry.duration_seconds = calculate_duration_seconds(entry.start_time, entry.end_time)
         entry.is_running = False
-    
+
     await db.commit()
     await db.refresh(entry)
-    
+
     # Get names (guard for null project_id — e.g. meeting entries)
     project_name = None
     if entry.project_id:
         project_result = await db.execute(select(Project.name).where(Project.id == entry.project_id))
         project_name = project_result.scalar()
-    
+
     task_name = None
     if entry.task_id:
         task_result = await db.execute(select(Task.name).where(Task.id == entry.task_id))
         task_name = task_result.scalar()
-    
+
     # Broadcast time entry update to SAME COMPANY for real-time reports update
     await ws_manager.broadcast_to_company({
         "type": "time_entry_updated",
@@ -1149,7 +1162,7 @@ async def update_time_entry(
             "is_running": entry.is_running
         }
     }, company_id=current_user.company_id)
-    
+
     return make_entry_response(entry, project_name, task_name, current_user.name)
 
 
@@ -1162,7 +1175,7 @@ async def delete_time_entry(
     """Delete time entry with multi-tenant validation"""
     # Get company filter for multi-tenant data isolation
     company_filter = get_company_filter(current_user)
-    
+
     # Query with company filter to ensure we only access our company's entries
     query = (
         select(TimeEntry)
@@ -1170,17 +1183,17 @@ async def delete_time_entry(
         .where(TimeEntry.id == entry_id)
     )
     query = apply_company_filter(query, User.company_id, company_filter)
-    
+
     result = await db.execute(query)
     entry = result.scalar_one_or_none()
-    
+
     if not entry:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time entry not found or access denied")
-    
+
     # Only owner can delete (admins within company can delete)
     if entry.user_id != current_user.id and current_user.role not in ["super_admin", "admin", "company_admin"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Can only delete your own entries")
-    
+
     # Store entry data before deletion for WebSocket broadcast
     entry_data = {
         "entry_id": entry.id,
@@ -1188,15 +1201,15 @@ async def delete_time_entry(
         "project_id": entry.project_id,
         "task_id": entry.task_id
     }
-    
+
     await db.delete(entry)
     await db.commit()
-    
+
     # Broadcast time entry deletion to SAME COMPANY for real-time reports update
     await ws_manager.broadcast_to_company({
         "type": "time_entry_deleted",
         "data": entry_data
     }, company_id=current_user.company_id)
-    
+
     return {"message": "Time entry deleted successfully"}
 

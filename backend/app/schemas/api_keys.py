@@ -4,9 +4,10 @@ SEC-020: Secure API Key Storage for AI Integrations
 """
 
 from datetime import datetime
-from typing import Optional, List
-from pydantic import BaseModel, Field, field_validator
 from enum import Enum
+from typing import List, Optional
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class AIProviderEnum(str, Enum):
@@ -28,7 +29,7 @@ class APIKeyCreate(BaseModel):
     api_key: str = Field(..., min_length=10, description="The actual API key (will be encrypted)")
     label: Optional[str] = Field(None, max_length=255, description="Optional friendly name")
     notes: Optional[str] = Field(None, description="Optional notes about this key")
-    
+
     @field_validator('api_key')
     @classmethod
     def validate_api_key(cls, v: str) -> str:
@@ -48,7 +49,7 @@ class APIKeyUpdate(BaseModel):
     label: Optional[str] = Field(None, max_length=255, description="Optional friendly name")
     notes: Optional[str] = Field(None, description="Optional notes")
     is_active: Optional[bool] = Field(None, description="Enable/disable the key")
-    
+
     @field_validator('api_key')
     @classmethod
     def validate_api_key(cls, v: Optional[str]) -> Optional[str]:
@@ -86,7 +87,7 @@ class APIKeyResponse(BaseModel):
     last_used_at: Optional[datetime] = None
     usage_count: int
     notes: Optional[str] = None
-    
+
     class Config:
         from_attributes = True
 
@@ -133,7 +134,7 @@ class APIKeyInternal(BaseModel):
     provider: str
     decrypted_key: str  # The actual decrypted API key
     is_active: bool
-    
+
     class Config:
         from_attributes = True
 
