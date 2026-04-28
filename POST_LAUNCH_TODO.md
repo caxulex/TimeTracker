@@ -553,41 +553,29 @@ CI green at the time of the sweep.
 (items that, in the auditor's judgment, should be addressed before opening
 the door to paying customers — not items that block launch tonight)
 
-- **A1 — `backend/create_superadmin.py` hardcodes credentials.**
-  Lines 12-13 ship `email="shae@shaemarcus.com"`, `password="admin123"`.
-  `admin123` is on the `INSECURE_PASSWORDS` denylist in
-  `backend/app/config.py:42` — but the validator is bypassed because the
-  script never reads `FIRST_SUPER_ADMIN_PASSWORD`. The password validator
-  in `config.py:195-202` only fires for the env var path. Sets
-  `is_active=True` unconditionally. Fix: rewrite the script to read the
-  two env vars and fail with a clear message if either is unset; remove the
-  hardcoded fallback.
-- **A2 — Backend port published on the host in `docker-compose.prod.yml`.**
-  Backend service uses `ports: - "8080:8080"`, exposing the API directly
-  on the Lightsail public interface and bypassing nginx (and therefore
-  bypassing the security headers, the rate limit at the edge, and the
-  `X-Forwarded-For` chain that the new `TRUSTED_PROXIES` (B16) check
-  depends on). Fix: change to `expose: ["8080"]` so only the
-  `timetracker-network` peers (nginx) can reach it.
-- **A3 — Uvicorn started without `--proxy-headers` /
-  `--forwarded-allow-ips`.** `backend/Dockerfile:47` and
-  `backend/Dockerfile.prod` both run uvicorn with no proxy-aware flags.
-  Result: even if A2 is fixed and `TRUSTED_PROXIES` is set, FastAPI's
-  `request.client.host` is the docker-network peer IP and the
-  `X-Forwarded-For` header is silently ignored by Starlette's
-  `ProxyHeadersMiddleware` (because that middleware is never installed).
-  `get_client_ip` will work, but anything reading `request.client`
-  directly (audit logs, lockout key) will see the proxy IP. Fix: add
-  `--proxy-headers --forwarded-allow-ips=*` to the CMD (the trust check
-  already lives in app code).
-- **A4 — HSTS commented out in nginx, port 80 only.**
-  `frontend/nginx.conf:35` has the HSTS header disabled. The container
-  listens on port 80 only — TLS termination is assumed to be upstream
-  (Lightsail load balancer / Cloudflare). If the upstream is misconfigured
-  (or absent on a future deploy), the app will serve traffic over plain
-  HTTP without complaint. Fix on launch day: confirm Lightsail TLS is on
-  and uncomment the HSTS header (1-year, `includeSubDomains`,
-  `preload`).
+- ~~**A1 — `backend/create_superadmin.py` hardcodes credentials.**~~
+  **RESOLVED in Prompt 8.5.** See "Prompt 8.5" section below for details.
+  The hardcoded `admin123` has been removed; the bootstrap script now
+  reads `FIRST_SUPER_ADMIN_EMAIL` / `FIRST_SUPER_ADMIN_PASSWORD` and
+  exits with a clear message if either is unset.
+- ~~**A2 — Backend port published on the host in `docker-compose.prod.yml`.**~~
+  **RESOLVED in Prompt 8.5.** Backend ports changed to `127.0.0.1:8080:8080`
+  and frontend ports to `127.0.0.1:${PORT:-3000}:80` in both
+  `docker-compose.prod.yml` and `docker-compose.prod.ghcr.yml`. Public access
+  is now exclusively via Caddy on the host; the public 0.0.0.0:8080 surface
+  that bypassed Caddy/CORS/rate-limiting/TLS is closed.
+- ~~**A3 — Uvicorn started without `--proxy-headers` /
+  `--forwarded-allow-ips`.**~~
+  **RESOLVED in Prompt 8.5.** `backend/Dockerfile` (uvicorn, currently in
+  production) now runs with `--proxy-headers --forwarded-allow-ips=*`.
+  `backend/Dockerfile.prod` (gunicorn variant, defensive parity) now passes
+  `--forwarded-allow-ips=*` to gunicorn, which forwards it to
+  `uvicorn.workers.UvicornWorker` (proxy_headers=True by default).
+- ~~**A4 — HSTS commented out in nginx, port 80 only.**~~
+  **RESOLVED in Prompt 8.5 (documentation).** Production no longer uses
+  nginx — Caddy 2 on the host terminates TLS for `timetracker.shaemarcus.com`
+  and emits HSTS by default. Operator verification block added under
+  "Pre-deploy operator checklist" below.
 
 ### B. Pre-launch fixes (not strictly blocking, but small and high-value)
 
@@ -719,4 +707,80 @@ real defects but won't bite a smoke test, and C2/C3 only matter for US
 hourly-payroll customers — segment customers accordingly until those
 land. Dependency CVEs (B-fix-2, B-fix-3) are clean `--fix` operations
 and should ship with the A-items.
+
+---
+
+## Deploy notes — Prompt 8.5 (A1/A2/A3/A4 + B-fix-1/2/3)
+
+Follow-up session that converted the Prompt 8 report-only findings A1-A4
+and B-fix-1/2/3 into actual fixes on `prep/production-readiness`. All
+A-items in the Prompt 8 "Launch blockers" section above are now struck
+through and point here. CI Linux is the trustworthy gate; local Windows
+pytest produces ~109 spurious 401 failures from WSL-hosted Redis flake
+that do not reproduce in CI.
+
+### Operational context — Lightsail RAM constraint
+Production Lightsail instance is RAM-constrained (1 GB).
+`scripts/deploy-sequential.sh` exists to build containers serially and
+avoid OOM during deploy. Future infra changes must respect this
+constraint — never use `docker compose up -d --build` or parallel
+builds on this host.
+
+### Defensive parity edits beyond the active deploy path
+A2 and A3 fixes were applied to **both** compose files
+(`docker-compose.prod.yml` and `docker-compose.prod.ghcr.yml`) and to
+**both** Dockerfiles (`backend/Dockerfile` uvicorn variant, currently
+in production, and `backend/Dockerfile.prod` gunicorn variant) even
+though the current deploy uses only the non-GHCR / uvicorn path. This
+prevents a future security regression if the deploy paths switch (per
+`ZERO_BUILD_DEPLOY.md` plan to migrate to GHCR-prebuilt images).
+
+### Required production env vars (set before deploy)
+- **`FIRST_SUPER_ADMIN_EMAIL`** — email for the super-admin bootstrap.
+- **`FIRST_SUPER_ADMIN_PASSWORD`** — strong password (≥14 chars, mixed
+  case, digit, special, not in denylist). Bootstrap script will exit
+  non-zero if unset.
+- **`TRUSTED_PROXIES`** — set to `127.0.0.1` since Caddy proxies to
+  backend over localhost. Without this, `X-Forwarded-For` from Caddy
+  is ignored and audit logs show wrong IPs.
+
+### Pre-deploy operator checklist
+- [ ] `FIRST_SUPER_ADMIN_PASSWORD` is strong (≥14 chars, mixed case,
+      digit, special).
+- [ ] `TRUSTED_PROXIES=127.0.0.1` in production `.env`.
+- [ ] HSTS verified post-deploy via curl (see A4 verification block
+      below).
+- [ ] Port 8080 not publicly accessible after deploy: from any client,
+      `curl -I http://<lightsail-public-ip>:8080` should fail with
+      timeout / connection-refused.
+
+#### A4: HSTS verification
+After deploy, run on any client (not on Lightsail itself):
+```
+curl -sI https://timetracker.shaemarcus.com | grep -i strict-transport-security
+```
+
+Expected: a `Strict-Transport-Security: max-age=...` header in the response.
+
+If absent: add this line inside the `timetracker.shaemarcus.com {` block
+in `/etc/caddy/Caddyfile`:
+```
+header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+```
+Then run: `sudo systemctl reload caddy`.
+
+### Migrations: none in this prompt.
+
+### Post-launch follow-ups
+- **`force_password_change_on_login` flow.** User model lacks a
+  `password_changed_at` column. Adding the
+  force-change-on-first-login flow requires a schema migration.
+  Deferred to post-launch enhancement.
+- **Remaining 11 npm vulnerabilities (deferred).** `npm audit fix`
+  reduced 20 → 11. The remaining 11 are dev-only and require `--force`
+  + major-version bumps (`@typescript-eslint` 6→8 chain rooted at
+  `minimatch` ReDoS; `vitest`/`vite`/`vite-node`/`@vitest/ui`/`esbuild`
+  chain via `vitest` 1→2/3). All in tooling, none in production
+  runtime. Bump in a dedicated post-launch session with full CI
+  validation, per the prompt's hard "do not use `--force`" constraint.
 

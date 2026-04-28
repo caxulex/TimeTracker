@@ -66,4 +66,11 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
 # Run application with gunicorn for production
-CMD ["gunicorn", "app.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8080", "--access-logfile", "-", "--error-logfile", "-"]
+# --forwarded-allow-ips="*": gunicorn passes this through to
+#   uvicorn.workers.UvicornWorker, which sets proxy_headers=True by
+#   default. Without an explicit forwarded-allow-ips the worker would
+#   ignore X-Forwarded-* from Caddy, defeating the app-level
+#   TRUSTED_PROXIES setting. "*" is safe in this deployment because
+#   docker-compose.prod*.yml binds the host port to 127.0.0.1, so only
+#   Caddy on the host can reach the container in the first place.
+CMD ["gunicorn", "app.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8080", "--forwarded-allow-ips=*", "--access-logfile", "-", "--error-logfile", "-"]

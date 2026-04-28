@@ -55,7 +55,8 @@ services:
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-["timetracker.shaemarcus.com","localhost","127.0.0.1","timetracker-backend","backend"]}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://timetracker.shaemarcus.com}
     ports:
-      - "8080:8080"
+      # Bind to localhost only; public access via Caddy reverse proxy
+      - "127.0.0.1:8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,7 +77,8 @@ services:
     container_name: timetracker-frontend
     restart: unless-stopped
     ports:
-      - "${PORT:-3000}:80"
+      # Bind to localhost only; public access via Caddy reverse proxy
+      - "127.0.0.1:${PORT:-3000}:80"
     depends_on:
       backend:
         condition: service_healthy
