@@ -537,3 +537,186 @@ addressed B17 (deferred), B19, B22, B25, B26.
   `frontend/src/stores/authStore.ts` so the next engineer can find
   every site to migrate. Commit message marks B17 as
   "deferred to post-launch".
+
+
+---
+
+## Prompt 8 — Pre-launch verification sweep (2026-01-…)
+
+Findings from the seven-task verification pass on commit `752cba5` (branch
+`prep/production-readiness`). All findings are **report-only**; no fix code
+was written this session except the trivial alembic idempotency commit.
+CI green at the time of the sweep.
+
+### A. Launch blockers
+
+(items that, in the auditor's judgment, should be addressed before opening
+the door to paying customers — not items that block launch tonight)
+
+- **A1 — `backend/create_superadmin.py` hardcodes credentials.**
+  Lines 12-13 ship `email="shae@shaemarcus.com"`, `password="admin123"`.
+  `admin123` is on the `INSECURE_PASSWORDS` denylist in
+  `backend/app/config.py:42` — but the validator is bypassed because the
+  script never reads `FIRST_SUPER_ADMIN_PASSWORD`. The password validator
+  in `config.py:195-202` only fires for the env var path. Sets
+  `is_active=True` unconditionally. Fix: rewrite the script to read the
+  two env vars and fail with a clear message if either is unset; remove the
+  hardcoded fallback.
+- **A2 — Backend port published on the host in `docker-compose.prod.yml`.**
+  Backend service uses `ports: - "8080:8080"`, exposing the API directly
+  on the Lightsail public interface and bypassing nginx (and therefore
+  bypassing the security headers, the rate limit at the edge, and the
+  `X-Forwarded-For` chain that the new `TRUSTED_PROXIES` (B16) check
+  depends on). Fix: change to `expose: ["8080"]` so only the
+  `timetracker-network` peers (nginx) can reach it.
+- **A3 — Uvicorn started without `--proxy-headers` /
+  `--forwarded-allow-ips`.** `backend/Dockerfile:47` and
+  `backend/Dockerfile.prod` both run uvicorn with no proxy-aware flags.
+  Result: even if A2 is fixed and `TRUSTED_PROXIES` is set, FastAPI's
+  `request.client.host` is the docker-network peer IP and the
+  `X-Forwarded-For` header is silently ignored by Starlette's
+  `ProxyHeadersMiddleware` (because that middleware is never installed).
+  `get_client_ip` will work, but anything reading `request.client`
+  directly (audit logs, lockout key) will see the proxy IP. Fix: add
+  `--proxy-headers --forwarded-allow-ips=*` to the CMD (the trust check
+  already lives in app code).
+- **A4 — HSTS commented out in nginx, port 80 only.**
+  `frontend/nginx.conf:35` has the HSTS header disabled. The container
+  listens on port 80 only — TLS termination is assumed to be upstream
+  (Lightsail load balancer / Cloudflare). If the upstream is misconfigured
+  (or absent on a future deploy), the app will serve traffic over plain
+  HTTP without complaint. Fix on launch day: confirm Lightsail TLS is on
+  and uncomment the HSTS header (1-year, `includeSubDomains`,
+  `preload`).
+
+### B. Pre-launch fixes (not strictly blocking, but small and high-value)
+
+- **B-fix-1 — `aioredis==2.0.1` in `backend/requirements.txt:21`.**
+  Zero `import aioredis` / `from aioredis` lines anywhere in the
+  codebase (the Redis client in use is `redis.asyncio`). Dead dep —
+  delete the line. Reduces image size and dependency surface.
+- **B-fix-2 — `python-multipart` 0.0.22 → 0.0.26.** Single CVE
+  (CVE-2026-40347), in the request path (FastAPI form / file uploads).
+  Patch-version bump.
+- **B-fix-3 — `npm audit fix` on the frontend.** Resolves
+  axios <=1.14.0 (moderate, SSRF — GHSA-3p68-rc4w-qgx5,
+  GHSA-fvcv-3m26-pcqx), follow-redirects (moderate, GHSA-r4q5-vmmm-2653),
+  and lodash <=4.17.23 (HIGH, prototype pollution —
+  GHSA-r5fr-rjxr-66jc, GHSA-f23m-r3pf-42rh). All three are flagged as
+  `--fix` clean. Run, regenerate `package-lock.json`, ship.
+
+### C. Post-launch (correctness / hygiene, won't bite a smoke test)
+
+- **C1 — Migration round-trip stops at `001 → base`.**
+  After commit 752cba5 (3 `if_exists=True` adds), `alembic downgrade`
+  unwinds 20 of 21 migrations cleanly. The final step `001 → base`
+  fails on `DROP TABLE users` because later migrations created FKs that
+  reference `users.id` and their own downgrade does not drop the FK
+  before unwinding the column. Production deploys are forward-only, so
+  this only bites a hypothetical full DR rebuild from migration 001
+  upward. Resolution requires a dedicated session: walk every migration
+  with a foreign key into a 001-era table and add the matching
+  `op.drop_constraint` to its `downgrade()`. Out of scope for launch.
+- **C2 — Payroll overtime threshold is per-PERIOD, not per-WEEK.**
+  `backend/app/services/payroll_service.py:412-413, 567-568`.
+  `overtime_threshold = Decimal("40") * weeks_in_period` then
+  `regular_hours = min(total_hours, overtime_threshold)`. For a
+  bi-weekly period this means the 41st hour of week 1 is paid at regular
+  rate as long as total hours over both weeks stay under 80. FLSA and
+  most US state wage laws define overtime per workweek. Same defect for
+  semi-monthly and monthly. **Wage-compliance risk if customers in the
+  US run this service for non-exempt hourly employees.** Fix: bucket
+  `time_entries` by ISO week (in the company timezone — `company_tz`
+  is now available via the 4a sweep) and apply the 40-hour threshold per
+  bucket, then sum.
+- **C3 — Payroll period boundary uses naive UTC midnight.**
+  `backend/app/services/payroll_service.py:472-473`:
+  `TimeEntry.start_time >= datetime.combine(period.start_date, datetime.min.time())`
+  /  `... datetime.max.time()`. The `.combine` calls produce naive
+  datetimes that SQLAlchemy compares as UTC. For a company in any zone
+  west of UTC, time entries from late evening of the last period day
+  (local) are silently dropped from that period and (depending on how
+  the next period bounds line up) may be dropped from both periods.
+  Mirrors the bug class that 4a fixed in `time_entries.py` and
+  `reports.py` — apply `app.utils.timewindow.range_bounds` here.
+- **C4 — Payroll uses `2.17` and `4.33` weeks-per-period.**
+  `payroll_service.py:409-410`. These are coarse averages that compound
+  with C2: even if you fix C2, a "monthly" period spans 4–5 ISO weeks
+  depending on alignment, not 4.33. Once C2 is fixed (per-week buckets),
+  these constants become unused and should be deleted.
+- **C5 — Payroll has no withholding / tax / net-amount logic.**
+  `payroll_service.py` computes `gross_amount` only. Acceptable if
+  the resale customer hands the gross numbers off to an external payroll
+  provider; not acceptable if marketed as a turnkey US payroll system.
+  Document this in the resale collateral so a customer doesn't assume
+  net pay is computed.
+- **C6 — No `force_password_change` on first super-admin login.**
+  Despite earlier audit recommending one, the column / flag does not
+  exist anywhere in the codebase. After A1 is addressed, add a
+  `password_changed_at` column and a login-time check that 302s to
+  `/account/change-password` if the value is null or older than the
+  configured rotation window. Pairs with C7.
+- **C7 — Password validator is denylist-only.**
+  `config.py:195-202` only rejects 8 hardcoded common passwords. No
+  length, complexity, entropy, or user-attribute-similarity check. Add
+  `MIN_PASSWORD_LENGTH = 12` and a basic complexity rule (mixed case
+  + digit) at the same boundary, plus apply the same check to the
+  registration / change-password endpoints (not just the bootstrap env
+  var).
+- **C8 — `ENVIRONMENT=production` does not require a non-empty
+  `FIRST_SUPER_ADMIN_PASSWORD`.** The validator early-returns on
+  empty / falsy `v`, so `FIRST_SUPER_ADMIN_PASSWORD=""` passes in
+  production. Acceptable IF the bootstrap script (A1) becomes the sole
+  super-admin path and itself requires the env. Worth adding a belt-
+  and-suspenders check here regardless.
+
+### D. Dependency bumps to schedule (test-required)
+
+- `starlette` 0.46.2 → 0.49.1 — two CVEs (CVE-2025-54121,
+  CVE-2025-62727), both in the request path. FastAPI may pin a narrower
+  range; bump in a dedicated session with full CI run.
+- `pytest` 7.4.3 → 9.0.3 — CVE-2025-71176, dev / CI only. Major bump,
+  expect plugin compatibility surprises.
+- `black` 24.8.0 → 26.3.1 — CVE-2026-32274, dev only. Major bump,
+  reformatting churn expected.
+- `python-jose` 3.5.0 — no CVE flagged in this version, but the
+  package is poorly maintained relative to `PyJWT`. Migrate in a
+  later hardening session.
+
+### E. Infra config corrections (Lightsail deploy day)
+
+- Set `TRUSTED_PROXIES` to the docker network CIDR for the compose
+  bridge (run `docker network inspect timetracker-network` to read
+  the actual CIDR — typically `172.x.0.0/16`). Empty / unset will log
+  `auth.no_trusted_proxies` and fall back to peer IP, which after
+  fixing A2/A3 will be the nginx container — close enough for
+  per-IP-rate-limiting purposes but defeats the X-Forwarded-For chain.
+- Confirm Lightsail TLS termination is on. After confirming, address A4
+  (uncomment HSTS).
+- Set non-empty `SECRET_KEY`, `API_KEY_ENCRYPTION_KEY`,
+  `FIRST_SUPER_ADMIN_EMAIL`, `FIRST_SUPER_ADMIN_PASSWORD` (the last
+  two only if A1 is done and the bootstrap script reads them).
+
+### F. Verification tasks not completed this session
+
+- **Playwright e2e (Task 5).** Aborted on environmental grounds (one of
+  the explicitly-listed abort reasons in the prompt). Browser binaries
+  not installed (`Executable doesn't exist at .../chrome-headless-shell.exe`);
+  `e2e/.env` not created (only `.env.example` ships); seed data not
+  populated; Redis unreachable from the Windows host. Multiple stacked
+  blockers — running `npx playwright install` plus `npm run
+  seed:demo` plus a Linux-side Redis would have exceeded the 15-min
+  environmental-fix budget. **CI does not run Playwright** (only vitest
+  + tsc + eslint), so there is no green reference baseline. Schedule a
+  dedicated e2e bring-up session post-launch on a Linux host.
+
+### Verdict
+
+**LAUNCH READY WITH CONDITIONS.** The four A-items are short-lived
+(~1 day combined) and should be fixed before the first paying tenant
+touches the system; none of them require a refactor. The C-items are
+real defects but won't bite a smoke test, and C2/C3 only matter for US
+hourly-payroll customers — segment customers accordingly until those
+land. Dependency CVEs (B-fix-2, B-fix-3) are clean `--fix` operations
+and should ship with the A-items.
+
