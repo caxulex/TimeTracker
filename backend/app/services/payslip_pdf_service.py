@@ -6,19 +6,25 @@ Generates professional PDF payslips for employees using ReportLab.
 
 import io
 import logging
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    Image, HRFlowable
+    HRFlowable,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
 )
-from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
+
+from app.utils.timewindow import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -26,18 +32,18 @@ logger = logging.getLogger(__name__)
 class PayslipPDFGenerator:
     """
     Generates professional PDF payslips.
-    
+
     Usage:
         generator = PayslipPDFGenerator()
         pdf_bytes = generator.generate_payslip(payslip_data)
     """
-    
+
     def __init__(self, company_name: str = "Time Tracker", company_logo: Optional[str] = None):
         self.company_name = company_name
         self.company_logo = company_logo
         self.styles = getSampleStyleSheet()
         self._setup_custom_styles()
-    
+
     def _setup_custom_styles(self):
         """Setup custom paragraph styles"""
         self.styles.add(ParagraphStyle(
@@ -48,7 +54,7 @@ class PayslipPDFGenerator:
             spaceAfter=6,
             alignment=TA_CENTER
         ))
-        
+
         self.styles.add(ParagraphStyle(
             name='PayslipTitle',
             parent=self.styles['Heading2'],
@@ -58,7 +64,7 @@ class PayslipPDFGenerator:
             spaceAfter=12,
             alignment=TA_CENTER
         ))
-        
+
         self.styles.add(ParagraphStyle(
             name='SectionHeader',
             parent=self.styles['Heading3'],
@@ -69,21 +75,21 @@ class PayslipPDFGenerator:
             borderPadding=4,
             backColor=colors.HexColor('#f3f4f6')
         ))
-        
+
         self.styles.add(ParagraphStyle(
             name='FieldLabel',
             parent=self.styles['Normal'],
             fontSize=9,
             textColor=colors.HexColor('#6b7280')
         ))
-        
+
         self.styles.add(ParagraphStyle(
             name='FieldValue',
             parent=self.styles['Normal'],
             fontSize=10,
             textColor=colors.HexColor('#111827')
         ))
-        
+
         self.styles.add(ParagraphStyle(
             name='TotalAmount',
             parent=self.styles['Normal'],
@@ -92,7 +98,7 @@ class PayslipPDFGenerator:
             fontName='Helvetica-Bold',
             alignment=TA_RIGHT
         ))
-        
+
         self.styles.add(ParagraphStyle(
             name='Footer',
             parent=self.styles['Normal'],
@@ -100,7 +106,7 @@ class PayslipPDFGenerator:
             textColor=colors.HexColor('#9ca3af'),
             alignment=TA_CENTER
         ))
-    
+
     def generate_payslip(
         self,
         employee_name: str,
@@ -124,7 +130,7 @@ class PayslipPDFGenerator:
     ) -> bytes:
         """
         Generate a PDF payslip.
-        
+
         Returns:
             bytes: PDF file content
         """
@@ -137,21 +143,21 @@ class PayslipPDFGenerator:
             topMargin=0.5*inch,
             bottomMargin=0.5*inch
         )
-        
+
         story = []
-        
+
         # Company Header
         company = company_name or self.company_name
         story.append(Paragraph(company, self.styles['CompanyName']))
         if company_address:
             story.append(Paragraph(company_address, self.styles['Normal']))
         story.append(Spacer(1, 12))
-        
+
         # Payslip Title
         story.append(Paragraph("PAYSLIP", self.styles['PayslipTitle']))
         story.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#e5e7eb')))
         story.append(Spacer(1, 12))
-        
+
         # Employee and Period Information (side by side)
         info_data = [
             [
@@ -171,13 +177,13 @@ class PayslipPDFGenerator:
                 Paragraph(f"End: {period_end.strftime('%B %d, %Y')}", self.styles['FieldValue'])
             ],
         ]
-        
+
         if payment_date:
             info_data.append([
                 Paragraph("", self.styles['FieldValue']),
                 Paragraph(f"Payment Date: {payment_date.strftime('%B %d, %Y')}", self.styles['FieldValue'])
             ])
-        
+
         info_table = Table(info_data, colWidths=[3.5*inch, 3.5*inch])
         info_table.setStyle(TableStyle([
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -186,20 +192,20 @@ class PayslipPDFGenerator:
         ]))
         story.append(info_table)
         story.append(Spacer(1, 20))
-        
+
         # Earnings Section
         story.append(Paragraph("EARNINGS", self.styles['SectionHeader']))
-        
+
         regular_amount = regular_hours * regular_rate
         overtime_amount = overtime_hours * overtime_rate
-        
+
         earnings_data = [
             ['Description', 'Hours', 'Rate', 'Amount'],
             ['Regular Hours', f"{regular_hours:.2f}", f"${regular_rate:.2f}", f"${regular_amount:.2f}"],
             ['Overtime Hours', f"{overtime_hours:.2f}", f"${overtime_rate:.2f}", f"${overtime_amount:.2f}"],
             ['', '', 'Gross Pay:', f"${gross_amount:.2f}"],
         ]
-        
+
         earnings_table = Table(earnings_data, colWidths=[2.5*inch, 1.25*inch, 1.5*inch, 1.75*inch])
         earnings_table.setStyle(TableStyle([
             # Header row
@@ -220,11 +226,11 @@ class PayslipPDFGenerator:
         ]))
         story.append(earnings_table)
         story.append(Spacer(1, 20))
-        
+
         # Adjustments Section (if any)
         if adjustments:
             story.append(Paragraph("ADJUSTMENTS", self.styles['SectionHeader']))
-            
+
             adj_data = [['Type', 'Description', 'Amount']]
             for adj in adjustments:
                 adj_type = adj.get('adjustment_type', 'adjustment').replace('_', ' ').title()
@@ -232,9 +238,9 @@ class PayslipPDFGenerator:
                 adj_amount = adj.get('amount', Decimal('0.00'))
                 sign = '+' if adj_amount >= 0 else ''
                 adj_data.append([adj_type, adj_desc, f"{sign}${adj_amount:.2f}"])
-            
+
             adj_data.append(['', 'Total Adjustments:', f"${adjustments_total:.2f}"])
-            
+
             adj_table = Table(adj_data, colWidths=[1.5*inch, 3.5*inch, 2*inch])
             adj_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f3f4f6')),
@@ -250,15 +256,15 @@ class PayslipPDFGenerator:
             ]))
             story.append(adj_table)
             story.append(Spacer(1, 20))
-        
+
         # Net Pay Summary
         story.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#1e40af')))
         story.append(Spacer(1, 10))
-        
+
         net_data = [
             ['', 'NET PAY:', f"${net_amount:.2f} {currency}"],
         ]
-        
+
         net_table = Table(net_data, colWidths=[3*inch, 2*inch, 2*inch])
         net_table.setStyle(TableStyle([
             ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
@@ -271,27 +277,27 @@ class PayslipPDFGenerator:
         ]))
         story.append(net_table)
         story.append(Spacer(1, 30))
-        
+
         # Footer
         story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#e5e7eb')))
         story.append(Spacer(1, 10))
         story.append(Paragraph(
-            f"Generated on {datetime.now().strftime('%B %d, %Y at %I:%M %p')}",
+            f"Generated on {now_utc().strftime('%B %d, %Y at %I:%M %p UTC')}",
             self.styles['Footer']
         ))
         story.append(Paragraph(
             "This is a computer-generated document. No signature is required.",
             self.styles['Footer']
         ))
-        
+
         # Build PDF
         doc.build(story)
         pdf_bytes = buffer.getvalue()
         buffer.close()
-        
+
         logger.info(f"Generated payslip PDF for employee {employee_id}, period {period_name}")
         return pdf_bytes
-    
+
     def generate_batch_payslips(
         self,
         payslips_data: List[Dict[str, Any]],
@@ -300,10 +306,10 @@ class PayslipPDFGenerator:
     ) -> Dict[int, bytes]:
         """
         Generate multiple payslips.
-        
+
         Args:
             payslips_data: List of payslip data dictionaries
-            
+
         Returns:
             Dict mapping employee_id to PDF bytes
         """
@@ -334,7 +340,7 @@ class PayslipPDFGenerator:
             except Exception as e:
                 logger.error(f"Failed to generate payslip for employee {data.get('employee_id')}: {e}")
                 raise
-        
+
         return results
 
 

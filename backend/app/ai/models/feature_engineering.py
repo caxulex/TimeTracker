@@ -5,9 +5,11 @@ Data models and utilities for preparing features for AI predictions.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
-from datetime import datetime, time, date, timedelta
+from datetime import date, datetime, time, timedelta
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from app.utils.timewindow import now_utc
 
 
 class DayOfWeek(str, Enum):
@@ -44,11 +46,11 @@ class TimeContext:
     def from_datetime(cls, dt: Optional[datetime] = None) -> "TimeContext":
         """Create TimeContext from datetime."""
         if dt is None:
-            dt = datetime.now()
-        
+            dt = now_utc()
+
         day_names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
         dow = DayOfWeek(day_names[dt.weekday()])
-        
+
         hour = dt.hour
         if 5 <= hour < 9:
             tod = TimeOfDay.EARLY_MORNING
@@ -60,7 +62,7 @@ class TimeContext:
             tod = TimeOfDay.EVENING
         else:
             tod = TimeOfDay.NIGHT
-        
+
         return cls(
             current_datetime=dt,
             day_of_week=dow,
@@ -91,18 +93,18 @@ class UserContext:
     job_title: Optional[str] = None
     expected_hours_per_week: float = 40.0
     manager_id: Optional[int] = None
-    
+
     # Computed from history
     avg_entries_per_day: float = 0.0
     most_common_projects: List[Dict[str, Any]] = field(default_factory=list)
     most_common_tasks: List[Dict[str, Any]] = field(default_factory=list)
     typical_start_time: Optional[time] = None
     typical_end_time: Optional[time] = None
-    
+
     # Recent activity
     recent_entries: List[Dict[str, Any]] = field(default_factory=list)
     active_projects: List[Dict[str, Any]] = field(default_factory=list)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for caching/serialization."""
         return {
@@ -127,7 +129,7 @@ class SuggestionFeatures:
     user_context: UserContext
     time_context: TimeContext
     partial_description: Optional[str] = None
-    
+
     # Computed features
     project_frequencies: Dict[int, float] = field(default_factory=dict)
     task_frequencies: Dict[int, float] = field(default_factory=dict)
@@ -138,33 +140,33 @@ class SuggestionFeatures:
         """Compute project frequency scores from recent entries."""
         if not entries:
             return
-        
+
         # Count occurrences
         project_counts: Dict[int, int] = {}
         for entry in entries:
             pid = entry.get("project_id")
             if pid:
                 project_counts[pid] = project_counts.get(pid, 0) + 1
-        
+
         # Normalize to frequencies
         total = sum(project_counts.values())
         self.project_frequencies = {
-            pid: count / total 
+            pid: count / total
             for pid, count in project_counts.items()
         }
 
     def compute_time_slot_patterns(self, entries: List[Dict[str, Any]]) -> None:
         """Compute which projects are commonly used at which times."""
         patterns: Dict[str, Dict[int, int]] = {}
-        
+
         for entry in entries:
             start_time = entry.get("start_time")
             if not start_time:
                 continue
-            
+
             if isinstance(start_time, str):
                 start_time = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-            
+
             # Determine time slot
             hour = start_time.hour
             if 5 <= hour < 12:
@@ -173,13 +175,13 @@ class SuggestionFeatures:
                 slot = "afternoon"
             else:
                 slot = "evening"
-            
+
             pid = entry.get("project_id")
             if pid:
                 if slot not in patterns:
                     patterns[slot] = {}
                 patterns[slot][pid] = patterns[slot].get(pid, 0) + 1
-        
+
         # Convert to sorted lists of project IDs
         self.time_slot_patterns = {
             slot: sorted(projects.keys(), key=lambda p: projects[p], reverse=True)
@@ -190,7 +192,7 @@ class SuggestionFeatures:
         """Extract keywords from partial description."""
         if not self.partial_description:
             return
-        
+
         # Simple keyword extraction
         text = self.partial_description.lower()
         # Remove common words
@@ -218,11 +220,11 @@ class AnomalyFeatures:
     period_start: date
     period_end: date
     expected_hours_per_day: float = 8.0
-    
+
     # Daily metrics
     daily_hours: Dict[str, float] = field(default_factory=dict)  # date -> hours
     daily_entry_counts: Dict[str, int] = field(default_factory=dict)  # date -> count
-    
+
     # Computed metrics
     total_hours: float = 0.0
     avg_hours_per_day: float = 0.0
@@ -230,24 +232,24 @@ class AnomalyFeatures:
     min_hours_day: float = 0.0
     days_worked: int = 0
     weekend_hours: float = 0.0
-    
+
     # Pattern metrics
     consecutive_long_days: int = 0
     days_over_threshold: int = 0
     missing_days: List[str] = field(default_factory=list)
-    
+
     def compute_metrics(self) -> None:
         """Compute all metrics from daily data."""
         if not self.daily_hours:
             return
-        
+
         hours_list = list(self.daily_hours.values())
         self.total_hours = sum(hours_list)
         self.days_worked = len([h for h in hours_list if h > 0])
         self.avg_hours_per_day = self.total_hours / self.days_worked if self.days_worked > 0 else 0
         self.max_hours_day = max(hours_list) if hours_list else 0
         self.min_hours_day = min([h for h in hours_list if h > 0], default=0)
-        
+
         # Compute weekend hours
         self.weekend_hours = 0.0
         for date_str, hours in self.daily_hours.items():
@@ -257,10 +259,10 @@ class AnomalyFeatures:
                     self.weekend_hours += hours
             except ValueError:
                 pass
-        
+
         # Compute consecutive long days
         self._compute_consecutive_long_days()
-        
+
         # Find missing days
         self._find_missing_days()
 
@@ -269,7 +271,7 @@ class AnomalyFeatures:
         dates = sorted(self.daily_hours.keys())
         max_consecutive = 0
         current_consecutive = 0
-        
+
         for date_str in dates:
             hours = self.daily_hours[date_str]
             if hours >= threshold:
@@ -278,7 +280,7 @@ class AnomalyFeatures:
                 self.days_over_threshold += 1
             else:
                 current_consecutive = 0
-        
+
         self.consecutive_long_days = max_consecutive
 
     def _find_missing_days(self) -> None:

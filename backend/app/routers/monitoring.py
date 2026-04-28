@@ -3,19 +3,21 @@ Health Check and Monitoring Endpoints
 TASK-064: Add basic monitoring endpoints
 """
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
-from datetime import datetime, timedelta, timezone
-from typing import Dict, Any
 import os
-import sys
 import platform
+import sys
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict
+
 import psutil
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user, get_current_admin_user
+from app.dependencies import get_current_admin_user
 from app.models import User
+from app.utils.timewindow import now_utc
 
 router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 
@@ -28,7 +30,7 @@ async def health_check(db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
     """
     status = "healthy"
     checks = {}
-    
+
     # Database check
     try:
         await db.execute(text("SELECT 1"))
@@ -36,10 +38,10 @@ async def health_check(db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
     except Exception as e:
         checks["database"] = {"status": "unhealthy", "message": str(e)}
         status = "unhealthy"
-    
+
     return {
         "status": status,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": now_utc().isoformat(),
         "checks": checks
     }
 
@@ -80,16 +82,16 @@ async def get_metrics(
     cpu_percent = psutil.cpu_percent(interval=0.1)
     memory = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
-    
+
     # Process metrics
     process = psutil.Process()
     process_memory = process.memory_info()
-    
+
     # Database stats
     db_stats = {}
     try:
         result = await db.execute(text("""
-            SELECT 
+            SELECT
                 (SELECT COUNT(*) FROM users) as user_count,
                 (SELECT COUNT(*) FROM projects) as project_count,
                 (SELECT COUNT(*) FROM time_entries) as entry_count,
@@ -105,9 +107,9 @@ async def get_metrics(
             }
     except Exception:
         db_stats = {"error": "Could not fetch stats"}
-    
+
     return {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": now_utc().isoformat(),
         "system": {
             "platform": platform.platform(),
             "python_version": sys.version,
@@ -147,7 +149,7 @@ async def get_info() -> Dict[str, Any]:
         "version": os.getenv("APP_VERSION", "1.0.0"),
         "environment": os.getenv("ENVIRONMENT", "development"),
         "python_version": platform.python_version(),
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": now_utc().isoformat()
     }
 
 
@@ -163,36 +165,36 @@ async def get_activity_stats(
     one_hour_ago = now - timedelta(hours=1)
     one_day_ago = now - timedelta(days=1)
     one_week_ago = now - timedelta(weeks=1)
-    
+
     try:
         # Time entries in last hour
         result = await db.execute(text("""
-            SELECT COUNT(*) FROM time_entries 
+            SELECT COUNT(*) FROM time_entries
             WHERE created_at > :one_hour_ago
         """), {"one_hour_ago": one_hour_ago})
         entries_last_hour = result.scalar() or 0
-        
+
         # Active users today
         result = await db.execute(text("""
-            SELECT COUNT(DISTINCT user_id) FROM time_entries 
+            SELECT COUNT(DISTINCT user_id) FROM time_entries
             WHERE created_at > :one_day_ago
         """), {"one_day_ago": one_day_ago})
         active_users_today = result.scalar() or 0
-        
+
         # Total hours this week
         result = await db.execute(text("""
-            SELECT COALESCE(SUM(duration_seconds), 0) / 3600.0 
-            FROM time_entries 
+            SELECT COALESCE(SUM(duration_seconds), 0) / 3600.0
+            FROM time_entries
             WHERE start_time > :one_week_ago
         """), {"one_week_ago": one_week_ago})
         hours_this_week = round(result.scalar() or 0, 2)
-        
+
         # Running timers
         result = await db.execute(text("""
             SELECT COUNT(*) FROM time_entries WHERE is_running = true
         """))
         running_timers = result.scalar() or 0
-        
+
         return {
             "timestamp": now.isoformat(),
             "entries_last_hour": entries_last_hour,

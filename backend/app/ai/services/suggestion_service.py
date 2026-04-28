@@ -10,28 +10,30 @@ Provides intelligent time entry suggestions based on:
 """
 
 import logging
-from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
-from sqlalchemy import select, func, and_
+from datetime import timedelta
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.config import ai_settings
-from app.ai.services.ai_client import AIClient, get_ai_client, AIProviderError
-from app.ai.utils.prompt_templates import PromptTemplates
-from app.ai.utils.cache_manager import AICacheManager, get_cache_manager
 from app.ai.models.feature_engineering import (
+    SuggestionFeatures,
     TimeContext,
     UserContext,
-    SuggestionFeatures
 )
+from app.ai.services.ai_client import AIClient, AIProviderError, get_ai_client
+from app.ai.utils.cache_manager import AICacheManager, get_cache_manager
+from app.ai.utils.prompt_templates import PromptTemplates
 from app.services.ai_feature_service import AIFeatureManager
+from app.utils.timewindow import now_utc
 
 logger = logging.getLogger(__name__)
 
 
 class SuggestionResult:
     """Container for a single suggestion."""
-    
+
     def __init__(
         self,
         project_id: int,
@@ -51,7 +53,7 @@ class SuggestionResult:
         self.confidence = confidence
         self.reason = reason
         self.source = source
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "project_id": self.project_id,
@@ -68,13 +70,13 @@ class SuggestionResult:
 class SuggestionService:
     """
     Service for generating time entry suggestions.
-    
+
     Uses a multi-stage approach:
     1. Pattern-based: Fast, frequency-based suggestions
     2. Context-aware: Time of day/week patterns
     3. AI-enhanced: GPT/Gemini for complex matching
     """
-    
+
     def __init__(
         self,
         db: AsyncSession,
@@ -106,13 +108,13 @@ class SuggestionService:
     ) -> Dict[str, Any]:
         """
         Get time entry suggestions for user.
-        
+
         Args:
             user_id: User requesting suggestions
             partial_description: Optional text user is typing
             limit: Max number of suggestions
             use_ai: Whether to use AI enhancement
-            
+
         Returns:
             Dict with suggestions list and metadata
         """
@@ -137,9 +139,9 @@ class SuggestionService:
                     }
 
             # Build context
-            time_context = TimeContext.from_datetime(datetime.now())
+            time_context = TimeContext.from_datetime(now_utc())
             user_context = await self._build_user_context(user_id)
-            
+
             # Check cache first
             cache_key_context = {
                 "user_id": user_id,
@@ -147,7 +149,7 @@ class SuggestionService:
                 "day": time_context.day_of_week.value,
                 "partial": partial_description or ""
             }
-            
+
             if self.cache:
                 cached = await self.cache.get_suggestion_cache(user_id, cache_key_context)
                 if cached:
@@ -183,7 +185,7 @@ class SuggestionService:
 
             # Filter by confidence threshold
             suggestions = [
-                s for s in suggestions 
+                s for s in suggestions
                 if s.confidence >= ai_settings.SUGGESTION_CONFIDENCE_THRESHOLD
             ]
 
@@ -224,14 +226,14 @@ class SuggestionService:
 
     async def _build_user_context(self, user_id: int) -> UserContext:
         """Build user context from database."""
-        from app.models import User, TimeEntry, Project, Task
-        
+        from app.models import Project, Task, TimeEntry, User
+
         # Get user info
         user_result = await self.db.execute(
             select(User).where(User.id == user_id)
         )
         user = user_result.scalar_one_or_none()
-        
+
         if not user:
             raise ValueError(f"User {user_id} not found")
 
@@ -243,8 +245,8 @@ class SuggestionService:
         )
 
         # Get recent time entries
-        lookback_date = datetime.now() - timedelta(days=ai_settings.SUGGESTION_LOOKBACK_DAYS)
-        
+        lookback_date = now_utc() - timedelta(days=ai_settings.SUGGESTION_LOOKBACK_DAYS)
+
         entries_query = await self.db.execute(
             select(TimeEntry, Project.name.label("project_name"), Task.name.label("task_name"))
             .outerjoin(Project, TimeEntry.project_id == Project.id)
@@ -284,7 +286,7 @@ class SuggestionService:
             .limit(50)
         )
         projects = projects_query.scalars().all()
-        
+
         context.active_projects = [
             {"id": p.id, "name": p.name}
             for p in projects
@@ -295,7 +297,7 @@ class SuggestionService:
         for entry in context.recent_entries:
             pid = entry["project_id"]
             project_counts[pid] = project_counts.get(pid, 0) + 1
-        
+
         context.most_common_projects = sorted(
             [
                 {"project_id": pid, "count": count}
@@ -315,7 +317,7 @@ class SuggestionService:
     ) -> List[SuggestionResult]:
         """Generate pattern-based suggestions."""
         suggestions = []
-        
+
         # Create feature set
         features = SuggestionFeatures(
             user_context=user_context,
@@ -324,7 +326,7 @@ class SuggestionService:
         )
         features.compute_project_frequencies(user_context.recent_entries)
         features.compute_time_slot_patterns(user_context.recent_entries)
-        
+
         if partial_description:
             features.extract_keywords()
 
@@ -350,7 +352,7 @@ class SuggestionService:
         if time_slot in ["morning", "afternoon", "evening"]:
             slot_key = "morning" if time_slot in ["morning", "early_morning"] else time_slot
             slot_projects = features.time_slot_patterns.get(slot_key, [])
-            
+
             for pid in slot_projects[:2]:
                 if pid in project_lookup and pid not in {s.project_id for s in suggestions}:
                     proj = project_lookup[pid]
@@ -411,7 +413,7 @@ class SuggestionService:
         """Get AI-enhanced suggestions."""
         try:
             client = await self._get_ai_client()
-            
+
             if not client.is_initialized:
                 return []
 
@@ -435,10 +437,10 @@ class SuggestionService:
 
             suggestions = []
             data = response.get("data", {})
-            
+
             if isinstance(data, dict) and "suggestions" in data:
                 project_lookup = {p["id"]: p for p in user_context.active_projects}
-                
+
                 for sug in data["suggestions"][:5]:
                     pid = sug.get("project_id")
                     if pid and pid in project_lookup:

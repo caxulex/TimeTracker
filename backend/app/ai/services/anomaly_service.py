@@ -10,18 +10,20 @@ Detects unusual patterns in time tracking data:
 """
 
 import logging
-from typing import List, Dict, Any, Optional
-from datetime import datetime, date, timedelta
-from enum import Enum
 from dataclasses import dataclass, field
-from sqlalchemy import select, func, and_, or_
+from datetime import date, datetime, timedelta
+from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.config import ai_settings
-from app.ai.services.ai_client import AIClient, get_ai_client
-from app.ai.utils.cache_manager import AICacheManager, get_cache_manager
 from app.ai.models.feature_engineering import AnomalyFeatures
+from app.ai.services.ai_client import AIClient
+from app.ai.utils.cache_manager import AICacheManager, get_cache_manager
 from app.services.ai_feature_service import AIFeatureManager
+from app.utils.timewindow import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +57,7 @@ class Anomaly:
     detected_at: datetime
     details: Dict[str, Any] = field(default_factory=dict)
     recommendation: Optional[str] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "type": self.type.value,
@@ -72,11 +74,11 @@ class Anomaly:
 class AnomalyService:
     """
     Service for detecting anomalies in time tracking data.
-    
+
     Uses rule-based detection with optional AI enhancement
     for contextual analysis.
     """
-    
+
     def __init__(
         self,
         db: AsyncSession,
@@ -86,7 +88,7 @@ class AnomalyService:
         self.cache = cache_manager
         self._ai_client: Optional[AIClient] = None
         self._feature_manager: Optional[AIFeatureManager] = None
-        
+
         # Thresholds from config
         self.extended_day_hours = ai_settings.ANOMALY_EXTENDED_DAY_HOURS
         self.consecutive_long_days_count = ai_settings.ANOMALY_CONSECUTIVE_LONG_DAYS
@@ -106,11 +108,11 @@ class AnomalyService:
     ) -> Dict[str, Any]:
         """
         Scan a single user for anomalies.
-        
+
         Args:
             user_id: User to scan
             period_days: Days to look back
-            
+
         Returns:
             Dict with anomalies and summary
         """
@@ -122,7 +124,7 @@ class AnomalyService:
                     "anomalies": [],
                     "enabled": False,
                     "message": "Anomaly detection is disabled",
-                    "scan_date": datetime.now().isoformat(),
+                    "scan_date": now_utc().isoformat(),
                     "period_days": period_days,
                     "user_id": user_id
                 }
@@ -136,7 +138,7 @@ class AnomalyService:
 
             # Build features
             features = await self._build_features(user_id, period_days)
-            
+
             # Run detection
             anomalies = []
             anomalies.extend(await self._detect_extended_days(features))
@@ -151,7 +153,7 @@ class AnomalyService:
                 "user_name": features.user_name,
                 "anomalies": [a.to_dict() for a in anomalies],
                 "summary": features.to_dict(),
-                "scan_date": datetime.now().isoformat(),
+                "scan_date": now_utc().isoformat(),
                 "period_days": period_days,
                 "enabled": True
             }
@@ -178,7 +180,7 @@ class AnomalyService:
                 "anomalies": [],
                 "error": str(e),
                 "enabled": True,
-                "scan_date": datetime.now().isoformat(),
+                "scan_date": now_utc().isoformat(),
                 "period_days": period_days,
                 "user_id": user_id
             }
@@ -192,17 +194,17 @@ class AnomalyService:
         """
         Scan all users (or team) for anomalies.
         Used by scheduled daily scan.
-        
+
         Args:
             period_days: Days to look back
             team_id: Optional team filter
             company_id: Optional company filter for multi-tenancy
-            
+
         Returns:
             Dict with all anomalies and statistics
         """
-        from app.models import User, Team, TeamMember
-        
+        from app.models import TeamMember, User
+
         try:
             fm = await self._get_feature_manager()
             # Check if feature is globally enabled (use system check without user-specific prefs)
@@ -211,7 +213,7 @@ class AnomalyService:
                 return {
                     "anomalies": [],
                     "enabled": False,
-                    "scan_date": datetime.now().isoformat(),
+                    "scan_date": now_utc().isoformat(),
                     "period_days": period_days,
                     "message": "Anomaly detection is disabled"
                 }
@@ -227,10 +229,10 @@ class AnomalyService:
                 )
             else:
                 query = select(User).where(User.is_active == True)
-            
+
             # Multi-tenancy: ALWAYS filter by company_id (strict isolation)
             query = query.where(User.company_id == company_id)
-            
+
             result = await self.db.execute(query)
             users = result.scalars().all()
 
@@ -241,7 +243,7 @@ class AnomalyService:
             for user in users:
                 user_result = await self.scan_user(user.id, period_days)
                 users_scanned += 1
-                
+
                 if user_result.get("anomalies"):
                     users_with_anomalies += 1
                     all_anomalies.extend(user_result["anomalies"])
@@ -262,7 +264,7 @@ class AnomalyService:
                     "warning_count": len([a for a in all_anomalies if a["severity"] == "warning"]),
                     "info_count": len([a for a in all_anomalies if a["severity"] == "info"])
                 },
-                "scan_date": datetime.now().isoformat(),
+                "scan_date": now_utc().isoformat(),
                 "period_days": period_days,
                 "enabled": True
             }
@@ -273,7 +275,7 @@ class AnomalyService:
                 "anomalies": [],
                 "error": str(e),
                 "enabled": True,
-                "scan_date": datetime.now().isoformat(),
+                "scan_date": now_utc().isoformat(),
                 "period_days": period_days
             }
 
@@ -283,14 +285,14 @@ class AnomalyService:
         period_days: int
     ) -> AnomalyFeatures:
         """Build anomaly features from time entries."""
-        from app.models import User, TimeEntry
-        
+        from app.models import TimeEntry, User
+
         # Get user
         user_result = await self.db.execute(
             select(User).where(User.id == user_id)
         )
         user = user_result.scalar_one_or_none()
-        
+
         if not user:
             raise ValueError(f"User {user_id} not found")
 
@@ -322,16 +324,16 @@ class AnomalyService:
         for entry in entries:
             if entry.end_time is None:
                 continue
-            
+
             day_str = entry.start_time.date().isoformat()
             duration_hours = (entry.end_time - entry.start_time).total_seconds() / 3600
-            
+
             features.daily_hours[day_str] = features.daily_hours.get(day_str, 0) + duration_hours
             features.daily_entry_counts[day_str] = features.daily_entry_counts.get(day_str, 0) + 1
 
         # Compute metrics
         features.compute_metrics()
-        
+
         return features
 
     async def _detect_extended_days(
@@ -340,7 +342,7 @@ class AnomalyService:
     ) -> List[Anomaly]:
         """Detect days with extended work hours."""
         anomalies = []
-        
+
         for day_str, hours in features.daily_hours.items():
             if hours >= self.extended_day_hours:
                 anomalies.append(Anomaly(
@@ -349,7 +351,7 @@ class AnomalyService:
                     user_id=features.user_id,
                     user_name=features.user_name,
                     description=f"Extended work day: {hours:.1f} hours on {day_str}",
-                    detected_at=datetime.now(),
+                    detected_at=now_utc(),
                     details={
                         "date": day_str,
                         "hours": round(hours, 2),
@@ -357,7 +359,7 @@ class AnomalyService:
                     },
                     recommendation="Consider taking breaks and maintaining work-life balance"
                 ))
-        
+
         return anomalies
 
     async def _detect_consecutive_long_days(
@@ -366,7 +368,7 @@ class AnomalyService:
     ) -> List[Anomaly]:
         """Detect consecutive days with long hours."""
         anomalies = []
-        
+
         if features.consecutive_long_days >= self.consecutive_long_days_count:
             anomalies.append(Anomaly(
                 type=AnomalyType.CONSECUTIVE_LONG_DAYS,
@@ -377,7 +379,7 @@ class AnomalyService:
                     f"{features.consecutive_long_days} consecutive days "
                     f"with {self.long_day_threshold}+ hours"
                 ),
-                detected_at=datetime.now(),
+                detected_at=now_utc(),
                 details={
                     "consecutive_days": features.consecutive_long_days,
                     "threshold_hours": self.long_day_threshold,
@@ -385,7 +387,7 @@ class AnomalyService:
                 },
                 recommendation="This pattern may indicate burnout risk. Consider workload review."
             ))
-        
+
         return anomalies
 
     async def _detect_weekend_spikes(
@@ -394,7 +396,7 @@ class AnomalyService:
     ) -> List[Anomaly]:
         """Detect unusual weekend work."""
         anomalies = []
-        
+
         if features.weekend_hours >= self.weekend_spike_hours:
             anomalies.append(Anomaly(
                 type=AnomalyType.WEEKEND_SPIKE,
@@ -402,14 +404,14 @@ class AnomalyService:
                 user_id=features.user_id,
                 user_name=features.user_name,
                 description=f"Weekend work spike: {features.weekend_hours:.1f} hours",
-                detected_at=datetime.now(),
+                detected_at=now_utc(),
                 details={
                     "weekend_hours": round(features.weekend_hours, 2),
                     "threshold": self.weekend_spike_hours
                 },
                 recommendation="Ensure weekend work is planned and compensated appropriately"
             ))
-        
+
         return anomalies
 
     async def _detect_missing_time(
@@ -418,7 +420,7 @@ class AnomalyService:
     ) -> List[Anomaly]:
         """Detect missing time entries."""
         anomalies = []
-        
+
         # Only flag if significant missing days
         if len(features.missing_days) >= 2:
             anomalies.append(Anomaly(
@@ -427,14 +429,14 @@ class AnomalyService:
                 user_id=features.user_id,
                 user_name=features.user_name,
                 description=f"Missing time entries for {len(features.missing_days)} weekdays",
-                detected_at=datetime.now(),
+                detected_at=now_utc(),
                 details={
                     "missing_days": features.missing_days[:5],  # Show first 5
                     "total_missing": len(features.missing_days)
                 },
                 recommendation="Consider filling in missing time entries"
             ))
-        
+
         return anomalies
 
     async def _detect_duplicates(
@@ -444,9 +446,9 @@ class AnomalyService:
     ) -> List[Anomaly]:
         """Detect potential duplicate entries."""
         from app.models import TimeEntry
-        
+
         anomalies = []
-        
+
         # Query for potential duplicates (same project, similar time, same day)
         query = await self.db.execute(
             select(
@@ -468,9 +470,9 @@ class AnomalyService:
             )
             .having(func.count() > 3)  # More than 3 entries same project same day
         )
-        
+
         duplicates = query.all()
-        
+
         for dup in duplicates:
             anomalies.append(Anomaly(
                 type=AnomalyType.DUPLICATE_ENTRY,
@@ -478,7 +480,7 @@ class AnomalyService:
                 user_id=features.user_id,
                 user_name=features.user_name,
                 description=f"Multiple entries ({dup.count}) for same project on {dup.entry_date}",
-                detected_at=datetime.now(),
+                detected_at=now_utc(),
                 details={
                     "date": str(dup.entry_date),
                     "project_id": dup.project_id,
@@ -486,7 +488,7 @@ class AnomalyService:
                 },
                 recommendation="Review entries for potential duplicates or consolidation"
             ))
-        
+
         return anomalies
 
     async def _detect_burnout_risk(
@@ -495,27 +497,27 @@ class AnomalyService:
     ) -> List[Anomaly]:
         """Detect burnout risk based on multiple factors."""
         anomalies = []
-        
+
         # Calculate burnout risk score
         risk_score = 0
         risk_factors = []
-        
+
         if features.avg_hours_per_day > 9:
             risk_score += 20
             risk_factors.append(f"High avg hours ({features.avg_hours_per_day:.1f}h/day)")
-        
+
         if features.consecutive_long_days >= 3:
             risk_score += 30
             risk_factors.append(f"{features.consecutive_long_days} consecutive long days")
-        
+
         if features.weekend_hours > 4:
             risk_score += 15
             risk_factors.append(f"Weekend work ({features.weekend_hours:.1f}h)")
-        
+
         if features.max_hours_day > 12:
             risk_score += 20
             risk_factors.append(f"Max {features.max_hours_day:.1f}h in single day")
-        
+
         if features.days_worked == 7:  # Worked every day
             risk_score += 15
             risk_factors.append("No days off in period")
@@ -524,13 +526,13 @@ class AnomalyService:
             anomalies.append(Anomaly(
                 type=AnomalyType.BURNOUT_RISK,
                 severity=(
-                    AnomalySeverity.CRITICAL if risk_score >= 60 
+                    AnomalySeverity.CRITICAL if risk_score >= 60
                     else AnomalySeverity.WARNING
                 ),
                 user_id=features.user_id,
                 user_name=features.user_name,
                 description=f"Potential burnout risk detected (score: {risk_score}/100)",
-                detected_at=datetime.now(),
+                detected_at=now_utc(),
                 details={
                     "risk_score": risk_score,
                     "risk_factors": risk_factors,
@@ -541,7 +543,7 @@ class AnomalyService:
                     "Regular breaks and time off are important for sustained productivity."
                 )
             ))
-        
+
         return anomalies
 
     async def dismiss_anomaly(

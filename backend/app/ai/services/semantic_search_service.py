@@ -9,19 +9,16 @@ Intelligent task search using semantic similarity:
 """
 
 import logging
-import hashlib
-from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime, timedelta
-from dataclasses import dataclass
-import json
 import re
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.config import ai_settings
 from app.ai.utils.cache_manager import AICacheManager, get_cache_manager
-from app.ai.services.ai_client import get_ai_client
+from app.utils.timewindow import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -52,14 +49,14 @@ class SearchResult:
 class SemanticSearchService:
     """
     Semantic Task Search Service
-    
+
     Uses AI embeddings to find similar tasks based on:
     - Task description semantic similarity
     - Project context
     - User history
     - Time patterns
     """
-    
+
     def __init__(
         self,
         db: AsyncSession,
@@ -67,10 +64,10 @@ class SemanticSearchService:
     ):
         self.db = db
         self.cache = cache_manager
-        
+
         # Embedding cache (in-memory for session)
         self._embedding_cache: Dict[str, List[float]] = {}
-        
+
         # Configuration
         self.max_results = 10
         self.min_similarity = 0.3
@@ -86,7 +83,7 @@ class SemanticSearchService:
     ) -> SearchResult:
         """
         Search for tasks similar to the query.
-        
+
         Uses a hybrid approach:
         1. Keyword matching for exact terms
         2. Semantic similarity for meaning
@@ -94,9 +91,9 @@ class SemanticSearchService:
         """
         import time
         start_time = time.time()
-        
-        from app.models import TimeEntry, Task, Project, TeamMember
-        
+
+        from app.models import Project
+
         # Build base query for tasks/entries the user has access to
         if team_id:
             # Get tasks from team projects
@@ -108,25 +105,25 @@ class SemanticSearchService:
         else:
             # Get user's own entries
             project_ids = None
-        
+
         # Step 1: Keyword search
         keyword_matches = await self._keyword_search(query, user_id, project_ids, limit * 2)
-        
+
         # Step 2: Get historical tasks for semantic comparison
         historical_tasks = await self._get_historical_tasks(user_id, project_ids, limit=100)
-        
+
         # Step 3: Semantic ranking
         ranked_results = await self._rank_by_similarity(query, historical_tasks, keyword_matches)
-        
+
         # Step 4: Filter by project if specified
         if project_id:
             ranked_results = [r for r in ranked_results if r.project_id == project_id]
-        
+
         # Limit results
         final_results = ranked_results[:limit]
-        
+
         elapsed_ms = (time.time() - start_time) * 1000
-        
+
         return SearchResult(
             query=query,
             results=final_results,
@@ -142,11 +139,11 @@ class SemanticSearchService:
         limit: int
     ) -> List[Dict[str, Any]]:
         """Perform keyword-based search."""
-        from app.models import TimeEntry, Task, Project
-        
+        from app.models import Project, Task, TimeEntry
+
         # Tokenize query
         tokens = self._tokenize(query)
-        
+
         # Build search conditions
         conditions = []
         for token in tokens:
@@ -157,10 +154,10 @@ class SemanticSearchService:
             if Task is not None:
                 search_conditions.append(Task.name.ilike(pattern))
             conditions.append(or_(*search_conditions))
-        
+
         if not conditions:
             return []
-        
+
         # Query time entries
         base_query = (
             select(
@@ -177,10 +174,10 @@ class SemanticSearchService:
             .where(TimeEntry.description.isnot(None))
             .where(or_(*conditions))
         )
-        
+
         if project_ids:
             base_query = base_query.where(TimeEntry.project_id.in_(project_ids))
-        
+
         base_query = (
             base_query
             .group_by(
@@ -194,10 +191,10 @@ class SemanticSearchService:
             .order_by(func.count().desc())
             .limit(limit)
         )
-        
+
         result = await self.db.execute(base_query)
         rows = result.fetchall()
-        
+
         return [
             {
                 "description": row.description,
@@ -218,8 +215,8 @@ class SemanticSearchService:
         limit: int = 100
     ) -> List[Dict[str, Any]]:
         """Get historical task data for semantic comparison."""
-        from app.models import TimeEntry, Project
-        
+        from app.models import Project, TimeEntry
+
         # Get recent unique task descriptions
         query = (
             select(
@@ -236,10 +233,10 @@ class SemanticSearchService:
             .where(TimeEntry.description.isnot(None))
             .where(TimeEntry.description != "")
         )
-        
+
         if project_ids:
             query = query.where(TimeEntry.project_id.in_(project_ids))
-        
+
         query = (
             query
             .group_by(
@@ -251,10 +248,10 @@ class SemanticSearchService:
             .order_by(func.count().desc())
             .limit(limit)
         )
-        
+
         result = await self.db.execute(query)
         rows = result.fetchall()
-        
+
         return [
             {
                 "description": row.description,
@@ -277,14 +274,14 @@ class SemanticSearchService:
         """Rank tasks by semantic similarity to query."""
         if not historical_tasks and not keyword_matches:
             return []
-        
+
         # Combine sources (keyword matches get boost)
         all_tasks = {}
-        
+
         for task in historical_tasks:
             key = (task["description"], task["project_id"])
             all_tasks[key] = {**task, "keyword_match": False}
-        
+
         for task in keyword_matches:
             key = (task["description"], task["project_id"])
             if key in all_tasks:
@@ -295,42 +292,42 @@ class SemanticSearchService:
                 )
             else:
                 all_tasks[key] = {**task, "keyword_match": True}
-        
+
         # Calculate similarity scores
         results = []
         query_lower = query.lower()
         query_tokens = set(self._tokenize(query))
-        
+
         for key, task in all_tasks.items():
             description = task["description"]
             desc_lower = description.lower()
             desc_tokens = set(self._tokenize(description))
-            
+
             # Calculate similarity components
-            
+
             # 1. Exact match bonus
             exact_bonus = 0.5 if query_lower in desc_lower else 0.0
-            
+
             # 2. Token overlap (Jaccard similarity)
             intersection = query_tokens & desc_tokens
             union = query_tokens | desc_tokens
             jaccard = len(intersection) / len(union) if union else 0.0
-            
+
             # 3. Keyword match bonus
             keyword_bonus = 0.2 if task.get("keyword_match") else 0.0
-            
+
             # 4. Usage frequency bonus (logarithmic)
             import math
             usage_count = task.get("usage_count", 1)
             usage_bonus = min(0.2, math.log10(usage_count + 1) * 0.1)
-            
+
             # 5. Recency bonus
             last_used = task.get("last_used")
             recency_bonus = 0.0
             if last_used:
-                days_ago = (datetime.now() - last_used).days
+                days_ago = (now_utc() - last_used).days
                 recency_bonus = max(0, 0.1 - days_ago * 0.001)
-            
+
             # Combine scores
             similarity = (
                 jaccard * 0.5 +
@@ -339,10 +336,10 @@ class SemanticSearchService:
                 usage_bonus +
                 recency_bonus
             )
-            
+
             # Normalize to 0-1
             similarity = min(1.0, max(0.0, similarity))
-            
+
             if similarity >= self.min_similarity:
                 results.append(SimilarTask(
                     task_id=task.get("task_id"),
@@ -359,10 +356,10 @@ class SemanticSearchService:
                     times_used=task.get("usage_count", 1),
                     last_used=task.get("last_used")
                 ))
-        
+
         # Sort by similarity score
         results.sort(key=lambda x: x.similarity_score, reverse=True)
-        
+
         return results
 
     def _tokenize(self, text: str) -> List[str]:
@@ -383,11 +380,11 @@ class SemanticSearchService:
     ) -> List[SimilarTask]:
         """
         Get task suggestions based on time patterns.
-        
+
         Finds tasks the user commonly works on at this time.
         """
-        from app.models import TimeEntry, Project
-        
+        from app.models import Project, TimeEntry
+
         # Find entries at similar times
         query = (
             select(
@@ -413,10 +410,10 @@ class SemanticSearchService:
             .order_by(func.count().desc())
             .limit(limit)
         )
-        
+
         result = await self.db.execute(query)
         rows = result.fetchall()
-        
+
         return [
             SimilarTask(
                 task_id=row.task_id,

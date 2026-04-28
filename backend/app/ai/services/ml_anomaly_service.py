@@ -9,14 +9,12 @@ Advanced anomaly detection using machine learning:
 """
 
 import logging
-import pickle
-from typing import List, Dict, Any, Optional, Tuple, TypedDict, TYPE_CHECKING
-from datetime import datetime, date, timedelta, timezone
-from enum import Enum
-from dataclasses import dataclass, field
-import json
 import statistics
 from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta, timezone
+from enum import Enum
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypedDict
 
 # Timezone support for correct weekend/workday detection
 try:
@@ -33,12 +31,12 @@ class DailyEntryData(TypedDict):
     end_times: List[float]
     projects: List[str]
 
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.config import ai_settings
 from app.ai.utils.cache_manager import AICacheManager, get_cache_manager
 from app.services.ai_feature_service import AIFeatureManager
+from app.utils.timewindow import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +95,7 @@ class UserBaseline:
     entries_per_day: float
     calculated_at: datetime
     data_points: int
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "user_id": self.user_id,
@@ -125,7 +123,7 @@ class BurnoutRiskAssessment:
     recommendations: List[str]
     trend: str  # "improving", "stable", "worsening"
     assessed_at: datetime
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "user_id": self.user_id,
@@ -151,7 +149,7 @@ class MLAnomaly:
     detected_at: datetime
     details: Dict[str, Any] = field(default_factory=dict)
     recommendation: Optional[str] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "type": self.type.value,
@@ -169,11 +167,11 @@ class MLAnomaly:
 class MLAnomalyService:
     """
     ML-enhanced anomaly detection service.
-    
+
     Uses Isolation Forest for statistical anomaly detection
     and behavioral baselines for personalized analysis.
     """
-    
+
     # Feature names for the model
     FEATURE_NAMES = [
         "daily_hours",
@@ -187,7 +185,7 @@ class MLAnomalyService:
         "hours_deviation",  # from baseline
         "time_deviation"  # from typical schedule
     ]
-    
+
     def __init__(
         self,
         db: AsyncSession,
@@ -199,7 +197,7 @@ class MLAnomalyService:
         self._models: Dict[int, Any] = {}  # Per-user Isolation Forest models
         self._baselines: Dict[int, UserBaseline] = {}
         self._scaler: Optional[Any] = StandardScaler() if ML_AVAILABLE else None
-        
+
         # Configuration
         self.contamination = 0.1  # Expected anomaly rate
         self.min_samples_for_model = 30  # Minimum entries for ML
@@ -215,15 +213,15 @@ class MLAnomalyService:
     # ============================================
     # BASELINE MANAGEMENT
     # ============================================
-    
+
     async def calculate_user_baseline(
         self,
         user_id: int,
         period_days: int = 30
     ) -> UserBaseline:
         """Calculate behavioral baseline for a user."""
-        from app.models import User, TimeEntry
-        
+        from app.models import TimeEntry, User
+
         # Get user
         user_result = await self.db.execute(
             select(User).where(User.id == user_id)
@@ -231,9 +229,9 @@ class MLAnomalyService:
         user = user_result.scalar_one_or_none()
         if not user:
             raise ValueError(f"User {user_id} not found")
-        
-        period_start = datetime.now() - timedelta(days=period_days)
-        
+
+        period_start = now_utc() - timedelta(days=period_days)
+
         # Get time entries
         entries_result = await self.db.execute(
             select(TimeEntry)
@@ -247,7 +245,7 @@ class MLAnomalyService:
             .order_by(TimeEntry.start_time)
         )
         entries = entries_result.scalars().all()
-        
+
         if not entries:
             # Return default baseline
             return UserBaseline(
@@ -261,10 +259,10 @@ class MLAnomalyService:
                 project_distribution={},
                 avg_entry_duration=60.0,
                 entries_per_day=3.0,
-                calculated_at=datetime.now(),
+                calculated_at=now_utc(),
                 data_points=0
             )
-        
+
         # Group by date - explicitly typed
         def create_daily_entry() -> DailyEntryData:
             return {
@@ -274,9 +272,9 @@ class MLAnomalyService:
                 "end_times": [],
                 "projects": []
             }
-        
+
         daily_data: Dict[date, DailyEntryData] = defaultdict(create_daily_entry)
-        
+
         for entry in entries:
             day_key = entry.start_time.date()
             duration_hours = (entry.duration_seconds or 0) / 3600
@@ -287,13 +285,13 @@ class MLAnomalyService:
                 daily_data[day_key]["end_times"].append(entry.end_time.hour + entry.end_time.minute / 60)
             if entry.project_id:
                 daily_data[day_key]["projects"].append(str(entry.project_id))
-        
+
         # Calculate statistics
         daily_hours = [d["hours"] for d in daily_data.values() if d["hours"] > 0]
-        
+
         avg_daily = statistics.mean(daily_hours) if daily_hours else 8.0
         std_daily = statistics.stdev(daily_hours) if len(daily_hours) > 1 else 1.5
-        
+
         # Weekly hours
         weeks = defaultdict(float)
         for day, data in daily_data.items():
@@ -301,23 +299,23 @@ class MLAnomalyService:
             weeks[week_num] += data["hours"]
         weekly_hours = list(weeks.values())
         avg_weekly = statistics.mean(weekly_hours) if weekly_hours else 40.0
-        
+
         # Typical times
         all_starts = []
         all_ends = []
         for data in daily_data.values():
             all_starts.extend(data["start_times"])
             all_ends.extend(data["end_times"])
-        
+
         typical_start = statistics.mean(all_starts) if all_starts else 9.0
         typical_end = statistics.mean(all_ends) if all_ends else 17.0
-        
+
         # Preferred days (days with most entries)
         day_counts = defaultdict(int)
         for day in daily_data.keys():
             day_counts[day.weekday()] += 1
         preferred = sorted(day_counts.keys(), key=lambda x: day_counts[x], reverse=True)[:5]
-        
+
         # Project distribution
         all_projects = []
         for data in daily_data.values():
@@ -327,13 +325,13 @@ class MLAnomalyService:
             project_counts[p] += 1
         total_projects = len(all_projects) or 1
         project_dist = {k: v / total_projects for k, v in project_counts.items()}
-        
+
         # Entry statistics
         all_entries = [e for d in daily_data.values() for e in d["entries"]]
         durations = [(e.duration_seconds or 0) / 60 for e in all_entries]  # in minutes
         avg_duration = statistics.mean(durations) if durations else 60.0
         entries_per_day = len(all_entries) / len(daily_data) if daily_data else 3.0
-        
+
         baseline = UserBaseline(
             user_id=user_id,
             avg_daily_hours=avg_daily,
@@ -345,13 +343,13 @@ class MLAnomalyService:
             project_distribution=project_dist,
             avg_entry_duration=avg_duration,
             entries_per_day=entries_per_day,
-            calculated_at=datetime.now(),
+            calculated_at=now_utc(),
             data_points=len(all_entries)
         )
-        
+
         # Cache baseline
         self._baselines[user_id] = baseline
-        
+
         return baseline
 
     async def get_user_baseline(self, user_id: int) -> UserBaseline:
@@ -359,15 +357,15 @@ class MLAnomalyService:
         if user_id in self._baselines:
             # Check if baseline is fresh (less than 1 day old)
             baseline = self._baselines[user_id]
-            if (datetime.now() - baseline.calculated_at).days < 1:
+            if (now_utc() - baseline.calculated_at).days < 1:
                 return baseline
-        
+
         return await self.calculate_user_baseline(user_id)
 
     # ============================================
     # ML ANOMALY DETECTION
     # ============================================
-    
+
     async def _build_feature_vector(
         self,
         entries: List[Any],
@@ -376,34 +374,34 @@ class MLAnomalyService:
         """Build feature vector for a day's entries."""
         if not entries:
             return None
-        
+
         # Calculate daily metrics
         total_hours = sum((e.duration_seconds or 0) / 3600 for e in entries)
         entry_count = len(entries)
         avg_duration = statistics.mean([(e.duration_seconds or 0) / 60 for e in entries])
-        
+
         start_times = [e.start_time.hour + e.start_time.minute / 60 for e in entries]
         end_times = [
-            (e.end_time.hour + e.end_time.minute / 60) if e.end_time 
+            (e.end_time.hour + e.end_time.minute / 60) if e.end_time
             else (e.start_time.hour + (e.duration_seconds or 0) / 3600)
             for e in entries
         ]
-        
+
         start_hour = min(start_times)
         end_hour = max(end_times)
         span_hours = end_hour - start_hour
-        
+
         # Day of week
         day = entries[0].start_time.date()
         weekend_flag = 1 if day.weekday() >= 5 else 0
-        
+
         # Consecutive work days (simplified)
         consecutive_days = 1  # Would need more context
-        
+
         # Deviation from baseline
         hours_deviation = (total_hours - baseline.avg_daily_hours) / (baseline.std_daily_hours or 1)
         time_deviation = abs(start_hour - baseline.typical_start_hour) / 2  # Normalized
-        
+
         return [
             total_hours,
             entry_count,
@@ -428,11 +426,11 @@ class MLAnomalyService:
                 "success": False,
                 "error": "ML libraries not installed"
             }
-        
+
         from app.models import TimeEntry
-        
-        period_start = datetime.now() - timedelta(days=period_days)
-        
+
+        period_start = now_utc() - timedelta(days=period_days)
+
         # Get time entries
         entries_result = await self.db.execute(
             select(TimeEntry)
@@ -446,59 +444,59 @@ class MLAnomalyService:
             .order_by(TimeEntry.start_time)
         )
         entries = list(entries_result.scalars().all())
-        
+
         if len(entries) < self.min_samples_for_model:
             return {
                 "success": False,
                 "error": f"Insufficient data. Need {self.min_samples_for_model} entries, have {len(entries)}"
             }
-        
+
         # Get baseline
         baseline = await self.get_user_baseline(user_id)
-        
+
         # Group entries by day
         daily_entries = defaultdict(list)
         for entry in entries:
             day_key = entry.start_time.date()
             daily_entries[day_key].append(entry)
-        
+
         # Build feature matrix
         feature_vectors = []
         for day_entries in daily_entries.values():
             vector = await self._build_feature_vector(day_entries, baseline)
             if vector:
                 feature_vectors.append(vector)
-        
+
         if len(feature_vectors) < 10:
             return {
                 "success": False,
                 "error": "Not enough days with data for training"
             }
-        
+
         # Train model
         X = np.array(feature_vectors)
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
-        
+
         model = IsolationForest(
             contamination=self.contamination,
             random_state=42,
             n_estimators=100
         )
         model.fit(X_scaled)
-        
+
         # Store model and scaler
         self._models[user_id] = {
             "model": model,
             "scaler": scaler,
-            "trained_at": datetime.now(),
+            "trained_at": now_utc(),
             "samples": len(feature_vectors)
         }
-        
+
         return {
             "success": True,
             "samples_used": len(feature_vectors),
-            "trained_at": datetime.now().isoformat()
+            "trained_at": now_utc().isoformat()
         }
 
     async def detect_ml_anomalies(
@@ -507,10 +505,10 @@ class MLAnomalyService:
         period_days: int = 7
     ) -> List[MLAnomaly]:
         """Detect anomalies using ML model."""
-        from app.models import User, TimeEntry
-        
+        from app.models import TimeEntry, User
+
         anomalies = []
-        
+
         # Get user info
         user_result = await self.db.execute(
             select(User).where(User.id == user_id)
@@ -518,19 +516,19 @@ class MLAnomalyService:
         user = user_result.scalar_one_or_none()
         if not user:
             return anomalies
-        
+
         # Get baseline
         baseline = await self.get_user_baseline(user_id)
-        
+
         # Check if we have a trained model
         if user_id not in self._models and ML_AVAILABLE:
             # Try to train one
             train_result = await self.train_user_model(user_id)
             if not train_result.get("success"):
                 logger.info(f"No ML model for user {user_id}: {train_result.get('error')}")
-        
-        period_start = datetime.now() - timedelta(days=period_days)
-        
+
+        period_start = now_utc() - timedelta(days=period_days)
+
         # Get recent entries
         entries_result = await self.db.execute(
             select(TimeEntry)
@@ -544,19 +542,19 @@ class MLAnomalyService:
             .order_by(TimeEntry.start_time)
         )
         entries = list(entries_result.scalars().all())
-        
+
         # Group by day
         daily_entries = defaultdict(list)
         for entry in entries:
             day_key = entry.start_time.date()
             daily_entries[day_key].append(entry)
-        
+
         # ML-based detection
         if user_id in self._models and ML_AVAILABLE:
             model_data = self._models[user_id]
             model = model_data["model"]
             scaler = model_data["scaler"]
-            
+
             for day, day_entries in daily_entries.items():
                 vector = await self._build_feature_vector(day_entries, baseline)
                 if vector:
@@ -564,11 +562,11 @@ class MLAnomalyService:
                     X_scaled = scaler.transform(X)
                     prediction = model.predict(X_scaled)[0]
                     score = model.decision_function(X_scaled)[0]
-                    
+
                     if prediction == -1:  # Anomaly detected
                         confidence = min(1.0, abs(score) * 2)
                         severity = "warning" if confidence < 0.7 else "critical"
-                        
+
                         # Determine anomaly type
                         total_hours = vector[0]
                         if total_hours > baseline.avg_daily_hours + 2 * baseline.std_daily_hours:
@@ -580,7 +578,7 @@ class MLAnomalyService:
                         else:
                             anomaly_type = MLAnomalyType.PATTERN_DEVIATION
                             description = f"Work pattern deviation detected on {day}"
-                        
+
                         anomalies.append(MLAnomaly(
                             type=anomaly_type,
                             severity=severity,
@@ -588,7 +586,7 @@ class MLAnomalyService:
                             user_name=user.name,
                             description=description,
                             confidence=confidence,
-                            detected_at=datetime.now(),
+                            detected_at=now_utc(),
                             details={
                                 "date": day.isoformat(),
                                 "hours": round(total_hours, 1),
@@ -597,12 +595,12 @@ class MLAnomalyService:
                             },
                             recommendation=self._get_recommendation(anomaly_type, vector, baseline)
                         ))
-        
+
         # Rule-based behavioral detection (always run)
         anomalies.extend(await self._detect_behavioral_anomalies(
             user_id, user.name, daily_entries, baseline
         ))
-        
+
         return anomalies
 
     async def _detect_behavioral_anomalies(
@@ -614,19 +612,19 @@ class MLAnomalyService:
     ) -> List[MLAnomaly]:
         """Detect behavioral anomalies without ML."""
         anomalies = []
-        
+
         # Check for workload imbalance
         if daily_entries:
             daily_hours = [
                 sum((e.duration_seconds or 0) / 3600 for e in entries)
                 for entries in daily_entries.values()
             ]
-            
+
             if daily_hours:
                 max_hours = max(daily_hours)
                 min_hours = min(daily_hours) if min(daily_hours) > 0 else 0.1
                 imbalance_ratio = max_hours / min_hours
-                
+
                 if imbalance_ratio > 3:
                     anomalies.append(MLAnomaly(
                         type=MLAnomalyType.WORKLOAD_IMBALANCE,
@@ -635,7 +633,7 @@ class MLAnomalyService:
                         user_name=user_name,
                         description=f"Significant workload imbalance detected (ratio: {imbalance_ratio:.1f}x)",
                         confidence=min(1.0, imbalance_ratio / 5),
-                        detected_at=datetime.now(),
+                        detected_at=now_utc(),
                         details={
                             "max_hours": round(max_hours, 1),
                             "min_hours": round(min_hours, 1),
@@ -643,14 +641,14 @@ class MLAnomalyService:
                         },
                         recommendation="Consider redistributing tasks for more balanced workload"
                     ))
-        
+
         # Check for behavioral change (compared to baseline)
         if baseline.data_points > 0:
             recent_avg = statistics.mean([
                 sum((e.duration_seconds or 0) / 3600 for e in entries)
                 for entries in daily_entries.values()
             ]) if daily_entries else 0
-            
+
             deviation = abs(recent_avg - baseline.avg_daily_hours)
             if deviation > baseline.std_daily_hours * 2:
                 change_direction = "increase" if recent_avg > baseline.avg_daily_hours else "decrease"
@@ -661,7 +659,7 @@ class MLAnomalyService:
                     user_name=user_name,
                     description=f"Significant {change_direction} in daily hours detected",
                     confidence=min(1.0, deviation / (baseline.std_daily_hours * 3)),
-                    detected_at=datetime.now(),
+                    detected_at=now_utc(),
                     details={
                         "baseline_avg": round(baseline.avg_daily_hours, 1),
                         "recent_avg": round(recent_avg, 1),
@@ -669,7 +667,7 @@ class MLAnomalyService:
                     },
                     recommendation=f"Review recent workload changes that may explain this {change_direction}"
                 ))
-        
+
         return anomalies
 
     def _get_recommendation(
@@ -691,15 +689,15 @@ class MLAnomalyService:
     # ============================================
     # BURNOUT RISK PREDICTION
     # ============================================
-    
+
     async def assess_burnout_risk(
         self,
         user_id: int,
         period_days: int = 30
     ) -> BurnoutRiskAssessment:
         """Assess burnout risk for a user."""
-        from app.models import User, TimeEntry, Company
-        
+        from app.models import Company, TimeEntry, User
+
         # Get user with company relationship for timezone
         user_result = await self.db.execute(
             select(User).where(User.id == user_id)
@@ -707,7 +705,7 @@ class MLAnomalyService:
         user = user_result.scalar_one_or_none()
         if not user:
             raise ValueError(f"User {user_id} not found")
-        
+
         # Get company timezone (default to UTC if not set or no company)
         company_tz_str = "UTC"
         if user.company_id:
@@ -717,20 +715,19 @@ class MLAnomalyService:
             company = company_result.scalar_one_or_none()
             if company and company.timezone:
                 company_tz_str = company.timezone
-        
+
         # Create timezone object for date conversions
         try:
             company_tz = ZoneInfo(company_tz_str)
         except Exception:
             logger.warning(f"Invalid timezone '{company_tz_str}', falling back to UTC")
             company_tz = ZoneInfo("UTC")
-        
+
         logger.debug(f"Burnout assessment for user {user_id} using timezone: {company_tz_str}")
-        
+
         # Get baseline and recent data
-        baseline = await self.get_user_baseline(user_id)
         period_start = datetime.now(timezone.utc) - timedelta(days=period_days)
-        
+
         entries_result = await self.db.execute(
             select(TimeEntry)
             .where(
@@ -743,7 +740,7 @@ class MLAnomalyService:
             .order_by(TimeEntry.start_time)
         )
         entries = list(entries_result.scalars().all())
-        
+
         # Group by day - CONVERT TO COMPANY LOCAL TIMEZONE FIRST
         # This ensures weekend detection works correctly for the user's location
         daily_entries: Dict[date, list] = defaultdict(list)
@@ -752,16 +749,16 @@ class MLAnomalyService:
             entry_time = entry.start_time
             if entry_time.tzinfo is None:
                 entry_time = entry_time.replace(tzinfo=timezone.utc)
-            
+
             # Convert to company's local timezone and extract date
             local_time = entry_time.astimezone(company_tz)
             day_key = local_time.date()
             daily_entries[day_key].append(entry)
-        
+
         # Calculate risk factors
         factors = []
         risk_score = 0
-        
+
         # Factor 1: Overtime frequency
         overtime_days = 0
         daily_hours_list = []
@@ -770,7 +767,7 @@ class MLAnomalyService:
             daily_hours_list.append(hours)
             if hours > 9:  # More than 9 hours is overtime
                 overtime_days += 1
-        
+
         overtime_rate = overtime_days / max(len(daily_entries), 1)
         overtime_score = min(30, overtime_rate * 100)
         risk_score += overtime_score
@@ -780,7 +777,7 @@ class MLAnomalyService:
             "max_score": 30,
             "detail": f"{overtime_days} overtime days out of {len(daily_entries)} work days"
         })
-        
+
         # Factor 2: Weekend work (now correctly using local timezone dates)
         weekend_days = sum(
             1 for day in daily_entries.keys()
@@ -794,7 +791,7 @@ class MLAnomalyService:
             "max_score": 20,
             "detail": f"{weekend_days} weekend days worked"
         })
-        
+
         # Factor 3: Late work hours (using company local timezone)
         late_entries = 0
         for day_entries_list in daily_entries.values():
@@ -806,7 +803,7 @@ class MLAnomalyService:
                     local_end = end_time.astimezone(company_tz)
                     if local_end.hour >= 20:  # After 8 PM in company timezone
                         late_entries += 1
-        
+
         late_score = min(20, late_entries * 2)
         risk_score += late_score
         factors.append({
@@ -815,7 +812,7 @@ class MLAnomalyService:
             "max_score": 20,
             "detail": f"{late_entries} entries ending after 8 PM"
         })
-        
+
         # Factor 4: Hours variance (inconsistent schedule)
         hours_std = 0.0
         if len(daily_hours_list) > 1:
@@ -830,14 +827,13 @@ class MLAnomalyService:
             "max_score": 15,
             "detail": f"Hours standard deviation: {hours_std:.1f}" if len(daily_hours_list) > 1 else "N/A"
         })
-        
+
         # Factor 5: No days off (consecutive work days)
         # Use company timezone for "today" to ensure correct day boundaries
         work_streak = 0
         max_streak = 0
-        now_utc = datetime.now(timezone.utc)
-        current_date_local = now_utc.astimezone(company_tz).date()
-        
+        current_date_local = now_utc().astimezone(company_tz).date()
+
         for i in range(period_days):
             check_date = current_date_local - timedelta(days=i)
             if check_date in daily_entries:
@@ -845,7 +841,7 @@ class MLAnomalyService:
                 max_streak = max(max_streak, work_streak)
             else:
                 work_streak = 0
-        
+
         streak_score = min(15, max(0, max_streak - 5) * 3)
         risk_score += streak_score
         factors.append({
@@ -854,7 +850,7 @@ class MLAnomalyService:
             "max_score": 15,
             "detail": f"Longest work streak: {max_streak} days"
         })
-        
+
         # Determine risk level
         if risk_score < 30:
             risk_level = RiskLevel.LOW
@@ -864,7 +860,7 @@ class MLAnomalyService:
             risk_level = RiskLevel.HIGH
         else:
             risk_level = RiskLevel.CRITICAL
-        
+
         # Generate recommendations
         recommendations = []
         if overtime_score > 15:
@@ -879,13 +875,13 @@ class MLAnomalyService:
             recommendations.append("Ensure regular days off to prevent exhaustion")
         if not recommendations:
             recommendations.append("Keep maintaining your healthy work patterns")
-        
+
         # Calculate trend (compare first and second half of period)
         if len(daily_hours_list) >= 10:
             mid = len(daily_hours_list) // 2
             first_half_avg = statistics.mean(daily_hours_list[:mid])
             second_half_avg = statistics.mean(daily_hours_list[mid:])
-            
+
             if second_half_avg > first_half_avg * 1.1:
                 trend = "worsening"
             elif second_half_avg < first_half_avg * 0.9:
@@ -894,7 +890,7 @@ class MLAnomalyService:
                 trend = "stable"
         else:
             trend = "stable"
-        
+
         return BurnoutRiskAssessment(
             user_id=user_id,
             user_name=user.name,
@@ -903,7 +899,7 @@ class MLAnomalyService:
             factors=factors,
             recommendations=recommendations,
             trend=trend,
-            assessed_at=datetime.now()
+            assessed_at=now_utc()
         )
 
     async def scan_team_burnout(
@@ -912,8 +908,8 @@ class MLAnomalyService:
         company_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """Scan all users for burnout risk."""
-        from app.models import User, TeamMember
-        
+        from app.models import TeamMember, User
+
         # Get users
         if team_id:
             query = (
@@ -928,16 +924,16 @@ class MLAnomalyService:
             )
         else:
             query = select(User).where(User.is_active == True)
-        
+
         # Multi-tenancy: ALWAYS filter by company_id (strict isolation)
         query = query.where(User.company_id == company_id)
-        
+
         result = await self.db.execute(query)
         users = result.scalars().all()
-        
+
         assessments = []
         risk_distribution = {"low": 0, "moderate": 0, "high": 0, "critical": 0}
-        
+
         for user in users:
             try:
                 assessment = await self.assess_burnout_risk(user.id)
@@ -945,13 +941,13 @@ class MLAnomalyService:
                 risk_distribution[assessment.risk_level.value] += 1
             except Exception as e:
                 logger.error(f"Error assessing user {user.id}: {e}")
-        
+
         return {
             "assessments": assessments,
             "risk_distribution": risk_distribution,
             "total_users": len(users),
             "high_risk_count": risk_distribution["high"] + risk_distribution["critical"],
-            "assessed_at": datetime.now().isoformat()
+            "assessed_at": now_utc().isoformat()
         }
 
 

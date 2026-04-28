@@ -11,19 +11,19 @@ Uses time-series analysis and pattern detection for predictions.
 """
 
 import logging
-from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime, date, timedelta
+import statistics
+from dataclasses import dataclass, field
+from datetime import date, timedelta
 from decimal import Decimal
 from enum import Enum
-from dataclasses import dataclass, field
-from collections import defaultdict
-import statistics
-from sqlalchemy import select, func, and_, or_
+from typing import Any, Dict, List, Optional, Tuple
+
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.config import ai_settings
 from app.ai.utils.cache_manager import AICacheManager, get_cache_manager
 from app.services.ai_feature_service import AIFeatureManager
+from app.utils.timewindow import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class PayrollForecast:
     upper_bound: Decimal
     trend: str  # "increasing", "decreasing", "stable"
     factors: List[Dict[str, Any]] = field(default_factory=list)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "period_start": self.period_start.isoformat(),
@@ -85,7 +85,7 @@ class OvertimeRisk:
     projected_overtime: float
     estimated_cost: Decimal
     recommendation: str
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "user_id": self.user_id,
@@ -113,7 +113,7 @@ class ProjectBudgetForecast:
     projected_completion: date
     risk_level: RiskLevel
     recommendations: List[str] = field(default_factory=list)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "project_id": self.project_id,
@@ -133,13 +133,13 @@ class ProjectBudgetForecast:
 class ForecastingService:
     """
     Service for generating predictive analytics.
-    
+
     Uses historical data analysis with:
     - Moving averages for trend detection
     - Standard deviation for confidence intervals
     - Pattern matching for seasonality
     """
-    
+
     def __init__(
         self,
         db: AsyncSession,
@@ -169,14 +169,14 @@ class ForecastingService:
     ) -> Dict[str, Any]:
         """
         Forecast payroll for upcoming period(s).
-        
+
         Args:
             user_id: User requesting forecast (for auth/logging)
             period_type: Type of payroll period
             periods_ahead: How many periods to forecast
             include_overtime: Include overtime projections
             company_id: Company filter for multi-tenancy
-            
+
         Returns:
             Dict with forecast data and metadata
         """
@@ -200,7 +200,7 @@ class ForecastingService:
 
             # Get historical payroll data (filtered by company)
             historical_data = await self._get_payroll_history(period_type, company_id=company_id)
-            
+
             if len(historical_data) < 3:
                 return {
                     "forecasts": [],
@@ -211,14 +211,14 @@ class ForecastingService:
             # Generate forecasts
             forecasts = []
             last_period_end = historical_data[-1]["period_end"]
-            
+
             for i in range(periods_ahead):
                 period_start, period_end = self._calculate_next_period(
                     last_period_end,
                     period_type,
                     offset=i
                 )
-                
+
                 forecast = await self._generate_payroll_forecast(
                     historical_data,
                     period_start,
@@ -233,7 +233,7 @@ class ForecastingService:
                 "enabled": True,
                 "period_type": period_type,
                 "historical_periods_used": len(historical_data),
-                "generated_at": datetime.now().isoformat()
+                "generated_at": now_utc().isoformat()
             }
 
             # Cache result (forecast_type, entity_id, forecast)
@@ -267,8 +267,8 @@ class ForecastingService:
         company_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """Get historical payroll data for analysis."""
-        from app.models import PayrollPeriod, PayrollEntry, User
-        
+        from app.models import PayrollEntry, PayrollPeriod, User
+
         # Get completed payroll periods
         # Note: PayrollPeriod doesn't have company_id, so we filter via PayrollEntry -> User
         # First get all paid periods of this type
@@ -283,17 +283,17 @@ class ForecastingService:
             .order_by(PayrollPeriod.start_date.desc())
             .limit(limit * 2)  # Get extra to filter by company
         )
-        
+
         result = await self.db.execute(query)
         periods = result.scalars().all()
-        
+
         history = []
         periods_added = 0
-        
+
         for period in reversed(periods):  # Oldest first
             if periods_added >= limit:
                 break
-                
+
             # Get entries for this period, filtered by company via User relationship
             # Multi-tenancy: ALWAYS filter by company_id (even when None)
             entries_result = await self.db.execute(
@@ -307,15 +307,15 @@ class ForecastingService:
                 )
             )
             entries = entries_result.scalars().all()
-            
+
             # Skip periods with no entries for this company
             if not entries:
                 continue
-            
+
             total_regular = sum(e.regular_hours or 0 for e in entries)
             total_overtime = sum(e.overtime_hours or 0 for e in entries)
             total_gross = sum(e.gross_amount or Decimal(0) for e in entries)
-            
+
             history.append({
                 "period_id": period.id,
                 "period_start": period.start_date,
@@ -326,7 +326,7 @@ class ForecastingService:
                 "employee_count": len(entries)
             })
             periods_added += 1
-        
+
         return history
 
     def _calculate_next_period(
@@ -338,7 +338,7 @@ class ForecastingService:
         """Calculate next payroll period dates."""
         # Move to next day after last period
         period_start = last_end + timedelta(days=1)
-        
+
         # Apply offset
         if period_type == "weekly":
             period_start += timedelta(weeks=offset)
@@ -358,7 +358,7 @@ class ForecastingService:
             period_start += timedelta(days=30 * offset)
             next_month = period_start.replace(day=28) + timedelta(days=4)
             period_end = next_month - timedelta(days=next_month.day)
-        
+
         return period_start, period_end
 
     async def _generate_payroll_forecast(
@@ -373,18 +373,18 @@ class ForecastingService:
         amounts = [d["gross_amount"] for d in historical_data]
         regular_hours = [d["regular_hours"] for d in historical_data]
         overtime_hours = [d["overtime_hours"] for d in historical_data]
-        
+
         # Calculate weighted moving average (recent periods weighted more)
         weights = list(range(1, len(amounts) + 1))
         total_weight = sum(weights)
-        
+
         weighted_avg = sum(a * w for a, w in zip(amounts, weights)) / total_weight
-        
+
         # Calculate trend
         if len(amounts) >= 3:
             recent_avg = statistics.mean(amounts[-3:])
             older_avg = statistics.mean(amounts[:-3]) if len(amounts) > 3 else amounts[0]
-            
+
             if recent_avg > older_avg * 1.05:
                 trend = "increasing"
                 trend_factor = recent_avg / older_avg
@@ -397,15 +397,15 @@ class ForecastingService:
         else:
             trend = "stable"
             trend_factor = 1.0
-        
+
         # Apply trend adjustment
         predicted_total = Decimal(str(weighted_avg * trend_factor))
-        
+
         # Calculate regular vs overtime split
         avg_regular_pct = sum(regular_hours) / max(sum(regular_hours) + sum(overtime_hours), 1)
         predicted_regular = predicted_total * Decimal(str(avg_regular_pct))
         predicted_overtime = predicted_total - predicted_regular if include_overtime else Decimal(0)
-        
+
         # Confidence interval based on standard deviation
         if len(amounts) >= 3:
             std_dev = statistics.stdev(amounts)
@@ -413,21 +413,21 @@ class ForecastingService:
         else:
             std_dev = statistics.mean(amounts) * 0.15
             confidence = 0.5
-        
+
         margin = Decimal(str(std_dev * 1.96))  # 95% confidence interval
         lower_bound = max(predicted_total - margin, Decimal(0))
         upper_bound = predicted_total + margin
-        
+
         # Identify contributing factors
         factors = []
         if trend == "increasing":
             factors.append({"factor": "trend", "description": "Payroll costs trending upward", "impact": "positive"})
         elif trend == "decreasing":
             factors.append({"factor": "trend", "description": "Payroll costs trending downward", "impact": "negative"})
-        
+
         if sum(overtime_hours) / len(overtime_hours) > 5:
             factors.append({"factor": "overtime", "description": "Significant overtime observed", "impact": "positive"})
-        
+
         return PayrollForecast(
             period_start=period_start,
             period_end=period_end,
@@ -454,16 +454,16 @@ class ForecastingService:
     ) -> Dict[str, Any]:
         """
         Assess overtime risk for employees.
-        
+
         Identifies users likely to exceed overtime thresholds
         based on current hours and historical patterns.
-        
+
         Args:
             user_id: User requesting assessment
             days_ahead: Days to project
             team_id: Optional team filter
             company_id: Optional company filter for multi-tenancy
-            
+
         Returns:
             Dict with risk assessments per user
         """
@@ -476,8 +476,8 @@ class ForecastingService:
                     "message": "Overtime risk assessment is disabled"
                 }
 
-            from app.models import User, TimeEntry, PayRate, TeamMember
-            
+            from app.models import TeamMember, User
+
             # Get users to assess
             if team_id:
                 query = (
@@ -488,19 +488,19 @@ class ForecastingService:
                 )
             else:
                 query = select(User).where(User.is_active == True)
-            
+
             # Multi-tenancy: ALWAYS filter by company_id (strict isolation)
             query = query.where(User.company_id == company_id)
-            
+
             result = await self.db.execute(query)
             users = result.scalars().all()
-            
+
             logger.info(f"Assessing overtime risk for {len(users)} users (company_id={company_id})")
-            
+
             risks = []
             week_start = self._get_week_start()
             week_end = week_start + timedelta(days=6)
-            
+
             for user in users:
                 # Get current week hours (includes running timers!)
                 current_hours = await self._get_user_hours(
@@ -508,23 +508,23 @@ class ForecastingService:
                     week_start,
                     date.today()
                 )
-                
+
                 # Log significant hours for debugging
                 if current_hours > 20:
                     logger.info(f"User {user.name} (id={user.id}) has {current_hours:.1f} hours this week")
-                
+
                 # Get historical average daily hours
                 avg_daily = await self._get_avg_daily_hours(user.id, days=30)
-                
+
                 # Get overtime threshold
                 expected_weekly = float(user.expected_hours_per_week or 40)
                 overtime_threshold = expected_weekly
-                
+
                 # Project hours for rest of week
                 days_left = (week_end - date.today()).days
                 projected_additional = avg_daily * days_left
                 projected_total = current_hours + projected_additional
-                
+
                 # Calculate risk
                 if projected_total > overtime_threshold * 1.2:
                     risk_level = RiskLevel.CRITICAL
@@ -538,14 +538,14 @@ class ForecastingService:
                 else:
                     risk_level = RiskLevel.LOW
                     recommendation = "On track for normal hours"
-                
+
                 # Only include medium+ risks
                 if risk_level in [RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL]:
                     # Estimate overtime cost
                     pay_rate = await self._get_user_pay_rate(user.id)
                     overtime_hours = max(projected_total - overtime_threshold, 0)
                     overtime_cost = Decimal(str(overtime_hours)) * pay_rate * Decimal("1.5")
-                    
+
                     risks.append(OvertimeRisk(
                         user_id=user.id,
                         user_name=user.name,
@@ -557,18 +557,18 @@ class ForecastingService:
                         estimated_cost=overtime_cost.quantize(Decimal("0.01")),
                         recommendation=recommendation
                     ).to_dict())
-            
+
             # Sort by risk level
             risk_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
             risks.sort(key=lambda x: risk_order.get(x["risk_level"], 4))
-            
+
             return {
                 "risks": risks,
                 "enabled": True,
                 "period": f"{week_start.isoformat()} to {week_end.isoformat()}",
                 "users_assessed": len(users),
                 "users_at_risk": len(risks),
-                "generated_at": datetime.now().isoformat()
+                "generated_at": now_utc().isoformat()
             }
 
         except Exception as e:
@@ -592,13 +592,14 @@ class ForecastingService:
     ) -> float:
         """
         Get total hours for user in date range, including running timers.
-        
+
         IMPORTANT: Running timers are counted even if they started before start_date,
         because the elapsed time represents real work happening NOW.
         """
-        from app.models import TimeEntry
         from datetime import datetime, timezone
-        
+
+        from app.models import TimeEntry
+
         # Get completed entries within the date range
         completed_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
@@ -612,7 +613,7 @@ class ForecastingService:
             )
         )
         completed_seconds = completed_result.scalar() or 0
-        
+
         # Get ALL running entries for this user (regardless of start date)
         # A running timer represents active work that should be flagged as risk
         running_result = await self.db.execute(
@@ -625,7 +626,7 @@ class ForecastingService:
             )
         )
         running_entries = running_result.fetchall()
-        
+
         # Calculate running time (use timezone-aware datetime)
         running_seconds = 0
         now = datetime.now(timezone.utc)
@@ -636,7 +637,7 @@ class ForecastingService:
                 if entry_start.tzinfo is None:
                     entry_start = entry_start.replace(tzinfo=timezone.utc)
                 running_seconds += (now - entry_start).total_seconds()
-        
+
         total_seconds = completed_seconds + running_seconds
         return total_seconds / 3600
 
@@ -647,9 +648,9 @@ class ForecastingService:
     ) -> float:
         """Get average daily hours for user."""
         from app.models import TimeEntry
-        
+
         start_date = date.today() - timedelta(days=days)
-        
+
         result = await self.db.execute(
             select(
                 func.date(TimeEntry.start_time).label("work_date"),
@@ -664,23 +665,23 @@ class ForecastingService:
             )
             .group_by(func.date(TimeEntry.start_time))
         )
-        
+
         # Filter out None values (shouldn't happen now but be safe)
         daily_hours = [
-            row.total_seconds / 3600 
-            for row in result.fetchall() 
+            row.total_seconds / 3600
+            for row in result.fetchall()
             if row.total_seconds is not None
         ]
-        
+
         if not daily_hours:
             return 8.0  # Default assumption
-        
+
         return statistics.mean(daily_hours)
 
     async def _get_user_pay_rate(self, user_id: int) -> Decimal:
         """Get current hourly pay rate for user."""
         from app.models import PayRate
-        
+
         result = await self.db.execute(
             select(PayRate)
             .where(
@@ -697,7 +698,7 @@ class ForecastingService:
             .limit(1)
         )
         pay_rate = result.scalar_one_or_none()
-        
+
         if pay_rate:
             return pay_rate.base_rate
         return Decimal("25.00")  # Default rate
@@ -715,13 +716,13 @@ class ForecastingService:
     ) -> Dict[str, Any]:
         """
         Forecast project budget consumption.
-        
+
         Args:
             user_id: User requesting forecast
             project_id: Specific project (optional)
             team_id: Team projects (optional)
             company_id: Company filter for multi-tenancy
-            
+
         Returns:
             Dict with budget forecasts per project
         """
@@ -734,8 +735,8 @@ class ForecastingService:
                     "message": "Budget forecasting is disabled"
                 }
 
-            from app.models import Project, TimeEntry, PayRate, TeamMember, Team
-            
+            from app.models import Project, Team
+
             # Get projects to analyze
             # Note: Project doesn't have company_id directly - must join through Team
             if project_id:
@@ -773,25 +774,25 @@ class ForecastingService:
                     )
                     .limit(20)
                 )
-            
+
             result = await self.db.execute(query)
             projects = result.scalars().all()
-            
+
             forecasts = []
             for project in projects:
                 forecast = await self._analyze_project_budget(project)
                 if forecast:
                     forecasts.append(forecast.to_dict())
-            
+
             # Sort by risk
             risk_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
             forecasts.sort(key=lambda x: risk_order.get(x["risk_level"], 4))
-            
+
             return {
                 "forecasts": forecasts,
                 "enabled": True,
                 "projects_analyzed": len(projects),
-                "generated_at": datetime.now().isoformat()
+                "generated_at": now_utc().isoformat()
             }
 
         except Exception as e:
@@ -807,21 +808,21 @@ class ForecastingService:
         project
     ) -> Optional[ProjectBudgetForecast]:
         """Analyze budget consumption for a project."""
-        from app.models import TimeEntry, PayRate
-        
+        from app.models import TimeEntry
+
         # Skip projects without a budget set
         if not project.budget_amount:
             return None
-        
+
         budget_total = project.budget_amount
-        
+
         # Calculate labor cost to date
         entries_result = await self.db.execute(
             select(TimeEntry)
             .where(TimeEntry.project_id == project.id)
         )
         entries = entries_result.scalars().all()
-        
+
         if not entries:
             # Project has budget but no time entries yet
             return ProjectBudgetForecast(
@@ -836,19 +837,19 @@ class ForecastingService:
                 risk_level=RiskLevel.LOW,
                 recommendations=["No time tracked yet - budget fully available"]
             )
-        
+
         # Calculate total hours and approximate cost
         total_hours = sum(e.duration_seconds or 0 for e in entries) / 3600
-        
+
         # Get average pay rate (simplified)
         avg_rate = Decimal("50.00")  # Default blended rate
         spent_to_date = Decimal(str(total_hours)) * avg_rate
-        
+
         # Calculate burn rate
         first_entry = min(entries, key=lambda e: e.start_time)
         days_active = max((date.today() - first_entry.start_time.date()).days, 1)
         burn_rate_daily = spent_to_date / days_active
-        
+
         # Calculate days remaining based on deadline or budget
         if project.deadline:
             days_remaining = max((project.deadline - date.today()).days, 0)
@@ -864,17 +865,17 @@ class ForecastingService:
             days_remaining = 365
             projected_completion = date.today() + timedelta(days=365)
             projected_total = spent_to_date
-        
+
         # Determine risk level
         utilization = float(spent_to_date / budget_total * 100) if budget_total > 0 else 0
-        
+
         # Additional risk factor: deadline approaching with high utilization
         deadline_risk = False
         if project.deadline:
             days_to_deadline = (project.deadline - date.today()).days
             if days_to_deadline <= 7 and utilization > 75:
                 deadline_risk = True
-        
+
         if utilization > 90 or deadline_risk:
             risk_level = RiskLevel.CRITICAL
             recommendations = [
@@ -898,7 +899,7 @@ class ForecastingService:
             recommendations = [
                 "Budget utilization healthy"
             ]
-        
+
         return ProjectBudgetForecast(
             project_id=project.id,
             project_name=project.name,
@@ -924,12 +925,12 @@ class ForecastingService:
     ) -> Dict[str, Any]:
         """
         Forecast weekly cash flow for payroll.
-        
+
         Args:
             user_id: User requesting forecast
             weeks_ahead: Weeks to forecast
             company_id: Company filter for multi-tenancy
-            
+
         Returns:
             Dict with weekly cash flow projections
         """
@@ -944,27 +945,27 @@ class ForecastingService:
 
             # Get recent payroll averages (filtered by company)
             historical = await self._get_payroll_history("bi_weekly", limit=6, company_id=company_id)
-            
+
             if not historical:
                 return {
                     "forecast": [],
                     "enabled": True,
                     "message": "Insufficient payroll history"
                 }
-            
+
             avg_payroll = statistics.mean([h["gross_amount"] for h in historical])
-            
+
             # Generate weekly forecast
             forecast = []
             current_week = self._get_week_start()
-            
+
             for i in range(weeks_ahead):
                 week_start = current_week + timedelta(weeks=i)
                 week_end = week_start + timedelta(days=6)
-                
+
                 # Check if payroll falls in this week (assume bi-weekly)
                 is_payroll_week = (i % 2 == 0)
-                
+
                 forecast.append({
                     "week_start": week_start.isoformat(),
                     "week_end": week_end.isoformat(),
@@ -972,12 +973,12 @@ class ForecastingService:
                     "projected_payroll": round(avg_payroll, 2) if is_payroll_week else 0,
                     "cumulative": round(avg_payroll * ((i // 2) + 1), 2) if is_payroll_week else round(avg_payroll * (i // 2), 2)
                 })
-            
+
             return {
                 "forecast": forecast,
                 "enabled": True,
                 "average_payroll": round(avg_payroll, 2),
-                "generated_at": datetime.now().isoformat()
+                "generated_at": now_utc().isoformat()
             }
 
         except Exception as e:
