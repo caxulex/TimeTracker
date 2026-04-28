@@ -235,3 +235,107 @@ preserved — Prompt 5 did not touch the auth path.
   protected test that exercises the JWT blacklist; CI (Linux) is
   unaffected. Documented for future contributors so a flaky local run
   isn't mistaken for a regression.
+
+
+## Deploy notes — backend medium polish (B16 / B23 / B29)
+
+### B16 — Trusted-proxy-aware client IP
+
+`get_client_ip(request)` in `backend/app/routers/auth.py` no longer trusts
+`X-Forwarded-For` / `X-Real-IP` blindly. The header is honored only when
+the immediate TCP peer (`request.client.host`) is in the new
+`TRUSTED_PROXIES` setting. Each entry may be either an exact IP
+(`10.0.0.5`) or a CIDR block (`10.0.0.0/8`); parsed via
+`ipaddress.ip_network(strict=False)`.
+
+#### Required env var (production)
+
+```dotenv
+# Comma-separated list of CIDRs / IPs allowed to set X-Forwarded-For.
+# Set to your reverse-proxy / load-balancer subnet.
+# Empty value => trust no proxy (fall back to peer IP only).
+TRUSTED_PROXIES=10.0.0.0/8,127.0.0.1
+```
+
+If left empty in production, the FastAPI lifespan logs a single startup
+warning `auth.no_trusted_proxies` and the app falls back to using the
+direct peer IP for every audit log / login lockout / rate-limit key.
+Lightsail deployment behind nginx: set `TRUSTED_PROXIES` to the nginx
+subnet (typically `127.0.0.1` for same-host nginx, or the container
+network CIDR for compose deployments).
+
+### B29 — list_time_entries authorization tightening
+
+`GET /api/time-entries?user_id=<other>` previously returned an empty
+`200` for non-admins requesting a user with whom they share no team.
+The endpoint now returns `403 {"detail":"You do not have permission to
+view this user's time entries."}` when:
+
+- caller is not admin / superadmin, **and**
+- `?user_id` is supplied, **and**
+- `?user_id != caller.id`, **and**
+- no row in `team_members` exists where the caller and target share a
+  team.
+
+#### Frontend impact
+
+Frontend currently treats an empty list as "no entries". After this
+change, the same query for a stranger now returns 403. Callers should:
+
+- surface a "you don't have access" toast, **not** "no results", and
+- avoid pre-populating the user-id filter with a value the current user
+  cannot legally query (e.g., from a stale URL share).
+
+No change for self-lookups, teammate-lookups, no-`user_id` queries, or
+admin / superadmin queries.
+
+### B23 — list_time_entries enrichment N+1 fix
+
+The list endpoint previously issued, per page:
+
+1. count query
+2. sum-of-duration query
+3. main page query
+4. `SELECT … FROM projects WHERE id IN (…)` enrichment
+5. `SELECT … FROM tasks WHERE id IN (…)` enrichment
+6. `SELECT … FROM users WHERE id IN (…)` enrichment
+
+Now: count and sum are merged into a single aggregate query, and the
+project / task / user names are eager-loaded via SQLAlchemy
+`joinedload` (single LEFT JOIN — safe because all three relationships
+are has-one). The endpoint hits `time_entries` exactly twice per
+request (stats + page). No client-visible behavior change — just lower
+DB cost on long-tail tenants. Verified by
+`backend/tests/test_time_entries_query_count_b23.py` which asserts
+`count("time_entries" statements) <= 2` over a 50-entry / 10-project /
+10-task / 3-user dataset.
+
+### Bare-except sweep deferred sites
+
+Out-of-scope for this prompt (intentional fallbacks or already
+narrowed); revisit during the Prompt 7.5 lint cleanup:
+
+- `app/ai/utils/cache_manager.py` — 12 sites of intentional Redis
+  graceful-degradation fallback (lines 71, 92, 116, 139, 156, 175, 196,
+  216, 250, 266, 290).
+- `app/ai/services/ai_client.py:145, 227` — `is_available` probes;
+  intentional broad catch.
+- `app/ai/services/ml_anomaly_service.py:724` — already logs and
+  returns a degraded response.
+- `app/routers/companies.py:754` — re-raises `HTTPException`.
+- `app/routers/ai_features.py:470` — counter increment, intentional
+  no-op on metric backend failure.
+- `app/main.py:165` — narrow `urlparse` fallback.
+- `app/routers/monitoring.py:106` — already returns explicit error
+  dict.
+- `app/services/auth_service.py:31` — bcrypt verify intentionally
+  returns `False` on any exception (timing-attack hygiene).
+
+In-scope sweep done in this prompt:
+
+- `app/services/payroll_report_service.py:383` — narrowed bare
+  `except` to `except (TypeError, ValueError, AttributeError)`.
+- `app/routers/notifications.py` — bulk-WS delivery `except Exception:
+  pass` replaced with a `CancelledError` / system-exit re-raise plus a
+  `logger.warning("notifications.bulk_ws_delivery_failed")` for the
+  swallowed delivery failure.

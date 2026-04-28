@@ -380,7 +380,11 @@ class PayrollReportService:
                     try:
                         if cell.value:
                             max_length = max(max_length, len(str(cell.value)))
-                    except:
+                    except (TypeError, ValueError, AttributeError):
+                        # Best-effort column-width computation: a non-stringifiable
+                        # cell value should not abort export rendering. Critical
+                        # control-flow exceptions (CancelledError, KeyboardInterrupt,
+                        # SystemExit) intentionally propagate.
                         pass
                 ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
         

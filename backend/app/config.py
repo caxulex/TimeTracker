@@ -119,6 +119,14 @@ class Settings(BaseSettings):
     # SEC-016: Password Hashing Configuration
     BCRYPT_ROUNDS: int = 12
 
+    # B16: Trusted reverse-proxy networks. Only when the immediate peer
+    # IP falls within one of these networks does ``get_client_ip`` honor
+    # ``X-Forwarded-For``. Accepts CIDR ranges or exact IPs (parsed via
+    # ``ipaddress.ip_network`` so both forms work). Empty list (the
+    # default) means XFF is never trusted, mitigating IP-spoofing of
+    # audit logs in deployments that don't sit behind a known proxy.
+    TRUSTED_PROXIES: EnvList = []
+
     # Sentry Error Tracking (Phase 3: Production Observability)
     SENTRY_DSN: Optional[str] = None
 

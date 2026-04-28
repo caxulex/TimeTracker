@@ -4,6 +4,7 @@ SEC-002, SEC-003, SEC-004, SEC-011, SEC-015: Security Hardened
 """
 
 import logging
+from ipaddress import ip_address, ip_network
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status, Request
@@ -11,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from app.config import settings
 from app.database import get_db
 from app.models import User
 from app.schemas.auth import (
@@ -43,15 +45,69 @@ class LogoutRequest(BaseModel):
     refresh_token: Optional[str] = None
 
 
+def _parse_trusted_proxy_networks():
+    """Parse settings.TRUSTED_PROXIES into a list of ``ip_network`` objects.
+
+    ``ip_network`` accepts both CIDR notation (``10.0.0.0/8``) and bare
+    addresses (``10.0.0.5``); the latter become /32 (or /128) networks.
+    Invalid entries are skipped with a WARNING — the deployment shouldn't
+    crash because of a typo, but the operator must see it.
+    """
+    networks = []
+    for raw in settings.TRUSTED_PROXIES:
+        try:
+            networks.append(ip_network(raw, strict=False))
+        except ValueError:
+            logger.warning(
+                "auth.invalid_trusted_proxy: ignoring TRUSTED_PROXIES entry %r",
+                raw,
+            )
+    return networks
+
+
+def _is_trusted_proxy(peer_ip: str, networks) -> bool:
+    """True if ``peer_ip`` parses and is contained in any trusted network."""
+    if not networks:
+        return False
+    try:
+        peer = ip_address(peer_ip)
+    except ValueError:
+        return False
+    return any(peer in net for net in networks)
+
+
 def get_client_ip(request: Request) -> str:
-    """Extract client IP from request"""
+    """Extract client IP, honoring X-Forwarded-For only behind a trusted proxy.
+
+    B16: previously XFF was honored unconditionally, which let any direct
+    caller spoof the IP recorded in audit logs (and bypass any IP-keyed
+    rate limiting). Now the immediate peer IP must be in
+    ``settings.TRUSTED_PROXIES`` before XFF is consulted; otherwise we
+    return the peer IP. When trusted, the leftmost non-trusted-proxy IP
+    in XFF is returned (RFC 7239 semantics).
+    """
+    peer_ip = request.client.host if request.client else "unknown"
+    trusted_networks = _parse_trusted_proxy_networks()
+
+    if not _is_trusted_proxy(peer_ip, trusted_networks):
+        return peer_ip
+
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        for raw_ip in forwarded.split(","):
+            candidate = raw_ip.strip()
+            if not candidate:
+                continue
+            if _is_trusted_proxy(candidate, trusted_networks):
+                # Skip our own infrastructure; keep walking left-to-right
+                # for the originating client.
+                continue
+            return candidate
+        # All entries were trusted proxies — fall through to peer.
     real_ip = request.headers.get("X-Real-IP")
     if real_ip:
-        return real_ip
-    return request.client.host if request.client else "unknown"
+        return real_ip.strip()
+    return peer_ip
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)

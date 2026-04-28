@@ -12,7 +12,7 @@ from datetime import datetime, date, timedelta, timezone
 import logging
 import uuid as _uuid
 
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.config import settings
 from app.database import get_db
@@ -859,107 +859,116 @@ async def list_time_entries(
     tz: str = Depends(get_company_timezone),
 ):
     """List time entries (filtered by company for multi-tenancy)"""
-    # Multi-tenancy: join with user to filter by company
+    # Multi-tenancy: join with user to filter by company.
+    # B23: ``count_query`` and ``sum_query`` are merged into a single
+    # aggregate ``stats_query`` so the endpoint issues exactly two
+    # round-trips: one for total/sum, one for the rows + eager-loaded
+    # project/task/user via joinedload (has-one, no Cartesian risk).
     base_query = select(TimeEntry).join(User, TimeEntry.user_id == User.id)
-    count_query = select(func.count(TimeEntry.id)).join(User, TimeEntry.user_id == User.id)
-    sum_query = select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0)).join(User, TimeEntry.user_id == User.id)
-    
+    stats_query = select(
+        func.count(TimeEntry.id),
+        func.coalesce(func.sum(TimeEntry.duration_seconds), 0),
+    ).join(User, TimeEntry.user_id == User.id)
+
     # Multi-tenancy: filter by company
     company_id = get_company_filter(current_user)
     base_query = apply_company_filter(base_query, User.company_id, company_id)
-    count_query = apply_company_filter(count_query, User.company_id, company_id)
-    sum_query = apply_company_filter(sum_query, User.company_id, company_id)
+    stats_query = apply_company_filter(stats_query, User.company_id, company_id)
     
     # Filter by user (regular users see only their entries, admin sees all in company)
     if current_user.role not in ["super_admin", "admin", "company_admin"]:
         if user_id and user_id != current_user.id:
-            # Can only see team members' entries
+            # B29: explicit user_id from a non-admin must reference a teammate.
+            # Previously, a non-shared user_id silently produced an empty 200
+            # response; that is an information-leakage smell and is now a 403.
             user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
+            shared_team_check = await db.execute(
+                select(TeamMember.user_id)
+                .where(
+                    TeamMember.team_id.in_(user_teams),
+                    TeamMember.user_id == user_id,
+                )
+                .limit(1)
+            )
+            if shared_team_check.first() is None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You do not have permission to view this user's time entries.",
+                )
+            # Authorized: scope visible rows to self OR teammates (the
+            # subsequent ``user_id`` filter below narrows further to the
+            # requested user).
             team_users = select(TeamMember.user_id).where(TeamMember.team_id.in_(user_teams))
             base_query = base_query.where(
                 (TimeEntry.user_id == current_user.id) | (TimeEntry.user_id.in_(team_users))
             )
-            count_query = count_query.where(
-                (TimeEntry.user_id == current_user.id) | (TimeEntry.user_id.in_(team_users))
-            )
-            sum_query = sum_query.where(
+            stats_query = stats_query.where(
                 (TimeEntry.user_id == current_user.id) | (TimeEntry.user_id.in_(team_users))
             )
         elif not user_id:
             base_query = base_query.where(TimeEntry.user_id == current_user.id)
-            count_query = count_query.where(TimeEntry.user_id == current_user.id)
-            sum_query = sum_query.where(TimeEntry.user_id == current_user.id)
-    
+            stats_query = stats_query.where(TimeEntry.user_id == current_user.id)
+
     if user_id:
         base_query = base_query.where(TimeEntry.user_id == user_id)
-        count_query = count_query.where(TimeEntry.user_id == user_id)
-        sum_query = sum_query.where(TimeEntry.user_id == user_id)
-    
+        stats_query = stats_query.where(TimeEntry.user_id == user_id)
+
     if project_id:
         base_query = base_query.where(TimeEntry.project_id == project_id)
-        count_query = count_query.where(TimeEntry.project_id == project_id)
-        sum_query = sum_query.where(TimeEntry.project_id == project_id)
-    
+        stats_query = stats_query.where(TimeEntry.project_id == project_id)
+
     if task_id:
         base_query = base_query.where(TimeEntry.task_id == task_id)
-        count_query = count_query.where(TimeEntry.task_id == task_id)
-        sum_query = sum_query.where(TimeEntry.task_id == task_id)
-    
+        stats_query = stats_query.where(TimeEntry.task_id == task_id)
+
     if start_date:
         # B7: tenant-local midnight as half-open range start.
         start_datetime, _ = day_bounds(start_date, tz)
         base_query = base_query.where(TimeEntry.start_time >= start_datetime)
-        count_query = count_query.where(TimeEntry.start_time >= start_datetime)
-        sum_query = sum_query.where(TimeEntry.start_time >= start_datetime)
-    
+        stats_query = stats_query.where(TimeEntry.start_time >= start_datetime)
+
     if end_date:
         # B7+B20: half-open range [start_of_local_day, next_local_day_midnight).
         # Matches reports.py and avoids both the microsecond cliff of
         # datetime.max.time() and the UTC-vs-local mismatch.
         _, end_datetime = day_bounds(end_date, tz)
         base_query = base_query.where(TimeEntry.start_time < end_datetime)
-        count_query = count_query.where(TimeEntry.start_time < end_datetime)
-        sum_query = sum_query.where(TimeEntry.start_time < end_datetime)
-    
-    # Get counts
-    total_result = await db.execute(count_query)
-    total = total_result.scalar()
-    
-    sum_result = await db.execute(sum_query)
-    total_seconds = sum_result.scalar() or 0
-    
-    # Get paginated results
+        stats_query = stats_query.where(TimeEntry.start_time < end_datetime)
+
+    # Get aggregate stats (count + sum) in a single round trip.
+    stats_result = await db.execute(stats_query)
+    total, total_seconds = stats_result.one()
+    total = total or 0
+    total_seconds = total_seconds or 0
+
+    # Get paginated results.
+    # B23: eager-load project/task/user via joinedload. All three are
+    # has-one (many-to-one from TimeEntry), so a single LEFT OUTER JOIN
+    # is safe (no Cartesian explosion) and yields the rows + names in
+    # one query. Combined with the merged stats query above, the
+    # endpoint now issues exactly two SQL statements regardless of page
+    # size. The response shape is unchanged.
     offset = (page - 1) * page_size
-    query = base_query.offset(offset).limit(page_size).order_by(TimeEntry.start_time.desc())
+    query = (
+        base_query
+        .options(
+            joinedload(TimeEntry.project),
+            joinedload(TimeEntry.task),
+            joinedload(TimeEntry.user),
+        )
+        .offset(offset)
+        .limit(page_size)
+        .order_by(TimeEntry.start_time.desc())
+    )
     result = await db.execute(query)
     entries = result.scalars().all()
-    
-    # Get related names
-    project_ids = list(set(e.project_id for e in entries))
-    task_ids = list(set(e.task_id for e in entries if e.task_id))
-    user_ids = list(set(e.user_id for e in entries))
-    
-    project_names = {}
-    if project_ids:
-        projects_result = await db.execute(select(Project.id, Project.name).where(Project.id.in_(project_ids)))
-        project_names = dict(projects_result.all())
-    
-    task_names = {}
-    if task_ids:
-        tasks_result = await db.execute(select(Task.id, Task.name).where(Task.id.in_(task_ids)))
-        task_names = dict(tasks_result.all())
-    
-    user_names = {}
-    if user_ids:
-        users_result = await db.execute(select(User.id, User.name).where(User.id.in_(user_ids)))
-        user_names = dict(users_result.all())
-    
+
     items = [
         make_entry_response(
             entry,
-            project_names.get(entry.project_id),
-            task_names.get(entry.task_id) if entry.task_id else None,
-            user_names.get(entry.user_id)
+            entry.project.name if entry.project else None,
+            entry.task.name if entry.task else None,
+            entry.user.name if entry.user else None,
         )
         for entry in entries
     ]

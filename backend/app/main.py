@@ -56,6 +56,18 @@ async def lifespan(app: FastAPI):
     from app.database import log_pool_config
     log_pool_config()
 
+    # B16: warn loudly when running in production without an explicit
+    # trusted-proxy list. In that mode get_client_ip falls back to the
+    # immediate peer IP, which is fine for a direct-bind deployment but
+    # is almost never what an operator running behind nginx/ALB wants.
+    if settings.ENVIRONMENT == "production" and not settings.TRUSTED_PROXIES:
+        logger.warning(
+            "auth.no_trusted_proxies: TRUSTED_PROXIES is empty in production; "
+            "X-Forwarded-For will be ignored and audit logs will record the "
+            "direct peer IP. Set TRUSTED_PROXIES to your reverse-proxy CIDR "
+            "(e.g. '10.0.0.0/8') if requests reach this app via a proxy."
+        )
+
     # B13: warm the realtime active-timers cache once at startup. This
     # function is best-effort: on failure it logs ``app.warm_cache_failed``
     # and returns 0 so the app starts with an empty cache rather than

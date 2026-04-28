@@ -6,6 +6,7 @@
 # Admins can send notifications to users.
 # ============================================
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List
@@ -372,8 +373,18 @@ async def send_bulk_notifications(
                     }
                 }, user.id)
                 websocket_sent += 1
-            except Exception:
-                pass
+            except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+                # Bulk fan-out must not swallow shutdown/cancellation.
+                raise
+            except Exception as ws_exc:
+                # One disconnected/dead socket should not abort the rest of
+                # the bulk send; log and continue. The DB row is already
+                # persisted, so the user will still see the notification on
+                # next reconnect.
+                logger.warning(
+                    "notifications.bulk_ws_delivery_failed",
+                    extra={"user_id": user.id, "error": str(ws_exc)},
+                )
     except Exception as e:
         logger.warning(f"Failed to send WebSocket notifications: {e}")
     
