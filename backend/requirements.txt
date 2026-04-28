@@ -14,11 +14,10 @@ psycopg2-binary==2.9.9  # For Alembic migrations
 # Authentication & Security
 python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
-python-multipart==0.0.22
+python-multipart==0.0.26
 
 # Redis for caching and pub/sub
 redis==5.0.1
-aioredis==2.0.1
 
 # HTTP client for external APIs
 httpx==0.25.2
