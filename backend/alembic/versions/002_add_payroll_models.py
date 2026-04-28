@@ -152,7 +152,9 @@ def downgrade() -> None:
     op.drop_table('pay_rate_history')
     
     op.drop_index('ix_pay_rates_user_effective', table_name='pay_rates')
-    op.drop_index('ix_pay_rates_effective_from', table_name='pay_rates')
+    # Also created (with if_not_exists=True) in migration 006, which drops it
+    # first on downgrade. Use if_exists=True to make this drop idempotent.
+    op.drop_index('ix_pay_rates_effective_from', table_name='pay_rates', if_exists=True)
     op.drop_index('ix_pay_rates_user_id', table_name='pay_rates')
     op.drop_index('ix_pay_rates_id', table_name='pay_rates')
     op.drop_table('pay_rates')
