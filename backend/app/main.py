@@ -153,55 +153,13 @@ app.add_middleware(SecurityHeadersMiddleware)
 # SEC-004: Add rate limiting middleware
 app.add_middleware(RateLimitMiddleware, limiter=rate_limiter)
 
-# SEC-008: CORS origin validator for multi-tenant wildcard subdomain support
-def is_origin_allowed(origin: str) -> bool:
-    """
-    Check if an origin is allowed for CORS.
-    Supports:
-    - Exact matches from ALLOWED_ORIGINS
-    - Wildcard subdomain matches from CORS_WILDCARD_DOMAINS (e.g., *.example.com)
-    """
-    if not origin:
-        return False
-    
-    # Exact match
-    if origin in settings.ALLOWED_ORIGINS:
-        return True
-    
-    # Parse origin to get hostname
-    try:
-        from urllib.parse import urlparse
-        parsed = urlparse(origin)
-        hostname = parsed.hostname or ''
-        scheme = parsed.scheme or 'https'
-    except Exception:
-        return False
-    
-    # Check wildcard domains
-    for base_domain in settings.CORS_WILDCARD_DOMAINS:
-        # Allow exact base domain
-        if hostname == base_domain:
-            return True
-        # Allow any subdomain of base domain (e.g., xyz-corp.timetracker.shaemarcus.com)
-        if hostname.endswith(f'.{base_domain}'):
-            return True
-    
-    return False
 
-
-# SEC-008: Build complete origins list for CORS middleware
-def get_all_cors_origins() -> list:
-    """
-    Get all allowed origins including wildcard domain expansions.
-    Note: FastAPI CORSMiddleware doesn't support regex, so we use allow_origin_regex
-    or handle dynamically with a custom middleware for full wildcard support.
-    """
-    origins = list(settings.ALLOWED_ORIGINS)
-    # For non-wildcard usage, return exact list
-    return origins
-
-
-# SEC-008: Build CORS origin regex for wildcard subdomain support
+# SEC-008 / B25: Build CORS origin regex for wildcard subdomain support.
+# `is_origin_allowed` and `get_all_cors_origins` were dead/trivial helpers
+# (B25 cleanup) — `is_origin_allowed` was never called and
+# `get_all_cors_origins` was a 3-line wrapper around list(ALLOWED_ORIGINS).
+# Both were removed; the exact-origin list is now inlined at the
+# add_middleware() call site, and the regex is the only computed piece.
 def build_cors_origin_regex() -> str | None:
     """
     Build a regex pattern to match wildcard subdomains.
@@ -209,7 +167,7 @@ def build_cors_origin_regex() -> str | None:
     """
     if not settings.CORS_WILDCARD_DOMAINS:
         return None
-    
+
     # Build regex pattern for all wildcard domains
     # e.g., ["example.com", "test.com"] -> r"https?://.*\.(example\.com|test\.com)"
     escaped_domains = [domain.replace('.', r'\.') for domain in settings.CORS_WILDCARD_DOMAINS]
@@ -219,9 +177,52 @@ def build_cors_origin_regex() -> str | None:
 
 # SEC-008: Tightened CORS configuration with multi-tenant support
 cors_origin_regex = build_cors_origin_regex()
+cors_exact_origins = list(settings.ALLOWED_ORIGINS)
+
+
+def _assert_cors_not_fully_closed_in_production(
+    environment: str,
+    exact_origins: list,
+    origin_regex: str | None,
+) -> None:
+    """B25: Fail-closed safety check.
+
+    If running in production with NEITHER an explicit origin list NOR a
+    wildcard regex, CORS is fully closed and every browser request from a
+    tenant subdomain will be silently blocked. Refuse to start so the
+    operator notices immediately.
+    """
+    if environment == "production" and not exact_origins and not origin_regex:
+        raise RuntimeError(
+            "CORS is fully closed in production — set ALLOWED_ORIGINS or "
+            "CORS_WILDCARD_DOMAINS"
+        )
+
+
+_assert_cors_not_fully_closed_in_production(
+    settings.ENVIRONMENT, cors_exact_origins, cors_origin_regex
+)
+
+# B25: Surface the resolved CORS configuration at startup so operators can
+# verify production isn't accidentally rejecting tenant subdomains. Logged
+# under a stable structured identifier `cors.config_resolved`.
+from app.utils.timewindow import now_utc as _b25_now_utc
+logger.info(
+    "cors.config_resolved",
+    extra={
+        "event": "cors.config_resolved",
+        "exact_origins": cors_exact_origins,
+        "origin_regex": cors_origin_regex,
+        "wildcard_enabled": bool(settings.CORS_WILDCARD_DOMAINS),
+        "wildcard_domains": list(settings.CORS_WILDCARD_DOMAINS),
+        "environment": settings.ENVIRONMENT,
+        "resolved_at": _b25_now_utc().isoformat(),
+    },
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=get_all_cors_origins(),
+    allow_origins=cors_exact_origins,
     allow_origin_regex=cors_origin_regex,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],

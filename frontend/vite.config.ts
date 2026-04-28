@@ -15,9 +15,16 @@ export default defineConfig(({ mode }) => ({
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version),
   },
-  // Phase 3: Strip console.log and debugger in production builds only
+  // B19: Strip console.log/debug/info and debugger in production builds only.
+  // Keep console.warn and console.error so production-side issues remain visible.
+  // `pure` lets esbuild treat the listed call expressions as side-effect-free
+  // and tree-shake them; `drop` removes debugger statements outright.
+  // Dev builds are untouched — devs still see all console output via `npm run dev`.
   esbuild: mode === 'production'
-    ? { drop: ['console', 'debugger'] }
+    ? {
+        pure: ['console.log', 'console.debug', 'console.info', 'console.trace'],
+        drop: ['debugger'],
+      }
     : undefined,
   server: {
     port: 5173,

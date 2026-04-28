@@ -339,3 +339,201 @@ In-scope sweep done in this prompt:
   pass` replaced with a `CancelledError` / system-exit re-raise plus a
   `logger.warning("notifications.bulk_ws_delivery_failed")` for the
   swallowed delivery failure.
+
+
+---
+
+## B17 token storage migration plan (deferred from prep/production-readiness session)
+
+**Status:** Deferred to post-launch. Audit finding B17 (medium severity).
+TODO comments added in source at every localStorage token access in
+`frontend/src/api/client.ts` and `frontend/src/stores/authStore.ts`.
+
+### Risk being deferred
+
+Both access and refresh tokens are stored in `localStorage`. Any XSS
+anywhere in the SPA grants total account takeover (steal + replay both
+tokens with no MFA challenge). Estimated effort: **medium** (~1–2 days
+including tests and a staged migration window). Not safe to attempt in a
+single hardening session because it interacts with: the Zustand `persist`
+middleware, the redirect-loop guard in `client.ts`, the existing B15
+logout-revoke flow, and cross-subdomain cookie scope for tenants on
+`*.timetracker.shaemarcus.com`.
+
+### Affected files
+
+Backend:
+- `backend/app/routers/auth.py` — login, refresh, logout endpoints.
+- `backend/.env.example` — document new cookie-scope env var if added.
+
+Frontend:
+- `frontend/src/api/client.ts` — request interceptor, refresh flow,
+  `forceLogoutAndRedirect`.
+- `frontend/src/stores/authStore.ts` — login, logout, fetchUser,
+  onRehydrateStorage, partialize shape.
+- `frontend/src/stores/authStore.test.ts` — adjust mocks to expect
+  cookie-based refresh and in-memory access token.
+
+### Backend changes
+
+1. **Login (`POST /api/auth/login`)**: alongside the existing JSON body
+   response, set the refresh token via:
+   ```python
+   response.set_cookie(
+       key="refresh_token",
+       value=refresh_token,
+       httponly=True,
+       secure=True,
+       samesite="strict",
+       max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+       # Scope: confirm tenant subdomain handling. If tenants live at
+       # *.timetracker.shaemarcus.com and the API is at api.timetracker...,
+       # set domain=".timetracker.shaemarcus.com" so the cookie is sent on
+       # cross-subdomain requests. Otherwise omit `domain` for host-only.
+   )
+   ```
+   Continue returning `refresh_token` in the JSON body during the
+   migration window (backward compatibility with old frontend deploys).
+   Add a TODO with a removal date once the frontend rollout is complete.
+
+2. **Refresh (`POST /api/auth/refresh`)**: accept refresh token from
+   EITHER `request.cookies.get("refresh_token")` OR
+   `body.refresh_token`, **preferring the cookie**. Document the
+   dual-source acceptance as a deliberate migration concession.
+
+3. **Logout (`POST /api/auth/logout`)**: confirm B15's flow already
+   accepts refresh token from either cookie or body. Set
+   `response.delete_cookie("refresh_token", ...)` on success so the
+   browser drops the cookie immediately.
+
+### Frontend changes
+
+1. In `client.ts`, replace the module-scope `localStorage`-based token
+   access with private state plus accessors:
+   ```ts
+   let accessToken: string | null = null;
+   export function getAccessToken() { return accessToken; }
+   export function setAccessToken(t: string | null) { accessToken = t; }
+   ```
+   Wire the request interceptor to `getAccessToken()`.
+
+2. Replace every `localStorage.setItem('access_token', ...)` call with
+   `setAccessToken(...)`. Remove every
+   `localStorage.setItem('refresh_token', ...)` (the cookie is set by
+   the server).
+
+3. In the response interceptor's refresh branch, call
+   `axios.post(url, {}, { withCredentials: true })` — the cookie is
+   sent automatically; no body needed once the backend cookie path is
+   live. Keep the body fallback during the dual-source window.
+
+4. On app load (in `main.tsx` or store `onRehydrateStorage`), if the
+   persisted state says `isAuthenticated` but `getAccessToken()` is
+   null, call `/auth/refresh` with `{ withCredentials: true }` to mint
+   a new access token from the cookie. This replaces today's
+   "no token = clear stale auth" branch.
+
+5. Update Zustand `partialize` if needed — `access_token` /
+   `refresh_token` were never in the persisted slice, so this is mostly
+   a no-op, but verify the rehydration logic.
+
+6. Update `forceLogoutAndRedirect` to clear via
+   `setAccessToken(null)` instead of `localStorage.removeItem(...)`.
+   The cookie clears server-side via the logout endpoint.
+
+### Testing strategy
+
+Unit (vitest):
+- `getAccessToken()` / `setAccessToken()` round-trip.
+- Request interceptor: when accessor returns null, no `Authorization`
+  header is attached; when it returns a string, header is `Bearer ...`.
+- `forceLogoutAndRedirect` clears in-memory token and triggers
+  navigation.
+
+Integration (pytest, backend):
+- Login sets the `refresh_token` cookie with `HttpOnly; Secure;
+  SameSite=Strict` attributes.
+- Refresh accepts cookie alone (no body) and returns a new access
+  token.
+- Refresh accepts body alone (legacy path) during the migration window.
+- Refresh prefers cookie when both are present.
+- Logout clears the cookie.
+
+E2E (manual or Playwright if added later):
+- Login → reload page → still authenticated (refresh via cookie).
+- Logout → reload page → unauthenticated.
+- XSS smoke check: in DevTools, `localStorage.getItem('access_token')`
+  returns null after migration.
+
+### Migration window (deploy plan)
+
+1. **Phase 1 — backend deploys first.** Backend accepts refresh token
+   from cookie OR body, sets cookie on login alongside JSON body
+   response. Old frontend continues to work unchanged (uses body).
+2. **Phase 2 — frontend deploys.** New frontend uses
+   `withCredentials: true`, in-memory access token, no localStorage
+   tokens. Old backend deploys (none after Phase 1) unaffected.
+3. **Phase 3 — backend cleanup deploy.** Remove refresh token from
+   login JSON body; remove body-source acceptance from refresh
+   endpoint. Bump a minor API version note.
+
+The TODO comments in source reference this section; remove them as
+each phase ships.
+
+### Why not done in the campaign session
+
+- 12+ localStorage touchpoints across `client.ts` and `authStore.ts`
+  plus Zustand `persist` interaction.
+- Existing redirect-loop guard, refresh mutex, and rehydration paths
+  all need rewriting and dedicated tests.
+- Cross-subdomain cookie scope for tenants needs an explicit threat
+  model decision (apex domain vs host-only).
+- B15 logout-revoke flow assumes body source — needs revisit.
+- Backward-compat dual-source window adds further code paths/tests.
+
+---
+
+## Deploy notes — frontend & ops polish
+
+These notes accompany the prep/production-readiness session that
+addressed B17 (deferred), B19, B22, B25, B26.
+
+- **B19 (prod build console stripping).** `console.log`,
+  `console.debug`, `console.info`, `console.trace` and `debugger`
+  statements are stripped from the production frontend bundle via
+  `esbuild.pure` / `esbuild.drop` in `frontend/vite.config.ts`.
+  `console.warn` and `console.error` are preserved so production-side
+  issues remain visible. Devs still see all console output in
+  `npm run dev` — the strip is production-mode only.
+
+- **B25 (CORS startup safety).** `backend/app/main.py` now refuses to
+  start in production if BOTH `ALLOWED_ORIGINS` is empty AND
+  `CORS_WILDCARD_DOMAINS` is empty (would silently block every browser
+  request). Production deploys must set at least one. The resolved
+  CORS configuration is logged at startup under the structured
+  identifier `cors.config_resolved` (exact origins, regex pattern,
+  wildcard-enabled flag, environment, resolved_at). Operators can
+  grep for `cors.config_resolved` in startup logs to verify.
+
+- **B22 (branding input validation).** Invalid favicon URLs (non-https
+  / non-image-extension / `data:` / `javascript:` etc.) and invalid
+  color strings (anything other than `#RRGGBB` or `#RRGGBBAA`) are
+  silently rejected to defaults with a `console.warn` from
+  `[branding]`. If a tenant reports their custom branding isn't
+  appearing, check the browser console for a `[branding]` warning.
+  The favicon `<link>` node is now reused across calls — repeated
+  `applyBrandingToDocument` no longer leaks DOM nodes.
+
+- **B26 (TODO label).** The placeholder
+  `"Close (TODO: Open Staff Wizard)"` button label in the account
+  requests prefill modal is now `"Close"`. The TODO note was relocated
+  to a JSX comment immediately above the button in
+  `frontend/src/pages/AccountRequestsPage.tsx`.
+
+- **B17 (token storage — deferred).** See the "B17 token storage
+  migration plan" section above. Source-level TODO comments tagged
+  `TODO(B17, XSS-risk):` were added at every `localStorage` token
+  access in `frontend/src/api/client.ts` and
+  `frontend/src/stores/authStore.ts` so the next engineer can find
+  every site to migrate. Commit message marks B17 as
+  "deferred to post-launch".
