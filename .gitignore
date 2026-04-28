@@ -278,3 +278,7 @@ baseline_*.txt
 *_results*.txt
 pytest_*.txt
 test_out.txt
+# Playwright e2e artifacts
+frontend/test-results/
+frontend/playwright-report/
+frontend/playwright/.cache/
