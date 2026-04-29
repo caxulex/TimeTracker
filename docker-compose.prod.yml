@@ -54,7 +54,7 @@ services:
       JWT_EXPIRE_MINUTES: 60
       ENVIRONMENT: ${ENVIRONMENT:-production}
       SECRET_KEY: ${SECRET_KEY:-}
-      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-127.0.0.1}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-["127.0.0.1"]}
       # AI Features - API Key Encryption
       API_KEY_ENCRYPTION_KEY: ${API_KEY_ENCRYPTION_KEY:-}
       # Production domain for CORS + TrustedHostMiddleware
