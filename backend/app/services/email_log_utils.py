@@ -7,7 +7,8 @@
 
 import logging
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import EmailLog
@@ -28,7 +29,7 @@ async def log_email(
 ) -> EmailLog:
     """
     Log an email to the database for tracking.
-    
+
     Args:
         db: Database session
         to_email: Recipient email address
@@ -39,7 +40,7 @@ async def log_email(
         error_message: Error message if failed
         company_id: Company ID for multi-tenant filtering
         metadata: Additional metadata
-        
+
     Returns:
         Created EmailLog record
     """
@@ -56,14 +57,14 @@ async def log_email(
             sent_at=datetime.now(timezone.utc) if status == "sent" else None,
             delivered_at=datetime.now(timezone.utc) if status == "delivered" else None
         )
-        
+
         db.add(email_log)
         await db.commit()
         await db.refresh(email_log)
-        
+
         logger.info(f"Email logged: {email_type} to {to_email} - {status}")
         return email_log
-        
+
     except Exception as e:
         logger.error(f"Failed to log email: {e}")
         await db.rollback()

@@ -1,0 +1,133 @@
+# ============================================
+# CI — Phase 0 stub
+# Verifies baseline on PR + push to master/main + prep/** branches.
+# Wire-up only: assertions are intentionally lenient. Will be tightened
+# in a later prompt. Playwright e2e is explicitly out of scope (Phase 9).
+# No deployment happens here — Lightsail is manual.
+# ============================================
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+      - "prep/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (lint + type + pytest)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: time_tracker_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/time_tracker_test
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/time_tracker_test
+      REDIS_URL: redis://localhost:6379/0
+      TESTING: "1"
+      SECRET_KEY: ci-test-secret-key-not-for-production
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # TODO: Flip continue-on-error to false (or remove it) after Prompt 7.5
+      # clears the 4,313 pre-existing ruff errors. Until then, ruff errors are
+      # tracked as debt, not build blockers. Same policy as mypy below.
+      - name: Ruff (must run; errors reported, not fatal yet)
+        working-directory: backend
+        continue-on-error: true
+        run: python -m ruff check .
+
+      # TODO: Flip continue-on-error to false (or remove it) after Prompt 7.5
+      # clears the 761 pre-existing mypy errors. Until then, type errors are
+      # tracked as debt, not build blockers. Same policy as ruff above.
+      - name: Mypy (must complete end-to-end; type errors not fatal yet)
+        working-directory: backend
+        continue-on-error: true
+        run: python -m mypy app
+
+      - name: Alembic upgrade head
+        working-directory: backend
+        run: python -m alembic upgrade head
+
+      - name: Pytest
+        working-directory: backend
+        run: python -m pytest --tb=short
+
+  frontend:
+    name: Frontend (tsc + eslint + vitest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: TypeScript — tsc --noEmit
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: ESLint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Vitest
+        working-directory: frontend
+        run: npx vitest run --reporter=default
+
+  # NOTE: Playwright e2e is intentionally NOT part of this workflow.
+  # Scoped to Phase 9; a dedicated e2e job will be added later.

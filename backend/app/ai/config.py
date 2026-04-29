@@ -8,14 +8,13 @@ Centralized configuration for all AI features including:
 - Feature thresholds
 """
 
-from typing import Optional
-from pydantic_settings import BaseSettings
 from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class AISettings(BaseSettings):
     """AI-specific configuration settings."""
-    
+
     model_config = {
         "env_prefix": "AI_",
         "extra": "ignore",

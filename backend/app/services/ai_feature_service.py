@@ -7,28 +7,22 @@ Provides methods to check if features are enabled and track usage.
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional, List, Dict, Any
-from sqlalchemy import select, update, and_, func
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from typing import Any, Dict, List, Optional
 
-from app.models import (
-    AIFeatureSetting, 
-    UserAIPreference, 
-    AIUsageLog, 
-    User,
-    APIKey
-)
+from sqlalchemy import and_, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import AIFeatureSetting, AIUsageLog, APIKey, User, UserAIPreference
 
 
 class AIFeatureManager:
     """
     Centralized service for managing AI feature toggles.
-    
+
     Features can be controlled at two levels:
     1. Global (admin) - affects all users
     2. Per-user - users can disable features for themselves
-    
+
     Priority: Global OFF > Admin Override > User Preference > Default ON
     """
 
@@ -42,16 +36,16 @@ class AIFeatureManager:
     async def is_enabled(self, feature_id: str, user_id: int) -> bool:
         """
         Check if an AI feature is enabled for a specific user.
-        
+
         Returns True only if:
         1. Global setting is enabled AND
         2. User hasn't disabled it (unless admin overrode) AND
         3. Admin hasn't force-disabled it for this user
-        
+
         Args:
             feature_id: The feature identifier (e.g., 'ai_suggestions')
             user_id: The user ID to check
-            
+
         Returns:
             bool: True if feature should be active for this user
         """
@@ -59,34 +53,34 @@ class AIFeatureManager:
         global_setting = await self.get_global_setting(feature_id)
         if not global_setting or not global_setting.is_enabled:
             return False
-        
+
         # Check if API key is required and available
         if global_setting.requires_api_key and global_setting.api_provider:
             has_key = await self._has_active_api_key(global_setting.api_provider)
             if not has_key:
                 return False
-        
+
         # Get user preference
         user_pref = await self.get_user_preference(user_id, feature_id)
-        
+
         if user_pref:
             # Admin override takes precedence
             if user_pref.admin_override:
                 return user_pref.is_enabled
             # Otherwise use user's preference
             return user_pref.is_enabled
-        
+
         # No user preference set - default to enabled
         return True
 
     async def get_feature_status_for_user(
-        self, 
-        feature_id: str, 
+        self,
+        feature_id: str,
         user_id: int
     ) -> Dict[str, Any]:
         """
         Get detailed feature status for a user including why it's enabled/disabled.
-        
+
         Returns dict with:
         - is_enabled: Final status
         - global_enabled: Global setting
@@ -95,7 +89,7 @@ class AIFeatureManager:
         - reason: Human-readable reason for status
         """
         global_setting = await self.get_global_setting(feature_id)
-        
+
         if not global_setting:
             return {
                 "is_enabled": False,
@@ -104,7 +98,7 @@ class AIFeatureManager:
                 "admin_override": False,
                 "reason": "Feature not found"
             }
-        
+
         if not global_setting.is_enabled:
             return {
                 "is_enabled": False,
@@ -113,7 +107,7 @@ class AIFeatureManager:
                 "admin_override": False,
                 "reason": "Disabled by administrator"
             }
-        
+
         # Check API key requirement
         if global_setting.requires_api_key and global_setting.api_provider:
             has_key = await self._has_active_api_key(global_setting.api_provider)
@@ -125,9 +119,9 @@ class AIFeatureManager:
                     "admin_override": False,
                     "reason": f"Requires {global_setting.api_provider} API key"
                 }
-        
+
         user_pref = await self.get_user_preference(user_id, feature_id)
-        
+
         if user_pref:
             if user_pref.admin_override:
                 return {
@@ -144,7 +138,7 @@ class AIFeatureManager:
                 "admin_override": False,
                 "reason": "User preference" if not user_pref.is_enabled else "Enabled"
             }
-        
+
         return {
             "is_enabled": True,
             "global_enabled": True,
@@ -192,11 +186,11 @@ class AIFeatureManager:
         setting = await self.get_global_setting(feature_id)
         if not setting:
             return None
-        
+
         setting.is_enabled = is_enabled
         setting.updated_by = updated_by
         setting.updated_at = datetime.now(timezone.utc)
-        
+
         await self.db.commit()
         await self.db.refresh(setting)
         return setting
@@ -206,8 +200,8 @@ class AIFeatureManager:
     # ============================================
 
     async def get_user_preference(
-        self, 
-        user_id: int, 
+        self,
+        user_id: int,
         feature_id: str
     ) -> Optional[UserAIPreference]:
         """Get user's preference for a specific feature."""
@@ -236,7 +230,7 @@ class AIFeatureManager:
     ) -> UserAIPreference:
         """Set user's preference for a feature."""
         pref = await self.get_user_preference(user_id, feature_id)
-        
+
         if pref:
             # Don't allow changes if admin override is set
             if pref.admin_override:
@@ -250,7 +244,7 @@ class AIFeatureManager:
                 is_enabled=is_enabled
             )
             self.db.add(pref)
-        
+
         await self.db.commit()
         await self.db.refresh(pref)
         return pref
@@ -264,7 +258,7 @@ class AIFeatureManager:
     ) -> UserAIPreference:
         """Set admin override for a user's feature (admin only)."""
         pref = await self.get_user_preference(user_id, feature_id)
-        
+
         if pref:
             pref.is_enabled = is_enabled
             pref.admin_override = True
@@ -279,7 +273,7 @@ class AIFeatureManager:
                 admin_override_by=admin_id
             )
             self.db.add(pref)
-        
+
         await self.db.commit()
         await self.db.refresh(pref)
         return pref
@@ -310,7 +304,7 @@ class AIFeatureManager:
         """
         all_features = await self.get_all_global_settings()
         result = []
-        
+
         for feature in all_features:
             status = await self.get_feature_status_for_user(feature.feature_id, user_id)
             result.append({
@@ -320,7 +314,7 @@ class AIFeatureManager:
                 "api_provider": feature.api_provider,
                 **status
             })
-        
+
         return result
 
     # ============================================
@@ -333,15 +327,15 @@ class AIFeatureManager:
         """
         all_features = await self.get_all_global_settings()
         result = []
-        
+
         for feature in all_features:
             # Count users with feature enabled
             enabled_count = await self._count_users_with_feature_enabled(feature.feature_id)
             total_users = await self._count_total_users()
-            
+
             # Get usage stats for this month
             usage_stats = await self.get_feature_usage_stats(feature.feature_id)
-            
+
             result.append({
                 "feature_id": feature.feature_id,
                 "feature_name": feature.feature_name,
@@ -353,7 +347,7 @@ class AIFeatureManager:
                 "total_user_count": total_users,
                 "usage_this_month": usage_stats
             })
-        
+
         return result
 
     async def _count_users_with_feature_enabled(self, feature_id: str) -> int:
@@ -367,7 +361,7 @@ class AIFeatureManager:
         )
         disabled_result = await self.db.execute(disabled_query)
         disabled_count = disabled_result.scalar() or 0
-        
+
         total_users = await self._count_total_users()
         return total_users - disabled_count
 
@@ -394,7 +388,7 @@ class AIFeatureManager:
         metadata: Optional[Dict[str, Any]] = None
     ) -> AIUsageLog:
         """Log an AI feature usage event."""
-        
+
         log = AIUsageLog(
             user_id=user_id,
             feature_id=feature_id,
@@ -406,22 +400,22 @@ class AIFeatureManager:
             error_message=error_message,
             request_metadata=metadata  # Pass dict directly - column is JSON type
         )
-        
+
         self.db.add(log)
         await self.db.commit()
         await self.db.refresh(log)
         return log
 
     async def get_feature_usage_stats(
-        self, 
+        self,
         feature_id: str,
         days: int = 30
     ) -> Dict[str, Any]:
         """Get usage statistics for a feature over the past N days."""
         from datetime import timedelta
-        
+
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        
+
         query = select(
             func.count(AIUsageLog.id).label("total_requests"),
             func.sum(AIUsageLog.tokens_used).label("total_tokens"),
@@ -434,10 +428,10 @@ class AIFeatureManager:
                 AIUsageLog.request_timestamp >= cutoff
             )
         )
-        
+
         result = await self.db.execute(query)
         row = result.one()
-        
+
         return {
             "total_requests": row.total_requests or 0,
             "total_tokens": row.total_tokens or 0,
@@ -448,15 +442,15 @@ class AIFeatureManager:
         }
 
     async def get_user_usage_stats(
-        self, 
+        self,
         user_id: int,
         days: int = 30
     ) -> Dict[str, Any]:
         """Get usage statistics for a user over the past N days."""
         from datetime import timedelta
-        
+
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        
+
         query = select(
             AIUsageLog.feature_id,
             func.count(AIUsageLog.id).label("request_count"),
@@ -468,14 +462,14 @@ class AIFeatureManager:
                 AIUsageLog.request_timestamp >= cutoff
             )
         ).group_by(AIUsageLog.feature_id)
-        
+
         result = await self.db.execute(query)
         rows = result.all()
-        
+
         features_usage = {}
         total_tokens = 0
         total_cost = 0.0
-        
+
         for row in rows:
             features_usage[row.feature_id] = {
                 "request_count": row.request_count,
@@ -484,7 +478,7 @@ class AIFeatureManager:
             }
             total_tokens += row.tokens_used or 0
             total_cost += float(row.estimated_cost) if row.estimated_cost else 0.0
-        
+
         return {
             "user_id": user_id,
             "period_days": days,
@@ -496,9 +490,9 @@ class AIFeatureManager:
     async def get_usage_summary(self, days: int = 30) -> Dict[str, Any]:
         """Get overall AI usage summary for admin dashboard."""
         from datetime import timedelta
-        
+
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        
+
         # Overall stats
         overall_query = select(
             func.count(AIUsageLog.id).label("total_requests"),
@@ -506,10 +500,10 @@ class AIFeatureManager:
             func.sum(AIUsageLog.estimated_cost).label("total_cost"),
             func.count(func.distinct(AIUsageLog.user_id)).label("unique_users")
         ).where(AIUsageLog.request_timestamp >= cutoff)
-        
+
         overall_result = await self.db.execute(overall_query)
         overall = overall_result.one()
-        
+
         # Per-feature breakdown
         feature_query = select(
             AIUsageLog.feature_id,
@@ -519,7 +513,7 @@ class AIFeatureManager:
         ).where(
             AIUsageLog.request_timestamp >= cutoff
         ).group_by(AIUsageLog.feature_id)
-        
+
         feature_result = await self.db.execute(feature_query)
         features = {
             row.feature_id: {
@@ -529,7 +523,7 @@ class AIFeatureManager:
             }
             for row in feature_result.all()
         }
-        
+
         return {
             "period_days": days,
             "total_requests": overall.total_requests or 0,

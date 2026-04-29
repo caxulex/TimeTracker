@@ -3,23 +3,23 @@ Pydantic schemas for authentication
 SEC-003: Enhanced with password strength validation hints
 """
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
-from typing import Optional
 from datetime import date, datetime
-import re
+from typing import Optional
+
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class UserRegister(BaseModel):
     """Schema for user registration with strong password requirements"""
     email: EmailStr
     password: str = Field(
-        ..., 
-        min_length=12, 
+        ...,
+        min_length=12,
         max_length=128,
         description="Password must be 12-128 characters with uppercase, lowercase, number, and special character"
     )
     name: str = Field(..., min_length=1, max_length=255)
-    
+
     @field_validator('password')
     @classmethod
     def validate_password_basic(cls, v: str) -> str:
@@ -51,8 +51,8 @@ class PasswordChange(BaseModel):
     """Schema for password change with strong validation"""
     current_password: str
     new_password: str = Field(
-        ..., 
-        min_length=12, 
+        ...,
+        min_length=12,
         max_length=128,
         description="Password must be 12-128 characters with uppercase, lowercase, number, and special character"
     )
@@ -74,13 +74,13 @@ class UserResponse(BaseModel):
     role: str
     is_active: bool
     created_at: datetime
-    
+
     # Contact Information
     phone: Optional[str] = None
     address: Optional[str] = None
     emergency_contact_name: Optional[str] = None
     emergency_contact_phone: Optional[str] = None
-    
+
     # Employment Details
     job_title: Optional[str] = None
     department: Optional[str] = None

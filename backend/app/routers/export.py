@@ -2,31 +2,44 @@
 Export router for generating PDF and Excel reports
 """
 
-from datetime import datetime, date, timedelta, timezone
-from typing import Optional, List
+from datetime import date
 from io import BytesIO
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
 
 from app.database import get_db
-from app.models import User, Project, Task, TimeEntry, Team, TeamMember
-from app.dependencies import get_current_active_user, get_company_filter, FILTER_NULL_COMPANY
+from app.dependencies import (
+    FILTER_NULL_COMPANY,
+    get_company_filter,
+    get_company_timezone,
+    get_current_active_user,
+)
+from app.models import Project, Task, TimeEntry, User
+from app.utils.timewindow import day_bounds, now_utc
 
 try:
     from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     EXCEL_AVAILABLE = True
 except ImportError:
     EXCEL_AVAILABLE = False
 
 try:
     from reportlab.lib import colors
-    from reportlab.lib.pagesizes import letter, A4
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.pagesizes import A4, letter
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import inch
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.platypus import (
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
     PDF_AVAILABLE = True
 except ImportError:
     PDF_AVAILABLE = False
@@ -48,10 +61,15 @@ async def get_user_time_entries(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     project_id: Optional[int] = None,
-    user_id: Optional[int] = None
+    user_id: Optional[int] = None,
+    tz: str = "UTC",
 ) -> List[dict]:
-    """Get time entries with filtering - enforces company-based multi-tenancy"""
-    # Join with User table to enable company filtering
+    """Get time entries with filtering - enforces company-based multi-tenancy.
+
+    ``tz`` is the company's IANA timezone, used to translate civil-day filters
+    into UTC instants. Defaults to ``"UTC"`` so direct callers without tenant
+    context still get safe behavior.
+    """    # Join with User table to enable company filtering
     query = select(TimeEntry, Project.name.label("project_name"), Task.name.label("task_name"), User).outerjoin(
         Project, TimeEntry.project_id == Project.id
     ).outerjoin(
@@ -75,11 +93,13 @@ async def get_user_time_entries(
     elif user_id:
         query = query.where(TimeEntry.user_id == user_id)
 
-    # Date filters
+    # Date filters (interpret civil dates in the company's local tz, half-open).
     if start_date:
-        query = query.where(TimeEntry.start_time >= datetime.combine(start_date, datetime.min.time()))
+        start_dt, _ = day_bounds(start_date, tz)
+        query = query.where(TimeEntry.start_time >= start_dt)
     if end_date:
-        query = query.where(TimeEntry.start_time <= datetime.combine(end_date, datetime.max.time()))
+        _, end_dt = day_bounds(end_date, tz)
+        query = query.where(TimeEntry.start_time < end_dt)
     if project_id:
         query = query.where(TimeEntry.project_id == project_id)
 
@@ -93,7 +113,7 @@ async def get_user_time_entries(
         duration = 0
         if entry.end_time and entry.start_time:
             duration = int((entry.end_time - entry.start_time).total_seconds())
-        
+
         entries.append({
             "id": entry.id,
             "date": entry.start_time.strftime("%Y-%m-%d"),
@@ -116,13 +136,14 @@ async def export_excel(
     project_id: Optional[int] = None,
     user_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
 ):
     """Export time entries to Excel format"""
     if not EXCEL_AVAILABLE:
         raise HTTPException(status_code=500, detail="Excel export not available. Install openpyxl.")
 
-    entries = await get_user_time_entries(db, current_user, start_date, end_date, project_id, user_id)
+    entries = await get_user_time_entries(db, current_user, start_date, end_date, project_id, user_id, tz=tz)
 
     # Create workbook
     wb = Workbook()
@@ -179,7 +200,7 @@ async def export_excel(
     wb.save(buffer)
     buffer.seek(0)
 
-    filename = f"time_entries_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"time_entries_{now_utc().strftime('%Y%m%d_%H%M%S')}.xlsx"
     return StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -194,21 +215,22 @@ async def export_pdf(
     project_id: Optional[int] = None,
     user_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
 ):
     """Export time entries to PDF format"""
     if not PDF_AVAILABLE:
         raise HTTPException(status_code=500, detail="PDF export not available. Install reportlab.")
 
-    entries = await get_user_time_entries(db, current_user, start_date, end_date, project_id, user_id)
+    entries = await get_user_time_entries(db, current_user, start_date, end_date, project_id, user_id, tz=tz)
 
     # Create PDF
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
-    
+
     elements = []
     styles = getSampleStyleSheet()
-    
+
     # Title
     title_style = ParagraphStyle(
         "CustomTitle",
@@ -218,7 +240,7 @@ async def export_pdf(
         textColor=colors.HexColor("#4F46E5")
     )
     elements.append(Paragraph("Time Tracking Report", title_style))
-    
+
     # Date range subtitle
     date_range = ""
     if start_date and end_date:
@@ -229,9 +251,9 @@ async def export_pdf(
         date_range = f"Until: {end_date}"
     else:
         date_range = "All Time"
-    
+
     elements.append(Paragraph(date_range, styles["Normal"]))
-    elements.append(Paragraph(f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}", styles["Normal"]))
+    elements.append(Paragraph(f"Generated: {now_utc().strftime('%Y-%m-%d %H:%M UTC')}", styles["Normal"]))
     elements.append(Spacer(1, 20))
 
     # Table data
@@ -274,7 +296,7 @@ async def export_pdf(
     doc.build(elements)
     buffer.seek(0)
 
-    filename = f"time_report_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.pdf"
+    filename = f"time_report_{now_utc().strftime('%Y%m%d_%H%M%S')}.pdf"
     return StreamingResponse(
         buffer,
         media_type="application/pdf",
@@ -289,23 +311,24 @@ async def export_csv(
     project_id: Optional[int] = None,
     user_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
 ):
     """Export time entries to CSV format"""
     import csv
-    
-    entries = await get_user_time_entries(db, current_user, start_date, end_date, project_id, user_id)
+
+    entries = await get_user_time_entries(db, current_user, start_date, end_date, project_id, user_id, tz=tz)
 
     buffer = BytesIO()
-    
+
     # Write CSV to buffer
     import io
     text_buffer = io.StringIO()
     writer = csv.writer(text_buffer)
-    
+
     # Header
     writer.writerow(["Date", "Start Time", "End Time", "Duration", "Project", "Task", "Description"])
-    
+
     # Data
     for entry in entries:
         writer.writerow([
@@ -317,12 +340,12 @@ async def export_csv(
             entry["task"],
             entry["description"]
         ])
-    
+
     # Convert to bytes
     buffer.write(text_buffer.getvalue().encode("utf-8"))
     buffer.seek(0)
 
-    filename = f"time_entries_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
+    filename = f"time_entries_{now_utc().strftime('%Y%m%d_%H%M%S')}.csv"
     return StreamingResponse(
         buffer,
         media_type="text/csv",
@@ -348,6 +371,7 @@ async def export_streaming_excel(
     user_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
 ):
     """
     Export time entries as Excel using write-only mode for reduced memory.
@@ -373,9 +397,11 @@ async def export_streaming_excel(
         base_where.append(TimeEntry.user_id == user_id)
 
     if start_date:
-        base_where.append(TimeEntry.start_time >= datetime.combine(start_date, datetime.min.time()))
+        start_dt, _ = day_bounds(start_date, tz)
+        base_where.append(TimeEntry.start_time >= start_dt)
     if end_date:
-        base_where.append(TimeEntry.start_time <= datetime.combine(end_date, datetime.max.time()))
+        _, end_dt = day_bounds(end_date, tz)
+        base_where.append(TimeEntry.start_time < end_dt)
     if project_id:
         base_where.append(TimeEntry.project_id == project_id)
 
@@ -446,7 +472,7 @@ async def export_streaming_excel(
     wb.save(output)
     output.seek(0)
 
-    filename = f"time_entries_streaming_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"time_entries_streaming_{now_utc().strftime('%Y%m%d_%H%M%S')}.xlsx"
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -462,6 +488,7 @@ async def export_streaming_pdf(
     user_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
 ):
     """
     Export time entries as PDF with row limit protection.
@@ -489,9 +516,11 @@ async def export_streaming_pdf(
         base_where.append(TimeEntry.user_id == user_id)
 
     if start_date:
-        base_where.append(TimeEntry.start_time >= datetime.combine(start_date, datetime.min.time()))
+        start_dt, _ = day_bounds(start_date, tz)
+        base_where.append(TimeEntry.start_time >= start_dt)
     if end_date:
-        base_where.append(TimeEntry.start_time <= datetime.combine(end_date, datetime.max.time()))
+        _, end_dt = day_bounds(end_date, tz)
+        base_where.append(TimeEntry.start_time < end_dt)
     if project_id:
         base_where.append(TimeEntry.project_id == project_id)
 
@@ -514,7 +543,7 @@ async def export_streaming_pdf(
         )
 
     # Fetch all data within limit using existing helper
-    entries = await get_user_time_entries(db, current_user, start_date, end_date, project_id, user_id)
+    entries = await get_user_time_entries(db, current_user, start_date, end_date, project_id, user_id, tz=tz)
 
     # Build PDF
     buffer = BytesIO()
@@ -543,7 +572,7 @@ async def export_streaming_pdf(
         date_range = "All Time"
 
     elements.append(Paragraph(date_range, styles["Normal"]))
-    elements.append(Paragraph(f"Total entries: {len(entries)} | Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}", styles["Normal"]))
+    elements.append(Paragraph(f"Total entries: {len(entries)} | Generated: {now_utc().strftime('%Y-%m-%d %H:%M UTC')}", styles["Normal"]))
     elements.append(Spacer(1, 20))
 
     table_data = [["Date", "Start", "End", "Duration", "Project", "Task"]]
@@ -581,7 +610,7 @@ async def export_streaming_pdf(
     doc.build(elements)
     buffer.seek(0)
 
-    filename = f"time_report_streaming_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.pdf"
+    filename = f"time_report_streaming_{now_utc().strftime('%Y%m%d_%H%M%S')}.pdf"
     return StreamingResponse(
         buffer,
         media_type="application/pdf",

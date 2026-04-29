@@ -2,13 +2,27 @@
 SQLAlchemy models for Time Tracker
 """
 
-from datetime import datetime, date, timezone
+import enum
+from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Optional, Dict, Any
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Index, Date, Numeric, Enum as SQLEnum, JSON
+from typing import Any, Dict, Optional
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Enum as SQLEnum,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
-import enum
 
 
 class Base(DeclarativeBase):
@@ -100,22 +114,22 @@ class Company(Base):
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)  # URL-safe identifier
     email: Mapped[str] = mapped_column(String(255), nullable=False)  # Primary contact email
     phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    
+
     # Subscription
     subscription_tier: Mapped[str] = mapped_column(String(50), default="trial", nullable=False)
     status: Mapped[str] = mapped_column(String(50), default="trial", nullable=False)
     trial_ends_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     subscription_ends_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    
+
     # Limits (based on tier)
     max_users: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
     max_projects: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
-    
+
     # Settings
     timezone: Mapped[str] = mapped_column(String(50), default="UTC", nullable=False)
     date_format: Mapped[str] = mapped_column(String(20), default="YYYY-MM-DD", nullable=False)
     time_format: Mapped[str] = mapped_column(String(20), default="HH:mm", nullable=False)
-    
+
     # Email/SMTP Configuration
     smtp_server: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     smtp_port: Mapped[int] = mapped_column(Integer, default=587, nullable=False)
@@ -125,11 +139,22 @@ class Company(Base):
     smtp_from_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     smtp_use_tls: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     email_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    
+
+    # Overtime / payroll configuration (C2 - per-company FLSA opt-in)
+    overtime_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    overtime_threshold_hours_per_week: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), default=Decimal("40.00"), server_default="40.00", nullable=False
+    )
+    overtime_multiplier: Mapped[Decimal] = mapped_column(
+        Numeric(3, 2), default=Decimal("1.50"), server_default="1.50", nullable=False
+    )
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    
+
     # Relationships
     white_label_config: Mapped[Optional["WhiteLabelConfig"]] = relationship("WhiteLabelConfig", back_populates="company", uselist=False)
     teams: Mapped[list["Team"]] = relationship("Team", back_populates="company")
@@ -147,47 +172,47 @@ class WhiteLabelConfig(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     company_id: Mapped[int] = mapped_column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), unique=True, nullable=False)
-    
+
     # Domain Configuration
     custom_domain: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True, index=True)
     subdomain: Mapped[Optional[str]] = mapped_column(String(100), unique=True, nullable=True, index=True)  # xyz-corp.timetracker.com
-    
+
     # Branding - Application Identity
     app_name: Mapped[str] = mapped_column(String(100), default="Time Tracker", nullable=False)
     company_name: Mapped[str] = mapped_column(String(255), nullable=False)
     tagline: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    
+
     # Branding - Visual Assets
     logo_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     favicon_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     login_background_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    
+
     # Branding - Colors (hex format)
     primary_color: Mapped[str] = mapped_column(String(7), default="#2563eb", nullable=False)
     secondary_color: Mapped[Optional[str]] = mapped_column(String(7), nullable=True)
     accent_color: Mapped[Optional[str]] = mapped_column(String(7), nullable=True)
-    
+
     # Contact & Support
     support_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     support_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    
+
     # Legal Links
     terms_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     privacy_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    
+
     # Display Options
     show_powered_by: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     custom_css: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Custom CSS overrides
     custom_js: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Custom JS (careful with security)
-    
+
     # Email Customization
     email_from_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     email_from_address: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    
+
     # Relationships
     company: Mapped["Company"] = relationship("Company", back_populates="white_label_config")
 
@@ -210,16 +235,16 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(50), nullable=False, default="regular_user")  # super_admin, company_admin, team_lead, regular_user
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    
+
     # Multi-tenant: Company association (nullable for platform super_admins)
     company_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True)
-    
+
     # Contact Information
     phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     emergency_contact_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     emergency_contact_phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    
+
     # Employment Details
     job_title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     department: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
@@ -227,7 +252,7 @@ class User(Base):
     start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     expected_hours_per_week: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
     manager_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -297,7 +322,7 @@ class Project(Base):
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    
+
     # Budget fields (admin-only visibility)
     budget_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)  # USD budget
     deadline: Mapped[Optional[date]] = mapped_column(Date, nullable=True)  # Project deadline
@@ -347,12 +372,12 @@ class TimeEntry(Base):
     is_running: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    
+
     # Link to work session (NULLABLE for backward compatibility with existing entries)
     work_session_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("work_sessions.id"), nullable=True
     )
-    
+
     # Pause tracking (for breaks/meetings)
     is_paused: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     paused_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -379,28 +404,28 @@ class WorkSession(Base):
     Tracks global work time, breaks, and meetings.
     """
     __tablename__ = "work_sessions"
-    
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     company_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
-    
+
     # Session timing
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     end_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    
+
     # Calculated totals (updated on session end)
     total_work_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_break_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_meeting_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    
+
     # Status tracking
     status: Mapped[str] = mapped_column(String(20), default="active", nullable=False, index=True)
     # Values: "active", "break", "meeting", "completed"
-    
+
     # Metadata
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
-    
+
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="work_sessions")
     company: Mapped[Optional["Company"]] = relationship("Company")
@@ -418,17 +443,17 @@ class SessionBreak(Base):
     Breaks pause BOTH global and task timers.
     """
     __tablename__ = "session_breaks"
-    
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     work_session_id: Mapped[int] = mapped_column(Integer, ForeignKey("work_sessions.id"), nullable=False, index=True)
-    
+
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     end_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    
+
     break_type: Mapped[str] = mapped_column(String(20), default="short", nullable=False)
     # Values: "short", "lunch", "other"
-    
+
     # Relationships
     work_session: Mapped["WorkSession"] = relationship("WorkSession", back_populates="breaks")
 
@@ -443,23 +468,23 @@ class SessionMeeting(Base):
     Now also creates a time entry for the meeting itself.
     """
     __tablename__ = "session_meetings"
-    
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     work_session_id: Mapped[int] = mapped_column(Integer, ForeignKey("work_sessions.id"), nullable=False, index=True)
-    
+
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     end_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    
+
     title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     meeting_type: Mapped[str] = mapped_column(String(20), default="internal", nullable=False)
     # Values: "internal", "external", "client"
-    
+
     # Track paused entry to resume after meeting
     paused_entry_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("time_entries.id"), nullable=True)
     # The time entry created for this meeting
     time_entry_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("time_entries.id"), nullable=True)
-    
+
     # Relationships
     work_session: Mapped["WorkSession"] = relationship("WorkSession", back_populates="meetings")
     paused_entry: Mapped[Optional["TimeEntry"]] = relationship("TimeEntry", foreign_keys=[paused_entry_id])
@@ -532,11 +557,11 @@ class PayrollPeriod(Base):
     end_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=PeriodStatus.DRAFT.value, index=True)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
-    
+
     # Employee selection criteria (stored as JSON-like string for filtering)
     selected_user_ids: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Comma-separated user IDs, null = all
     rate_type_filter: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # Filter by rate type (hourly, monthly, etc.)
-    
+
     approved_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"))
     approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -607,7 +632,7 @@ class AccountRequest(Base):
     __tablename__ = "account_requests"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    
+
     # Submitted Information
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -615,26 +640,26 @@ class AccountRequest(Base):
     job_title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     department: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
+
     # Request Metadata
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", index=True)
     submitted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     reviewed_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     admin_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
+
     # Audit Trail
     ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
     user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
+
     # Email Notification Tracking
     email_notification_sent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     email_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     email_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
+
     # Relationships
     reviewer: Mapped[Optional["User"]] = relationship("User", foreign_keys=[reviewed_by])
-    
+
     def __repr__(self) -> str:
         return f"<AccountRequest(id={self.id}, email={self.email}, status={self.status})>"
 
@@ -646,7 +671,7 @@ class AccountRequest(Base):
 class AuditLog(Base):
     """Audit log model for tracking all system changes"""
     __tablename__ = "audit_logs"
-    
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True, default=lambda: datetime.now(timezone.utc))
     user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
@@ -691,17 +716,17 @@ class APIKey(Base):
     key_preview: Mapped[str] = mapped_column(String(20), nullable=False)  # e.g., "...xxxx" for display
     label: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Optional friendly name
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
-    
+
     # Tracking
     created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     usage_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    
+
     # Additional metadata
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
+
     # Relationships
     creator: Mapped[User] = relationship("User", foreign_keys=[created_by])
 
@@ -751,12 +776,12 @@ class AIFeatureSetting(Base):
     requires_api_key: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     api_provider: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     config: Mapped[Optional[dict]] = mapped_column("config", Text, nullable=True)  # JSON stored as text
-    
+
     # Tracking
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     updated_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
-    
+
     # Relationships
     updater: Mapped[Optional[User]] = relationship("User", foreign_keys=[updated_by])
 
@@ -778,11 +803,11 @@ class UserAIPreference(Base):
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     admin_override: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     admin_override_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
-    
+
     # Tracking
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    
+
     # Relationships
     user: Mapped[User] = relationship("User", foreign_keys=[user_id])
     admin: Mapped[Optional[User]] = relationship("User", foreign_keys=[admin_override_by])
@@ -813,7 +838,7 @@ class AIUsageLog(Base):
     success: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     request_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)  # JSON column for metadata
-    
+
     # Relationships
     user: Mapped[Optional[User]] = relationship("User", foreign_keys=[user_id])
 
@@ -840,17 +865,17 @@ class ProjectBudgetHistory(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     project_id: Mapped[int] = mapped_column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     changed_by_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    
+
     # Budget change tracking
     old_budget_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
     new_budget_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
     old_deadline: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     new_deadline: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    
+
     # Change metadata
     change_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    
+
     # Relationships
     project: Mapped["Project"] = relationship("Project", back_populates="budget_history")
     changed_by: Mapped[Optional[User]] = relationship("User", foreign_keys=[changed_by_id])
@@ -885,23 +910,23 @@ class EmailLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     company_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("companies.id", ondelete="SET NULL"), nullable=True, index=True)
-    
+
     # Email details
     to_email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     from_email: Mapped[str] = mapped_column(String(255), nullable=False)
     subject: Mapped[str] = mapped_column(String(500), nullable=False)
     email_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)  # welcome, password_reset, notification, etc.
-    
+
     # Status tracking
     status: Mapped[str] = mapped_column(String(50), default="pending", nullable=False, index=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     delivered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    
+
     # Extra data
     email_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
 
@@ -942,24 +967,24 @@ class Notification(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     company_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True)
-    
+
     # Notification content
     type: Mapped[str] = mapped_column(String(50), default="info", nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
-    
+
     # Link to related entity (optional)
     link: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     entity_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # time_entry, approval, payroll, etc.
     entity_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    
+
     # Status
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    
+
     # Extra data (for custom notification content)
     notification_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
 

@@ -14,11 +14,10 @@ psycopg2-binary==2.9.9  # For Alembic migrations
 # Authentication & Security
 python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
-python-multipart==0.0.22
+python-multipart==0.0.26
 
 # Redis for caching and pub/sub
 redis==5.0.1
-aioredis==2.0.1
 
 # HTTP client for external APIs
 httpx==0.25.2
@@ -60,3 +59,8 @@ python-json-logger>=2.0.0,<3.0.0
 # Export functionality
 openpyxl==3.1.2
 reportlab==4.0.8
+
+# Timezone data for stdlib zoneinfo (Windows + Alpine/slim Linux containers
+# lack a system tz database; PEP 615 designates tzdata as the companion).
+tzdata==2026.2
+

@@ -3,18 +3,21 @@ Company/Tenant Management API Router
 Handles company registration, management, and white-label configuration.
 """
 
-from typing import Optional, List
-from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from pydantic import BaseModel, EmailStr, Field, field_validator
 import re
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, EmailStr, Field, field_validator
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from zoneinfo import available_timezones
 
 from app.database import get_db
-from app.models import User, Company, WhiteLabelConfig
-from app.services.auth_service import AuthService
 from app.dependencies import get_current_user
+from app.models import Company, User, WhiteLabelConfig
+from app.services.auth_service import AuthService
 from app.utils.password_validator import validate_password_strength
 
 router = APIRouter()
@@ -32,7 +35,8 @@ class CompanyRegister(BaseModel):
     admin_password: str = Field(..., min_length=8)
     admin_name: str = Field(..., min_length=2, max_length=255)
     phone: Optional[str] = None
-    
+    timezone: str = "UTC"
+
     @field_validator('company_slug')
     @classmethod
     def validate_slug(cls, v):
@@ -40,6 +44,23 @@ class CompanyRegister(BaseModel):
             return v
         if not re.match(r'^[a-z0-9-]+$', v):
             raise ValueError('Slug must contain only lowercase letters, numbers, and hyphens')
+        return v
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, v):
+        """Reject non-IANA timezone identifiers (B7 correctness gate).
+
+        Mirrors :class:`CompanyUpdate.validate_timezone` so create-side and
+        update-side rules cannot drift.
+        """
+        if v is None:
+            return v
+        if v not in available_timezones():
+            raise ValueError(
+                f"Invalid IANA timezone: {v!r}. "
+                "Use values like 'UTC', 'America/Los_Angeles', 'Europe/Madrid'."
+            )
         return v
 
 
@@ -57,7 +78,10 @@ class CompanyResponse(BaseModel):
     max_users: int
     max_projects: int
     created_at: datetime
-    
+    overtime_enabled: bool = False
+    overtime_threshold_hours_per_week: Decimal = Decimal("40.00")
+    overtime_multiplier: Decimal = Decimal("1.50")
+
     class Config:
         from_attributes = True
 
@@ -67,6 +91,46 @@ class CompanyUpdate(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
     timezone: Optional[str] = None
+    overtime_enabled: Optional[bool] = None
+    overtime_threshold_hours_per_week: Optional[Decimal] = None
+    overtime_multiplier: Optional[Decimal] = None
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, v):
+        """Reject non-IANA timezone identifiers (B7 correctness gate)."""
+        if v is None:
+            return v
+        if v not in available_timezones():
+            raise ValueError(
+                f"Invalid IANA timezone: {v!r}. "
+                "Use values like 'UTC', 'America/Los_Angeles', 'Europe/Madrid'."
+            )
+        return v
+
+    @field_validator("overtime_threshold_hours_per_week")
+    @classmethod
+    def validate_overtime_threshold(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        """Threshold must be > 0 and <= 168 (hours in a week)."""
+        if v is None:
+            return v
+        if v <= Decimal("0") or v > Decimal("168"):
+            raise ValueError(
+                "overtime_threshold_hours_per_week must be > 0 and <= 168."
+            )
+        return v
+
+    @field_validator("overtime_multiplier")
+    @classmethod
+    def validate_overtime_multiplier(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        """Multiplier must be in [1.0, 3.0]."""
+        if v is None:
+            return v
+        if v < Decimal("1.0") or v > Decimal("3.0"):
+            raise ValueError(
+                "overtime_multiplier must be between 1.0 and 3.0 (inclusive)."
+            )
+        return v
 
 
 class WhiteLabelConfigCreate(BaseModel):
@@ -106,7 +170,7 @@ class WhiteLabelConfigResponse(BaseModel):
     terms_url: Optional[str]
     privacy_url: Optional[str]
     show_powered_by: bool
-    
+
     class Config:
         from_attributes = True
 
@@ -174,10 +238,10 @@ async def register_company(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Password does not meet requirements: {', '.join(password_errors)}"
         )
-    
+
     # Generate slug if not provided
     slug = data.company_slug or generate_slug(data.company_name)
-    
+
     # Check if slug already exists
     result = await db.execute(select(Company).where(Company.slug == slug))
     if result.scalar_one_or_none():
@@ -185,7 +249,7 @@ async def register_company(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Company slug '{slug}' is already taken"
         )
-    
+
     # Check if admin email already exists
     result = await db.execute(select(User).where(User.email == data.admin_email))
     if result.scalar_one_or_none():
@@ -193,7 +257,7 @@ async def register_company(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email address is already registered"
         )
-    
+
     # Create company with 14-day trial
     trial_end = datetime.now(timezone.utc) + timedelta(days=14)
     company = Company(
@@ -201,6 +265,7 @@ async def register_company(
         slug=slug,
         email=data.admin_email,
         phone=data.phone,
+        timezone=data.timezone,
         subscription_tier="trial",
         status="trial",
         trial_ends_at=trial_end,
@@ -209,7 +274,7 @@ async def register_company(
     )
     db.add(company)
     await db.flush()  # Get company ID
-    
+
     # Create white-label config with defaults
     white_label = WhiteLabelConfig(
         company_id=company.id,
@@ -219,7 +284,7 @@ async def register_company(
         support_email=data.admin_email,
     )
     db.add(white_label)
-    
+
     # Create admin user
     admin_user = User(
         email=data.admin_email,
@@ -230,15 +295,15 @@ async def register_company(
         is_active=True,
     )
     db.add(admin_user)
-    
+
     await db.commit()
     await db.refresh(company)
     await db.refresh(white_label)
-    
+
     # Build login URL (adjust based on your domain setup)
     base_url = "http://localhost:5173"  # Change in production
     login_url = f"{base_url}/login?company={slug}"
-    
+
     return LoginInfo(
         company_name=company.name,
         company_slug=company.slug,
@@ -256,13 +321,13 @@ async def get_company_by_slug(
     """Get company by slug (public endpoint for login page)"""
     result = await db.execute(select(Company).where(Company.slug == slug))
     company = result.scalar_one_or_none()
-    
+
     if not company:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Company not found"
         )
-    
+
     return company
 
 
@@ -278,13 +343,13 @@ async def get_company_branding(
         .where(Company.slug == slug)
     )
     config = result.scalar_one_or_none()
-    
+
     if not config:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Company branding not found"
         )
-    
+
     return config
 
 
@@ -299,20 +364,20 @@ async def get_branding_by_domain(
         select(WhiteLabelConfig).where(WhiteLabelConfig.custom_domain == domain)
     )
     config = result.scalar_one_or_none()
-    
+
     if not config:
         # Check subdomain
         result = await db.execute(
             select(WhiteLabelConfig).where(WhiteLabelConfig.subdomain == domain)
         )
         config = result.scalar_one_or_none()
-    
+
     if not config:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Branding configuration not found"
         )
-    
+
     return config
 
 
@@ -327,18 +392,18 @@ async def get_my_company(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User is not associated with a company"
         )
-    
+
     result = await db.execute(
         select(Company).where(Company.id == current_user.company_id)
     )
     company = result.scalar_one_or_none()
-    
+
     if not company:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Company not found"
         )
-    
+
     return company
 
 
@@ -354,24 +419,24 @@ async def update_my_company(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only company admins can update company settings"
         )
-    
+
     if not current_user.company_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User is not associated with a company"
         )
-    
+
     result = await db.execute(
         select(Company).where(Company.id == current_user.company_id)
     )
     company = result.scalar_one_or_none()
-    
+
     if not company:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Company not found"
         )
-    
+
     # Update fields
     if data.name is not None:
         company.name = data.name
@@ -379,10 +444,10 @@ async def update_my_company(
         company.phone = data.phone
     if data.timezone is not None:
         company.timezone = data.timezone
-    
+
     await db.commit()
     await db.refresh(company)
-    
+
     return company
 
 
@@ -397,18 +462,18 @@ async def get_my_company_branding(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User is not associated with a company"
         )
-    
+
     result = await db.execute(
         select(WhiteLabelConfig).where(WhiteLabelConfig.company_id == current_user.company_id)
     )
     config = result.scalar_one_or_none()
-    
+
     if not config:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Branding configuration not found"
         )
-    
+
     return config
 
 
@@ -424,24 +489,24 @@ async def update_my_company_branding(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only company admins can update branding"
         )
-    
+
     if not current_user.company_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User is not associated with a company"
         )
-    
+
     result = await db.execute(
         select(WhiteLabelConfig).where(WhiteLabelConfig.company_id == current_user.company_id)
     )
     config = result.scalar_one_or_none()
-    
+
     if not config:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Branding configuration not found"
         )
-    
+
     # Check subdomain uniqueness if changing
     if data.subdomain and data.subdomain != config.subdomain:
         result = await db.execute(
@@ -452,7 +517,7 @@ async def update_my_company_branding(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Subdomain is already taken"
             )
-    
+
     # Check custom domain uniqueness if changing
     if data.custom_domain and data.custom_domain != config.custom_domain:
         result = await db.execute(
@@ -463,15 +528,15 @@ async def update_my_company_branding(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Custom domain is already in use"
             )
-    
+
     # Update fields
     update_data = data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(config, field, value)
-    
+
     await db.commit()
     await db.refresh(config)
-    
+
     return config
 
 
@@ -486,10 +551,10 @@ async def list_companies(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only super admins can list all companies"
         )
-    
+
     result = await db.execute(select(Company).order_by(Company.created_at.desc()))
     companies = result.scalars().all()
-    
+
     return list(companies)
 
 
@@ -548,24 +613,24 @@ async def get_email_settings(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admins can access email settings"
         )
-    
+
     if not current_user.company_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User is not associated with a company"
         )
-    
+
     result = await db.execute(
         select(Company).where(Company.id == current_user.company_id)
     )
     company = result.scalar_one_or_none()
-    
+
     if not company:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Company not found"
         )
-    
+
     # Handle case where migration hasn't run yet (columns may not exist)
     try:
         return EmailSettingsResponse(
@@ -578,7 +643,7 @@ async def get_email_settings(
             smtp_from_name=getattr(company, 'smtp_from_name', None),
             smtp_use_tls=getattr(company, 'smtp_use_tls', True),
         )
-    except Exception as e:
+    except Exception:
         # If columns don't exist, return defaults
         return EmailSettingsResponse(
             email_enabled=False,
@@ -600,30 +665,30 @@ async def update_email_settings(
 ):
     """Update company email/SMTP settings (admin only)"""
     from app.services.encryption_service import EncryptionService
-    
+
     if current_user.role not in ["company_admin", "admin", "super_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admins can update email settings"
         )
-    
+
     if not current_user.company_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User is not associated with a company"
         )
-    
+
     result = await db.execute(
         select(Company).where(Company.id == current_user.company_id)
     )
     company = result.scalar_one_or_none()
-    
+
     if not company:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Company not found"
         )
-    
+
     # Update fields
     if data.email_enabled is not None:
         company.email_enabled = data.email_enabled
@@ -643,7 +708,7 @@ async def update_email_settings(
         company.smtp_from_name = data.smtp_from_name
     if data.smtp_use_tls is not None:
         company.smtp_use_tls = data.smtp_use_tls
-    
+
     # Encrypt password if provided
     if data.smtp_password is not None:
         encryption_service = EncryptionService()
@@ -654,10 +719,10 @@ async def update_email_settings(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to encrypt password: {str(e)}"
             )
-    
+
     await db.commit()
     await db.refresh(company)
-    
+
     return EmailSettingsResponse(
         email_enabled=company.email_enabled,
         smtp_server=company.smtp_server,
@@ -677,43 +742,44 @@ async def test_email_settings(
     db: AsyncSession = Depends(get_db)
 ):
     """Send a test email using company SMTP settings"""
-    import time
     import smtplib
-    from email.mime.text import MIMEText
+    import time
     from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
     from email.utils import formataddr
+
     from app.services.encryption_service import EncryptionService
-    
+
     if current_user.role not in ["company_admin", "admin", "super_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admins can test email settings"
         )
-    
+
     if not current_user.company_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User is not associated with a company"
         )
-    
+
     result = await db.execute(
         select(Company).where(Company.id == current_user.company_id)
     )
     company = result.scalar_one_or_none()
-    
+
     if not company:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Company not found"
         )
-    
+
     # Check if SMTP is configured
     if not company.smtp_server or not company.smtp_username or not company.smtp_password_encrypted:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="SMTP settings are not fully configured"
         )
-    
+
     # Decrypt password
     encryption_service = EncryptionService()
     try:
@@ -723,16 +789,16 @@ async def test_email_settings(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to decrypt SMTP password"
         )
-    
+
     # Prepare test email
     from_name = company.smtp_from_name or company.name
     from_email = company.smtp_from_email or company.smtp_username
-    
+
     msg = MIMEMultipart('alternative')
     msg['Subject'] = f"Test Email from {company.name}"
     msg['From'] = formataddr((from_name, from_email))
     msg['To'] = data.recipient
-    
+
     html_body = f"""
     <html>
     <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -750,9 +816,9 @@ async def test_email_settings(
     </body>
     </html>
     """
-    
+
     msg.attach(MIMEText(html_body, 'html'))
-    
+
     # Send email and measure latency
     start_time = time.time()
     try:
@@ -761,15 +827,15 @@ async def test_email_settings(
                 server.starttls()
             server.login(company.smtp_username, smtp_password)
             server.sendmail(from_email, data.recipient, msg.as_string())
-        
+
         latency_ms = int((time.time() - start_time) * 1000)
-        
+
         return TestEmailResponse(
             success=True,
             message=f"Test email sent successfully to {data.recipient}",
             latency_ms=latency_ms,
         )
-    
+
     except smtplib.SMTPAuthenticationError:
         return TestEmailResponse(
             success=False,
@@ -819,55 +885,56 @@ async def send_welcome_credentials(
     db: AsyncSession = Depends(get_db)
 ):
     """Send welcome credentials email to a new staff member"""
-    import time
     import smtplib
-    from email.mime.text import MIMEText
+    import time
     from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
     from email.utils import formataddr
+
     from app.services.encryption_service import EncryptionService
-    
+
     try:
         if current_user.role not in ["company_admin", "admin", "super_admin"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only admins can send welcome credentials emails"
             )
-        
+
         if not current_user.company_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User is not associated with a company"
             )
-        
+
         result = await db.execute(
             select(Company).where(Company.id == current_user.company_id)
         )
         company = result.scalar_one_or_none()
-        
+
         if not company:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Company not found"
             )
-        
+
         # Check if email is enabled
         if not getattr(company, 'email_enabled', False):
             return WelcomeCredentialsResponse(
                 success=False,
                 message="Email is not enabled for this company. Please enable email in Admin Settings first."
             )
-        
+
         # Check if SMTP is configured
         smtp_server = getattr(company, 'smtp_server', None)
         smtp_username = getattr(company, 'smtp_username', None)
         smtp_password_encrypted = getattr(company, 'smtp_password_encrypted', None)
-        
+
         if not smtp_server or not smtp_username or not smtp_password_encrypted:
             return WelcomeCredentialsResponse(
                 success=False,
                 message="SMTP settings are not fully configured. Please configure email settings first."
             )
-        
+
         # Decrypt password
         encryption_service = EncryptionService()
         try:
@@ -877,26 +944,26 @@ async def send_welcome_credentials(
                 success=False,
                 message=f"Failed to decrypt SMTP password: {str(e)}"
             )
-        
+
         # Prepare welcome email
         from_name = getattr(company, 'smtp_from_name', None) or company.name
         from_email = getattr(company, 'smtp_from_email', None) or smtp_username
         smtp_port = getattr(company, 'smtp_port', 587) or 587
         smtp_use_tls = getattr(company, 'smtp_use_tls', True)
         login_url = f"https://{company.subdomain}.timetracker.com" if getattr(company, 'subdomain', None) else "https://timetracker.shaemarcus.com"
-        
+
         msg = MIMEMultipart('alternative')
         msg['Subject'] = f"Welcome to {company.name} - Your Login Credentials"
         msg['From'] = formataddr((from_name, from_email))
         msg['To'] = data.recipient_email
-        
+
         # Build optional info section
         optional_info = ""
         if data.job_title:
             optional_info += f"<p><strong>Job Title:</strong> {data.job_title}</p>"
         if data.department:
             optional_info += f"<p><strong>Department:</strong> {data.department}</p>"
-        
+
         html_body = f"""
         <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -904,39 +971,39 @@ async def send_welcome_credentials(
                 <h1 style="color: #2563eb;">🎉 Welcome to {company.name}!</h1>
                 <p>Hi {data.recipient_name},</p>
                 <p>Your account has been created in the Time Tracker system. Here are your login credentials:</p>
-                
+
                 <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
                     <p style="margin: 0 0 10px 0;"><strong>Email:</strong> {data.recipient_email}</p>
                     {optional_info}
-                    <p style="margin: 10px 0 0 0;"><strong>Temporary Password:</strong> 
+                    <p style="margin: 10px 0 0 0;"><strong>Temporary Password:</strong>
                         <code style="background: #e5e5e5; padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 14px;">{data.temporary_password}</code>
                     </p>
                 </div>
-                
+
                 <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
                     <p style="margin: 0; color: #92400e;">
-                        <strong>⚠️ Important:</strong> For security, please change your password after your first login. 
-                        We recommend using the same password that you use for your email, Basecamp, and other company systems 
+                        <strong>⚠️ Important:</strong> For security, please change your password after your first login.
+                        We recommend using the same password that you use for your email, Basecamp, and other company systems
                         to make it easier to remember.
                     </p>
                 </div>
-                
+
                 <p>
                     <a href="{login_url}" style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">
                         Login to Time Tracker
                     </a>
                 </p>
-                
+
                 <p style="color: #666; font-size: 14px; margin-top: 30px;">
                     If you have any questions, please contact your administrator.
                 </p>
-                
+
                 <p>Best regards,<br><strong>{company.name} Team</strong></p>
             </div>
         </body>
         </html>
         """
-        
+
         text_body = f"""
 Welcome to {company.name}!
 
@@ -951,7 +1018,7 @@ LOGIN CREDENTIALS:
 - Temporary Password: {data.temporary_password}
 
 ⚠️ IMPORTANT: For security, please change your password after your first login.
-We recommend using the same password that you use for your email, Basecamp, 
+We recommend using the same password that you use for your email, Basecamp,
 and other company systems to make it easier to remember.
 
 Login at: {login_url}
@@ -959,10 +1026,10 @@ Login at: {login_url}
 Best regards,
 {company.name} Team
         """
-        
+
         msg.attach(MIMEText(text_body, 'plain'))
         msg.attach(MIMEText(html_body, 'html'))
-        
+
         # Send email and measure latency
         start_time = time.time()
         with smtplib.SMTP(smtp_server, smtp_port) as server:
@@ -970,15 +1037,15 @@ Best regards,
                 server.starttls()
             server.login(smtp_username, smtp_password)
             server.sendmail(from_email, data.recipient_email, msg.as_string())
-        
+
         latency_ms = int((time.time() - start_time) * 1000)
-        
+
         return WelcomeCredentialsResponse(
             success=True,
             message=f"Welcome credentials email sent successfully to {data.recipient_email}",
             latency_ms=latency_ms,
         )
-    
+
     except HTTPException:
         raise  # Re-raise HTTP exceptions
     except smtplib.SMTPAuthenticationError:

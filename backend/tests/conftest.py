@@ -1,31 +1,47 @@
 # ============================================
 # TIME TRACKER - TEST CONFIGURATION
-# Uses PostgreSQL test database (requires Docker containers running)
+# Uses PostgreSQL test database. Connection string is env-driven;
+# see backend/.env.example and backend/scripts/DEV_SETUP.md.
 # ============================================
+import logging
 import os
 from typing import AsyncGenerator
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.pool import NullPool
 
 # Set test environment before importing app
 os.environ["TESTING"] = "1"
+# Lower bcrypt work factor for tests (prod default is 12). Must be set
+# before any ``app.*`` import so the Settings validator sees TESTING=1
+# and accepts the sub-10 value. Production is untouched: this env var
+# is only exported by the test harness.
+os.environ.setdefault("BCRYPT_ROUNDS", "4")
 
 from app.main import app
 from app.database import get_db
 from app.models import User
 from app.services.auth_service import AuthService
 
-# Use the real database (running in Docker)
-# Try DATABASE_URL first (used in CI), then TEST_DATABASE_URL (local), then default
-TEST_DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    os.getenv(
-        "TEST_DATABASE_URL",
-        "postgresql+asyncpg://postgres:postgres@localhost:5434/time_tracker"
-    )
+logger = logging.getLogger(__name__)
+
+# Resolve the test database URL in this order:
+#   1. TEST_DATABASE_URL (explicit, preferred for local dev + CI)
+#   2. DATABASE_URL       (legacy CI compatibility)
+#   3. Hardcoded fallback  (debug-logged; should be avoided)
+_DEFAULT_TEST_DATABASE_URL = (
+    "postgresql+asyncpg://postgres:postgres@localhost:5432/time_tracker_test"
 )
+TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL")
+if not TEST_DATABASE_URL:
+    logger.debug(
+        "conftest: TEST_DATABASE_URL / DATABASE_URL unset, "
+        "falling back to default %s",
+        _DEFAULT_TEST_DATABASE_URL,
+    )
+    TEST_DATABASE_URL = _DEFAULT_TEST_DATABASE_URL
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -40,41 +56,95 @@ async def async_engine():
     await engine.dispose()
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _reset_token_blacklist_redis_cache() -> AsyncGenerator[None, None]:
+    """Drop the ``token_blacklist`` module's cached Redis client before
+    each test.
+
+    The ``redis.asyncio`` client binds itself to the event loop on which
+    it was first created. ``pytest-asyncio`` (mode=auto, function-scope)
+    creates a fresh event loop per test, so a client cached on a
+    previous test's loop raises ``RuntimeError: Event loop is closed``
+    on subsequent calls. Pre-B4 this was silently swallowed by the
+    fail-open ``is_blacklisted`` and ignored; post-B4 (fail-closed) the
+    same situation correctly returns 401, which would mass-break the
+    suite. Reseting the singleton between tests forces each test to
+    instantiate a fresh client on its own event loop.
+    """
+    from app.services import token_blacklist as _tb_module
+
+    _tb_module.token_blacklist._redis = None
+    yield
+    _tb_module.token_blacklist._redis = None
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _truncate_tables_around_test(async_engine) -> AsyncGenerator[None, None]:
+    """
+    Test isolation via TRUNCATE-before-test (Option B).
+
+    Individual tests exercise FastAPI route handlers that call
+    ``session.commit()`` directly, which means a naive
+    ``begin()``/``rollback()`` wrapper in ``db_session`` cannot
+    prevent cross-test data leakage. Running TRUNCATE against every
+    user table (except ``alembic_version``) *before* each test
+    guarantees a clean slate regardless of what the previous test or
+    a previous pytest run committed. ``CASCADE`` handles FK chains;
+    ``RESTART IDENTITY`` resets sequences so autoincrement IDs do
+    not drift.
+    """
+    async with async_engine.begin() as conn:
+        result = await conn.execute(
+            text(
+                "SELECT tablename "
+                "FROM pg_tables "
+                "WHERE schemaname = 'public' "
+                "  AND tablename <> 'alembic_version'"
+            )
+        )
+        tables = [row[0] for row in result.fetchall()]
+        if tables:
+            quoted = ", ".join(f'"{t}"' for t in tables)
+            await conn.execute(
+                text(f"TRUNCATE {quoted} RESTART IDENTITY CASCADE")
+            )
+
+    yield
+
+
 @pytest_asyncio.fixture(scope="function")
 async def db_session(async_engine) -> AsyncGenerator[AsyncSession, None]:
-    """Create a test database session with transaction rollback."""
+    """
+    Test DB session. No transaction wrapping: app handlers commit
+    their own work, and the ``_truncate_tables_after_test`` autouse
+    fixture guarantees isolation by wiping all rows after each test.
+    """
     async_session_factory = async_sessionmaker(
         async_engine,
         class_=AsyncSession,
         expire_on_commit=False,
         autoflush=False,
     )
-    
+
     async with async_session_factory() as session:
-        # Start a transaction
-        await session.begin()
-        try:
-            yield session
-        finally:
-            # Rollback to clean up test data
-            await session.rollback()
+        yield session
 
 
 @pytest_asyncio.fixture(scope="function")
 async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     """Create test client with database session override."""
-    
+
     async def override_get_db():
         yield db_session
-    
+
     app.dependency_overrides[get_db] = override_get_db
-    
+
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test"
     ) as ac:
         yield ac
-    
+
     app.dependency_overrides.clear()
 
 

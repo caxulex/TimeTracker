@@ -60,6 +60,11 @@ const api: AxiosInstance = axios.create({
 // Request interceptor to add auth token
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    // TODO(B17, XSS-risk): localStorage-stored tokens expose the SPA to total
+    // account takeover on any XSS. Migration plan: refresh token in
+    // httpOnly+Secure+SameSite=Strict cookie, access token in a module-level
+    // variable here (getAccessToken/setAccessToken accessors). See
+    // POST_LAUNCH_TODO.md » "B17 token storage migration plan".
     const token = localStorage.getItem('access_token');
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -78,6 +83,8 @@ let authRedirectResetTimer: ReturnType<typeof setTimeout> | null = null;
 // Helper to clear all auth state and redirect (used to break redirect loops)
 const forceLogoutAndRedirect = () => {
   console.warn('[Auth] Forcing logout and redirect to login');
+  // TODO(B17, XSS-risk): replace with cookie clear + in-memory token reset
+  // post-migration. See POST_LAUNCH_TODO.md » B17.
   localStorage.removeItem('access_token');
   localStorage.removeItem('refresh_token');
   // Clear the persisted Zustand auth state to prevent redirect loops
@@ -189,6 +196,11 @@ api.interceptors.response.use(
         isRefreshing = true;
 
         try {
+          // TODO(B17, XSS-risk): post-migration the refresh token will be sent
+          // automatically as an httpOnly cookie via { credentials: 'include' };
+          // remove this localStorage read and the request body field once the
+          // backend dual-source acceptance window closes (see POST_LAUNCH_TODO
+          // » B17 token storage migration plan).
           const refreshToken = localStorage.getItem('refresh_token');
           if (refreshToken) {
             const response = await axios.post<AuthToken>(`${API_BASE_URL}/api/auth/refresh`, {
@@ -196,6 +208,8 @@ api.interceptors.response.use(
             });
 
             const { access_token, refresh_token } = response.data;
+            // TODO(B17, XSS-risk): swap for setAccessToken(access_token); the
+            // refresh token will not be returned in the body post-migration.
             localStorage.setItem('access_token', access_token);
             localStorage.setItem('refresh_token', refresh_token);
             
@@ -243,7 +257,11 @@ export const authApi = {
   },
 
   logout: async (): Promise<void> => {
-    await api.post('/api/auth/logout');
+    // B15: Send the refresh token so the backend can revoke it. If the
+    // token is missing from storage, the backend still revokes the
+    // access token and logs a warning.
+    const refreshToken = localStorage.getItem('refresh_token');
+    await api.post('/api/auth/logout', refreshToken ? { refresh_token: refreshToken } : {});
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
   },

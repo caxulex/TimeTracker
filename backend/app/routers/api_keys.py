@@ -6,26 +6,27 @@ All endpoints require super_admin role.
 """
 
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import User
 from app.dependencies import get_current_active_user
+from app.models import User
 from app.schemas.api_keys import (
-    APIKeyCreate,
-    APIKeyUpdate,
-    APIKeyResponse,
-    APIKeyListResponse,
-    APIKeyTestResponse,
-    SupportedProvidersResponse,
     SUPPORTED_PROVIDERS,
+    APIKeyCreate,
+    APIKeyListResponse,
+    APIKeyResponse,
+    APIKeyTestResponse,
+    APIKeyUpdate,
+    SupportedProvidersResponse,
 )
 from app.services.api_key_service import (
-    APIKeyService,
     APIKeyNotFoundError,
-    APIKeyValidationError,
+    APIKeyService,
     APIKeyServiceError,
+    APIKeyValidationError,
 )
 from app.services.audit_log import AuditLogService
 
@@ -72,7 +73,7 @@ async def get_supported_providers(
 ):
     """
     Get list of supported AI providers.
-    
+
     Returns provider information including:
     - Provider ID and name
     - Description
@@ -93,7 +94,7 @@ async def list_api_keys(
 ):
     """
     List all API keys (without exposing actual key values).
-    
+
     Returns paginated list with:
     - Key preview (last 4 characters)
     - Provider information
@@ -107,7 +108,7 @@ async def list_api_keys(
         provider_filter=provider,
         active_only=active_only
     )
-    
+
     return APIKeyListResponse(
         items=[APIKeyResponse.model_validate(item) for item in items],
         total=total,
@@ -126,15 +127,15 @@ async def create_api_key(
 ):
     """
     Create a new API key.
-    
+
     The API key will be encrypted before storage using AES-256-GCM.
     Only the last 4 characters are stored for identification.
-    
+
     **Security Note**: The actual API key is never returned after creation.
     """
     audit_service = AuditLogService()
     service = APIKeyService(db, audit_service)
-    
+
     try:
         api_key = await service.create(
             data=data,
@@ -166,13 +167,13 @@ async def get_api_key(
     """
     service = APIKeyService(db)
     api_key = await service.get_by_id(key_id)
-    
+
     if not api_key:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"API key {key_id} not found"
         )
-    
+
     return APIKeyResponse.model_validate(api_key)
 
 
@@ -186,7 +187,7 @@ async def update_api_key(
 ):
     """
     Update an existing API key.
-    
+
     Can update:
     - The API key value (will be re-encrypted)
     - Label and notes
@@ -194,7 +195,7 @@ async def update_api_key(
     """
     audit_service = AuditLogService()
     service = APIKeyService(db, audit_service)
-    
+
     try:
         api_key = await service.update(
             key_id=key_id,
@@ -230,20 +231,20 @@ async def delete_api_key(
 ):
     """
     Delete an API key.
-    
+
     **Warning**: This action is irreversible. The encrypted key will be
     permanently removed from the database.
     """
     audit_service = AuditLogService()
     service = APIKeyService(db, audit_service)
-    
+
     deleted = await service.delete(
         key_id=key_id,
         deleted_by=current_user.id,
         ip_address=get_client_ip(request),
         user_agent=get_user_agent(request)
     )
-    
+
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -259,27 +260,27 @@ async def test_api_key(
 ):
     """
     Test an API key's connectivity with its provider.
-    
+
     This will:
     1. Decrypt the stored key
     2. Attempt to connect to the provider's API
     3. Return success/failure status and latency
-    
+
     **Note**: Some providers may not support connectivity testing.
     """
     service = APIKeyService(db)
-    
+
     result = await service.test_connectivity(
         key_id=key_id,
         user_id=current_user.id
     )
-    
+
     if not result.success and "not found" in result.message.lower():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"API key {key_id} not found"
         )
-    
+
     return result
 
 
@@ -289,15 +290,15 @@ async def get_encryption_status(
 ):
     """
     Check if the encryption service is properly configured.
-    
+
     Returns:
     - configured: Whether the encryption key is set
     - key_length: Length of the configured key (masked)
     """
     from app.services.encryption_service import encryption_service
-    
+
     is_configured = encryption_service.is_configured()
-    
+
     return {
         "configured": is_configured,
         "message": "Encryption service is ready" if is_configured else "API_KEY_ENCRYPTION_KEY not configured or too short"

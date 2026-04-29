@@ -9,18 +9,17 @@ Advanced team performance analytics:
 """
 
 import logging
-from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime, date, timedelta
-from dataclasses import dataclass, field
 import statistics
 from collections import defaultdict
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import select, func, and_, or_, case
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.config import ai_settings
 from app.ai.utils.cache_manager import AICacheManager, get_cache_manager
-from app.ai.services.ai_client import get_ai_client
+from app.utils.timewindow import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -73,40 +72,40 @@ class TeamAnalyticsReport:
     period_days: int
     total_members: int
     active_members: int
-    
+
     # Aggregate metrics
     total_hours: float
     avg_hours_per_member: float
     total_projects: int
     total_tasks: int
-    
+
     # Member breakdown
     member_metrics: List[TeamMemberMetrics]
-    
+
     # Velocity data
     velocity_history: List[TeamVelocity]
     current_velocity_trend: str
-    
+
     # Collaboration network
     collaboration_edges: List[CollaborationEdge]
     collaboration_density: float  # 0-1, how interconnected the team is
-    
+
     # Workload distribution
     workload_gini: float  # 0-1, lower is more equal distribution
     top_contributors: List[Dict[str, Any]]
     underutilized_members: List[Dict[str, Any]]
-    
+
     # AI-generated insights
     ai_insights: List[str]
     recommendations: List[str]
-    
+
     generated_at: datetime
 
 
 class TeamAnalyticsService:
     """
     Team Performance Analytics Service
-    
+
     Provides comprehensive team analytics including:
     - Individual member performance metrics
     - Team velocity tracking
@@ -114,7 +113,7 @@ class TeamAnalyticsService:
     - Workload balance assessment
     - AI-powered insights
     """
-    
+
     def __init__(
         self,
         db: AsyncSession,
@@ -132,19 +131,19 @@ class TeamAnalyticsService:
         """
         Generate comprehensive team analytics report.
         """
-        from app.models import Team, TeamMember, User, TimeEntry, Project, Task
-        
+        from app.models import Team, TeamMember, User
+
         # Get team info
         team_result = await self.db.execute(
             select(Team).where(Team.id == team_id)
         )
         team = team_result.scalar_one_or_none()
-        
+
         if not team:
             raise ValueError(f"Team {team_id} not found")
-        
-        period_start = datetime.now() - timedelta(days=period_days)
-        
+
+        period_start = now_utc() - timedelta(days=period_days)
+
         # Get team members
         members_result = await self.db.execute(
             select(TeamMember, User)
@@ -152,43 +151,43 @@ class TeamAnalyticsService:
             .where(TeamMember.team_id == team_id)
         )
         members = members_result.fetchall()
-        
+
         member_ids = [m[0].user_id for m in members]
         member_names = {m[0].user_id: m[1].name for m in members}
-        
+
         # Calculate member metrics
         member_metrics = await self._calculate_member_metrics(
             member_ids, member_names, period_start, team_id
         )
-        
+
         # Calculate velocity history
         velocity_history = await self._calculate_velocity_history(
             team_id, member_ids, period_days
         )
-        
+
         # Calculate collaboration network
         collaboration_edges = await self._calculate_collaboration_network(
             member_ids, member_names, period_start, team_id
         )
-        
+
         # Calculate workload distribution
         workload_gini, top_contributors, underutilized = await self._analyze_workload_distribution(
             member_metrics
         )
-        
+
         # Calculate aggregate metrics
         total_hours = sum(m.total_hours for m in member_metrics)
         active_members = len([m for m in member_metrics if m.total_hours > 0])
-        
+
         # Get project/task counts
         project_count = await self._get_active_project_count(team_id, period_start)
         task_count = await self._get_completed_task_count(team_id, period_start)
-        
+
         # Calculate collaboration density
         max_edges = len(member_ids) * (len(member_ids) - 1) / 2
         actual_edges = len([e for e in collaboration_edges if e.interaction_score > 0.3])
         collaboration_density = actual_edges / max_edges if max_edges > 0 else 0
-        
+
         # Determine velocity trend
         current_trend = "stable"
         if len(velocity_history) >= 2:
@@ -198,7 +197,7 @@ class TeamAnalyticsService:
                 current_trend = "increasing"
             elif recent < previous * 0.9:
                 current_trend = "decreasing"
-        
+
         # Generate AI insights
         ai_insights = []
         recommendations = []
@@ -210,7 +209,7 @@ class TeamAnalyticsService:
                 workload_gini,
                 collaboration_density
             )
-        
+
         return TeamAnalyticsReport(
             team_id=team_id,
             team_name=team.name,
@@ -231,7 +230,7 @@ class TeamAnalyticsService:
             underutilized_members=underutilized,
             ai_insights=ai_insights,
             recommendations=recommendations,
-            generated_at=datetime.now()
+            generated_at=now_utc()
         )
 
     async def _calculate_member_metrics(
@@ -242,10 +241,10 @@ class TeamAnalyticsService:
         team_id: int
     ) -> List[TeamMemberMetrics]:
         """Calculate individual member metrics."""
-        from app.models import TimeEntry, Project
-        
+        from app.models import TimeEntry
+
         metrics = []
-        
+
         for user_id in member_ids:
             # Get time entries
             entries_result = await self.db.execute(
@@ -258,7 +257,7 @@ class TeamAnalyticsService:
                 )
             )
             entries = list(entries_result.scalars().all())
-            
+
             if not entries:
                 metrics.append(TeamMemberMetrics(
                     user_id=user_id,
@@ -273,45 +272,45 @@ class TeamAnalyticsService:
                     weekend_hours=0
                 ))
                 continue
-            
+
             # Calculate metrics
             total_seconds = sum(e.duration_seconds or 0 for e in entries)
             total_hours = total_seconds / 3600
-            
+
             # Days with entries
             work_days = len(set(e.start_time.date() for e in entries))
             avg_daily = total_hours / work_days if work_days > 0 else 0
-            
+
             # Projects worked
             projects = set(e.project_id for e in entries if e.project_id)
-            
+
             # Tasks completed
             tasks = set(e.task_id for e in entries if e.task_id)
-            
+
             # Overtime (entries ending after 6pm)
             overtime_entries = [
-                e for e in entries 
+                e for e in entries
                 if e.end_time and e.end_time.hour >= 18
             ]
             overtime_hours = sum(
                 (e.duration_seconds or 0) / 3600 for e in overtime_entries
             )
-            
+
             # Weekend hours
             weekend_entries = [
-                e for e in entries 
+                e for e in entries
                 if e.start_time.weekday() >= 5
             ]
             weekend_hours = sum(
                 (e.duration_seconds or 0) / 3600 for e in weekend_entries
             )
-            
+
             # Consistency score (based on regular daily hours)
             daily_hours = defaultdict(float)
             for e in entries:
                 day = e.start_time.date()
                 daily_hours[day] += (e.duration_seconds or 0) / 3600
-            
+
             if len(daily_hours) > 1:
                 hours_std = statistics.stdev(daily_hours.values())
                 hours_mean = statistics.mean(daily_hours.values())
@@ -319,7 +318,7 @@ class TeamAnalyticsService:
                 consistency_score = max(0, min(100, 100 - cv * 50))
             else:
                 consistency_score = 50
-            
+
             metrics.append(TeamMemberMetrics(
                 user_id=user_id,
                 user_name=member_names.get(user_id, f"User {user_id}"),
@@ -332,7 +331,7 @@ class TeamAnalyticsService:
                 overtime_hours=round(overtime_hours, 1),
                 weekend_hours=round(weekend_hours, 1)
             ))
-        
+
         return metrics
 
     async def _calculate_velocity_history(
@@ -343,19 +342,19 @@ class TeamAnalyticsService:
     ) -> List[TeamVelocity]:
         """Calculate velocity over time periods."""
         from app.models import TimeEntry
-        
+
         # Split into weekly periods
         weeks = period_days // 7
         if weeks < 1:
             weeks = 1
-        
+
         velocities = []
-        now = datetime.now()
-        
+        now = now_utc()
+
         for week in range(weeks):
             week_end = now - timedelta(weeks=week)
             week_start = week_end - timedelta(days=7)
-            
+
             # Get entries for this week
             result = await self.db.execute(
                 select(
@@ -372,14 +371,14 @@ class TeamAnalyticsService:
                 )
             )
             row = result.fetchone()
-            
+
             # Handle None values from aggregation
             total_seconds = getattr(row, 'total_seconds', 0) or 0 if row else 0
             tasks_count = getattr(row, 'tasks', 0) or 0 if row else 0
             projects_count = getattr(row, 'projects', 0) or 0 if row else 0
-            
+
             total_hours = total_seconds / 3600
-            
+
             velocities.append(TeamVelocity(
                 period_start=week_start.date(),
                 period_end=week_end.date(),
@@ -391,7 +390,7 @@ class TeamAnalyticsService:
                 velocity_trend="stable",
                 change_percent=0
             ))
-        
+
         # Calculate trends between periods
         velocities.reverse()  # Oldest first
         for i in range(1, len(velocities)):
@@ -404,7 +403,7 @@ class TeamAnalyticsService:
                     velocities[i].velocity_trend = "increasing"
                 elif change < -10:
                     velocities[i].velocity_trend = "decreasing"
-        
+
         return velocities
 
     async def _calculate_collaboration_network(
@@ -416,10 +415,10 @@ class TeamAnalyticsService:
     ) -> List[CollaborationEdge]:
         """Calculate collaboration between team members."""
         from app.models import TimeEntry
-        
+
         # Get projects each user worked on
         user_projects: Dict[int, set] = {}
-        
+
         for user_id in member_ids:
             result = await self.db.execute(
                 select(TimeEntry.project_id.distinct())
@@ -432,22 +431,22 @@ class TeamAnalyticsService:
                 )
             )
             user_projects[user_id] = set(r[0] for r in result.fetchall())
-        
+
         # Calculate collaboration edges
         edges = []
         processed = set()
-        
+
         for i, user1 in enumerate(member_ids):
             for user2 in member_ids[i + 1:]:
                 if (user1, user2) in processed or (user2, user1) in processed:
                     continue
                 processed.add((user1, user2))
-                
+
                 shared = user_projects.get(user1, set()) & user_projects.get(user2, set())
                 all_projects = user_projects.get(user1, set()) | user_projects.get(user2, set())
-                
+
                 interaction_score = len(shared) / len(all_projects) if all_projects else 0
-                
+
                 edges.append(CollaborationEdge(
                     user1_id=user1,
                     user1_name=member_names.get(user1, f"User {user1}"),
@@ -456,10 +455,10 @@ class TeamAnalyticsService:
                     shared_projects=len(shared),
                     interaction_score=round(interaction_score, 2)
                 ))
-        
+
         # Sort by interaction score
         edges.sort(key=lambda e: e.interaction_score, reverse=True)
-        
+
         return edges
 
     async def _analyze_workload_distribution(
@@ -469,18 +468,18 @@ class TeamAnalyticsService:
         """Analyze workload distribution across team."""
         if not member_metrics:
             return 0.0, [], []
-        
+
         # Calculate Gini coefficient
         hours = sorted([m.total_hours for m in member_metrics])
         n = len(hours)
-        
+
         if n == 0 or sum(hours) == 0:
             return 0.0, [], []
-        
+
         numerator = sum((i + 1) * h for i, h in enumerate(hours))
         gini = (2 * numerator) / (n * sum(hours)) - (n + 1) / n
         gini = max(0, min(1, gini))
-        
+
         # Find top contributors (top 25%)
         sorted_members = sorted(member_metrics, key=lambda m: m.total_hours, reverse=True)
         top_count = max(1, len(sorted_members) // 4)
@@ -495,7 +494,7 @@ class TeamAnalyticsService:
             }
             for m in sorted_members[:top_count]
         ]
-        
+
         # Find underutilized (bottom 25% with < 50% of average hours)
         avg_hours = statistics.mean(m.total_hours for m in member_metrics) if member_metrics else 0
         underutilized = [
@@ -508,7 +507,7 @@ class TeamAnalyticsService:
             for m in sorted_members[-top_count:]
             if m.total_hours < avg_hours * 0.5
         ]
-        
+
         return gini, top_contributors, underutilized
 
     async def _get_active_project_count(
@@ -518,7 +517,7 @@ class TeamAnalyticsService:
     ) -> int:
         """Get count of active projects."""
         from app.models import Project, TimeEntry
-        
+
         result = await self.db.execute(
             select(func.count(Project.id.distinct()))
             .join(TimeEntry, TimeEntry.project_id == Project.id)
@@ -537,8 +536,8 @@ class TeamAnalyticsService:
         period_start: datetime
     ) -> int:
         """Get count of tasks with time entries."""
-        from app.models import Task, Project, TimeEntry
-        
+        from app.models import Project, Task, TimeEntry
+
         result = await self.db.execute(
             select(func.count(Task.id.distinct()))
             .join(Project, Task.project_id == Project.id)
@@ -563,7 +562,7 @@ class TeamAnalyticsService:
         """Generate AI-powered insights and recommendations."""
         insights = []
         recommendations = []
-        
+
         # Analyze workload balance
         if workload_gini > 0.4:
             insights.append(
@@ -577,7 +576,7 @@ class TeamAnalyticsService:
             insights.append(
                 f"✅ Workload is well-balanced across the team (Gini: {workload_gini:.2f})."
             )
-        
+
         # Analyze collaboration
         if collaboration_density < 0.3:
             insights.append(
@@ -590,7 +589,7 @@ class TeamAnalyticsService:
             insights.append(
                 "✅ Strong team collaboration. Members frequently work on shared projects."
             )
-        
+
         # Analyze velocity trend
         if velocity_history:
             recent_trend = velocity_history[-1].velocity_trend if velocity_history else "stable"
@@ -605,7 +604,7 @@ class TeamAnalyticsService:
                 insights.append(
                     "📈 Team velocity is increasing. Great momentum!"
                 )
-        
+
         # Analyze overtime
         high_overtime = [m for m in member_metrics if m.overtime_hours > 10]
         if high_overtime:
@@ -616,14 +615,14 @@ class TeamAnalyticsService:
             recommendations.append(
                 "Review workload for team members with high overtime to prevent burnout."
             )
-        
+
         # Analyze weekend work
         weekend_workers = [m for m in member_metrics if m.weekend_hours > 4]
         if weekend_workers:
             insights.append(
                 f"📅 {len(weekend_workers)} team members worked significant weekend hours."
             )
-        
+
         return insights, recommendations
 
     async def compare_teams(
@@ -633,7 +632,7 @@ class TeamAnalyticsService:
     ) -> Dict[str, Any]:
         """Compare performance across multiple teams."""
         comparisons = []
-        
+
         for team_id in team_ids:
             try:
                 report = await self.generate_team_report(
@@ -652,7 +651,7 @@ class TeamAnalyticsService:
                 })
             except Exception as e:
                 logger.error(f"Error generating report for team {team_id}: {e}")
-        
+
         # Rank teams
         if comparisons:
             # Calculate composite score
@@ -662,14 +661,14 @@ class TeamAnalyticsService:
                     team["workload_balance"] * 30 +
                     team["collaboration"] * 40
                 )
-            
+
             comparisons.sort(key=lambda t: t["composite_score"], reverse=True)
-        
+
         return {
             "period_days": period_days,
             "teams_compared": len(comparisons),
             "comparisons": comparisons,
-            "generated_at": datetime.now().isoformat()
+            "generated_at": now_utc().isoformat()
         }
 
 

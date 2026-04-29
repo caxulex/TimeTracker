@@ -4,10 +4,12 @@ SEC-001, SEC-009, SEC-012: Secure Configuration with Validation
 """
 
 import json
+import os
 import secrets
 from typing import List, Optional, Union
+
+from pydantic import BeforeValidator, field_validator, model_validator
 from pydantic_settings import BaseSettings
-from pydantic import field_validator, model_validator, BeforeValidator
 from typing_extensions import Annotated
 
 
@@ -49,7 +51,7 @@ INSECURE_PASSWORDS = {
 
 class Settings(BaseSettings):
     """Application settings with security validation"""
-    
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
@@ -81,7 +83,7 @@ class Settings(BaseSettings):
     # For multi-tenancy: Include *.timetracker.shaemarcus.com pattern
     ALLOWED_ORIGINS: EnvList = ["http://localhost:5173", "http://localhost:3000"]
     ALLOWED_HOSTS: EnvList = ["localhost", "127.0.0.1"]
-    
+
     # Multi-tenancy: Base domains that support wildcard subdomain CORS
     # Format: domain.com (will allow *.domain.com and domain.com)
     CORS_WILDCARD_DOMAINS: EnvList = []
@@ -94,7 +96,7 @@ class Settings(BaseSettings):
     SMTP_FROM_EMAIL: Optional[str] = None  # Defaults to SMTP_USERNAME if not set
     SMTP_FROM_NAME: str = "Time Tracker"   # Display name for email sender
     SMTP_USE_TLS: bool = True
-    
+
     # Slack Integration
     SLACK_WEBHOOK_URL: Optional[str] = None  # Webhook URL for Slack notifications
 
@@ -117,17 +119,43 @@ class Settings(BaseSettings):
 
     # SEC-016: Password Hashing Configuration
     BCRYPT_ROUNDS: int = 12
-    
+
+    # B16: Trusted reverse-proxy networks. Only when the immediate peer
+    # IP falls within one of these networks does ``get_client_ip`` honor
+    # ``X-Forwarded-For``. Accepts CIDR ranges or exact IPs (parsed via
+    # ``ipaddress.ip_network`` so both forms work). Empty list (the
+    # default) means XFF is never trusted, mitigating IP-spoofing of
+    # audit logs in deployments that don't sit behind a known proxy.
+    TRUSTED_PROXIES: EnvList = []
+
     # Sentry Error Tracking (Phase 3: Production Observability)
     SENTRY_DSN: Optional[str] = None
 
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"
-    
+
     # Slow Query Logging
     SLOW_QUERY_THRESHOLD_MS: int = 500  # Log queries taking longer than this (milliseconds)
     ENABLE_QUERY_LOGGING: bool = True
+
+    # B12: Production async DB pool configuration. NullPool is kept for
+    # development/test (predictable, no connection-reuse surprises).
+    # Production switches to AsyncAdaptedQueuePool with these defaults
+    # — every value is overridable via env so an operator can tune
+    # without a code change.
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 20
+    DB_POOL_TIMEOUT: int = 30
+    DB_POOL_RECYCLE: int = 1800
+    DB_POOL_PRE_PING: bool = True
+
+    # Timer housekeeping (B14):
+    # When True, GET /api/time/timer will auto-close orphan running
+    # TimeEntry rows (running entry with no open WorkSession). When
+    # False (default, production-safe) the endpoint is side-effect-free
+    # and only logs a warning.
+    TIMER_ORPHAN_AUTOCLOSE_ON_READ: bool = False
 
     # File Upload
     UPLOAD_DIR: str = "uploads/"
@@ -143,7 +171,7 @@ class Settings(BaseSettings):
     # AI API Key Encryption - SEC-020: Encryption key for storing API keys in database
     # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
     API_KEY_ENCRYPTION_KEY: str = ""
-    
+
     # AI Provider Settings
     GEMINI_API_KEY: Optional[str] = None  # Legacy env-based (prefer database storage)
     OPENAI_API_KEY: Optional[str] = None  # Legacy env-based (prefer database storage)
@@ -155,7 +183,7 @@ class Settings(BaseSettings):
         # Generate secure key if empty (for development only)
         if not v:
             v = secrets.token_urlsafe(64)
-        
+
         # Check for known insecure values
         if v.lower() in INSECURE_SECRET_KEYS or len(v) < 32:
             raise ValueError(
@@ -176,10 +204,34 @@ class Settings(BaseSettings):
 
     @model_validator(mode='after')
     def validate_production_settings(self):
-        """SEC-009: Ensure production has secure settings"""
+        """SEC-009: Ensure production has secure settings.
+
+        B5 (Prompt 3): A missing/empty SECRET_KEY env var must be a hard
+        startup failure in production. Without this check, the
+        ``validate_secret_key`` field validator silently auto-generates a
+        random key on import, which produces a running-but-broken prod
+        (every restart rotates the signing key, invalidating all
+        sessions). The same rule applies to other server-side secrets
+        with silent auto-generation defaults.
+        """
         if self.ENVIRONMENT == "production":
             if self.DEBUG:
                 raise ValueError('DEBUG must be False in production')
+
+            # B5: Require explicit env-var configuration for every secret
+            # whose Pydantic field default would silently produce a
+            # working-but-insecure value. Read os.environ directly so we
+            # detect the "unset" case (Pydantic has already populated the
+            # field with the auto-generated value by this point).
+            required_secrets = ("SECRET_KEY", "API_KEY_ENCRYPTION_KEY")
+            for name in required_secrets:
+                env_value = os.environ.get(name, "")
+                if not env_value.strip():
+                    raise ValueError(
+                        f"{name} must be explicitly set in production "
+                        f"(missing or empty environment variable)"
+                    )
+
             if self.SECRET_KEY in INSECURE_SECRET_KEYS:
                 raise ValueError('SECRET_KEY must be changed in production')
             if 'localhost' in str(self.ALLOWED_ORIGINS):
@@ -190,7 +242,20 @@ class Settings(BaseSettings):
     @field_validator('BCRYPT_ROUNDS')
     @classmethod
     def validate_bcrypt_rounds(cls, v: int) -> int:
-        """SEC-016: Ensure sufficient bcrypt rounds"""
+        """SEC-016: Ensure sufficient bcrypt rounds.
+
+        In the test environment (``TESTING=1``) the lower bound is relaxed
+        to ``bcrypt``'s hard minimum (4) so the suite can run in a
+        reasonable time without changing the production-safe default
+        (12). Production code paths never set ``TESTING``; attempts to
+        configure a low rounds value outside of tests still fail.
+        """
+        if os.getenv("TESTING") == "1":
+            if v < 4:
+                raise ValueError('BCRYPT_ROUNDS must be at least 4 (bcrypt minimum)')
+            if v > 15:
+                raise ValueError('BCRYPT_ROUNDS above 15 may cause performance issues')
+            return v
         if v < 10:
             raise ValueError('BCRYPT_ROUNDS must be at least 10 for security')
         if v > 15:

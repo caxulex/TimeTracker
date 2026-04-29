@@ -4,9 +4,9 @@ Pydantic schemas for AI Feature Toggle System.
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Optional
 
+from pydantic import BaseModel, Field
 
 # ============================================
 # GLOBAL FEATURE SETTINGS SCHEMAS
@@ -29,7 +29,7 @@ class AIFeatureSettingResponse(AIFeatureSettingBase):
     created_at: datetime
     updated_at: datetime
     updated_by: Optional[int] = None
-    
+
     class Config:
         from_attributes = True
 
@@ -57,7 +57,7 @@ class UserAIPreferenceResponse(UserAIPreferenceBase):
     admin_override_by: Optional[int] = None
     created_at: datetime
     updated_at: datetime
-    
+
     class Config:
         from_attributes = True
 
@@ -162,7 +162,7 @@ class AIUsageLogResponse(BaseModel):
     response_time_ms: Optional[int] = None
     success: bool
     error_message: Optional[str] = None
-    
+
     class Config:
         from_attributes = True
 

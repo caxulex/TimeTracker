@@ -2,20 +2,34 @@
 Projects management router
 """
 
-from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete
-from pydantic import BaseModel, Field
-from datetime import datetime, date
+from datetime import date, datetime
 from decimal import Decimal
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import User, Team, TeamMember, Project, Task, TimeEntry, ProjectBudgetHistory
-from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter, FILTER_NULL_COMPANY
-from app.schemas.auth import Message
+from app.dependencies import (
+    FILTER_NULL_COMPANY,
+    apply_company_filter,
+    get_company_filter,
+    get_current_active_user,
+)
+from app.models import (
+    Project,
+    ProjectBudgetHistory,
+    Task,
+    Team,
+    TeamMember,
+    TimeEntry,
+    User,
+)
 from app.routers.websocket import manager as ws_manager
-from app.services.audit_logger import AuditLogger, AuditAction
+from app.schemas.auth import Message
+from app.services.audit_logger import AuditAction, AuditLogger
 
 router = APIRouter()
 
@@ -73,7 +87,7 @@ async def check_team_access(db: AsyncSession, team_id: int, user: User, require_
     """Check if user has access to team (within their company)"""
     # Multi-tenancy: first verify team belongs to user's company
     company_id = get_company_filter(user)
-    
+
     # Build the query based on company filter
     if company_id is None:
         # Super admin - can access any team
@@ -90,13 +104,13 @@ async def check_team_access(db: AsyncSession, team_id: int, user: User, require_
         team_result = await db.execute(
             select(Team).where(Team.id == team_id, Team.company_id == company_id)
         )
-    
+
     if not team_result.scalar_one_or_none():
         return False
-    
+
     if user.role in ["super_admin", "admin", "company_admin"]:
         return True
-    
+
     result = await db.execute(
         select(TeamMember).where(
             TeamMember.team_id == team_id,
@@ -119,49 +133,49 @@ async def list_projects(
     """List projects (user sees projects from their teams within their company)"""
     base_query = select(Project).join(Team, Project.team_id == Team.id)
     count_query = select(func.count(Project.id)).join(Team, Project.team_id == Team.id)
-    
+
     # Multi-tenancy: filter by company through team
     company_id = get_company_filter(current_user)
     base_query = apply_company_filter(base_query, Team.company_id, company_id)
     count_query = apply_company_filter(count_query, Team.company_id, company_id)
-    
+
     # Filter by accessible teams for non-admin users
     if current_user.role not in ["super_admin", "admin", "company_admin"]:
         user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
         access_filter = Project.team_id.in_(user_teams)
         base_query = base_query.where(access_filter)
         count_query = count_query.where(access_filter)
-    
+
     if team_id:
         base_query = base_query.where(Project.team_id == team_id)
         count_query = count_query.where(Project.team_id == team_id)
-    
+
     if not include_archived:
         base_query = base_query.where(Project.is_archived == False)
         count_query = count_query.where(Project.is_archived == False)
-    
+
     if search:
         search_filter = f"%{search}%"
         base_query = base_query.where(Project.name.ilike(search_filter))
         count_query = count_query.where(Project.name.ilike(search_filter))
-    
+
     # Get total count
     total_result = await db.execute(count_query)
     total = total_result.scalar()
-    
+
     # Get paginated results
     offset = (page - 1) * page_size
     query = base_query.offset(offset).limit(page_size).order_by(Project.created_at.desc())
     result = await db.execute(query)
     projects = result.scalars().all()
-    
+
     # Get team names
     team_ids = [p.team_id for p in projects]
     team_names = {}
     if team_ids:
         teams_result = await db.execute(select(Team.id, Team.name).where(Team.id.in_(team_ids)))
         team_names = dict(teams_result.all())
-    
+
     # Get task counts
     task_counts = {}
     project_ids = [p.id for p in projects]
@@ -172,10 +186,10 @@ async def list_projects(
             .group_by(Task.project_id)
         )
         task_counts = dict(task_count_result.all())
-    
+
     # Check if user is admin for budget visibility
     is_admin = current_user.role in ["super_admin", "admin", "company_admin"]
-    
+
     items = []
     for project in projects:
         item = ProjectResponse(
@@ -193,7 +207,7 @@ async def list_projects(
             deadline=project.deadline if is_admin else None
         )
         items.append(item)
-    
+
     return PaginatedProjects(
         items=items,
         total=total,
@@ -214,30 +228,30 @@ async def get_project(
     query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
     company_id = get_company_filter(current_user)
     query = apply_company_filter(query, Team.company_id, company_id)
-    
+
     result = await db.execute(query)
     project = result.scalar_one_or_none()
-    
+
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    
+
     # Check access (team membership for non-admins)
     is_admin = current_user.role in ["super_admin", "admin", "company_admin"]
     if not is_admin:
         has_access = await check_team_access(db, project.team_id, current_user)
         if not has_access:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    
+
     # Get team name
     team_result = await db.execute(select(Team.name).where(Team.id == project.team_id))
     team_name = team_result.scalar()
-    
+
     # Get task count
     task_count_result = await db.execute(
         select(func.count(Task.id)).where(Task.project_id == project_id)
     )
     task_count = task_count_result.scalar() or 0
-    
+
     return ProjectResponse(
         id=project.id,
         name=project.name,
@@ -265,10 +279,10 @@ async def create_project(
     has_access = await check_team_access(db, project_data.team_id, current_user)
     if not has_access:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to this team")
-    
+
     # Only admins can set budget fields
     is_admin = current_user.role in ["super_admin", "admin", "company_admin"]
-    
+
     project = Project(
         name=project_data.name,
         description=project_data.description,
@@ -277,11 +291,11 @@ async def create_project(
         budget_amount=Decimal(str(project_data.budget_amount)) if project_data.budget_amount is not None and is_admin else None,
         deadline=project_data.deadline if is_admin else None
     )
-    
+
     db.add(project)
     await db.commit()
     await db.refresh(project)
-    
+
     # If budget was set, log initial budget history
     if is_admin and (project_data.budget_amount is not None or project_data.deadline is not None):
         budget_history = ProjectBudgetHistory(
@@ -295,13 +309,13 @@ async def create_project(
         )
         db.add(budget_history)
         await db.commit()
-    
+
     # Audit log
     audit_values = {"name": project.name, "team_id": project.team_id, "color": project.color}
     if is_admin:
         audit_values["budget_amount"] = float(project.budget_amount) if project.budget_amount else None
         audit_values["deadline"] = str(project.deadline) if project.deadline else None
-    
+
     await AuditLogger.log(
         db=db,
         action=AuditAction.CREATE,
@@ -313,11 +327,11 @@ async def create_project(
         details=f"Created project '{project.name}' in team {project.team_id}"
     )
     await db.commit()
-    
+
     # Get team name
     team_result = await db.execute(select(Team.name).where(Team.id == project.team_id))
     team_name = team_result.scalar()
-    
+
     # Notify all team members about new project
     await ws_manager.broadcast_to_team(
         {
@@ -333,7 +347,7 @@ async def create_project(
         },
         project.team_id
     )
-    
+
     return ProjectResponse(
         id=project.id,
         name=project.name,
@@ -362,20 +376,20 @@ async def update_project(
     query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
     company_id = get_company_filter(current_user)
     query = apply_company_filter(query, Team.company_id, company_id)
-    
+
     result = await db.execute(query)
     project = result.scalar_one_or_none()
-    
+
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    
+
     # Check access (team membership for non-admins)
     is_admin = current_user.role in ["super_admin", "admin", "company_admin"]
     if not is_admin:
         has_access = await check_team_access(db, project.team_id, current_user)
         if not has_access:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    
+
     # If team_id is being changed, validate the new team
     if project_data.team_id is not None and project_data.team_id != project.team_id:
         # Verify new team exists and user has access
@@ -386,15 +400,15 @@ async def update_project(
         new_team = new_team_result.scalar_one_or_none()
         if not new_team:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid team_id")
-    
+
     # Track old values
     old_values = {"name": project.name, "color": project.color, "is_archived": project.is_archived, "team_id": project.team_id}
     old_budget_amount = project.budget_amount
     old_deadline = project.deadline
-    
+
     # Update fields - exclude budget fields for non-admins
     update_data = project_data.model_dump(exclude_unset=True)
-    
+
     # Remove budget fields from update if not admin
     budget_change_reason = update_data.pop("budget_change_reason", None)
     if not is_admin:
@@ -404,16 +418,16 @@ async def update_project(
         # Convert budget_amount to Decimal for database
         if "budget_amount" in update_data and update_data["budget_amount"] is not None:
             update_data["budget_amount"] = Decimal(str(update_data["budget_amount"]))
-    
+
     for key, value in update_data.items():
         setattr(project, key, value)
-    
+
     # Track budget changes for history (admin only)
     budget_changed = False
     if is_admin:
         new_budget_amount = project.budget_amount
         new_deadline = project.deadline
-        
+
         if old_budget_amount != new_budget_amount or old_deadline != new_deadline:
             budget_changed = True
             budget_history = ProjectBudgetHistory(
@@ -426,7 +440,7 @@ async def update_project(
                 change_reason=budget_change_reason
             )
             db.add(budget_history)
-    
+
     # Audit log
     new_values = {"name": project.name, "color": project.color, "is_archived": project.is_archived, "team_id": project.team_id}
     if is_admin:
@@ -434,7 +448,7 @@ async def update_project(
         old_values["deadline"] = str(old_deadline) if old_deadline else None
         new_values["budget_amount"] = float(project.budget_amount) if project.budget_amount else None
         new_values["deadline"] = str(project.deadline) if project.deadline else None
-    
+
     if old_values != new_values or budget_changed:
         await AuditLogger.log(
             db=db,
@@ -450,17 +464,17 @@ async def update_project(
 
     await db.commit()
     await db.refresh(project)
-    
+
     # Get team name
     team_result = await db.execute(select(Team.name).where(Team.id == project.team_id))
     team_name = team_result.scalar()
-    
+
     # Get task count
     task_count_result = await db.execute(
         select(func.count(Task.id)).where(Task.project_id == project_id)
     )
     task_count = task_count_result.scalar() or 0
-    
+
     return ProjectResponse(
         id=project.id,
         name=project.name,
@@ -488,19 +502,19 @@ async def delete_project(
     query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
     company_id = get_company_filter(current_user)
     query = apply_company_filter(query, Team.company_id, company_id)
-    
+
     result = await db.execute(query)
     project = result.scalar_one_or_none()
-    
+
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    
+
     # Check access (team membership for non-admins)
     if current_user.role not in ["super_admin", "admin", "company_admin"]:
         has_access = await check_team_access(db, project.team_id, current_user)
         if not has_access:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    
+
     # Check if there are any time entries associated with this project
     time_entries_count = await db.execute(
         select(func.count()).select_from(TimeEntry).where(TimeEntry.project_id == project_id)
@@ -510,15 +524,15 @@ async def delete_project(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot delete project with existing time entries. Archive it instead."
         )
-    
+
     project_name = project.name
-    
+
     # Delete associated tasks first
     await db.execute(delete(Task).where(Task.project_id == project_id))
-    
+
     # Permanently delete the project
     await db.delete(project)
-    
+
     # Audit log
     await AuditLogger.log(
         db=db,
@@ -531,9 +545,9 @@ async def delete_project(
         new_values=None,
         details=f"Permanently deleted project '{project_name}'"
     )
-    
+
     await db.commit()
-    
+
     return Message(message="Project deleted permanently")
 
 
@@ -548,27 +562,27 @@ async def restore_project(
     query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
     company_id = get_company_filter(current_user)
     query = apply_company_filter(query, Team.company_id, company_id)
-    
+
     result = await db.execute(query)
     project = result.scalar_one_or_none()
-    
+
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    
+
     # Check access (team membership for non-admins)
     if current_user.role not in ["super_admin", "admin", "company_admin"]:
         has_access = await check_team_access(db, project.team_id, current_user)
         if not has_access:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    
+
     project.is_archived = False
     await db.commit()
     await db.refresh(project)
-    
+
     # Get team name
     team_result = await db.execute(select(Team.name).where(Team.id == project.team_id))
     team_name = team_result.scalar()
-    
+
     return ProjectResponse(
         id=project.id,
         name=project.name,

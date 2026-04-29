@@ -2,22 +2,26 @@
 API Router for Pay Rates management
 """
 
-from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user, require_admin, get_company_filter, FILTER_NULL_COMPANY
+from app.dependencies import (
+    get_company_filter,
+    get_current_user,
+    require_admin,
+)
 from app.models import User
 from app.schemas.payroll import (
     PayRateCreate,
-    PayRateUpdate,
+    PayRateHistoryResponse,
     PayRateResponse,
+    PayRateUpdate,
     PayRateWithUser,
-    PayRateHistoryResponse
 )
 from app.services.payroll_service import PayRateService
-
 
 router = APIRouter(prefix="/api/pay-rates", tags=["Pay Rates"])
 
@@ -52,12 +56,9 @@ async def list_pay_rates(
     service = PayRateService(db)
     # Filter by company_id using multi-tenant filter
     company_filter = get_company_filter(current_user)
-    # Convert sentinel to None for service layer (service handles None as no filter)
-    company_id = None if company_filter is None else (None if company_filter == FILTER_NULL_COMPANY else company_filter)
-    # For platform users (FILTER_NULL_COMPANY), we need to pass a special marker
-    # The service layer needs to be updated to handle this
+    # For platform users (FILTER_NULL_COMPANY), the service layer handles the sentinel
     pay_rates, total = await service.get_all_pay_rates(skip, limit, active_only, company_filter)
-    
+
     return {
         "items": [
             PayRateWithUser(
@@ -100,7 +101,7 @@ async def get_user_pay_rates(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Can only view your own pay rates"
         )
-    
+
     service = PayRateService(db)
     pay_rates = await service.get_user_pay_rates(user_id, include_inactive)
     return pay_rates
@@ -120,7 +121,7 @@ async def get_user_current_rate(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Can only view your own pay rates"
         )
-    
+
     service = PayRateService(db)
     pay_rate = await service.get_user_active_rate(user_id)
     return pay_rate
@@ -137,19 +138,19 @@ async def get_pay_rate(
     """
     service = PayRateService(db)
     pay_rate = await service.get_pay_rate(pay_rate_id)
-    
+
     if not pay_rate:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Pay rate not found"
         )
-    
+
     if current_user.role not in ["super_admin", "admin", "company_admin"] and current_user.id != pay_rate.user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Can only view your own pay rates"
         )
-    
+
     return pay_rate
 
 
@@ -166,13 +167,13 @@ async def update_pay_rate(
     """
     service = PayRateService(db)
     pay_rate = await service.update_pay_rate(pay_rate_id, pay_rate_data, current_user.id)
-    
+
     if not pay_rate:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Pay rate not found"
         )
-    
+
     return pay_rate
 
 
@@ -188,7 +189,7 @@ async def delete_pay_rate(
     """
     service = PayRateService(db)
     deleted = await service.delete_pay_rate(pay_rate_id)
-    
+
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

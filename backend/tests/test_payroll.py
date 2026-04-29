@@ -164,10 +164,32 @@ class TestPayrollPeriodWorkflow:
     """Tests for payroll period workflow (process, approve, mark paid)"""
 
     async def test_process_payroll_period(
-        self, client: AsyncClient, admin_token: str
+        self, client: AsyncClient, admin_token: str, test_user: User
     ):
-        """Test processing a payroll period"""
-        # Create a period first
+        """Test processing a payroll period.
+
+        The /process endpoint returns 400 ``no_pay_rates`` unless at least
+        one user with an active PayRate exists in the admin's tenant. Create
+        that pay rate inline so this test does not depend on data leaked
+        from earlier tests (see TRUNCATE isolation in conftest.py).
+        """
+        # Arrange: give test_user an active hourly pay rate so /process
+        # has a candidate employee to calculate against.
+        rate_response = await client.post(
+            "/api/pay-rates",
+            json={
+                "user_id": test_user.id,
+                "rate_type": "hourly",
+                "base_rate": 25.00,
+                "currency": "USD",
+                "overtime_multiplier": 1.5,
+                "effective_from": str(date.today()),
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert rate_response.status_code == 201
+
+        # Create a period
         start_date = date.today() + timedelta(days=90)
         create_response = await client.post(
             "/api/payroll/periods",

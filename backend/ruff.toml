@@ -13,6 +13,8 @@ select = [
     "B",      # flake8-bugbear
     "C4",     # flake8-comprehensions
     "UP",     # pyupgrade
+    "DTZ003", # flake8-datetimez: ban datetime.utcnow()
+    "DTZ005", # flake8-datetimez: ban datetime.now() without tz
 ]
 
 ignore = [
@@ -26,8 +28,11 @@ fixable = ["ALL"]
 unfixable = []
 
 [lint.per-file-ignores]
-"tests/*" = ["B011", "S101"]  # Allow assert in tests
+"tests/*" = ["B011", "S101", "DTZ003", "DTZ005"]  # Allow assert + naive UTC in tests
 "__init__.py" = ["F401"]      # Allow unused imports in __init__.py
+# Prompt 4b deferred sweep is now complete. All previously-listed files have
+# been migrated to app.utils.timewindow.now_utc / day_bounds / range_bounds
+# and DTZ003/DTZ005 apply uniformly across backend/app/.
 
 [lint.isort]
 known-first-party = ["app"]
@@ -40,4 +45,6 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 # Like Black, respect magic trailing commas
-docstring-code-format = true
+# NOTE: `docstring-code-format = true` was removed because it requires
+# ruff >= 0.3 and this project currently pins ruff 0.1.6. Restore the
+# line once ruff is upgraded (tracked for the dependency-bump prompt).

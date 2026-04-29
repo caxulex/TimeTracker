@@ -6,27 +6,31 @@
 # Admins can send notifications to users.
 # ============================================
 
+import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy import select, func, and_, update, delete
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user, get_current_admin_user, get_company_filter
-from app.models import User, Notification
+from app.dependencies import (
+    get_current_admin_user,
+    get_current_user,
+)
+from app.models import Notification, User
 from app.schemas.notifications import (
-    NotificationResponse,
-    NotificationCreate,
     NotificationBulkCreate,
+    NotificationCreate,
+    NotificationDeleteRequest,
+    NotificationDeleteResponse,
     NotificationListResponse,
     NotificationMarkReadRequest,
     NotificationMarkReadResponse,
-    NotificationDeleteRequest,
-    NotificationDeleteResponse,
+    NotificationResponse,
     UnreadCountResponse,
-    NotificationTypeEnum
 )
 
 logger = logging.getLogger(__name__)
@@ -53,19 +57,19 @@ async def get_my_notifications(
     """
     # Build base query
     base_filter = Notification.user_id == current_user.id
-    
+
     if unread_only:
         base_filter = and_(base_filter, Notification.is_read == False)
-    
+
     if type:
         base_filter = and_(base_filter, Notification.type == type)
-    
+
     # Get total count
     count_result = await db.execute(
         select(func.count(Notification.id)).where(base_filter)
     )
     total = count_result.scalar() or 0
-    
+
     # Get unread count (always fetch for badge display)
     unread_result = await db.execute(
         select(func.count(Notification.id)).where(
@@ -76,7 +80,7 @@ async def get_my_notifications(
         )
     )
     unread_count = unread_result.scalar() or 0
-    
+
     # Get paginated notifications
     offset = (page - 1) * page_size
     result = await db.execute(
@@ -87,7 +91,7 @@ async def get_my_notifications(
         .limit(page_size)
     )
     notifications = result.scalars().all()
-    
+
     return NotificationListResponse(
         items=[NotificationResponse.model_validate(n) for n in notifications],
         total=total,
@@ -115,7 +119,7 @@ async def get_unread_count(
         )
     )
     unread_count = result.scalar() or 0
-    
+
     return UnreadCountResponse(unread_count=unread_count)
 
 
@@ -138,13 +142,13 @@ async def get_notification(
         )
     )
     notification = result.scalar_one_or_none()
-    
+
     if not notification:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Notification not found"
         )
-    
+
     return NotificationResponse.model_validate(notification)
 
 
@@ -160,7 +164,7 @@ async def mark_notifications_read(
     If notification_ids is None or empty, mark all as read.
     """
     now = datetime.now(timezone.utc)
-    
+
     if request.notification_ids:
         # Mark specific notifications as read
         result = await db.execute(
@@ -186,10 +190,10 @@ async def mark_notifications_read(
             )
             .values(is_read=True, read_at=now)
         )
-    
+
     await db.commit()
     updated_count = result.rowcount
-    
+
     return NotificationMarkReadResponse(
         updated_count=updated_count,
         message=f"Marked {updated_count} notification(s) as read"
@@ -229,10 +233,10 @@ async def delete_notifications(
                 )
             )
         )
-    
+
     await db.commit()
     deleted_count = result.rowcount
-    
+
     return NotificationDeleteResponse(
         deleted_count=deleted_count,
         message=f"Deleted {deleted_count} notification(s)"
@@ -258,13 +262,13 @@ async def send_notification(
         select(User).where(User.id == notification.user_id)
     )
     target_user = target_result.scalar_one_or_none()
-    
+
     if not target_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Target user not found"
         )
-    
+
     # Company admins can only send to users in their company
     if current_user.role != "super_admin" and current_user.company_id:
         if target_user.company_id != current_user.company_id:
@@ -272,7 +276,7 @@ async def send_notification(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot send notifications to users in other companies"
             )
-    
+
     # Create notification
     new_notification = Notification(
         user_id=notification.user_id,
@@ -285,13 +289,13 @@ async def send_notification(
         entity_id=notification.entity_id,
         metadata=notification.metadata
     )
-    
+
     db.add(new_notification)
     await db.commit()
     await db.refresh(new_notification)
-    
+
     logger.info(f"Notification sent to user {notification.user_id} by admin {current_user.id}")
-    
+
     # Send via WebSocket if user is connected
     try:
         from app.routers.websocket import manager
@@ -301,7 +305,7 @@ async def send_notification(
         }, notification.user_id)
     except Exception as e:
         logger.warning(f"Failed to send WebSocket notification: {e}")
-    
+
     return NotificationResponse.model_validate(new_notification)
 
 
@@ -320,13 +324,13 @@ async def send_bulk_notifications(
         select(User).where(User.id.in_(notification.user_ids))
     )
     target_users = users_result.scalars().all()
-    
+
     if not target_users:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No valid target users found"
         )
-    
+
     # Company admins can only send to users in their company
     if current_user.role != "super_admin" and current_user.company_id:
         target_users = [u for u in target_users if u.company_id == current_user.company_id]
@@ -335,11 +339,11 @@ async def send_bulk_notifications(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot send notifications to users in other companies"
             )
-    
+
     # Create notifications
     created_count = 0
     websocket_sent = 0
-    
+
     for user in target_users:
         new_notification = Notification(
             user_id=user.id,
@@ -354,9 +358,9 @@ async def send_bulk_notifications(
         )
         db.add(new_notification)
         created_count += 1
-    
+
     await db.commit()
-    
+
     # Send via WebSocket to connected users
     try:
         from app.routers.websocket import manager
@@ -372,13 +376,23 @@ async def send_bulk_notifications(
                     }
                 }, user.id)
                 websocket_sent += 1
-            except Exception:
-                pass
+            except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+                # Bulk fan-out must not swallow shutdown/cancellation.
+                raise
+            except Exception as ws_exc:
+                # One disconnected/dead socket should not abort the rest of
+                # the bulk send; log and continue. The DB row is already
+                # persisted, so the user will still see the notification on
+                # next reconnect.
+                logger.warning(
+                    "notifications.bulk_ws_delivery_failed",
+                    extra={"user_id": user.id, "error": str(ws_exc)},
+                )
     except Exception as e:
         logger.warning(f"Failed to send WebSocket notifications: {e}")
-    
+
     logger.info(f"Bulk notification sent to {created_count} users by admin {current_user.id}")
-    
+
     return {
         "message": f"Sent {created_count} notifications",
         "created_count": created_count,
@@ -419,11 +433,11 @@ async def create_notification(
         entity_id=entity_id,
         metadata=metadata
     )
-    
+
     db.add(notification)
     await db.commit()
     await db.refresh(notification)
-    
+
     # Send via WebSocket if enabled
     if send_websocket:
         try:
@@ -441,7 +455,7 @@ async def create_notification(
             }, user_id)
         except Exception as e:
             logger.warning(f"Failed to send WebSocket notification: {e}")
-    
+
     return notification
 
 

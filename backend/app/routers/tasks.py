@@ -2,18 +2,23 @@
 Tasks management router
 """
 
-from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from pydantic import BaseModel, Field
 from datetime import datetime
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import User, Project, Task, TeamMember, Team
-from app.dependencies import get_current_active_user, get_company_filter, apply_company_filter
-from app.schemas.auth import Message
+from app.dependencies import (
+    apply_company_filter,
+    get_company_filter,
+    get_current_active_user,
+)
+from app.models import Project, Task, Team, TeamMember, User
 from app.routers.websocket import manager as ws_manager
+from app.schemas.auth import Message
 
 router = APIRouter()
 
@@ -60,16 +65,16 @@ async def check_project_access(db: AsyncSession, project_id: int, user: User) ->
     query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
     company_id = get_company_filter(user)
     query = apply_company_filter(query, Team.company_id, company_id)
-    
+
     result = await db.execute(query)
     project = result.scalar_one_or_none()
     if not project:
         return False
-    
+
     # Admins have full access to projects in their company
     if user.role in ["super_admin", "admin", "company_admin"]:
         return True
-    
+
     # Regular users need team membership
     member_result = await db.execute(
         select(TeamMember).where(
@@ -93,44 +98,44 @@ async def list_tasks(
     """List tasks"""
     base_query = select(Task)
     count_query = select(func.count(Task.id))
-    
+
     # Filter by accessible projects
     if current_user.role != "super_admin":
         user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
         user_projects = select(Project.id).where(Project.team_id.in_(user_teams))
         base_query = base_query.where(Task.project_id.in_(user_projects))
         count_query = count_query.where(Task.project_id.in_(user_projects))
-    
+
     if project_id:
         base_query = base_query.where(Task.project_id == project_id)
         count_query = count_query.where(Task.project_id == project_id)
-    
+
     if status:
         base_query = base_query.where(Task.status == status)
         count_query = count_query.where(Task.status == status)
-    
+
     if search:
         search_filter = f"%{search}%"
         base_query = base_query.where(Task.name.ilike(search_filter))
         count_query = count_query.where(Task.name.ilike(search_filter))
-    
+
     # Get total count
     total_result = await db.execute(count_query)
     total = total_result.scalar()
-    
+
     # Get paginated results
     offset = (page - 1) * page_size
     query = base_query.offset(offset).limit(page_size).order_by(Task.created_at.desc())
     result = await db.execute(query)
     tasks = result.scalars().all()
-    
+
     # Get project names
     project_ids = list(set(t.project_id for t in tasks))
     project_names = {}
     if project_ids:
         projects_result = await db.execute(select(Project.id, Project.name).where(Project.id.in_(project_ids)))
         project_names = dict(projects_result.all())
-    
+
     items = []
     for task in tasks:
         items.append(TaskResponse(
@@ -143,7 +148,7 @@ async def list_tasks(
             created_at=task.created_at,
             updated_at=task.updated_at
         ))
-    
+
     return PaginatedTasks(
         items=items,
         total=total,
@@ -162,19 +167,19 @@ async def get_task(
     """Get task details"""
     result = await db.execute(select(Task).where(Task.id == task_id))
     task = result.scalar_one_or_none()
-    
+
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    
+
     # Check access
     has_access = await check_project_access(db, task.project_id, current_user)
     if not has_access:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    
+
     # Get project name
     project_result = await db.execute(select(Project.name).where(Project.id == task.project_id))
     project_name = project_result.scalar()
-    
+
     return TaskResponse(
         id=task.id,
         name=task.name,
@@ -198,22 +203,22 @@ async def create_task(
     has_access = await check_project_access(db, task_data.project_id, current_user)
     if not has_access:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found or access denied")
-    
+
     # Get project name and team_id for notifications
     project_result = await db.execute(select(Project).where(Project.id == task_data.project_id))
     project = project_result.scalar()
-    
+
     task = Task(
         name=task_data.name,
         description=task_data.description,
         project_id=task_data.project_id,
         status=task_data.status
     )
-    
+
     db.add(task)
     await db.commit()
     await db.refresh(task)
-    
+
     # Notify all team members about new task
     await ws_manager.broadcast_to_team(
         {
@@ -229,7 +234,7 @@ async def create_task(
         },
         project.team_id
     )
-    
+
     return TaskResponse(
         id=task.id,
         name=task.name,
@@ -252,21 +257,21 @@ async def update_task(
     """Update a task"""
     result = await db.execute(select(Task).where(Task.id == task_id))
     task = result.scalar_one_or_none()
-    
+
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    
+
     # Check access
     has_access = await check_project_access(db, task.project_id, current_user)
     if not has_access:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    
+
     # If project_id is being changed, validate the new project
     if task_data.project_id is not None and task_data.project_id != task.project_id:
         new_project_access = await check_project_access(db, task_data.project_id, current_user)
         if not new_project_access:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid project_id or access denied")
-    
+
     # Update fields
     if task_data.name is not None:
         task.name = task_data.name
@@ -276,14 +281,14 @@ async def update_task(
         task.status = task_data.status
     if task_data.project_id is not None:
         task.project_id = task_data.project_id
-    
+
     await db.commit()
     await db.refresh(task)
-    
+
     # Get project name
     project_result = await db.execute(select(Project.name).where(Project.id == task.project_id))
     project_name = project_result.scalar()
-    
+
     return TaskResponse(
         id=task.id,
         name=task.name,
@@ -305,16 +310,16 @@ async def delete_task(
     """Delete a task"""
     result = await db.execute(select(Task).where(Task.id == task_id))
     task = result.scalar_one_or_none()
-    
+
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    
+
     # Check access
     has_access = await check_project_access(db, task.project_id, current_user)
     if not has_access:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    
+
     await db.delete(task)
     await db.commit()
-    
+
     return Message(message="Task deleted successfully")

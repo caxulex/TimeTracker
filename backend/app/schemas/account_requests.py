@@ -4,6 +4,7 @@ Account request schemas
 
 from datetime import datetime
 from typing import Optional
+
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -37,7 +38,7 @@ class AccountRequestResponse(BaseModel):
     email_notification_sent: bool = False
     email_sent_at: Optional[datetime] = None
     email_error: Optional[str] = None
-    
+
     class Config:
         from_attributes = True
 

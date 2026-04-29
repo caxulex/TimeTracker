@@ -296,38 +296,100 @@ function adjustColorBrightness(hex: string, percent: number): string {
 }
 
 /**
+ * B22: Validate a favicon URL before injecting it into a `<link href>`.
+ * Accepts:
+ *   - https:// URLs ending in a known image extension (with optional query string)
+ *   - same-origin paths beginning with `/`
+ * Rejects everything else (data:, javascript:, vbscript:, http://, etc.).
+ * Exported for unit testing.
+ */
+export function isValidFaviconUrl(url: unknown): url is string {
+  if (typeof url !== 'string' || url.length === 0) return false;
+  if (url.startsWith('/')) return true;
+  return /^https:\/\/[^\s]+\.(png|ico|svg|jpg|jpeg|webp)(\?.*)?$/i.test(url);
+}
+
+/**
+ * B22: Validate a CSS color string. Accepts only `#RRGGBB` or `#RRGGBBAA`.
+ * Exported for unit testing.
+ */
+export function isValidHexColor(color: unknown): color is string {
+  if (typeof color !== 'string') return false;
+  return /^#[0-9a-fA-F]{6}$/.test(color) || /^#[0-9a-fA-F]{8}$/.test(color);
+}
+
+/**
  * Apply branding to document
  */
 export function applyBrandingToDocument(config: WhiteLabelConfig): void {
   const root = document.documentElement;
-  
-  // Apply primary color and variants
-  root.style.setProperty('--color-primary', config.primary_color);
-  root.style.setProperty('--color-primary-hover', adjustColorBrightness(config.primary_color, -10));
-  root.style.setProperty('--color-primary-light', adjustColorBrightness(config.primary_color, 40));
-  
-  // Apply secondary and accent colors if present
+
+  // B22: Validate primary color before applying. Reject silently to default
+  // palette (variable left untouched) with a console warning.
+  if (isValidHexColor(config.primary_color)) {
+    root.style.setProperty('--color-primary', config.primary_color);
+    root.style.setProperty('--color-primary-hover', adjustColorBrightness(config.primary_color, -10));
+    root.style.setProperty('--color-primary-light', adjustColorBrightness(config.primary_color, 40));
+  } else {
+    console.warn(
+      `[branding] Rejected invalid primary_color: ${String(config.primary_color)}. Using default.`
+    );
+  }
+
+  // B22: Apply secondary and accent colors only if they pass validation.
   if (config.secondary_color) {
-    root.style.setProperty('--color-secondary', config.secondary_color);
-    root.style.setProperty('--color-secondary-hover', adjustColorBrightness(config.secondary_color, -10));
+    if (isValidHexColor(config.secondary_color)) {
+      root.style.setProperty('--color-secondary', config.secondary_color);
+      root.style.setProperty('--color-secondary-hover', adjustColorBrightness(config.secondary_color, -10));
+    } else {
+      console.warn(
+        `[branding] Rejected invalid secondary_color: ${String(config.secondary_color)}. Using default.`
+      );
+    }
   }
-  
+
   if (config.accent_color) {
-    root.style.setProperty('--color-accent', config.accent_color);
+    if (isValidHexColor(config.accent_color)) {
+      root.style.setProperty('--color-accent', config.accent_color);
+    } else {
+      console.warn(
+        `[branding] Rejected invalid accent_color: ${String(config.accent_color)}. Using default.`
+      );
+    }
   }
-  
+
   // Update document title
   document.title = config.app_name;
-  
-  // Update favicon if provided
+
+  // B22: Update favicon ONLY when the URL passes validation. Reuse the
+  // existing `<link rel="icon">` node if present — never appendChild a
+  // duplicate. Branding failure must not break the page, so we log a
+  // warning and keep the default favicon on rejection.
   if (config.favicon_url) {
-    const link = document.querySelector("link[rel*='icon']") as HTMLLinkElement || document.createElement('link');
-    link.type = 'image/x-icon';
-    link.rel = 'shortcut icon';
-    link.href = config.favicon_url;
-    document.getElementsByTagName('head')[0].appendChild(link);
+    if (isValidFaviconUrl(config.favicon_url)) {
+      let link = document.querySelector(
+        'link[rel="icon"]'
+      ) as HTMLLinkElement | null;
+      if (!link) {
+        // Fallback: some HTML uses `rel="shortcut icon"`.
+        link = document.querySelector(
+          "link[rel='shortcut icon']"
+        ) as HTMLLinkElement | null;
+      }
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.head.appendChild(link);
+      }
+      link.type = 'image/x-icon';
+      link.href = config.favicon_url;
+    } else {
+      console.warn(
+        `[branding] Rejected invalid favicon_url: ${String(config.favicon_url)}. Keeping default favicon.`
+      );
+    }
   }
-  
+
   // Store for meta tag updates
   const metaDescription = document.querySelector('meta[name="description"]');
   if (metaDescription && config.tagline) {

@@ -37,9 +37,12 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # Drop indexes
-    op.drop_index('ix_users_manager_id', table_name='users')
+    # ix_users_manager_id and ix_users_department are also created
+    # (with if_not_exists=True) in migration 006, which drops them first
+    # on downgrade. Use if_exists=True to make this drop idempotent.
+    op.drop_index('ix_users_manager_id', table_name='users', if_exists=True)
     op.drop_index('ix_users_employment_type', table_name='users')
-    op.drop_index('ix_users_department', table_name='users')
+    op.drop_index('ix_users_department', table_name='users', if_exists=True)
     
     # Drop columns
     op.drop_column('users', 'address')

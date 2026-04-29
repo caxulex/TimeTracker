@@ -674,12 +674,18 @@ export function AccountRequestsPage() {
               {JSON.stringify(prefillData, null, 2)}
             </pre>
             <div className="mt-4">
+              {/*
+                B26: Staff Wizard is not yet implemented. When the wizard
+                exists, wire it to receive `prefillData` and replace this
+                close-only handler with a navigation/modal-open call.
+                TODO(B26): open Staff Wizard with prefillData.
+              */}
               <Button
                 variant="primary"
                 onClick={() => setPrefillData(null)}
                 className="w-full"
               >
-                Close (TODO: Open Staff Wizard)
+                Close
               </Button>
             </div>
           </div>

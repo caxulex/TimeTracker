@@ -4,10 +4,11 @@ SEC-010: Sanitized Error Responses Implementation
 Provides safe error messages without exposing internals
 """
 
-from fastapi import HTTPException, status
-from typing import Optional, Any, Dict
-import uuid
 import logging
+import uuid
+from typing import Any, Dict, Optional
+
+from fastapi import HTTPException, status
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ class AppException(HTTPException):
     Base application exception with safe error messages.
     Internal details are logged but not exposed to clients.
     """
-    
+
     def __init__(
         self,
         code: str,
@@ -31,11 +32,11 @@ class AppException(HTTPException):
         self.request_id = str(uuid.uuid4())[:8]
         self.internal_message = internal_message
         self.details = details or {}
-        
+
         # Log internal details
         if internal_message:
             logger.error(f"[{self.request_id}] {code}: {internal_message}")
-        
+
         super().__init__(
             status_code=status_code,
             detail={

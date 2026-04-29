@@ -6,6 +6,13 @@ __pycache__/
 # C extensions
 *.so
 
+# Phase 0 baseline re-run artifacts (local only, never commit)
+baseline_phase0_rerun/
+baseline_tsc.txt
+baseline_eslint.txt
+baseline_vitest.txt
+baseline_mypy.txt
+
 # Distribution / packaging
 .Python
 build/
@@ -264,3 +271,14 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+# Lint/test output dumps (audit finding B27)
+current_*.txt
+baseline_*.txt
+*_output.txt
+*_results*.txt
+pytest_*.txt
+test_out.txt
+# Playwright e2e artifacts
+frontend/test-results/
+frontend/playwright-report/
+frontend/playwright/.cache/

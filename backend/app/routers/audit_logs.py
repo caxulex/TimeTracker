@@ -6,14 +6,15 @@
 # ============================================
 
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from app.dependencies import get_current_admin_user
 from app.models import User
-from app.services.audit_log import audit_log, AuditEventType
+from app.services.audit_log import AuditEventType, audit_log
 
 logger = logging.getLogger(__name__)
 
@@ -84,9 +85,9 @@ async def get_audit_logs(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Invalid event type: {event_type}"
                 )
-        
+
         logs = await audit_log.get_recent_logs(event_type=filter_type, limit=limit)
-        
+
         return AuditLogListResponse(
             items=[AuditLogEntry(**log) for log in logs],
             total=len(logs)
@@ -111,7 +112,7 @@ async def get_user_audit_logs(
     """
     try:
         logs = await audit_log.get_user_logs(user_id=user_id, limit=limit)
-        
+
         return AuditLogListResponse(
             items=[AuditLogEntry(**log) for log in logs],
             total=len(logs)
@@ -136,21 +137,21 @@ async def get_audit_summary(
     try:
         # Get logs for time period
         all_logs = await audit_log.get_recent_logs(limit=1000)
-        
+
         # Filter by time range
         cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
         recent_logs = [
             log for log in all_logs
             if datetime.fromisoformat(log['timestamp'].replace('Z', '+00:00')) >= cutoff_time
         ]
-        
+
         # Calculate statistics
         login_success = sum(1 for log in recent_logs if log['event_type'] == AuditEventType.LOGIN_SUCCESS.value)
         login_failed = sum(1 for log in recent_logs if log['event_type'] == AuditEventType.LOGIN_FAILED.value)
         user_events = sum(1 for log in recent_logs if log['event_type'].startswith('user.'))
         admin_actions = sum(1 for log in recent_logs if log['event_type'].startswith('admin.'))
         security_events = sum(1 for log in recent_logs if log['event_type'].startswith('security.'))
-        
+
         return AuditLogSummary(
             total_events=len(recent_logs),
             login_success=login_success,

@@ -3,36 +3,59 @@ Time Tracker API - Main FastAPI Application
 SEC-004, SEC-007, SEC-008, SEC-009, SEC-010, SEC-018, SEC-020: Security Hardened
 """
 
+import logging
+import time
+import uuid
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
-import logging
-import time
-import uuid
 
-from app.config import settings
-from app.database import get_db
-from app.routers import auth, users, teams, projects, tasks, time_entries, reports, websocket
-from app.routers import pay_rates, payroll, payroll_reports, monitoring
-from app.routers import admin, export, sessions, invitations, approvals, report_templates
-from app.routers import ip_security as ip_security_router
-from app.routers import account_requests
-from app.routers import api_keys  # SEC-020: API Key management
-from app.routers import ai_features  # AI Feature Toggle System
-from app.routers import companies  # Multi-tenancy / White-label support
-from app.routers import email_logs  # Email delivery monitoring
-from app.routers import notifications  # In-app notifications
-from app.routers import audit_logs  # Audit log viewing
-from app.routers import work_sessions  # Micro-task management: Work sessions, breaks, meetings
 from app.ai import ai_router  # AI Services (suggestions, anomalies)
-from app.middleware import RateLimitMiddleware, rate_limiter, SecurityHeadersMiddleware, RequestValidationMiddleware
+from app.config import settings
 from app.exceptions import AppException
 from app.integrations.sentry import init_sentry
 
 # Phase 3: Configure structured logging BEFORE anything else logs
 from app.logging_config import configure_logging, request_id_var
+from app.middleware import (
+    RateLimitMiddleware,
+    RequestValidationMiddleware,
+    SecurityHeadersMiddleware,
+    rate_limiter,
+)
+from app.routers import (
+    account_requests,
+    admin,
+    ai_features,  # AI Feature Toggle System
+    api_keys,  # SEC-020: API Key management
+    approvals,
+    audit_logs,  # Audit log viewing
+    auth,
+    companies,  # Multi-tenancy / White-label support
+    email_logs,  # Email delivery monitoring
+    export,
+    invitations,
+    ip_security as ip_security_router,
+    monitoring,
+    notifications,  # In-app notifications
+    pay_rates,
+    payroll,
+    payroll_reports,
+    projects,
+    report_templates,
+    reports,
+    sessions,
+    tasks,
+    teams,
+    time_entries,
+    users,
+    websocket,
+    work_sessions,  # Micro-task management: Work sessions, breaks, meetings
+)
+
 configure_logging(
     log_level=settings.LOG_LEVEL,
     environment=settings.ENVIRONMENT,
@@ -50,13 +73,42 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Time Tracker API...")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info(f"Debug mode: {settings.DEBUG}")
-    
+
+    # B12: surface effective DB pool config at startup so operators
+    # can verify production isn't accidentally running NullPool.
+    from app.database import log_pool_config
+    log_pool_config()
+
+    # B16: warn loudly when running in production without an explicit
+    # trusted-proxy list. In that mode get_client_ip falls back to the
+    # immediate peer IP, which is fine for a direct-bind deployment but
+    # is almost never what an operator running behind nginx/ALB wants.
+    if settings.ENVIRONMENT == "production" and not settings.TRUSTED_PROXIES:
+        logger.warning(
+            "auth.no_trusted_proxies: TRUSTED_PROXIES is empty in production; "
+            "X-Forwarded-For will be ignored and audit logs will record the "
+            "direct peer IP. Set TRUSTED_PROXIES to your reverse-proxy CIDR "
+            "(e.g. '10.0.0.0/8') if requests reach this app via a proxy."
+        )
+
+    # B13: warm the realtime active-timers cache once at startup. This
+    # function is best-effort: on failure it logs ``app.warm_cache_failed``
+    # and returns 0 so the app starts with an empty cache rather than
+    # crashing. Per-connection loads later refresh the cache per tenant.
+    try:
+        from app.routers.websocket import load_active_timers_from_db
+        await load_active_timers_from_db(company_id=None)
+    except Exception as e:
+        logger.error(
+            "app.warm_cache_failed: startup hook crashed: %s", e, exc_info=True
+        )
+
     # Auto-seed AI features if not present
     try:
         await seed_ai_features_on_startup()
     except Exception as e:
         logger.warning(f"Could not auto-seed AI features: {e}")
-    
+
     logger.info("Time Tracker API started successfully")
     yield
     logger.info("Shutting down Time Tracker API...")
@@ -65,12 +117,13 @@ async def lifespan(app: FastAPI):
 async def seed_ai_features_on_startup():
     """Automatically seed AI features if the table is empty"""
     from sqlalchemy import text
+
     from app.database import async_session
-    
+
     async with async_session() as db:
         result = await db.execute(text("SELECT COUNT(*) FROM ai_feature_settings"))
         count = result.scalar()
-        
+
         if count == 0:
             logger.info("Seeding AI features...")
             features = [
@@ -81,18 +134,18 @@ async def seed_ai_features_on_startup():
                 ("ai_report_summaries", "AI Report Summaries", "AI-generated insights and summaries in your reports", False, True, "gemini"),
                 ("ai_task_estimation", "Task Duration Estimation", "AI-powered estimates for how long tasks will take", False, True, "gemini"),
             ]
-            
+
             for f in features:
                 await db.execute(
                     text("""
-                        INSERT INTO ai_feature_settings 
+                        INSERT INTO ai_feature_settings
                         (feature_id, feature_name, description, is_enabled, requires_api_key, api_provider)
                         VALUES (:fid, :fname, :desc, :enabled, :req_key, :provider)
                         ON CONFLICT (feature_id) DO NOTHING
                     """),
                     {"fid": f[0], "fname": f[1], "desc": f[2], "enabled": f[3], "req_key": f[4], "provider": f[5]}
                 )
-            
+
             await db.commit()
             logger.info(f"Seeded {len(features)} AI features")
         else:
@@ -124,55 +177,13 @@ app.add_middleware(SecurityHeadersMiddleware)
 # SEC-004: Add rate limiting middleware
 app.add_middleware(RateLimitMiddleware, limiter=rate_limiter)
 
-# SEC-008: CORS origin validator for multi-tenant wildcard subdomain support
-def is_origin_allowed(origin: str) -> bool:
-    """
-    Check if an origin is allowed for CORS.
-    Supports:
-    - Exact matches from ALLOWED_ORIGINS
-    - Wildcard subdomain matches from CORS_WILDCARD_DOMAINS (e.g., *.example.com)
-    """
-    if not origin:
-        return False
-    
-    # Exact match
-    if origin in settings.ALLOWED_ORIGINS:
-        return True
-    
-    # Parse origin to get hostname
-    try:
-        from urllib.parse import urlparse
-        parsed = urlparse(origin)
-        hostname = parsed.hostname or ''
-        scheme = parsed.scheme or 'https'
-    except Exception:
-        return False
-    
-    # Check wildcard domains
-    for base_domain in settings.CORS_WILDCARD_DOMAINS:
-        # Allow exact base domain
-        if hostname == base_domain:
-            return True
-        # Allow any subdomain of base domain (e.g., xyz-corp.timetracker.shaemarcus.com)
-        if hostname.endswith(f'.{base_domain}'):
-            return True
-    
-    return False
 
-
-# SEC-008: Build complete origins list for CORS middleware
-def get_all_cors_origins() -> list:
-    """
-    Get all allowed origins including wildcard domain expansions.
-    Note: FastAPI CORSMiddleware doesn't support regex, so we use allow_origin_regex
-    or handle dynamically with a custom middleware for full wildcard support.
-    """
-    origins = list(settings.ALLOWED_ORIGINS)
-    # For non-wildcard usage, return exact list
-    return origins
-
-
-# SEC-008: Build CORS origin regex for wildcard subdomain support
+# SEC-008 / B25: Build CORS origin regex for wildcard subdomain support.
+# `is_origin_allowed` and `get_all_cors_origins` were dead/trivial helpers
+# (B25 cleanup) — `is_origin_allowed` was never called and
+# `get_all_cors_origins` was a 3-line wrapper around list(ALLOWED_ORIGINS).
+# Both were removed; the exact-origin list is now inlined at the
+# add_middleware() call site, and the regex is the only computed piece.
 def build_cors_origin_regex() -> str | None:
     """
     Build a regex pattern to match wildcard subdomains.
@@ -180,7 +191,7 @@ def build_cors_origin_regex() -> str | None:
     """
     if not settings.CORS_WILDCARD_DOMAINS:
         return None
-    
+
     # Build regex pattern for all wildcard domains
     # e.g., ["example.com", "test.com"] -> r"https?://.*\.(example\.com|test\.com)"
     escaped_domains = [domain.replace('.', r'\.') for domain in settings.CORS_WILDCARD_DOMAINS]
@@ -190,9 +201,53 @@ def build_cors_origin_regex() -> str | None:
 
 # SEC-008: Tightened CORS configuration with multi-tenant support
 cors_origin_regex = build_cors_origin_regex()
+cors_exact_origins = list(settings.ALLOWED_ORIGINS)
+
+
+def _assert_cors_not_fully_closed_in_production(
+    environment: str,
+    exact_origins: list,
+    origin_regex: str | None,
+) -> None:
+    """B25: Fail-closed safety check.
+
+    If running in production with NEITHER an explicit origin list NOR a
+    wildcard regex, CORS is fully closed and every browser request from a
+    tenant subdomain will be silently blocked. Refuse to start so the
+    operator notices immediately.
+    """
+    if environment == "production" and not exact_origins and not origin_regex:
+        raise RuntimeError(
+            "CORS is fully closed in production — set ALLOWED_ORIGINS or "
+            "CORS_WILDCARD_DOMAINS"
+        )
+
+
+_assert_cors_not_fully_closed_in_production(
+    settings.ENVIRONMENT, cors_exact_origins, cors_origin_regex
+)
+
+# B25: Surface the resolved CORS configuration at startup so operators can
+# verify production isn't accidentally rejecting tenant subdomains. Logged
+# under a stable structured identifier `cors.config_resolved`.
+from app.utils.timewindow import now_utc as _b25_now_utc
+
+logger.info(
+    "cors.config_resolved",
+    extra={
+        "event": "cors.config_resolved",
+        "exact_origins": cors_exact_origins,
+        "origin_regex": cors_origin_regex,
+        "wildcard_enabled": bool(settings.CORS_WILDCARD_DOMAINS),
+        "wildcard_domains": list(settings.CORS_WILDCARD_DOMAINS),
+        "environment": settings.ENVIRONMENT,
+        "resolved_at": _b25_now_utc().isoformat(),
+    },
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=get_all_cors_origins(),
+    allow_origins=cors_exact_origins,
     allow_origin_regex=cors_origin_regex,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
@@ -221,7 +276,7 @@ def get_all_allowed_hosts() -> list:
     TrustedHostMiddleware supports wildcard patterns like *.example.com
     """
     hosts = list(settings.ALLOWED_HOSTS)
-    
+
     # Add wildcard patterns for each base domain
     for base_domain in settings.CORS_WILDCARD_DOMAINS:
         wildcard_pattern = f"*.{base_domain}"
@@ -230,7 +285,7 @@ def get_all_allowed_hosts() -> list:
         # Also ensure base domain itself is allowed
         if base_domain not in hosts:
             hosts.append(base_domain)
-    
+
     return hosts
 
 
@@ -288,8 +343,9 @@ async def api_health_check():
     """
     import redis.asyncio as redis_client
     from sqlalchemy import text
+
     from app.database import engine as async_engine
-    
+
     health_status = {
         "status": "healthy",
         "version": settings.APP_VERSION,
@@ -299,7 +355,7 @@ async def api_health_check():
             "redis": "unknown"
         }
     }
-    
+
     # Check database connection
     try:
         async with async_engine.connect() as conn:
@@ -308,7 +364,7 @@ async def api_health_check():
     except Exception as e:
         health_status["checks"]["database"] = f"unhealthy: {str(e)[:50]}"
         health_status["status"] = "degraded"
-    
+
     # Check Redis connection
     try:
         redis = redis_client.from_url(settings.REDIS_URL)
@@ -318,7 +374,7 @@ async def api_health_check():
     except Exception as e:
         health_status["checks"]["redis"] = f"unhealthy: {str(e)[:50]}"
         health_status["status"] = "degraded"
-    
+
     return health_status
 
 
@@ -328,9 +384,9 @@ async def version_info():
     Version and build information endpoint.
     Useful for debugging and deployment verification.
     """
-    import sys
     import platform
-    
+    import sys
+
     return {
         "app_name": settings.APP_NAME,
         "version": settings.APP_VERSION,

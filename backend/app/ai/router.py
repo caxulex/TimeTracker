@@ -12,88 +12,83 @@ API endpoints for AI features:
 """
 
 import logging
-from datetime import datetime
 from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
-from app.dependencies import get_current_user, require_role
-from app.models import User
-from app.ai.services import (
-    get_suggestion_service,
-    get_anomaly_service,
-    get_ai_client,
-    AIProviderError
-)
-from app.ai.services.forecasting_service import get_forecasting_service
-from app.ai.services.nlp_service import get_nlp_service
-from app.ai.services.reporting_service import get_reporting_service
-from app.ai.services.ml_anomaly_service import get_ml_anomaly_service
-from app.ai.services.task_estimation_service import get_task_estimation_service
-from app.ai.utils import get_cache_manager
 from app.ai.schemas import (
-    SuggestionRequest,
-    SuggestionResponse,
-    SuggestionFeedback,
+    AIStatusResponse,
+    AnomalyDismissRequest,
     AnomalyScanRequest,
     AnomalyScanResponse,
-    AnomalyDismissRequest,
-    AIStatusResponse,
-    AIProviderStatus,
-    # Forecasting schemas
-    PayrollForecastRequest,
-    PayrollForecastResponse,
-    OvertimeRiskRequest,
-    OvertimeRiskResponse,
-    ProjectBudgetRequest,
-    ProjectBudgetResponse,
+    BatchTaskEstimationRequest,
+    BatchTaskEstimationResponse,
+    BurnoutAssessmentRequest,
+    BurnoutAssessmentResponse,
     CashFlowResponse,
-    # NLP schemas (Phase 3)
-    NLPParseRequest,
-    NLPParseResponse,
-    NLPConfirmRequest,
-    NLPConfirmResponse,
-    # Report schemas (Phase 3)
-    WeeklySummaryRequest,
-    WeeklySummaryResponse,
-    ProjectHealthRequest,
-    ProjectHealthResponse,
-    UserInsightsRequest,
-    UserInsightsResponse,
+    EstimationStatsResponse,
     # Phase 4: ML Anomaly schemas
     MLAnomalyScanRequest,
     MLAnomalyScanResponse,
-    BurnoutAssessmentRequest,
-    BurnoutAssessmentResponse,
-    TeamBurnoutScanRequest,
-    TeamBurnoutResponse,
-    UserBaselineRequest,
-    UserBaselineResponse,
-    # Phase 4: Task Estimation schemas
-    TaskEstimationRequest,
-    TaskEstimationResponse,
-    BatchTaskEstimationRequest,
-    BatchTaskEstimationResponse,
     ModelTrainingRequest,
     ModelTrainingResponse,
-    UserPerformanceProfileResponse,
-    EstimationStatsResponse,
+    NLPConfirmRequest,
+    NLPConfirmResponse,
+    # NLP schemas (Phase 3)
+    NLPParseRequest,
+    NLPParseResponse,
+    OvertimeRiskRequest,
+    OvertimeRiskResponse,
+    # Forecasting schemas
+    PayrollForecastRequest,
+    PayrollForecastResponse,
+    ProjectBudgetRequest,
+    ProjectBudgetResponse,
+    ProjectHealthRequest,
+    ProjectHealthResponse,
     # Phase 5: Semantic Search schemas
     SemanticSearchRequest,
     SemanticSearchResponse,
-    SimilarTaskResult,
-    TimeSuggestionsRequest,
+    SuggestionFeedback,
+    SuggestionRequest,
+    SuggestionResponse,
+    # Phase 4: Task Estimation schemas
+    TaskEstimationRequest,
+    TaskEstimationResponse,
     # Phase 5: Team Analytics schemas
     TeamAnalyticsRequest,
     TeamAnalyticsResponse,
-    TeamMemberMetricsSchema,
-    TeamVelocitySchema,
-    CollaborationEdgeSchema,
+    TeamBurnoutResponse,
+    TeamBurnoutScanRequest,
     TeamComparisonRequest,
-    TeamComparisonResponse
+    TeamComparisonResponse,
+    TimeSuggestionsRequest,
+    UserBaselineRequest,
+    UserBaselineResponse,
+    UserInsightsRequest,
+    UserInsightsResponse,
+    UserPerformanceProfileResponse,
+    # Report schemas (Phase 3)
+    WeeklySummaryRequest,
+    WeeklySummaryResponse,
 )
+from app.ai.services import (
+    get_ai_client,
+    get_anomaly_service,
+    get_suggestion_service,
+)
+from app.ai.services.forecasting_service import get_forecasting_service
+from app.ai.services.ml_anomaly_service import get_ml_anomaly_service
+from app.ai.services.nlp_service import get_nlp_service
+from app.ai.services.reporting_service import get_reporting_service
+from app.ai.services.task_estimation_service import get_task_estimation_service
+from app.ai.utils import get_cache_manager
+from app.database import get_db
+from app.dependencies import get_current_user, require_role
+from app.models import User
+from app.utils.timewindow import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +112,7 @@ router = APIRouter(
     - Current time of day/week
     - Partial description typed
     - AI enhancement (optional)
-    
+
     Returns up to 5 suggestions sorted by confidence.
     """
 )
@@ -182,10 +177,10 @@ async def submit_suggestion_feedback(
     summary="Scan for anomalies",
     description="""
     Scan for anomalies in time tracking data.
-    
+
     - Regular users: Can only scan their own data
     - Admins/Managers: Can scan specific users, teams, or all users
-    
+
     Detects:
     - Extended work days (>12 hours)
     - Consecutive long days
@@ -203,12 +198,11 @@ async def scan_anomalies(
     """Scan for time tracking anomalies."""
     try:
         service = await get_anomaly_service(db)
-        
+
         # Permission checks
         is_admin = current_user.role in ["admin", "super_admin", "company_admin"]
         is_manager = current_user.role == "manager"
-        is_super_admin = current_user.role == "super_admin"
-        
+
         if request.scan_all:
             if not is_admin:
                 raise HTTPException(
@@ -238,9 +232,9 @@ async def scan_anomalies(
                 user_id=current_user.id,
                 period_days=request.period_days
             )
-        
+
         return result
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -293,10 +287,10 @@ async def get_all_anomalies(
     """Get anomalies for all users (admin/manager only)."""
     try:
         service = await get_anomaly_service(db)
-        
+
         # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
         company_id = current_user.company_id
-        
+
         result = await service.scan_all_users(
             period_days=period_days,
             team_id=team_id,
@@ -356,23 +350,23 @@ async def get_ai_status(
     """Get AI system status."""
     try:
         from app.services.ai_feature_service import AIFeatureManager
-        
+
         # Check AI providers
         client = await get_ai_client(db)
         provider_status = await client.check_availability()
-        
+
         # Get feature status
         fm = AIFeatureManager(db)
         features = {}
         for feature_name in ["ai_suggestions", "ai_anomaly_alerts"]:
             features[feature_name] = await fm.is_enabled(feature_name, current_user.id)
-        
+
         # Get cache stats (admin only)
         cache_stats = None
         if current_user.role in ["admin", "super_admin"]:
             cache = await get_cache_manager()
             cache_stats = await cache.get_cache_stats()
-        
+
         return {
             "providers": provider_status,
             "features": features,
@@ -399,11 +393,11 @@ async def reset_ai_client_endpoint(
     try:
         from app.ai.services import reset_ai_client
         await reset_ai_client()
-        
+
         # Reinitialize
         client = await get_ai_client(db)
         provider_status = await client.check_availability()
-        
+
         return {
             "success": True,
             "providers": provider_status
@@ -426,14 +420,14 @@ async def reset_ai_client_endpoint(
     summary="Forecast payroll costs",
     description="""
     Generate payroll forecasts for upcoming periods.
-    
+
     Uses historical payroll data to predict:
     - Total payroll cost
     - Regular hours cost
     - Overtime cost
     - Confidence intervals
     - Trend analysis
-    
+
     Requires at least 3 completed payroll periods for accurate forecasts.
     """
 )
@@ -445,10 +439,10 @@ async def forecast_payroll(
     """Get payroll forecast."""
     try:
         service = await get_forecasting_service(db)
-        
+
         # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
         company_id = current_user.company_id
-        
+
         result = await service.forecast_payroll(
             user_id=current_user.id,
             period_type=request.period_type,
@@ -471,13 +465,13 @@ async def forecast_payroll(
     summary="Assess overtime risk",
     description="""
     Identify employees at risk of exceeding overtime thresholds.
-    
+
     Analyzes:
     - Current week hours
     - Historical average daily hours
     - Projected end-of-week hours
     - Estimated overtime cost
-    
+
     Returns risk levels: low, medium, high, critical
     """
 )
@@ -489,10 +483,10 @@ async def assess_overtime_risk(
     """Assess overtime risk for employees."""
     try:
         service = await get_forecasting_service(db)
-        
+
         # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
         company_id = current_user.company_id
-        
+
         result = await service.assess_overtime_risk(
             user_id=current_user.id,
             days_ahead=request.days_ahead,
@@ -514,13 +508,13 @@ async def assess_overtime_risk(
     summary="Forecast project budget",
     description="""
     Forecast budget consumption for projects.
-    
+
     Analyzes:
     - Current spending vs budget
     - Burn rate trends
     - Projected completion date
     - Budget risk assessment
-    
+
     Returns recommendations for budget management.
     """
 )
@@ -532,10 +526,10 @@ async def forecast_project_budget(
     """Get project budget forecast."""
     try:
         service = await get_forecasting_service(db)
-        
+
         # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
         company_id = current_user.company_id
-        
+
         result = await service.forecast_project_budget(
             user_id=current_user.id,
             project_id=request.project_id,
@@ -557,7 +551,7 @@ async def forecast_project_budget(
     summary="Forecast cash flow",
     description="""
     Project weekly cash flow for payroll obligations.
-    
+
     Shows:
     - Weekly payroll projections
     - Payroll week indicators
@@ -572,10 +566,10 @@ async def forecast_cash_flow(
     """Get cash flow forecast."""
     try:
         service = await get_forecasting_service(db)
-        
+
         # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
         company_id = current_user.company_id
-        
+
         result = await service.forecast_cash_flow(
             user_id=current_user.id,
             weeks_ahead=min(weeks_ahead, 12),  # Max 12 weeks
@@ -600,12 +594,12 @@ async def forecast_cash_flow(
     summary="Parse natural language time entry",
     description="""
     Parse natural language input into time entry fields.
-    
+
     Supports inputs like:
     - "Log 2 hours on Project Alpha yesterday"
     - "3h client meeting for marketing project"
     - "worked 45 min on bug fixes this morning"
-    
+
     Returns parsed entities with confidence scores.
     If confidence is low, suggestions are provided.
     """
@@ -639,7 +633,7 @@ async def parse_time_entry(
     summary="Confirm and create time entry from NLP",
     description="""
     Confirm a parsed NLP result and create the time entry.
-    
+
     Optionally include modifications to override parsed values.
     """
 )
@@ -675,7 +669,7 @@ async def confirm_nlp_entry(
     summary="Generate weekly summary",
     description="""
     Generate an AI-powered weekly productivity summary.
-    
+
     Includes:
     - Total hours logged
     - Comparison vs last week
@@ -712,13 +706,13 @@ async def generate_weekly_summary(
     summary="Assess project health",
     description="""
     Generate a health assessment for a project.
-    
+
     Analyzes:
     - Activity trends
     - Task completion rate
     - Team involvement
     - Budget utilization
-    
+
     Returns health score (0-100) and actionable insights.
     """
 )
@@ -749,13 +743,13 @@ async def assess_project_health(
     summary="Generate user insights",
     description="""
     Generate personalized insights for a user.
-    
+
     Analyzes:
     - Work patterns
     - Productivity trends
     - Project distribution
     - Work-life balance indicators
-    
+
     Admins can view insights for other users.
     """
 )
@@ -775,27 +769,27 @@ async def generate_user_insights(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Cannot view other users' insights"
                 )
-            
+
             # Multi-tenancy: verify target user is in same company
             from app.models import User as UserModel
             target_result = await db.execute(
                 select(UserModel).where(UserModel.id == target_id)
             )
             target_user = target_result.scalar_one_or_none()
-            
+
             if not target_user:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Target user not found"
                 )
-            
+
             # Strict company isolation - must match exactly (even NULL == NULL)
             if target_user.company_id != current_user.company_id:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Cannot view users from other companies"
                 )
-        
+
         service = await get_reporting_service(db)
         result = await service.generate_user_insights(
             user_id=current_user.id,
@@ -822,10 +816,10 @@ async def generate_user_insights(
     summary="Scan for ML-based anomalies",
     description="""
     Scan for anomalies using machine learning.
-    
+
     Uses Isolation Forest for statistical outlier detection
     and behavioral baselines for personalized analysis.
-    
+
     Detects:
     - Statistical outliers in work patterns
     - Pattern deviations from baseline
@@ -842,7 +836,7 @@ async def scan_ml_anomalies(
     """Scan for ML-detected anomalies."""
     try:
         service = await get_ml_anomaly_service(db)
-        
+
         # Permission check
         target_id = request.user_id or current_user.id
         if target_id != current_user.id and current_user.role not in ["admin", "super_admin", "manager"]:
@@ -850,18 +844,18 @@ async def scan_ml_anomalies(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot scan other users"
             )
-        
+
         anomalies = await service.detect_ml_anomalies(
             user_id=target_id,
             period_days=request.period_days
         )
-        
+
         return MLAnomalyScanResponse(
             success=True,
             anomalies=[a.to_dict() for a in anomalies],  # type: ignore
             total_found=len(anomalies),
             ml_enabled=True,
-            scanned_at=datetime.now().isoformat()
+            scanned_at=now_utc().isoformat()
         )
     except HTTPException:
         raise
@@ -879,14 +873,14 @@ async def scan_ml_anomalies(
     summary="Assess burnout risk",
     description="""
     Assess burnout risk for a user.
-    
+
     Analyzes factors including:
     - Overtime frequency
     - Weekend work patterns
     - Late work hours
     - Schedule inconsistency
     - Consecutive work days
-    
+
     Returns risk level, score, and recommendations.
     """
 )
@@ -898,7 +892,7 @@ async def assess_burnout_risk(
     """Assess burnout risk for user."""
     try:
         service = await get_ml_anomaly_service(db)
-        
+
         # Permission check
         target_id = request.user_id or current_user.id
         if target_id != current_user.id and current_user.role not in ["admin", "super_admin", "manager"]:
@@ -906,12 +900,12 @@ async def assess_burnout_risk(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot assess other users' burnout risk"
             )
-        
+
         assessment = await service.assess_burnout_risk(
             user_id=target_id,
             period_days=request.period_days
         )
-        
+
         return BurnoutAssessmentResponse(
             success=True,
             user_id=assessment.user_id,
@@ -939,7 +933,7 @@ async def assess_burnout_risk(
     summary="Scan team for burnout risk",
     description="""
     Scan all team members for burnout risk.
-    
+
     Returns risk distribution and identifies high-risk employees.
     Admin/manager access required.
     """
@@ -952,15 +946,15 @@ async def scan_team_burnout(
     """Scan team for burnout risk."""
     try:
         service = await get_ml_anomaly_service(db)
-        
+
         # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
         company_id = current_user.company_id
-        
+
         result = await service.scan_team_burnout(
             team_id=request.team_id,
             company_id=company_id
         )
-        
+
         return TeamBurnoutResponse(
             success=True,
             assessments=result["assessments"],
@@ -983,7 +977,7 @@ async def scan_team_burnout(
     summary="Calculate user baseline",
     description="""
     Calculate behavioral baseline for a user.
-    
+
     Analyzes historical data to establish:
     - Average and typical work hours
     - Preferred schedule patterns
@@ -999,7 +993,7 @@ async def calculate_user_baseline(
     """Calculate user behavioral baseline."""
     try:
         service = await get_ml_anomaly_service(db)
-        
+
         # Permission check
         target_id = request.user_id or current_user.id
         if target_id != current_user.id and current_user.role not in ["admin", "super_admin"]:
@@ -1007,12 +1001,12 @@ async def calculate_user_baseline(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot calculate baseline for other users"
             )
-        
+
         baseline = await service.calculate_user_baseline(
             user_id=target_id,
             period_days=request.period_days
         )
-        
+
         return UserBaselineResponse(
             success=True,
             user_id=baseline.user_id,
@@ -1047,13 +1041,13 @@ async def calculate_user_baseline(
     summary="Estimate task duration",
     description="""
     Estimate duration for a task using ML.
-    
+
     Uses XGBoost regression with features:
     - Task description (TF-IDF)
     - Project context
     - User historical performance
     - Time of day patterns
-    
+
     Returns estimate with confidence range.
     """
 )
@@ -1071,7 +1065,7 @@ async def estimate_task_duration(
             user_id=current_user.id,
             scheduled_hour=request.scheduled_hour
         )
-        
+
         return TaskEstimationResponse(
             success=True,
             estimated_minutes=estimate.estimated_minutes,
@@ -1098,7 +1092,7 @@ async def estimate_task_duration(
     summary="Estimate duration for multiple tasks",
     description="""
     Estimate durations for multiple tasks at once.
-    
+
     Useful for sprint planning and workload assessment.
     """
 )
@@ -1110,7 +1104,7 @@ async def estimate_batch_tasks(
     """Estimate durations for multiple tasks."""
     try:
         service = await get_task_estimation_service(db)
-        
+
         tasks = [
             {
                 "description": t.description,
@@ -1119,12 +1113,12 @@ async def estimate_batch_tasks(
             }
             for t in request.tasks
         ]
-        
+
         estimates = await service.estimate_batch(
             tasks=tasks,
             user_id=current_user.id
         )
-        
+
         items = []
         total_minutes = 0
         for task, estimate in zip(request.tasks, estimates):
@@ -1135,7 +1129,7 @@ async def estimate_batch_tasks(
                 "confidence": estimate.confidence
             })
             total_minutes += estimate.estimated_minutes
-        
+
         return BatchTaskEstimationResponse(
             success=True,
             estimates=items,
@@ -1156,7 +1150,7 @@ async def estimate_batch_tasks(
     summary="Train estimation model",
     description="""
     Train the XGBoost duration estimation model.
-    
+
     Requires admin access and sufficient historical data.
     Uses completed tasks for training.
     """
@@ -1173,7 +1167,7 @@ async def train_estimation_model(
             team_id=request.team_id,
             period_days=request.period_days
         )
-        
+
         if result.get("success"):
             return ModelTrainingResponse(
                 success=True,
@@ -1201,7 +1195,7 @@ async def train_estimation_model(
     summary="Get user performance profile",
     description="""
     Get the user's performance profile for estimation.
-    
+
     Shows historical task completion patterns
     and performance characteristics.
     """
@@ -1214,7 +1208,7 @@ async def get_user_performance_profile(
     """Get user performance profile."""
     try:
         service = await get_task_estimation_service(db)
-        
+
         # Permission check
         target_id = user_id or current_user.id
         if target_id != current_user.id and current_user.role not in ["admin", "super_admin"]:
@@ -1222,9 +1216,9 @@ async def get_user_performance_profile(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot view other users' profiles"
             )
-        
+
         profile = await service.get_user_profile(target_id)
-        
+
         return UserPerformanceProfileResponse(
             success=True,
             user_id=profile.user_id,
@@ -1260,7 +1254,7 @@ async def get_estimation_stats(
     try:
         service = await get_task_estimation_service(db)
         stats = await service.get_estimation_stats()
-        
+
         return EstimationStatsResponse(
             success=True,
             model_trained=stats.get("model_trained", False),
@@ -1288,12 +1282,12 @@ async def get_estimation_stats(
     summary="Search for similar tasks",
     description="""
     Search for tasks semantically similar to the query.
-    
+
     Uses hybrid search combining:
     - Keyword matching for exact terms
     - Semantic similarity for meaning
     - User history for relevance ranking
-    
+
     Requires 'ai_semantic_search' feature to be enabled.
     """
 )
@@ -1303,9 +1297,9 @@ async def search_similar_tasks(
     db: AsyncSession = Depends(get_db)
 ):
     """Search for similar tasks."""
-    from app.ai.services.semantic_search_service import get_semantic_search_service
     from app.ai.schemas import SemanticSearchResponse, SimilarTaskResult
-    
+    from app.ai.services.semantic_search_service import get_semantic_search_service
+
     try:
         service = await get_semantic_search_service(db)
         result = await service.search_similar_tasks(
@@ -1315,7 +1309,7 @@ async def search_similar_tasks(
             project_id=request.project_id,
             limit=request.limit
         )
-        
+
         return SemanticSearchResponse(
             success=True,
             query=result.query,
@@ -1360,9 +1354,9 @@ async def get_time_suggestions(
     db: AsyncSession = Depends(get_db)
 ):
     """Get time-based task suggestions."""
-    from app.ai.services.semantic_search_service import get_semantic_search_service
     from app.ai.schemas import SemanticSearchResponse, SimilarTaskResult
-    
+    from app.ai.services.semantic_search_service import get_semantic_search_service
+
     try:
         service = await get_semantic_search_service(db)
         results = await service.get_task_suggestions_for_time(
@@ -1372,7 +1366,7 @@ async def get_time_suggestions(
             team_id=request.team_id,
             limit=request.limit
         )
-        
+
         return SemanticSearchResponse(
             success=True,
             query=f"Time: {request.hour}:00, Day: {request.day_of_week}",
@@ -1420,7 +1414,7 @@ async def get_time_suggestions(
     - Collaboration network analysis
     - Workload distribution
     - AI-generated insights and recommendations
-    
+
     Requires admin role.
     """
 )
@@ -1430,12 +1424,14 @@ async def generate_team_analytics(
     db: AsyncSession = Depends(get_db)
 ):
     """Generate team analytics report."""
-    from app.ai.services.team_analytics_service import get_team_analytics_service
     from app.ai.schemas import (
-        TeamAnalyticsResponse, TeamMemberMetricsSchema,
-        TeamVelocitySchema, CollaborationEdgeSchema
+        CollaborationEdgeSchema,
+        TeamAnalyticsResponse,
+        TeamMemberMetricsSchema,
+        TeamVelocitySchema,
     )
-    
+    from app.ai.services.team_analytics_service import get_team_analytics_service
+
     try:
         service = await get_team_analytics_service(db)
         report = await service.generate_team_report(
@@ -1443,7 +1439,7 @@ async def generate_team_analytics(
             period_days=request.period_days,
             include_ai_insights=request.include_ai_insights
         )
-        
+
         return TeamAnalyticsResponse(
             success=True,
             team_id=report.team_id,
@@ -1519,7 +1515,7 @@ async def generate_team_analytics(
             current_velocity_trend="unknown",
             collaboration_density=0,
             workload_gini=0,
-            generated_at=datetime.now(),
+            generated_at=now_utc(),
             error=str(ve)
         )
     except Exception as e:
@@ -1538,7 +1534,7 @@ async def generate_team_analytics(
             current_velocity_trend="unknown",
             collaboration_density=0,
             workload_gini=0,
-            generated_at=datetime.now(),
+            generated_at=now_utc(),
             error=str(e)
         )
 
@@ -1556,14 +1552,14 @@ async def compare_teams(
 ):
     """Compare multiple teams."""
     from app.ai.services.team_analytics_service import get_team_analytics_service
-    
+
     try:
         service = await get_team_analytics_service(db)
         comparison = await service.compare_teams(
             team_ids=request.team_ids,
             period_days=request.period_days
         )
-        
+
         return TeamComparisonResponse(
             success=True,
             period_days=comparison["period_days"],
@@ -1578,6 +1574,6 @@ async def compare_teams(
             period_days=request.period_days,
             teams_compared=0,
             comparisons=[],
-            generated_at=datetime.now().isoformat(),
+            generated_at=now_utc().isoformat(),
             error=str(e)
         )

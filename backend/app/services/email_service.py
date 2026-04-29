@@ -12,11 +12,12 @@
 import asyncio
 import logging
 import smtplib
-from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from email.utils import formataddr
-from typing import Optional, List, Dict, Any
 from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.config import settings
@@ -42,12 +43,12 @@ class EmailSendError(EmailServiceError):
 class EmailService:
     """
     Email service for sending transactional emails.
-    
+
     Usage:
         email_service = EmailService()
         await email_service.send_welcome_email("user@example.com", "John")
     """
-    
+
     def __init__(self):
         self.smtp_server = settings.SMTP_SERVER
         self.smtp_port = settings.SMTP_PORT or 587
@@ -55,7 +56,7 @@ class EmailService:
         self.smtp_password = settings.SMTP_PASSWORD
         self.from_email = getattr(settings, 'SMTP_FROM_EMAIL', None) or self.smtp_username
         self.from_name = getattr(settings, 'SMTP_FROM_NAME', 'Time Tracker')
-        
+
         # Setup Jinja2 for email templates
         template_dir = Path(__file__).parent.parent / "templates" / "email"
         if template_dir.exists():
@@ -66,16 +67,16 @@ class EmailService:
         else:
             self.jinja_env = None
             logger.warning(f"Email template directory not found: {template_dir}")
-    
+
     @property
     def is_configured(self) -> bool:
         """Check if email service is properly configured"""
         return bool(
-            self.smtp_server and 
-            self.smtp_username and 
+            self.smtp_server and
+            self.smtp_username and
             self.smtp_password
         )
-    
+
     def _create_message(
         self,
         to_email: str,
@@ -91,16 +92,16 @@ class EmailService:
         from_email = self.from_email or ''
         msg['From'] = formataddr((from_name, from_email))
         msg['To'] = to_email
-        
+
         # Add plain text version (fallback)
         if body_text:
             msg.attach(MIMEText(body_text, 'plain'))
-        
+
         # Add HTML version
         msg.attach(MIMEText(body_html, 'html'))
-        
+
         return msg
-    
+
     def _render_template(
         self,
         template_name: str,
@@ -109,14 +110,14 @@ class EmailService:
         """Render an email template with context"""
         if not self.jinja_env:
             raise EmailConfigurationError("Email templates not configured")
-        
+
         try:
             template = self.jinja_env.get_template(template_name)
             return template.render(**context)
         except Exception as e:
             logger.error(f"Failed to render template {template_name}: {e}")
             raise EmailServiceError(f"Template rendering failed: {e}")
-    
+
     async def send_email(
         self,
         to_email: str,
@@ -126,16 +127,16 @@ class EmailService:
     ) -> bool:
         """
         Send an email asynchronously.
-        
+
         Args:
             to_email: Recipient email address
             subject: Email subject line
             body_html: HTML body content
             body_text: Plain text body (optional fallback)
-            
+
         Returns:
             True if email was sent successfully
-            
+
         Raises:
             EmailConfigurationError: If SMTP not configured
             EmailSendError: If sending fails
@@ -143,20 +144,20 @@ class EmailService:
         if not self.is_configured:
             logger.warning("Email not configured - skipping send")
             return False
-        
+
         msg = self._create_message(to_email, subject, body_html, body_text)
-        
+
         try:
             # Run SMTP in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, self._send_smtp, msg, to_email)
             logger.info(f"Email sent successfully to {to_email}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to send email to {to_email}: {e}")
             raise EmailSendError(f"Failed to send email: {e}")
-    
+
     def _send_smtp(self, msg: MIMEMultipart, to_email: str) -> None:
         """Synchronous SMTP send (called from thread pool)"""
         # Type guards for SMTP configuration
@@ -166,14 +167,14 @@ class EmailService:
             raise EmailConfigurationError("SMTP_USERNAME not configured")
         if not self.smtp_password:
             raise EmailConfigurationError("SMTP_PASSWORD not configured")
-        
+
         from_email = self.from_email or self.smtp_username
-        
+
         with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
             server.starttls()
             server.login(self.smtp_username, self.smtp_password)
             server.sendmail(from_email, to_email, msg.as_string())
-    
+
     async def send_bulk_email(
         self,
         recipients: List[str],
@@ -183,7 +184,7 @@ class EmailService:
     ) -> Dict[str, bool]:
         """
         Send the same email to multiple recipients.
-        
+
         Returns dict of {email: success_status}
         """
         results = {}
@@ -194,11 +195,11 @@ class EmailService:
             except EmailSendError:
                 results[email] = False
         return results
-    
+
     # ==========================================
     # TEMPLATED EMAIL METHODS
     # ==========================================
-    
+
     async def send_welcome_email(
         self,
         to_email: str,
@@ -207,7 +208,7 @@ class EmailService:
     ) -> bool:
         """Send welcome email to new user"""
         subject = f"Welcome to {self.from_name}!"
-        
+
         body_html = f"""
         <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -226,22 +227,22 @@ class EmailService:
         </body>
         </html>
         """
-        
+
         body_text = f"""
         Welcome to {self.from_name}!
-        
+
         Hi {user_name},
-        
+
         Your account has been created successfully. You can now start tracking your time and managing your projects.
-        
+
         Login at: {login_url}
-        
+
         Best regards,
         {self.from_name} Team
         """
-        
+
         return await self.send_email(to_email, subject, body_html, body_text)
-    
+
     async def send_password_reset_email(
         self,
         to_email: str,
@@ -251,7 +252,7 @@ class EmailService:
     ) -> bool:
         """Send password reset email"""
         subject = f"Reset Your {self.from_name} Password"
-        
+
         body_html = f"""
         <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -271,26 +272,26 @@ class EmailService:
         </body>
         </html>
         """
-        
+
         body_text = f"""
         Password Reset Request
-        
+
         Hi {user_name},
-        
+
         We received a request to reset your password. Visit the link below to create a new password:
-        
+
         {reset_url}
-        
+
         This link will expire in {expires_in_hours} hours.
-        
+
         If you didn't request this, you can safely ignore this email.
-        
+
         Best regards,
         {self.from_name} Team
         """
-        
+
         return await self.send_email(to_email, subject, body_html, body_text)
-    
+
     async def send_account_request_notification(
         self,
         admin_email: str,
@@ -300,7 +301,7 @@ class EmailService:
     ) -> bool:
         """Notify admin of new account request"""
         subject = f"New Account Request - {requester_name}"
-        
+
         body_html = f"""
         <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -321,9 +322,9 @@ class EmailService:
         </body>
         </html>
         """
-        
+
         return await self.send_email(admin_email, subject, body_html)
-    
+
     async def send_account_approved_email(
         self,
         to_email: str,
@@ -333,7 +334,7 @@ class EmailService:
     ) -> bool:
         """Send account approval notification with temporary password"""
         subject = f"Your {self.from_name} Account Has Been Approved!"
-        
+
         body_html = f"""
         <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -356,9 +357,9 @@ class EmailService:
         </body>
         </html>
         """
-        
+
         return await self.send_email(to_email, subject, body_html)
-    
+
     async def send_account_rejected_email(
         self,
         to_email: str,
@@ -367,9 +368,9 @@ class EmailService:
     ) -> bool:
         """Send account rejection notification"""
         subject = f"Regarding Your {self.from_name} Account Request"
-        
+
         reason_text = f"<p><strong>Reason:</strong> {reason}</p>" if reason else ""
-        
+
         body_html = f"""
         <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -384,9 +385,9 @@ class EmailService:
         </body>
         </html>
         """
-        
+
         return await self.send_email(to_email, subject, body_html)
-    
+
     async def send_time_entry_reminder(
         self,
         to_email: str,
@@ -395,7 +396,7 @@ class EmailService:
     ) -> bool:
         """Send reminder for missing time entries"""
         subject = f"Time Entry Reminder - {missing_date}"
-        
+
         body_html = f"""
         <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -409,9 +410,9 @@ class EmailService:
         </body>
         </html>
         """
-        
+
         return await self.send_email(to_email, subject, body_html)
-    
+
     async def send_payroll_processed_notification(
         self,
         to_email: str,
@@ -422,7 +423,7 @@ class EmailService:
     ) -> bool:
         """Notify user their payroll has been processed"""
         subject = f"Payroll Processed - {period_name}"
-        
+
         body_html = f"""
         <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -439,13 +440,13 @@ class EmailService:
         </body>
         </html>
         """
-        
+
         return await self.send_email(to_email, subject, body_html)
-    
+
     # ==========================================
     # COMPANY-AWARE EMAIL METHODS
     # ==========================================
-    
+
     async def send_email_for_company(
         self,
         company_id: int,
@@ -458,7 +459,7 @@ class EmailService:
         """
         Send email using company-specific SMTP settings.
         Falls back to global SMTP if company has none configured.
-        
+
         Args:
             company_id: The company ID to get SMTP settings from
             to_email: Recipient email address
@@ -466,31 +467,32 @@ class EmailService:
             body_html: HTML body content
             body_text: Plain text body (optional fallback)
             db: Database session (required for company lookup)
-            
+
         Returns:
             True if email was sent successfully
         """
-        from app.models import Company
         from sqlalchemy import select
+
+        from app.models import Company
         from app.services.encryption_service import EncryptionService
-        
+
         # If no db provided, use global settings
         if db is None:
             return await self.send_email(to_email, subject, body_html, body_text)
-        
+
         # Fetch company settings
         result = await db.execute(select(Company).where(Company.id == company_id))
         company = result.scalar_one_or_none()
-        
+
         if not company or not company.email_enabled:
             # Fall back to global settings
             return await self.send_email(to_email, subject, body_html, body_text)
-        
+
         # Check if company has SMTP configured
         if not company.smtp_server or not company.smtp_username or not company.smtp_password_encrypted:
             # Fall back to global settings
             return await self.send_email(to_email, subject, body_html, body_text)
-        
+
         # Decrypt company SMTP password
         encryption_service = EncryptionService()
         try:
@@ -499,16 +501,16 @@ class EmailService:
             logger.error(f"Failed to decrypt company SMTP password: {e}")
             # Fall back to global settings
             return await self.send_email(to_email, subject, body_html, body_text)
-        
+
         # Use company SMTP settings
         from_name = company.smtp_from_name or company.name
         from_email = company.smtp_from_email or company.smtp_username
-        
+
         msg = self._create_message(to_email, subject, body_html, body_text)
         # Override From header with company settings
         from email.utils import formataddr
         msg.replace_header('From', formataddr((from_name, from_email)))
-        
+
         try:
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
@@ -528,7 +530,7 @@ class EmailService:
         except Exception as e:
             logger.error(f"Failed to send email via company SMTP: {e}")
             raise EmailSendError(f"Failed to send email: {e}")
-    
+
     def _send_smtp_with_config(
         self,
         msg: MIMEMultipart,
@@ -546,7 +548,7 @@ class EmailService:
                 server.starttls()
             server.login(smtp_username, smtp_password)
             server.sendmail(from_email, to_email, msg.as_string())
-    
+
     async def send_email_with_attachment(
         self,
         to_email: str,
@@ -559,7 +561,7 @@ class EmailService:
     ) -> bool:
         """
         Send an email with an attachment.
-        
+
         Args:
             to_email: Recipient email address
             subject: Email subject line
@@ -568,17 +570,17 @@ class EmailService:
             attachment_filename: Filename for the attachment
             attachment_mimetype: MIME type of the attachment
             body_text: Plain text body (optional fallback)
-            
+
         Returns:
             True if email was sent successfully
         """
-        from email.mime.base import MIMEBase
         from email import encoders
-        
+        from email.mime.base import MIMEBase
+
         if not self.is_configured:
             logger.warning("Email not configured - skipping send")
             return False
-        
+
         # Create message with mixed type for attachment support
         msg = MIMEMultipart('mixed')
         msg['Subject'] = subject
@@ -586,14 +588,14 @@ class EmailService:
         from_email = self.from_email or ''
         msg['From'] = formataddr((from_name, from_email))
         msg['To'] = to_email
-        
+
         # Create alternative part for text/html body
         alt_part = MIMEMultipart('alternative')
         if body_text:
             alt_part.attach(MIMEText(body_text, 'plain'))
         alt_part.attach(MIMEText(body_html, 'html'))
         msg.attach(alt_part)
-        
+
         # Add attachment
         maintype, subtype = attachment_mimetype.split('/', 1) if '/' in attachment_mimetype else ('application', 'octet-stream')
         attachment = MIMEBase(maintype, subtype)
@@ -605,7 +607,7 @@ class EmailService:
             filename=attachment_filename
         )
         msg.attach(attachment)
-        
+
         try:
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, self._send_smtp, msg, to_email)
@@ -614,7 +616,7 @@ class EmailService:
         except Exception as e:
             logger.error(f"Failed to send email with attachment to {to_email}: {e}")
             raise EmailSendError(f"Failed to send email: {e}")
-    
+
     async def send_email_with_attachment_for_company(
         self,
         company_id: int,
@@ -631,35 +633,37 @@ class EmailService:
         Send email with attachment using company-specific SMTP settings.
         Falls back to global SMTP if company has none configured.
         """
-        from app.models import Company
-        from sqlalchemy import select
-        from app.services.encryption_service import EncryptionService
-        from email.mime.base import MIMEBase
         from email import encoders
-        
+        from email.mime.base import MIMEBase
+
+        from sqlalchemy import select
+
+        from app.models import Company
+        from app.services.encryption_service import EncryptionService
+
         # If no db provided, use global settings
         if db is None:
             return await self.send_email_with_attachment(
                 to_email, subject, body_html, attachment_data,
                 attachment_filename, attachment_mimetype, body_text
             )
-        
+
         # Fetch company settings
         result = await db.execute(select(Company).where(Company.id == company_id))
         company = result.scalar_one_or_none()
-        
+
         if not company or not company.email_enabled:
             return await self.send_email_with_attachment(
                 to_email, subject, body_html, attachment_data,
                 attachment_filename, attachment_mimetype, body_text
             )
-        
+
         if not company.smtp_server or not company.smtp_username or not company.smtp_password_encrypted:
             return await self.send_email_with_attachment(
                 to_email, subject, body_html, attachment_data,
                 attachment_filename, attachment_mimetype, body_text
             )
-        
+
         # Decrypt company SMTP password
         encryption_service = EncryptionService()
         try:
@@ -670,24 +674,24 @@ class EmailService:
                 to_email, subject, body_html, attachment_data,
                 attachment_filename, attachment_mimetype, body_text
             )
-        
+
         # Use company SMTP settings
         from_name = company.smtp_from_name or company.name
         from_email = company.smtp_from_email or company.smtp_username
-        
+
         # Create message with mixed type for attachment support
         msg = MIMEMultipart('mixed')
         msg['Subject'] = subject
         msg['From'] = formataddr((from_name, from_email))
         msg['To'] = to_email
-        
+
         # Create alternative part for text/html body
         alt_part = MIMEMultipart('alternative')
         if body_text:
             alt_part.attach(MIMEText(body_text, 'plain'))
         alt_part.attach(MIMEText(body_html, 'html'))
         msg.attach(alt_part)
-        
+
         # Add attachment
         maintype, subtype = attachment_mimetype.split('/', 1) if '/' in attachment_mimetype else ('application', 'octet-stream')
         attachment = MIMEBase(maintype, subtype)
@@ -699,7 +703,7 @@ class EmailService:
             filename=attachment_filename
         )
         msg.attach(attachment)
-        
+
         try:
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
@@ -719,7 +723,7 @@ class EmailService:
         except Exception as e:
             logger.error(f"Failed to send email with attachment via company SMTP: {e}")
             raise EmailSendError(f"Failed to send email: {e}")
-    
+
     async def send_report_email(
         self,
         to_emails: List[str],
@@ -734,7 +738,7 @@ class EmailService:
     ) -> Dict[str, bool]:
         """
         Send report email to multiple recipients.
-        
+
         Args:
             to_emails: List of recipient email addresses
             report_name: Name of the report (e.g., "Time Report", "Team Timesheet")
@@ -745,12 +749,12 @@ class EmailService:
             custom_message: Optional custom message from sender
             company_id: Company ID for branded emails (optional)
             db: Database session (required if company_id provided)
-            
+
         Returns:
             Dict of {email: success_status}
         """
         subject = f"{report_name} - {date_range}"
-        
+
         custom_html = ""
         if custom_message:
             custom_html = f"""
@@ -759,7 +763,7 @@ class EmailService:
                 <p>{custom_message}</p>
             </div>
             """
-        
+
         body_html = f"""
         <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -774,7 +778,7 @@ class EmailService:
         </body>
         </html>
         """
-        
+
         results = {}
         for email in to_emails:
             try:
@@ -801,7 +805,7 @@ class EmailService:
                 results[email] = success
             except EmailSendError:
                 results[email] = False
-        
+
         return results
 
 

@@ -3,18 +3,19 @@ Time Entry Approval Router - TASK-028
 Handles time entry approval workflow with multi-tenant isolation
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
-from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel
 from enum import Enum
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import User
-from app.models import TimeEntry
-from app.dependencies import get_current_user, require_role, get_company_filter, apply_company_filter
+from app.dependencies import apply_company_filter, get_company_filter, require_role
+from app.models import TimeEntry, User
+from app.utils.timewindow import now_utc
 
 router = APIRouter()
 
@@ -41,7 +42,7 @@ class ApprovalResponse(BaseModel):
     status: str
     approved_by: Optional[int]
     approved_at: Optional[datetime]
-    
+
     class Config:
         from_attributes = True
 
@@ -58,26 +59,26 @@ async def get_pending_approvals(
     """Get all pending time entries for approval (managers/admins only) with multi-tenant filtering"""
     # Get company filter for multi-tenant data isolation
     company_filter = get_company_filter(current_user)
-    
+
     query = (
         select(TimeEntry)
         .join(User, TimeEntry.user_id == User.id)
         .where(TimeEntry.approval_status == "pending")
     )
-    
+
     # Apply company filter for multi-tenant isolation
     query = apply_company_filter(query, User.company_id, company_filter)
-    
+
     if user_id:
         query = query.where(TimeEntry.user_id == user_id)
     if project_id:
         query = query.where(TimeEntry.project_id == project_id)
-    
+
     query = query.offset(skip).limit(limit).order_by(TimeEntry.start_time.desc())
-    
+
     result = await db.execute(query)
     entries = result.scalars().all()
-    
+
     return [
         {
             "id": entry.id,
@@ -103,7 +104,7 @@ async def approve_time_entry(
     """Approve a single time entry with multi-tenant validation"""
     # Get company filter for multi-tenant data isolation
     company_filter = get_company_filter(current_user)
-    
+
     # Query with company filter to ensure we only access our company's entries
     query = (
         select(TimeEntry)
@@ -111,23 +112,23 @@ async def approve_time_entry(
         .where(TimeEntry.id == entry_id)
     )
     query = apply_company_filter(query, User.company_id, company_filter)
-    
+
     result = await db.execute(query)
     entry = result.scalar_one_or_none()
-    
+
     if not entry:
         raise HTTPException(status_code=404, detail="Time entry not found or access denied")
-    
+
     if entry.approval_status == "approved":
         raise HTTPException(status_code=400, detail="Entry already approved")
-    
+
     entry.approval_status = "approved"
     entry.approved_by = current_user.id
-    entry.approved_at = datetime.utcnow()
-    
+    entry.approved_at = now_utc()
+
     await db.commit()
     await db.refresh(entry)
-    
+
     return {
         "message": "Time entry approved",
         "entry_id": entry_id,
@@ -147,7 +148,7 @@ async def reject_time_entry(
     """Reject a single time entry with multi-tenant validation"""
     # Get company filter for multi-tenant data isolation
     company_filter = get_company_filter(current_user)
-    
+
     # Query with company filter to ensure we only access our company's entries
     query = (
         select(TimeEntry)
@@ -155,23 +156,23 @@ async def reject_time_entry(
         .where(TimeEntry.id == entry_id)
     )
     query = apply_company_filter(query, User.company_id, company_filter)
-    
+
     result = await db.execute(query)
     entry = result.scalar_one_or_none()
-    
+
     if not entry:
         raise HTTPException(status_code=404, detail="Time entry not found or access denied")
-    
+
     if entry.approval_status == "rejected":
         raise HTTPException(status_code=400, detail="Entry already rejected")
-    
+
     entry.approval_status = "rejected"
     entry.approved_by = current_user.id
-    entry.approved_at = datetime.utcnow()
-    
+    entry.approved_at = now_utc()
+
     await db.commit()
     await db.refresh(entry)
-    
+
     return {
         "message": "Time entry rejected",
         "entry_id": entry_id,
@@ -191,10 +192,10 @@ async def bulk_approval(
     """Approve or reject multiple time entries at once with multi-tenant validation"""
     if not request.entry_ids:
         raise HTTPException(status_code=400, detail="No entry IDs provided")
-    
+
     # Get company filter for multi-tenant data isolation
     company_filter = get_company_filter(current_user)
-    
+
     # Verify all entries exist AND belong to the user's company
     query = (
         select(TimeEntry)
@@ -202,31 +203,31 @@ async def bulk_approval(
         .where(TimeEntry.id.in_(request.entry_ids))
     )
     query = apply_company_filter(query, User.company_id, company_filter)
-    
+
     result = await db.execute(query)
     entries = result.scalars().all()
-    
+
     if len(entries) != len(request.entry_ids):
         found_ids = {e.id for e in entries}
         missing_ids = set(request.entry_ids) - found_ids
         raise HTTPException(
-            status_code=404, 
+            status_code=404,
             detail=f"Some entries not found or access denied: {list(missing_ids)}"
         )
-    
+
     # Update all entries
-    now = datetime.utcnow()
+    now = now_utc()
     updated_count = 0
-    
+
     for entry in entries:
         if entry.approval_status != request.status.value:
             entry.approval_status = request.status.value
             entry.approved_by = current_user.id
             entry.approved_at = now
             updated_count += 1
-    
+
     await db.commit()
-    
+
     return {
         "message": f"Bulk {request.status.value} completed",
         "total_entries": len(request.entry_ids),
@@ -245,26 +246,26 @@ async def get_approval_stats(
 ):
     """Get approval statistics with multi-tenant filtering"""
     from sqlalchemy import func
-    
+
     # Get company filter for multi-tenant data isolation
     company_filter = get_company_filter(current_user)
-    
+
     base_query = (
         select(TimeEntry.approval_status, func.count(TimeEntry.id))
         .join(User, TimeEntry.user_id == User.id)
     )
-    
+
     # Apply company filter
     base_query = apply_company_filter(base_query, User.company_id, company_filter)
-    
+
     if user_id:
         base_query = base_query.where(TimeEntry.user_id == user_id)
-    
+
     base_query = base_query.group_by(TimeEntry.approval_status)
-    
+
     result = await db.execute(base_query)
     stats = {status: count for status, count in result.all()}
-    
+
     return {
         "pending": stats.get("pending", 0),
         "approved": stats.get("approved", 0),
@@ -282,7 +283,7 @@ async def reset_approval_status(
     """Reset an entry back to pending status (admin only) with multi-tenant validation"""
     # Get company filter for multi-tenant data isolation
     company_filter = get_company_filter(current_user)
-    
+
     # Query with company filter to ensure we only access our company's entries
     query = (
         select(TimeEntry)
@@ -290,19 +291,19 @@ async def reset_approval_status(
         .where(TimeEntry.id == entry_id)
     )
     query = apply_company_filter(query, User.company_id, company_filter)
-    
+
     result = await db.execute(query)
     entry = result.scalar_one_or_none()
-    
+
     if not entry:
         raise HTTPException(status_code=404, detail="Time entry not found or access denied")
-    
+
     entry.approval_status = "pending"
     entry.approved_by = None
     entry.approved_at = None
-    
+
     await db.commit()
-    
+
     return {
         "message": "Approval status reset to pending",
         "entry_id": entry_id,

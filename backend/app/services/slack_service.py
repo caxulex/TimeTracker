@@ -6,12 +6,12 @@ Simple, reliable, and requires no additional dependencies.
 """
 
 import logging
-import json
-from typing import Optional, List, Dict, Any
-from datetime import datetime
+from typing import Any, Dict, List, Optional
+
 import httpx
 
 from app.config import settings
+from app.utils.timewindow import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -19,24 +19,24 @@ logger = logging.getLogger(__name__)
 class SlackNotificationService:
     """
     Service for sending Slack notifications via webhooks.
-    
+
     Setup:
     1. Go to https://api.slack.com/apps
     2. Create a new app or use existing one
     3. Enable "Incoming Webhooks"
     4. Add webhook to your channel
     5. Copy the webhook URL to SLACK_WEBHOOK_URL env variable
-    
+
     Usage:
         slack = SlackNotificationService()
         await slack.send_message("Hello from TimeTracker!")
     """
-    
+
     def __init__(self, webhook_url: Optional[str] = None):
         self.webhook_url = webhook_url or getattr(settings, 'SLACK_WEBHOOK_URL', None)
         self.app_name = getattr(settings, 'APP_NAME', 'Time Tracker')
         self.enabled = bool(self.webhook_url)
-    
+
     async def send_message(
         self,
         text: str,
@@ -47,33 +47,33 @@ class SlackNotificationService:
     ) -> bool:
         """
         Send a simple text message to Slack.
-        
+
         Args:
             text: The message text
             channel: Override default channel (optional)
             username: Override bot username (optional)
             icon_emoji: Emoji icon for the bot (optional)
             blocks: Slack Block Kit blocks for rich formatting (optional)
-            
+
         Returns:
             bool: True if message was sent successfully
         """
         if not self.enabled:
             logger.debug("Slack notifications disabled (no webhook URL)")
             return False
-        
+
         payload = {
             "text": text,
             "username": username or self.app_name,
             "icon_emoji": icon_emoji
         }
-        
+
         if channel:
             payload["channel"] = channel
-        
+
         if blocks:
             payload["blocks"] = blocks
-        
+
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -81,18 +81,18 @@ class SlackNotificationService:
                     json=payload,
                     timeout=10.0
                 )
-                
+
                 if response.status_code == 200:
                     logger.info(f"Slack notification sent: {text[:50]}...")
                     return True
                 else:
                     logger.error(f"Slack webhook failed: {response.status_code} - {response.text}")
                     return False
-                    
+
         except Exception as e:
             logger.error(f"Failed to send Slack notification: {e}")
             return False
-    
+
     async def send_payroll_notification(
         self,
         period_name: str,
@@ -122,17 +122,17 @@ class SlackNotificationService:
             {
                 "type": "context",
                 "elements": [
-                    {"type": "mrkdwn", "text": f"Processed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"}
+                    {"type": "mrkdwn", "text": f"Processed at {now_utc().strftime('%Y-%m-%d %H:%M:%S UTC')}"}
                 ]
             }
         ]
-        
+
         return await self.send_message(
             text=f"Payroll {status}: {period_name} - {total_employees} employees - ${total_amount:,.2f}",
             blocks=blocks,
             icon_emoji=":moneybag:"
         )
-    
+
     async def send_user_notification(
         self,
         event_type: str,
@@ -148,7 +148,7 @@ class SlackNotificationService:
             "invited": ":email:",
             "joined": ":tada:"
         }
-        
+
         blocks = [
             {
                 "type": "section",
@@ -158,19 +158,19 @@ class SlackNotificationService:
                 }
             }
         ]
-        
+
         if details:
             blocks.append({
                 "type": "context",
                 "elements": [{"type": "mrkdwn", "text": details}]
             })
-        
+
         return await self.send_message(
             text=f"User {event_type}: {user_name} ({user_email})",
             blocks=blocks,
             icon_emoji=emoji_map.get(event_type, ":bust_in_silhouette:")
         )
-    
+
     async def send_system_alert(
         self,
         title: str,
@@ -184,14 +184,7 @@ class SlackNotificationService:
             "error": ":rotating_light:",
             "success": ":white_check_mark:"
         }
-        
-        color_map = {
-            "info": "#2196F3",
-            "warning": "#FFC107",
-            "error": "#F44336",
-            "success": "#4CAF50"
-        }
-        
+
         blocks = [
             {
                 "type": "header",
@@ -211,17 +204,17 @@ class SlackNotificationService:
             {
                 "type": "context",
                 "elements": [
-                    {"type": "mrkdwn", "text": f"*Severity:* {severity.upper()} | *Time:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"}
+                    {"type": "mrkdwn", "text": f"*Severity:* {severity.upper()} | *Time:* {now_utc().strftime('%Y-%m-%d %H:%M:%S UTC')}"}
                 ]
             }
         ]
-        
+
         return await self.send_message(
             text=f"[{severity.upper()}] {title}: {message}",
             blocks=blocks,
             icon_emoji=emoji_map.get(severity, ":bell:")
         )
-    
+
     async def send_backup_notification(
         self,
         backup_file: str,
@@ -230,7 +223,7 @@ class SlackNotificationService:
     ) -> bool:
         """Send database backup notification"""
         emoji = ":white_check_mark:" if status == "completed" else ":x:"
-        
+
         return await self.send_message(
             text=f"{emoji} Database Backup {status.title()}\nFile: {backup_file}\nSize: {backup_size}",
             icon_emoji=":floppy_disk:"

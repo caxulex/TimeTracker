@@ -3,10 +3,10 @@ Pydantic schemas for Work Sessions, Breaks, and Meetings.
 
 Part of the Micro-Task Management feature.
 """
-from datetime import datetime, date
-from typing import Optional, List
-from pydantic import BaseModel, ConfigDict
+from datetime import date, datetime
+from typing import List, Optional
 
+from pydantic import BaseModel, ConfigDict
 
 # ============================================
 # SESSION BREAK SCHEMAS
@@ -25,7 +25,7 @@ class SessionBreakCreate(SessionBreakBase):
 class SessionBreakResponse(SessionBreakBase):
     """Schema for break response."""
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: int
     work_session_id: int
     start_time: datetime
@@ -51,7 +51,7 @@ class SessionMeetingCreate(SessionMeetingBase):
 class SessionMeetingResponse(SessionMeetingBase):
     """Schema for meeting response."""
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: int
     work_session_id: int
     start_time: datetime
@@ -78,7 +78,7 @@ class WorkSessionCreate(WorkSessionBase):
 class WorkSessionResponse(WorkSessionBase):
     """Schema for work session response."""
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: int
     user_id: int
     company_id: Optional[int] = None

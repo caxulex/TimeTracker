@@ -11,19 +11,19 @@ Uses AI (Gemini/OpenAI) to transform data into actionable insights.
 """
 
 import logging
-from typing import List, Dict, Any, Optional
-from datetime import datetime, date, timedelta, timezone
-from dataclasses import dataclass, field
-from enum import Enum
-from decimal import Decimal
 import statistics
-from sqlalchemy import select, func, and_, or_
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta, timezone
+from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.config import ai_settings
-from app.ai.services.ai_client import get_ai_client, AIClient
+from app.ai.services.ai_client import AIClient, get_ai_client
 from app.ai.utils.cache_manager import AICacheManager, get_cache_manager
 from app.services.ai_feature_service import AIFeatureManager
+from app.utils.timewindow import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class Insight:
     metric_label: Optional[str] = None
     action_items: List[str] = field(default_factory=list)
     related_entity: Optional[Dict[str, Any]] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "type": self.type.value,
@@ -83,7 +83,7 @@ class ReportSummary:
     insights: List[Insight]
     metrics: Dict[str, Any]
     generated_at: datetime = field(default_factory=datetime.now)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         # Format top_projects to match TopProject schema (name, hours)
         raw_top_projects = self.metrics.get("top_projects", [])
@@ -94,7 +94,7 @@ class ReportSummary:
             }
             for p in raw_top_projects
         ]
-        
+
         # Format attention_needed to match AttentionItem schema
         formatted_attention = [
             {
@@ -105,14 +105,14 @@ class ReportSummary:
             }
             for item in self.attention_needed
         ]
-        
+
         # Find most productive day
         daily_hours = self.metrics.get("daily_hours", [])
         most_productive_day = ""
         if daily_hours:
             max_day = max(daily_hours, key=lambda x: x.get("hours", 0), default={"date": ""})
             most_productive_day = max_day.get("date", "")
-        
+
         # Build metrics to match SummaryMetrics schema + frontend aliases
         formatted_metrics = {
             # Core schema fields
@@ -137,7 +137,7 @@ class ReportSummary:
             "entry_count": self.metrics.get("entry_count", 0),
             "trend": self.metrics.get("trend", "stable"),
         }
-        
+
         return {
             "period_start": self.period_start.isoformat(),
             "period_end": self.period_end.isoformat(),
@@ -156,14 +156,14 @@ class ReportSummary:
 class AIReportingService:
     """
     Service for generating AI-powered report summaries.
-    
+
     Provides:
     - Weekly executive summaries
     - Project health assessments
     - Team productivity analysis
     - Personalized recommendations
     """
-    
+
     def __init__(
         self,
         db: AsyncSession,
@@ -175,13 +175,13 @@ class AIReportingService:
         self.cache = cache_manager
         self._feature_manager: Optional[AIFeatureManager] = None
         self._last_tokens_used: int = 0  # Track tokens from last AI call
-    
+
     async def _get_feature_manager(self) -> AIFeatureManager:
         """Get or create feature manager."""
         if self._feature_manager is None:
             self._feature_manager = AIFeatureManager(self.db)
         return self._feature_manager
-    
+
     async def generate_weekly_summary(
         self,
         user_id: int,
@@ -190,12 +190,12 @@ class AIReportingService:
     ) -> Dict[str, Any]:
         """
         Generate a weekly summary report.
-        
+
         Args:
             user_id: User requesting summary
             team_id: Optional team filter
             include_ai: Whether to use AI for text generation
-            
+
         Returns:
             Dict with weekly summary
         """
@@ -207,33 +207,33 @@ class AIReportingService:
                     "enabled": False,
                     "message": "AI report summaries are disabled"
                 }
-            
+
             # Calculate week boundaries in UTC for consistent timezone handling
             # Time entries are stored in UTC, so we must use UTC dates for comparison
             now_utc = datetime.now(timezone.utc)
             today_utc = now_utc.date()
             week_start = today_utc - timedelta(days=today_utc.weekday())
             week_end = week_start + timedelta(days=6)
-            
+
             # Gather data
             metrics = await self._gather_weekly_metrics(user_id, week_start, week_end, team_id)
             insights = await self._generate_insights(metrics, week_start, week_end)
-            
+
             # Generate AI summary if enabled
             if include_ai and self.ai_client:
                 summary_text = await self._generate_ai_summary(metrics, insights)
             else:
                 summary_text = self._generate_rule_based_summary(metrics)
-            
+
             # Build highlights
             highlights = self._extract_highlights(metrics, insights)
-            
+
             # Build attention items
             attention_needed = self._extract_attention_items(insights)
-            
+
             # Build recommendations
             recommendations = self._generate_recommendations(metrics, insights)
-            
+
             summary = ReportSummary(
                 period_start=week_start,
                 period_end=week_end,
@@ -244,7 +244,7 @@ class AIReportingService:
                 insights=insights,
                 metrics=metrics
             )
-            
+
             # Log usage with token count
             tokens_used = self._last_tokens_used if include_ai else 0
             self._last_tokens_used = 0  # Reset for next call
@@ -254,20 +254,20 @@ class AIReportingService:
                 tokens_used=tokens_used,
                 metadata={"period": "weekly", "used_ai": include_ai}
             )
-            
+
             return {
                 "success": True,
                 "enabled": True,
                 "summary": summary.to_dict()
             }
-            
+
         except Exception as e:
             logger.error(f"Error generating weekly summary: {e}")
             return {
                 "success": False,
                 "error": str(e)
             }
-    
+
     async def generate_project_health(
         self,
         user_id: int,
@@ -275,11 +275,11 @@ class AIReportingService:
     ) -> Dict[str, Any]:
         """
         Generate project health assessment.
-        
+
         Args:
             user_id: User requesting assessment
             project_id: Project to assess
-            
+
         Returns:
             Dict with project health insights
         """
@@ -291,27 +291,27 @@ class AIReportingService:
                     "enabled": False,
                     "message": "AI report summaries are disabled"
                 }
-            
-            from app.models import Project, TimeEntry, Task
-            
+
+            from app.models import Project
+
             # Get project
             project_result = await self.db.execute(
                 select(Project).where(Project.id == project_id)
             )
             project = project_result.scalar_one_or_none()
-            
+
             if not project:
                 return {"success": False, "error": "Project not found"}
-            
+
             # Gather project metrics
             metrics = await self._gather_project_metrics(project_id)
-            
+
             # Generate health score (0-100)
             health_score = self._calculate_health_score(metrics)
-            
+
             # Generate insights
             insights = []
-            
+
             # Activity trend
             if metrics.get("activity_trend") == "increasing":
                 insights.append(Insight(
@@ -327,7 +327,7 @@ class AIReportingService:
                     description="Project activity has decreased - consider a status check",
                     severity=InsightSeverity.WARNING
                 ))
-            
+
             # Task completion
             if metrics.get("task_completion_rate", 0) < 0.3:
                 insights.append(Insight(
@@ -337,7 +337,7 @@ class AIReportingService:
                     severity=InsightSeverity.WARNING,
                     action_items=["Review blocked tasks", "Reassess task priorities"]
                 ))
-            
+
             # Team distribution
             if metrics.get("contributor_count", 0) == 1:
                 insights.append(Insight(
@@ -347,7 +347,7 @@ class AIReportingService:
                     severity=InsightSeverity.INFO,
                     action_items=["Consider knowledge sharing sessions"]
                 ))
-            
+
             return {
                 "success": True,
                 "enabled": True,
@@ -357,13 +357,13 @@ class AIReportingService:
                 "health_status": self._get_health_status(health_score),
                 "metrics": metrics,
                 "insights": [i.to_dict() for i in insights],
-                "generated_at": datetime.now().isoformat()
+                "generated_at": now_utc().isoformat()
             }
-            
+
         except Exception as e:
             logger.error(f"Error generating project health: {e}")
             return {"success": False, "error": str(e)}
-    
+
     async def generate_user_insights(
         self,
         user_id: int,
@@ -371,11 +371,11 @@ class AIReportingService:
     ) -> Dict[str, Any]:
         """
         Generate insights for a specific user.
-        
+
         Args:
             user_id: User requesting insights
             target_user_id: User to analyze (defaults to requester)
-            
+
         Returns:
             Dict with user-specific insights
         """
@@ -387,14 +387,14 @@ class AIReportingService:
                     "enabled": False,
                     "message": "AI report summaries are disabled"
                 }
-            
+
             target_id = target_user_id or user_id
-            
+
             # Get user metrics
             metrics = await self._gather_user_metrics(target_id)
-            
+
             insights = []
-            
+
             # Work-life balance
             avg_daily = metrics.get("avg_daily_hours", 8)
             if avg_daily > 10:
@@ -413,7 +413,7 @@ class AIReportingService:
                     severity=InsightSeverity.INFO,
                     action_items=["Ensure all time is being logged"]
                 ))
-            
+
             # Productivity trend
             if metrics.get("productivity_trend") == "improving":
                 insights.append(Insight(
@@ -422,7 +422,7 @@ class AIReportingService:
                     description="Time logging consistency has improved",
                     severity=InsightSeverity.INFO
                 ))
-            
+
             # Project diversity
             project_count = metrics.get("active_projects", 0)
             if project_count > 5:
@@ -432,24 +432,24 @@ class AIReportingService:
                     description=f"Working on {project_count} projects - may impact focus",
                     severity=InsightSeverity.INFO
                 ))
-            
+
             return {
                 "success": True,
                 "enabled": True,
                 "user_id": target_id,
                 "metrics": metrics,
                 "insights": [i.to_dict() for i in insights],
-                "generated_at": datetime.now().isoformat()
+                "generated_at": now_utc().isoformat()
             }
-            
+
         except Exception as e:
             logger.error(f"Error generating user insights: {e}")
             return {"success": False, "error": str(e)}
-    
+
     # ============================================
     # DATA GATHERING
     # ============================================
-    
+
     def _calculate_entry_duration_for_period(
         self,
         entry,
@@ -466,7 +466,7 @@ class AIReportingService:
         entry_start = entry.start_time
         if entry_start.tzinfo is None:
             entry_start = entry_start.replace(tzinfo=timezone.utc)
-        
+
         # Get entry end time (or now for running timers)
         if entry.end_time is None:
             entry_end = now
@@ -474,17 +474,17 @@ class AIReportingService:
             entry_end = entry.end_time
             if entry_end.tzinfo is None:
                 entry_end = entry_end.replace(tzinfo=timezone.utc)
-        
+
         # Calculate overlap between entry and period
         overlap_start = max(entry_start, period_start)
         overlap_end = min(entry_end, period_end)
-        
+
         # If no overlap, return 0
         if overlap_start >= overlap_end:
             return 0
-        
+
         return int((overlap_end - overlap_start).total_seconds())
-    
+
     async def _gather_weekly_metrics(
         self,
         user_id: int,
@@ -493,19 +493,19 @@ class AIReportingService:
         team_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """Gather metrics for weekly summary."""
-        from app.models import TimeEntry, User, Project, Task, TeamMember
-        from sqlalchemy import case, extract
-        
+
+        from app.models import Project, Task, TeamMember, TimeEntry, User
+
         metrics: Dict[str, Any] = {
             "week_start": week_start.isoformat(),
             "week_end": week_end.isoformat()
         }
-        
+
         # Convert date boundaries to UTC datetimes for proper comparison with UTC timestamps
         # week_start at 00:00:00 UTC, week_end at 23:59:59.999999 UTC
         week_start_dt = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
         week_end_dt = datetime.combine(week_end, datetime.max.time()).replace(tzinfo=timezone.utc)
-        
+
         # Get relevant users
         if team_id:
             user_result = await self.db.execute(
@@ -518,12 +518,12 @@ class AIReportingService:
         else:
             # Just the requesting user
             user_ids = [user_id]
-        
+
         metrics["user_count"] = len(user_ids)
-        
+
         # Current time for calculating running timer durations
         now_utc = datetime.now(timezone.utc)
-        
+
         # Total hours this week - fetch entries that OVERLAP with this week
         # This includes: entries that started this week, entries from before still running,
         # and entries that span multiple days
@@ -542,21 +542,21 @@ class AIReportingService:
             )
         )
         entries = entries_result.scalars().all()
-        
+
         # Calculate only the portion that falls within this week
         total_seconds = sum(
             self._calculate_entry_duration_for_period(e, week_start_dt, week_end_dt, now_utc)
             for e in entries
         )
-        
+
         metrics["total_hours"] = round(total_seconds / 3600, 1)
-        
+
         # Compare to last week
         last_week_start = week_start - timedelta(days=7)
         last_week_end = week_end - timedelta(days=7)
         last_week_start_dt = datetime.combine(last_week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
         last_week_end_dt = datetime.combine(last_week_end, datetime.max.time()).replace(tzinfo=timezone.utc)
-        
+
         # Fetch entries that overlapped with last week (same logic as this week)
         last_entries_result = await self.db.execute(
             select(TimeEntry)
@@ -572,21 +572,21 @@ class AIReportingService:
             )
         )
         last_entries = last_entries_result.scalars().all()
-        
+
         # Calculate only the portion that fell within last week
         last_week_seconds = sum(
             self._calculate_entry_duration_for_period(e, last_week_start_dt, last_week_end_dt, now_utc)
             for e in last_entries
         )
-        
+
         metrics["last_week_hours"] = round(last_week_seconds / 3600, 1)
-        
+
         if last_week_seconds > 0:
             change_pct = ((total_seconds - last_week_seconds) / last_week_seconds) * 100
             metrics["hours_change_pct"] = round(change_pct, 1)
         else:
             metrics["hours_change_pct"] = 0 if total_seconds == 0 else 100
-        
+
         # Projects worked on (count from entries that overlap with this week)
         projects_result = await self.db.execute(
             select(func.count(func.distinct(TimeEntry.project_id)))
@@ -602,7 +602,7 @@ class AIReportingService:
             )
         )
         metrics["projects_count"] = projects_result.scalar() or 0
-        
+
         # Tasks completed this week - count distinct tasks the user worked on that are now DONE
         # Since Task doesn't have assignee_id, we count tasks via TimeEntry relationship
         try:
@@ -623,19 +623,19 @@ class AIReportingService:
         except Exception as e:
             logger.warning(f"Could not count completed tasks: {e}")
             metrics["tasks_completed"] = 0
-        
+
         # Top projects by hours - calculate in Python for accuracy
         project_hours: Dict[int, Dict] = {}
         for entry in entries:
             if entry.project_id:
                 if entry.project_id not in project_hours:
                     project_hours[entry.project_id] = {"id": entry.project_id, "seconds": 0}
-                
+
                 if entry.duration_seconds:
                     project_hours[entry.project_id]["seconds"] += entry.duration_seconds
                 elif entry.end_time and entry.start_time:
                     project_hours[entry.project_id]["seconds"] += int((entry.end_time - entry.start_time).total_seconds())
-        
+
         # Get project names
         if project_hours:
             proj_result = await self.db.execute(
@@ -643,7 +643,7 @@ class AIReportingService:
                 .where(Project.id.in_(list(project_hours.keys())))
             )
             proj_names = {r.id: r.name for r in proj_result.fetchall()}
-            
+
             top_projects = sorted(project_hours.values(), key=lambda x: x["seconds"], reverse=True)[:5]
             metrics["top_projects"] = [
                 {
@@ -656,24 +656,24 @@ class AIReportingService:
             ]
         else:
             metrics["top_projects"] = []
-        
+
         # Daily breakdown - calculate in Python
         daily_hours_map: Dict[str, float] = {}
         for entry in entries:
             day_key = entry.start_time.strftime("%Y-%m-%d")
             if day_key not in daily_hours_map:
                 daily_hours_map[day_key] = 0
-            
+
             if entry.duration_seconds:
                 daily_hours_map[day_key] += entry.duration_seconds
             elif entry.end_time and entry.start_time:
                 daily_hours_map[day_key] += (entry.end_time - entry.start_time).total_seconds()
-        
+
         metrics["daily_hours"] = [
             {"date": k, "hours": round(v / 3600, 1)}
             for k, v in sorted(daily_hours_map.items())
         ]
-        
+
         # Calculate averages
         if daily_hours_map:
             daily_values = [v / 3600 for v in daily_hours_map.values()]
@@ -684,10 +684,10 @@ class AIReportingService:
             metrics["avg_daily_hours"] = 0
             metrics["max_daily_hours"] = 0
             metrics["min_daily_hours"] = 0
-        
+
         # Entry count
         metrics["entry_count"] = len(entries)
-        
+
         # Trend indicator
         if total_seconds > last_week_seconds:
             metrics["trend"] = "up"
@@ -695,15 +695,15 @@ class AIReportingService:
             metrics["trend"] = "down"
         else:
             metrics["trend"] = "stable"
-        
+
         return metrics
-    
+
     async def _gather_project_metrics(self, project_id: int) -> Dict[str, Any]:
         """Gather metrics for project health."""
-        from app.models import TimeEntry, Task, User
-        
+        from app.models import Task, TimeEntry
+
         metrics = {}
-        
+
         # Total hours
         hours_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
@@ -711,17 +711,17 @@ class AIReportingService:
         )
         total_seconds = hours_result.scalar() or 0
         metrics["total_hours"] = round(total_seconds / 3600, 1)
-        
+
         # This week vs last week
         now_utc = datetime.now(timezone.utc)
         today_utc = now_utc.date()
         week_start = today_utc - timedelta(days=today_utc.weekday())
         last_week_start = week_start - timedelta(days=7)
-        
+
         # Convert to UTC datetimes for proper comparison
         week_start_dt = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
         last_week_start_dt = datetime.combine(last_week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
-        
+
         this_week_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
             .where(
@@ -732,7 +732,7 @@ class AIReportingService:
             )
         )
         this_week = this_week_result.scalar() or 0
-        
+
         last_week_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
             .where(
@@ -744,10 +744,10 @@ class AIReportingService:
             )
         )
         last_week = last_week_result.scalar() or 0
-        
+
         metrics["this_week_hours"] = round(this_week / 3600, 1)
         metrics["last_week_hours"] = round(last_week / 3600, 1)
-        
+
         if last_week > 0:
             if this_week > last_week * 1.1:
                 metrics["activity_trend"] = "increasing"
@@ -757,7 +757,7 @@ class AIReportingService:
                 metrics["activity_trend"] = "stable"
         else:
             metrics["activity_trend"] = "new"
-        
+
         # Task completion
         tasks_result = await self.db.execute(
             select(
@@ -767,7 +767,7 @@ class AIReportingService:
             .where(Task.project_id == project_id)
         )
         task_stats = tasks_result.fetchone()
-        
+
         if task_stats and task_stats.total > 0:
             metrics["total_tasks"] = task_stats.total
             metrics["completed_tasks"] = task_stats.completed or 0
@@ -776,38 +776,38 @@ class AIReportingService:
             metrics["total_tasks"] = 0
             metrics["completed_tasks"] = 0
             metrics["task_completion_rate"] = 0
-        
+
         # Contributors
         contributors_result = await self.db.execute(
             select(func.count(func.distinct(TimeEntry.user_id)))
             .where(TimeEntry.project_id == project_id)
         )
         metrics["contributor_count"] = contributors_result.scalar() or 0
-        
+
         return metrics
-    
+
     async def _gather_user_metrics(self, user_id: int) -> Dict[str, Any]:
         """Gather metrics for user insights."""
-        from app.models import TimeEntry, User, Project
-        
+        from app.models import TimeEntry, User
+
         metrics = {}
-        
+
         # Get user
         user_result = await self.db.execute(
             select(User).where(User.id == user_id)
         )
         user = user_result.scalar_one_or_none()
-        
+
         if user:
             metrics["user_name"] = user.name
             metrics["expected_hours"] = user.expected_hours_per_week or 40
-        
+
         # Last 30 days hours - use UTC datetime for consistent timezone handling
         now_utc = datetime.now(timezone.utc)
         today_utc = now_utc.date()
         thirty_days_ago = today_utc - timedelta(days=30)
         thirty_days_ago_dt = datetime.combine(thirty_days_ago, datetime.min.time()).replace(tzinfo=timezone.utc)
-        
+
         hours_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
             .where(
@@ -819,7 +819,7 @@ class AIReportingService:
         )
         total_seconds = hours_result.scalar() or 0
         metrics["total_hours_30d"] = round(total_seconds / 3600, 1)
-        
+
         # Daily average - count distinct days with entries
         daily_result = await self.db.execute(
             select(func.count(func.distinct(func.date(TimeEntry.start_time))))
@@ -832,7 +832,7 @@ class AIReportingService:
         )
         work_days = daily_result.scalar() or 1
         metrics["avg_daily_hours"] = round((total_seconds / 3600) / work_days, 1)
-        
+
         # Active projects
         projects_result = await self.db.execute(
             select(func.count(func.distinct(TimeEntry.project_id)))
@@ -844,13 +844,13 @@ class AIReportingService:
             )
         )
         metrics["active_projects"] = projects_result.scalar() or 0
-        
+
         # Productivity trend (compare last 2 weeks)
         two_weeks_ago = today_utc - timedelta(days=14)
         one_week_ago = today_utc - timedelta(days=7)
         two_weeks_ago_dt = datetime.combine(two_weeks_ago, datetime.min.time()).replace(tzinfo=timezone.utc)
         one_week_ago_dt = datetime.combine(one_week_ago, datetime.min.time()).replace(tzinfo=timezone.utc)
-        
+
         week1_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
             .where(
@@ -862,7 +862,7 @@ class AIReportingService:
             )
         )
         week1 = week1_result.scalar() or 0
-        
+
         week2_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
             .where(
@@ -873,7 +873,7 @@ class AIReportingService:
             )
         )
         week2 = week2_result.scalar() or 0
-        
+
         if week1 > 0:
             if week2 > week1 * 1.1:
                 metrics["productivity_trend"] = "improving"
@@ -883,13 +883,13 @@ class AIReportingService:
                 metrics["productivity_trend"] = "stable"
         else:
             metrics["productivity_trend"] = "new"
-        
+
         return metrics
-    
+
     # ============================================
     # INSIGHT GENERATION
     # ============================================
-    
+
     async def _generate_insights(
         self,
         metrics: Dict[str, Any],
@@ -898,7 +898,7 @@ class AIReportingService:
     ) -> List[Insight]:
         """Generate insights from metrics."""
         insights = []
-        
+
         # Hours trend
         change_pct = metrics.get("hours_change_pct", 0)
         if change_pct > 20:
@@ -919,7 +919,7 @@ class AIReportingService:
                 metric_value=change_pct,
                 metric_label="% change"
             ))
-        
+
         # High daily hours
         max_hours = metrics.get("max_daily_hours", 0)
         if max_hours > 10:
@@ -931,7 +931,7 @@ class AIReportingService:
                 metric_value=max_hours,
                 metric_label="hours"
             ))
-        
+
         # Project focus
         if metrics.get("projects_count", 0) > 5:
             insights.append(Insight(
@@ -941,9 +941,9 @@ class AIReportingService:
                 severity=InsightSeverity.INFO,
                 action_items=["Consider focusing on fewer projects for better efficiency"]
             ))
-        
+
         return insights
-    
+
     async def _generate_ai_summary(
         self,
         metrics: Dict[str, Any],
@@ -952,7 +952,7 @@ class AIReportingService:
         """Use AI to generate natural language summary."""
         if not self.ai_client:
             return self._generate_rule_based_summary(metrics)
-        
+
         try:
             # Build prompt
             prompt = f"""Generate a brief, professional weekly summary for a time tracking application.
@@ -975,37 +975,37 @@ Write 2-3 sentences summarizing this week's activity. Be concise and actionable.
                 max_tokens=200,
                 temperature=0.7
             )
-            
+
             # Track token usage
             if response and response.get("usage"):
                 usage = response["usage"]
                 self._last_tokens_used = usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
-            
+
             if response and response.get("data"):
                 data = response["data"]
                 text = data.get("raw_text", "") if isinstance(data, dict) else str(data)
                 return text.strip()
-            
+
         except Exception as e:
             logger.error(f"AI summary generation failed: {e}")
-        
+
         return self._generate_rule_based_summary(metrics)
-    
+
     def _generate_rule_based_summary(self, metrics: Dict[str, Any]) -> str:
         """Generate summary without AI."""
         total_hours = metrics.get("total_hours", 0)
         change_pct = metrics.get("hours_change_pct", 0)
         projects = metrics.get("projects_count", 0)
-        
+
         parts = [f"This week you logged {total_hours:.1f} hours across {projects} projects."]
-        
+
         if change_pct > 10:
             parts.append(f"That's {change_pct:.0f}% more than last week.")
         elif change_pct < -10:
             parts.append(f"That's {abs(change_pct):.0f}% less than last week.")
-        
+
         return " ".join(parts)
-    
+
     def _extract_highlights(
         self,
         metrics: Dict[str, Any],
@@ -1013,25 +1013,25 @@ Write 2-3 sentences summarizing this week's activity. Be concise and actionable.
     ) -> List[str]:
         """Extract key highlights."""
         highlights = []
-        
+
         total_hours = metrics.get("total_hours", 0)
         if total_hours > 0:
             highlights.append(f"Logged {total_hours:.1f} hours this week")
-        
+
         top_projects = metrics.get("top_projects", [])
         if top_projects:
             top = top_projects[0]
             # Use project_name (from metrics) or name (from formatted output)
             project_name = top.get('project_name', top.get('name', 'Unknown'))
             highlights.append(f"Most time on: {project_name} ({top.get('hours', 0):.1f}h)")
-        
+
         change_pct = metrics.get("hours_change_pct", 0)
         if abs(change_pct) > 10:
             direction = "up" if change_pct > 0 else "down"
             highlights.append(f"Productivity {direction} {abs(change_pct):.0f}% vs last week")
-        
+
         return highlights[:5]
-    
+
     def _extract_attention_items(self, insights: List[Insight]) -> List[Dict[str, Any]]:
         """Extract items needing attention."""
         return [
@@ -1044,7 +1044,7 @@ Write 2-3 sentences summarizing this week's activity. Be concise and actionable.
             for i in insights
             if i.severity in [InsightSeverity.WARNING, InsightSeverity.CRITICAL]
         ]
-    
+
     def _generate_recommendations(
         self,
         metrics: Dict[str, Any],
@@ -1052,44 +1052,44 @@ Write 2-3 sentences summarizing this week's activity. Be concise and actionable.
     ) -> List[str]:
         """Generate actionable recommendations."""
         recommendations = []
-        
+
         # From insights
         for insight in insights:
             if insight.action_items:
                 recommendations.extend(insight.action_items)
-        
+
         # Generic recommendations based on metrics
         avg_hours = metrics.get("avg_daily_hours", 0)
         if avg_hours > 9:
             recommendations.append("Consider reviewing workload distribution")
-        
+
         if metrics.get("projects_count", 0) > 6:
             recommendations.append("Try to focus on fewer projects for better efficiency")
-        
+
         return list(set(recommendations))[:5]
-    
+
     def _calculate_health_score(self, metrics: Dict[str, Any]) -> int:
         """Calculate project health score (0-100)."""
         score = 100
-        
+
         # Task completion rate impacts score
         completion_rate = metrics.get("task_completion_rate", 0.5)
         score -= max(0, (0.5 - completion_rate) * 40)
-        
+
         # Activity trend
         trend = metrics.get("activity_trend", "stable")
         if trend == "decreasing":
             score -= 15
         elif trend == "new":
             score -= 5
-        
+
         # Contributor diversity
         contributors = metrics.get("contributor_count", 1)
         if contributors == 1:
             score -= 10
-        
+
         return max(0, min(100, int(score)))
-    
+
     def _get_health_status(self, score: int) -> str:
         """Convert health score to status."""
         if score >= 80:
@@ -1104,6 +1104,7 @@ Write 2-3 sentences summarizing this week's activity. Be concise and actionable.
 
 # Add missing import
 from sqlalchemy import Integer
+
 
 # Factory function
 async def get_reporting_service(db: AsyncSession) -> AIReportingService:
