@@ -140,6 +140,17 @@ class Company(Base):
     smtp_use_tls: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     email_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Overtime / payroll configuration (C2 - per-company FLSA opt-in)
+    overtime_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    overtime_threshold_hours_per_week: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), default=Decimal("40.00"), server_default="40.00", nullable=False
+    )
+    overtime_multiplier: Mapped[Decimal] = mapped_column(
+        Numeric(3, 2), default=Decimal("1.50"), server_default="1.50", nullable=False
+    )
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

@@ -5,6 +5,7 @@ Handles company registration, management, and white-label configuration.
 
 import re
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -77,6 +78,9 @@ class CompanyResponse(BaseModel):
     max_users: int
     max_projects: int
     created_at: datetime
+    overtime_enabled: bool = False
+    overtime_threshold_hours_per_week: Decimal = Decimal("40.00")
+    overtime_multiplier: Decimal = Decimal("1.50")
 
     class Config:
         from_attributes = True
@@ -87,6 +91,9 @@ class CompanyUpdate(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
     timezone: Optional[str] = None
+    overtime_enabled: Optional[bool] = None
+    overtime_threshold_hours_per_week: Optional[Decimal] = None
+    overtime_multiplier: Optional[Decimal] = None
 
     @field_validator("timezone")
     @classmethod
@@ -98,6 +105,30 @@ class CompanyUpdate(BaseModel):
             raise ValueError(
                 f"Invalid IANA timezone: {v!r}. "
                 "Use values like 'UTC', 'America/Los_Angeles', 'Europe/Madrid'."
+            )
+        return v
+
+    @field_validator("overtime_threshold_hours_per_week")
+    @classmethod
+    def validate_overtime_threshold(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        """Threshold must be > 0 and <= 168 (hours in a week)."""
+        if v is None:
+            return v
+        if v <= Decimal("0") or v > Decimal("168"):
+            raise ValueError(
+                "overtime_threshold_hours_per_week must be > 0 and <= 168."
+            )
+        return v
+
+    @field_validator("overtime_multiplier")
+    @classmethod
+    def validate_overtime_multiplier(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        """Multiplier must be in [1.0, 3.0]."""
+        if v is None:
+            return v
+        if v < Decimal("1.0") or v > Decimal("3.0"):
+            raise ValueError(
+                "overtime_multiplier must be between 1.0 and 3.0 (inclusive)."
             )
         return v
 

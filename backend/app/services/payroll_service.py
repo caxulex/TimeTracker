@@ -2,7 +2,7 @@
 Service layer for Payroll operations
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import List, Optional, Tuple, Union
 
@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from app.dependencies import FILTER_NULL_COMPANY
 from app.models import (
+    Company,
     PayRate,
     PayRateHistory,
     PayrollAdjustment,
@@ -32,7 +33,42 @@ from app.schemas.payroll import (
     PayrollPeriodUpdate,
     PeriodStatusEnum,
 )
-from app.utils.timewindow import now_utc
+from app.utils.timewindow import now_utc, range_bounds
+
+
+def group_hours_by_workweek(
+    entries: List[TimeEntry],
+    tz: str,
+) -> "dict[date, Decimal]":
+    """Return ``{monday_of_week_local: total_hours}`` for ISO workweeks in ``tz``.
+
+    Pure function: groups time entries by the Monday of the local ISO workweek
+    in which their ``start_time`` falls (when converted to the company's
+    timezone), summing ``duration_seconds`` and converting to fractional hours.
+
+    Used by the FLSA-compliant per-week overtime calculation. The function is
+    deliberately decoupled from the database so it can be unit-tested in
+    isolation without async fixtures.
+    """
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo(tz)
+    buckets: "dict[date, Decimal]" = {}
+    for entry in entries:
+        if entry.duration_seconds is None or entry.start_time is None:
+            continue
+        start = entry.start_time
+        # Treat naive datetimes as UTC (DB stores tz-aware UTC; defensive).
+        if start.tzinfo is None:
+            from datetime import timezone as _tz
+            start = start.replace(tzinfo=_tz.utc)
+        local_start = start.astimezone(zone)
+        local_date = local_start.date()
+        # Monday of the ISO workweek containing local_date
+        monday = local_date - timedelta(days=local_date.weekday())
+        hours = Decimal(entry.duration_seconds) / Decimal("3600")
+        buckets[monday] = buckets.get(monday, Decimal("0")) + hours
+    return buckets
 
 
 class PayRateService:
@@ -401,8 +437,33 @@ class PayrollPeriodService:
         # Calculate period duration for prorating
         period_days = (period.end_date - period.start_date).days + 1
 
-        # Calculate overtime threshold based on period type (for hourly workers)
-        # Standard is 40 hours/week
+        # Load tenant company (for timezone-aware boundaries and overtime config).
+        # company_id may be None in legacy/non-multitenant calls; in that case we
+        # preserve the historical naive-UTC behavior.
+        company: Optional[Company] = None
+        if company_id is not None:
+            company_stmt = select(Company).where(Company.id == company_id)
+            company_result = await self.db.execute(company_stmt)
+            company = company_result.scalar_one_or_none()
+
+        # C3 fix: derive period start/end as tz-aware UTC instants using the
+        # company's IANA timezone, so a pay period that runs e.g. 2026-01-01..
+        # 2026-01-15 for an LA company correctly spans local midnight LA, not
+        # UTC midnight. Falls back to the legacy naive-UTC bounds when no
+        # company timezone is available.
+        if company is not None and company.timezone:
+            period_start_dt, period_end_dt = range_bounds(
+                period.start_date, period.end_date, company.timezone
+            )
+            period_query_lower_inclusive = True  # half-open [start, end)
+        else:
+            period_start_dt = datetime.combine(period.start_date, datetime.min.time())
+            period_end_dt = datetime.combine(period.end_date, datetime.max.time())
+            period_query_lower_inclusive = False  # legacy <= upper bound
+
+        # Per-period overtime threshold (used only for the legacy
+        # overtime_enabled=False path so behavior is byte-for-byte preserved
+        # for the currently deployed tenant).
         period_weeks = {
             'weekly': Decimal("1"),
             'bi_weekly': Decimal("2"),
@@ -468,14 +529,16 @@ class PayrollPeriodService:
                 continue
 
             # Get user's time entries for this period (needed for hourly/daily calculations)
-            time_stmt = select(TimeEntry).where(
-                and_(
-                    TimeEntry.user_id == user.id,
-                    TimeEntry.start_time >= datetime.combine(period.start_date, datetime.min.time()),
-                    TimeEntry.start_time <= datetime.combine(period.end_date, datetime.max.time()),
-                    TimeEntry.is_running == False
-                )
-            )
+            time_conditions = [
+                TimeEntry.user_id == user.id,
+                TimeEntry.start_time >= period_start_dt,
+                TimeEntry.is_running == False,
+            ]
+            if period_query_lower_inclusive:
+                time_conditions.append(TimeEntry.start_time < period_end_dt)
+            else:
+                time_conditions.append(TimeEntry.start_time <= period_end_dt)
+            time_stmt = select(TimeEntry).where(and_(*time_conditions))
             time_result = await self.db.execute(time_stmt)
             time_entries = time_result.scalars().all()
 
@@ -544,13 +607,44 @@ class PayrollPeriodService:
                 total_seconds = sum(te.duration_seconds or 0 for te in time_entries)
                 total_hours = Decimal(total_seconds) / Decimal("3600")
 
-                # Calculate regular and overtime hours
-                regular_hours = min(total_hours, overtime_threshold)
-                overtime_hours = max(total_hours - overtime_threshold, Decimal("0"))
+                if company is not None and company.overtime_enabled:
+                    # FLSA-compliant per-workweek overtime (C2). Group entries
+                    # by Monday-anchored ISO workweek in the company timezone,
+                    # then apply the company-configured threshold/multiplier
+                    # to each week independently.
+                    company_tz = company.timezone or "UTC"
+                    weekly_hours = group_hours_by_workweek(
+                        list(time_entries), company_tz
+                    )
+                    company_threshold = Decimal(
+                        company.overtime_threshold_hours_per_week
+                    )
+                    company_multiplier = Decimal(company.overtime_multiplier)
 
-                regular_rate = pay_rate.base_rate
-                overtime_rate = pay_rate.base_rate * pay_rate.overtime_multiplier
-                gross_amount = (regular_hours * regular_rate) + (overtime_hours * overtime_rate)
+                    regular_hours = Decimal("0")
+                    overtime_hours = Decimal("0")
+                    for week_total in weekly_hours.values():
+                        reg = min(week_total, company_threshold)
+                        ot = max(week_total - company_threshold, Decimal("0"))
+                        regular_hours += reg
+                        overtime_hours += ot
+
+                    regular_rate = pay_rate.base_rate
+                    overtime_rate = pay_rate.base_rate * company_multiplier
+                    gross_amount = (
+                        (regular_hours * regular_rate)
+                        + (overtime_hours * overtime_rate)
+                    )
+                else:
+                    # Legacy per-period overtime (preserved byte-for-byte for
+                    # tenants with overtime_enabled=False, including the
+                    # currently deployed customer).
+                    regular_hours = min(total_hours, overtime_threshold)
+                    overtime_hours = max(total_hours - overtime_threshold, Decimal("0"))
+
+                    regular_rate = pay_rate.base_rate
+                    overtime_rate = pay_rate.base_rate * pay_rate.overtime_multiplier
+                    gross_amount = (regular_hours * regular_rate) + (overtime_hours * overtime_rate)
 
             # Round to 2 decimal places
             regular_hours = regular_hours.quantize(Decimal("0.01"))

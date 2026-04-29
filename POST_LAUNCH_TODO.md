@@ -784,3 +784,47 @@ Then run: `sudo systemctl reload caddy`.
   runtime. Bump in a dedicated post-launch session with full CI
   validation, per the prompt's hard "do not use `--force`" constraint.
 
+
+---
+
+## Deploy notes — Prompt 8.6 (C2/C3 — per-company overtime config)
+
+Adds opt-in FLSA-compliant overtime calculation per company. The currently
+deployed customer (Shae Marcus Consulting) keeps its existing payroll
+behavior unchanged; future US white-label customers can flip the new
+`overtime_enabled` flag to get correct per-workweek overtime.
+
+### Schema change
+- New columns on `companies`:
+  - `overtime_enabled BOOLEAN NOT NULL DEFAULT false`
+  - `overtime_threshold_hours_per_week NUMERIC(5,2) NOT NULL DEFAULT 40.00`
+  - `overtime_multiplier NUMERIC(3,2) NOT NULL DEFAULT 1.50`
+- Migration `022_company_overtime_cfg` applies forward-only; defaults
+  populate every existing row, including Shae Marcus's company. Round-trip
+  (upgrade ⇄ downgrade) verified on the local Postgres test DB.
+
+### Behavior
+- `overtime_enabled=False` (default): byte-for-byte equivalent to the
+  legacy per-period overtime path. Shae Marcus's payroll does not change.
+- `overtime_enabled=True`: time entries are bucketed by Monday-anchored
+  ISO workweek in the company's IANA timezone, then per-week regular and
+  overtime hours are computed against `overtime_threshold_hours_per_week`
+  and paid at `base_rate * overtime_multiplier`.
+- `range_bounds(period.start_date, period.end_date, company.timezone)`
+  is now used to derive period start/end (C3 fix). Naive `datetime.combine`
+  is retained as a fallback when `company_id` is None (legacy callers).
+
+### How to enable per-week overtime for a US white-label tenant
+The `CompanyUpdate` schema accepts the three new fields and validates
+ranges (threshold ∈ (0, 168], multiplier ∈ [1.0, 3.0]). Flip via the
+existing company settings PATCH endpoint; no admin UI exposure shipped
+in this session (frontend wiring is post-launch).
+
+### Out of scope / risks observed
+- `app/services/payroll_report_service.py` was not audited in this
+  session. If it has the same per-period overtime / naive-UTC bugs they
+  must be fixed in a follow-up; the hard constraint forbade touching it
+  here.
+- `CompanyRegister` deliberately does **not** accept the new fields:
+  overtime is post-registration configuration only.
+- Adjustments / tax / withholding logic untouched.
