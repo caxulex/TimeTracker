@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     Column,
     Date,
@@ -20,6 +21,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -999,3 +1001,101 @@ class Notification(Base):
 
     def __repr__(self) -> str:
         return f"<Notification(id={self.id}, user_id={self.user_id}, type={self.type}, read={self.is_read})>"
+
+
+# ============================================
+# BASECAMP INTEGRATION MODELS
+# ============================================
+
+
+class BasecampCredentials(Base):
+    """Per-company Basecamp OAuth credentials.
+
+    Tokens are encrypted at rest with ``API_KEY_ENCRYPTION_KEY``
+    (AES-256-GCM via ``app.services.encryption_service``). Exactly one
+    row per company (UNIQUE on ``company_id``).
+    """
+    __tablename__ = "basecamp_credentials"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, index=True)
+    company_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    account_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    account_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    access_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    refresh_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    connected_by_user_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    last_sync_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<BasecampCredentials(id={self.id}, company_id={self.company_id}, "
+            f"account_id={self.account_id})>"
+        )
+
+
+class BasecampProjectMapping(Base):
+    """Maps a Basecamp project to an internal TimeTracker ``Project`` row.
+
+    The triple (``company_id``, ``basecamp_account_id``,
+    ``basecamp_project_id``) is UNIQUE so the sync routine is
+    idempotent.
+    """
+    __tablename__ = "basecamp_project_mappings"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, index=True)
+    company_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    basecamp_account_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    basecamp_project_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    internal_project_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    last_synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "basecamp_account_id",
+            "basecamp_project_id",
+            name="uq_basecamp_project_mapping_external",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<BasecampProjectMapping(id={self.id}, company_id={self.company_id}, "
+            f"basecamp_project_id={self.basecamp_project_id}, "
+            f"internal_project_id={self.internal_project_id})>"
+        )
+
