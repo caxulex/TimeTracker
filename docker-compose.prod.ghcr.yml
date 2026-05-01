@@ -51,6 +51,10 @@ services:
       JWT_ALGORITHM: HS256
       JWT_EXPIRE_MINUTES: 60
       API_KEY_ENCRYPTION_KEY: ${API_KEY_ENCRYPTION_KEY:-}
+      # Basecamp integration (OAuth) — bare strings, not lists
+      BASECAMP_CLIENT_ID: ${BASECAMP_CLIENT_ID:-}
+      BASECAMP_CLIENT_SECRET: ${BASECAMP_CLIENT_SECRET:-}
+      BASECAMP_REDIRECT_URI: ${BASECAMP_REDIRECT_URI:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-["https://timetracker.shaemarcus.com"]}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-["timetracker.shaemarcus.com","localhost","127.0.0.1","timetracker-backend","backend"]}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://timetracker.shaemarcus.com}
