@@ -47,6 +47,7 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ defa
 // Admin pages - lazy loaded (separate chunk)
 const AdminPage = lazy(() => import('./pages/AdminPage').then(m => ({ default: m.AdminPage })));
 const AdminSettingsPage = lazy(() => import('./pages/AdminSettingsPage').then(m => ({ default: m.AdminSettingsPage })));
+const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage').then(m => ({ default: m.IntegrationsPage })));
 const UsersPage = lazy(() => import('./pages/UsersPage').then(m => ({ default: m.UsersPage })));
 const StaffPage = lazy(() => import('./pages/StaffPage').then(m => ({ default: m.StaffPage })));
 const StaffDetailPage = lazy(() => import('./pages/StaffDetailPage').then(m => ({ default: m.StaffDetailPage })));
@@ -409,6 +410,16 @@ function App() {
                 <SuperAdminRoute>
                   <ErrorBoundary name="AdminSettingsPage"><AdminSettingsPage /></ErrorBoundary>
                 </SuperAdminRoute>
+              }
+            />
+
+            {/* Integrations (admin + super_admin can view; only super_admin can mutate) */}
+            <Route
+              path="/settings/integrations"
+              element={
+                <AdminRoute>
+                  <ErrorBoundary name="IntegrationsPage"><IntegrationsPage /></ErrorBoundary>
+                </AdminRoute>
               }
             />
 
