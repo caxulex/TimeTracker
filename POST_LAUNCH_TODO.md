@@ -828,3 +828,26 @@ in this session (frontend wiring is post-launch).
 - `CompanyRegister` deliberately does **not** accept the new fields:
   overtime is post-registration configuration only.
 - Adjustments / tax / withholding logic untouched.
+
+## Basecamp integration v2 plans
+
+The v1 Basecamp integration is intentionally minimal (per-tenant OAuth,
+manual one-way project sync only). Items deferred to a future v2:
+
+- **Two-way sync.** Push TimeTracker project changes back to Basecamp.
+- **To-do mirroring.** Sync Basecamp to-do lists / to-dos as TimeTracker
+  micro-tasks (or a new resource).
+- **Webhook subscriptions.** Subscribe to Basecamp webhooks so changes
+  propagate without a manual sync click.
+- **Background scheduler.** Optional periodic sync (e.g. hourly) for
+  companies that don't want webhooks.
+- **Frontend admin UI** at `/settings/integrations` — Connect /
+  Disconnect / Sync buttons, last-sync timestamp, mapping table.
+- **Configurable target team.** Today the sync writes mirrored projects
+  under the lowest-id Team for a company. v2 should let admins pick.
+- **`basecampy3` re-evaluation.** v1 uses raw `httpx` because the SDK
+  is sync-only and didn't fit the async stack. Re-evaluate when /
+  if an async-capable client appears, or when sync work justifies the
+  thread-pool boundary.
+- **Multiple Basecamp accounts per company.** Today UNIQUE on`n  `basecamp_credentials.company_id` enforces one account per company.
+

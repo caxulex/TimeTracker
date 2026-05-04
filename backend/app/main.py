@@ -472,6 +472,10 @@ app.include_router(audit_logs.router, prefix="/api", tags=["Audit Logs"])
 # Work Sessions routes (Micro-task management: sessions, breaks, meetings)
 app.include_router(work_sessions.router, tags=["Work Sessions"])
 
+# Integrations: Basecamp (OAuth + project mirror)
+from app.routers.integrations import basecamp as basecamp_integration  # noqa: E402
+app.include_router(basecamp_integration.router, prefix="/api", tags=["Integrations: Basecamp"])
+
 
 # SEC-010: Custom exception handler for AppException
 @app.exception_handler(AppException)

@@ -172,6 +172,17 @@ class Settings(BaseSettings):
     # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
     API_KEY_ENCRYPTION_KEY: str = ""
 
+    # Basecamp integration (OAuth credentials registered at
+    # https://launchpad.37signals.com/integrations). All three default to
+    # empty strings; the integration is opt-in. Endpoints return HTTP 503
+    # when CLIENT_ID or CLIENT_SECRET is missing rather than failing at
+    # startup.
+    BASECAMP_CLIENT_ID: str = ""
+    BASECAMP_CLIENT_SECRET: str = ""
+    BASECAMP_REDIRECT_URI: str = (
+        "https://timetracker.shaemarcus.com/api/integrations/basecamp/callback"
+    )
+
     # AI Provider Settings
     GEMINI_API_KEY: Optional[str] = None  # Legacy env-based (prefer database storage)
     OPENAI_API_KEY: Optional[str] = None  # Legacy env-based (prefer database storage)
