@@ -202,7 +202,10 @@ async def get_dashboard_stats(
     current_user: User = Depends(get_current_active_user),
     tz: str = Depends(get_company_timezone),
 ):
-    """Get dashboard statistics for current user (filtered by company for multi-tenancy).
+    """Get personal dashboard statistics for the authenticated user.
+
+    Returns ONLY the current user's time entries regardless of role. Admins
+    who want company-wide views should use /api/reports/admin/dashboard.
 
     B6/B7: All day/week/month bounds are computed in the company's local
     timezone, then converted to UTC for SQL filters. This is what the user
@@ -214,35 +217,19 @@ async def get_dashboard_stats(
     week_start, week_end = week_bounds(today_local, tz)
     month_start, month_end = month_bounds(today_local, tz)
 
-    # Multi-tenancy: get company filter
+    # Multi-tenancy: get company filter (still used for active_projects scope)
     company_id = get_company_filter(current_user)
 
-    # Base filter: admins see all in company, regular users see team data
-    if current_user.role in ["super_admin", "admin"]:
-        if company_id is None:
-            user_filter = True  # Platform super_admin sees all
-        elif company_id == FILTER_NULL_COMPANY:
-            # Platform admin sees only platform users (NULL company_id)
-            company_users = select(User.id).where(User.company_id.is_(None))
-            user_filter = TimeEntry.user_id.in_(company_users)
-        else:
-            # Admin within a company sees all company entries
-            company_users = select(User.id).where(User.company_id == company_id)
-            user_filter = TimeEntry.user_id.in_(company_users)
-    else:
-        # Get all team members from user's teams (within company)
-        user_teams_query = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
-        team_members = select(TeamMember.user_id).where(TeamMember.team_id.in_(user_teams_query))
-        user_filter = TimeEntry.user_id.in_(team_members)
+    # Personal scope: always filter to the current user's own entries.
+    user_filter = TimeEntry.user_id == current_user.id
 
     # Today's time - fetch entries that OVERLAP with today (started before today end AND ended after today start or still running)
     # This includes: entries that started today, entries from yesterday still running, entries spanning midnight
     today_query = select(TimeEntry).where(
         TimeEntry.start_time < today_end,  # Started before today ends
-        (TimeEntry.end_time >= today_start) | (TimeEntry.end_time.is_(None))  # Ended after today started OR still running
+        (TimeEntry.end_time >= today_start) | (TimeEntry.end_time.is_(None)),  # Ended after today started OR still running
+        user_filter,
     )
-    if user_filter is not True:
-        today_query = today_query.where(user_filter)
     today_result = await db.execute(today_query)
     today_entries = today_result.scalars().all()
     # Calculate only the portion that falls within today
@@ -251,10 +238,9 @@ async def get_dashboard_stats(
     # This week's time - fetch entries that overlap with this week
     week_query = select(TimeEntry).where(
         TimeEntry.start_time < week_end,
-        (TimeEntry.end_time >= week_start) | (TimeEntry.end_time.is_(None))
+        (TimeEntry.end_time >= week_start) | (TimeEntry.end_time.is_(None)),
+        user_filter,
     )
-    if user_filter is not True:
-        week_query = week_query.where(user_filter)
     week_result = await db.execute(week_query)
     week_entries = week_result.scalars().all()
     week_seconds = sum(calculate_entry_duration_for_period(e, week_start, week_end, now) for e in week_entries)
@@ -262,10 +248,9 @@ async def get_dashboard_stats(
     # This month's time - fetch entries that overlap with this month
     month_query = select(TimeEntry).where(
         TimeEntry.start_time < month_end,
-        (TimeEntry.end_time >= month_start) | (TimeEntry.end_time.is_(None))
+        (TimeEntry.end_time >= month_start) | (TimeEntry.end_time.is_(None)),
+        user_filter,
     )
-    if user_filter is not True:
-        month_query = month_query.where(user_filter)
     month_result = await db.execute(month_query)
     month_entries = month_result.scalars().all()
     month_seconds = sum(calculate_entry_duration_for_period(e, month_start, month_end, now) for e in month_entries)
@@ -312,7 +297,11 @@ async def get_weekly_summary(
     current_user: User = Depends(get_current_active_user),
     tz: str = Depends(get_company_timezone),
 ):
-    """Get weekly time summary (filtered by company for multi-tenancy)"""
+    """Get personal weekly time summary for the authenticated user.
+
+    Returns ONLY the current user's time entries regardless of role. Admins
+    who want company-wide views should use /api/reports/admin/dashboard.
+    """
     now = now_utc()
     today_local = local_today(tz)
 
@@ -327,32 +316,15 @@ async def get_weekly_summary(
     # Half-open bounds in tenant local time (B7)
     start_datetime, end_datetime = range_bounds(week_start, week_end, tz)
 
-    # Multi-tenancy: get company filter
-    company_id = get_company_filter(current_user)
-
-    # Build user filter: admins see all in company, regular users see team data
-    if current_user.role in ["super_admin", "admin"]:
-        if company_id is None:
-            user_filter = True  # Platform super_admin sees all
-        elif company_id == FILTER_NULL_COMPANY:
-            company_users = select(User.id).where(User.company_id.is_(None))
-            user_filter = TimeEntry.user_id.in_(company_users)
-        else:
-            company_users = select(User.id).where(User.company_id == company_id)
-            user_filter = TimeEntry.user_id.in_(company_users)
-    else:
-        # Get all team members from user's teams
-        user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
-        team_members = select(TeamMember.user_id).where(TeamMember.team_id.in_(user_teams))
-        user_filter = TimeEntry.user_id.in_(team_members)
+    # Personal scope: always filter to the current user's own entries.
+    user_filter = TimeEntry.user_id == current_user.id
 
     # Fetch entries that OVERLAP with this week (not just started within)
     entries_query = select(TimeEntry).where(
         TimeEntry.start_time < end_datetime,  # Started before week ends
-        (TimeEntry.end_time >= start_datetime) | (TimeEntry.end_time.is_(None))  # Ended after week started OR still running
+        (TimeEntry.end_time >= start_datetime) | (TimeEntry.end_time.is_(None)),  # Ended after week started OR still running
+        user_filter,
     )
-    if user_filter is not True:
-        entries_query = entries_query.where(user_filter)
     entries_result = await db.execute(entries_query)
     all_entries = entries_result.scalars().all()
 
@@ -394,7 +366,11 @@ async def get_time_by_project(
     current_user: User = Depends(get_current_active_user),
     tz: str = Depends(get_company_timezone),
 ):
-    """Get time summary grouped by project with multi-tenant filtering"""
+    """Get personal time summary grouped by project for the authenticated user.
+
+    Returns ONLY the current user's time entries regardless of role. Admins
+    who want company-wide views should use /api/reports/admin/dashboard.
+    """
     now = now_utc()
     today_local = local_today(tz)
 
@@ -406,32 +382,15 @@ async def get_time_by_project(
 
     start_datetime, end_datetime = range_bounds(start_date, end_date, tz)
 
-    # Get company filter for multi-tenant data isolation
-    company_filter = get_company_filter(current_user)
-
-    # Get accessible projects and users for current user
-    if current_user.role in ["super_admin", "admin", "company_admin"]:
-        # For admins, get projects within their company
-        project_ids_query = select(Project.id).join(Team, Project.team_id == Team.id)
-        project_ids_query = apply_company_filter(project_ids_query, Team.company_id, company_filter)
-        user_filter = True  # Filter by company, but see all users in company
-    else:
-        user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
-        project_ids_query = select(Project.id).where(
-            Project.team_id.in_(user_teams)
-        )
-        # Get all team members from user's teams
-        team_members = select(TeamMember.user_id).where(TeamMember.team_id.in_(user_teams))
-        user_filter = TimeEntry.user_id.in_(team_members)
+    # Personal scope: always filter to the current user's own entries.
+    user_filter = TimeEntry.user_id == current_user.id
 
     # Fetch entries that OVERLAP with the period (not just started within)
     query_filters = [
         TimeEntry.start_time < end_datetime,  # Started before period ends
         (TimeEntry.end_time >= start_datetime) | (TimeEntry.end_time.is_(None)),  # Ended after period started OR still running
-        TimeEntry.project_id.in_(project_ids_query)
+        user_filter,
     ]
-    if user_filter is not True:
-        query_filters.append(user_filter)
 
     result = await db.execute(
         select(TimeEntry, Project.name)
