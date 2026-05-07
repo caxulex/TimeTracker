@@ -468,6 +468,11 @@ export const timeEntriesApi = {
     return response.data;
   },
 
+  updateEntry: async (entryId: number, updates: TimeEntryUpdate): Promise<TimeEntry> => {
+    const response = await api.patch<TimeEntry>(`/api/time/entries/${entryId}`, updates);
+    return response.data;
+  },
+
   delete: async (id: number): Promise<void> => {
     await api.delete(`/api/time/${id}`);
   },

@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import and_, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -73,7 +73,7 @@ class TimeEntryCreate(BaseModel):
 
 
 class TimeEntryUpdate(BaseModel):
-    description: Optional[str] = None
+    description: Optional[str] = Field(default=None, max_length=500)
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     project_id: Optional[int] = None
@@ -1162,6 +1162,185 @@ async def update_time_entry(
             "is_running": entry.is_running
         }
     }, company_id=current_user.company_id)
+
+    return make_entry_response(entry, project_name, task_name, current_user.name)
+
+
+@router.patch("/entries/{entry_id}", response_model=TimeEntryResponse)
+async def patch_time_entry(
+    entry_id: int,
+    entry_data: TimeEntryUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Edit a time entry the current user owns.
+
+    Personal-scope endpoint: ownership is enforced strictly even for
+    admins. Validation order is fail-fast:
+
+      1. Existence (404)
+      2. Ownership (403)
+      3. Running-timer guards (400) — start_time and end_time edits are
+         rejected; the user must use ``/stop`` first.
+      4. Time logic (400) — end > start, end <= now() + 5 min.
+      5. Project access (404 / 403) — only when project_id is changing.
+      6. Task validity (404 / 400) — task must belong to the resulting
+         project_id.
+      7. Description max length is enforced at the schema layer (422).
+    """
+    # 1. Existence
+    result = await db.execute(
+        select(TimeEntry).where(TimeEntry.id == entry_id)
+    )
+    entry = result.scalar_one_or_none()
+    if not entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Time entry not found",
+        )
+
+    # 2. Ownership — admins are NOT exempt on this personal-scope endpoint.
+    if entry.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only edit your own time entries",
+        )
+
+    is_running = entry.end_time is None
+
+    # 3. Running-timer guards
+    if is_running:
+        if entry_data.start_time is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Stop the timer before editing its start time.",
+            )
+        if entry_data.end_time is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Stop the timer first via the Stop button before editing it.",
+            )
+
+    # 4. Time logic — validate against the resulting (start, end) pair.
+    new_start = entry_data.start_time if entry_data.start_time is not None else entry.start_time
+    new_end = entry_data.end_time if entry_data.end_time is not None else entry.end_time
+
+    if entry_data.start_time is not None or entry_data.end_time is not None:
+        if new_start is not None and new_start.tzinfo is None:
+            new_start = new_start.replace(tzinfo=timezone.utc)
+        if new_end is not None and new_end.tzinfo is None:
+            new_end = new_end.replace(tzinfo=timezone.utc)
+
+        if new_end is not None and new_start is not None:
+            if new_end <= new_start:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="end_time must be greater than start_time",
+                )
+            now = datetime.now(timezone.utc)
+            if new_end > now + timedelta(minutes=5):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="end_time cannot be in the future",
+                )
+
+    # 5. Project access — only validate when project_id is provided AND changing.
+    target_project_id = entry.project_id
+    if entry_data.project_id is not None and entry_data.project_id != entry.project_id:
+        project = await check_project_access(db, entry_data.project_id, current_user)
+        if not project:
+            # Distinguish "doesn't exist" from "no access".
+            exists_result = await db.execute(
+                select(Project.id).where(Project.id == entry_data.project_id)
+            )
+            if exists_result.scalar_one_or_none() is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Project not found",
+                )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have access to this project",
+            )
+        target_project_id = entry_data.project_id
+
+    # 6. Task validity
+    target_task_id = entry.task_id
+    if entry_data.task_id is not None:
+        task_result = await db.execute(
+            select(Task).where(Task.id == entry_data.task_id)
+        )
+        task = task_result.scalar_one_or_none()
+        if not task:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Task not found",
+            )
+        if task.project_id != target_project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Task does not belong to the selected project",
+            )
+        target_task_id = entry_data.task_id
+
+    # All validations passed — apply changes.
+    if entry_data.description is not None:
+        entry.description = entry_data.description
+    if entry_data.start_time is not None:
+        entry.start_time = new_start
+    if entry_data.end_time is not None:
+        entry.end_time = new_end
+    if entry_data.project_id is not None:
+        entry.project_id = target_project_id
+    if entry_data.task_id is not None:
+        entry.task_id = target_task_id
+
+    # Recompute duration when the entry is closed.
+    if entry.end_time is not None:
+        entry.duration_seconds = calculate_duration_seconds(
+            entry.start_time,
+            entry.end_time,
+            entry.pause_seconds or 0,
+        )
+        entry.is_running = False
+
+    await db.commit()
+    await db.refresh(entry)
+
+    project_name = None
+    if entry.project_id:
+        project_name_result = await db.execute(
+            select(Project.name).where(Project.id == entry.project_id)
+        )
+        project_name = project_name_result.scalar()
+
+    task_name = None
+    if entry.task_id:
+        task_name_result = await db.execute(
+            select(Task.name).where(Task.id == entry.task_id)
+        )
+        task_name = task_name_result.scalar()
+
+    # Broadcast update for real-time reports refresh (same pattern as PUT).
+    await ws_manager.broadcast_to_company(
+        {
+            "type": "time_entry_updated",
+            "data": {
+                "entry_id": entry.id,
+                "user_id": entry.user_id,
+                "project_id": entry.project_id,
+                "project_name": project_name,
+                "task_id": entry.task_id,
+                "task_name": task_name,
+                "description": entry.description,
+                "start_time": entry.start_time.isoformat(),
+                "end_time": entry.end_time.isoformat() if entry.end_time else None,
+                "duration_seconds": entry.duration_seconds,
+                "is_running": entry.is_running,
+            },
+        },
+        company_id=current_user.company_id,
+    )
 
     return make_entry_response(entry, project_name, task_name, current_user.name)
 
