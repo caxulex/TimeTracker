@@ -215,7 +215,15 @@
     "manualEntryDefault": "Manual entry",
     "durationLabel": "Duration:",
     "addEntry": "Add Entry",
-    "showAISuggestions": "✨ Show AI Suggestions"
+    "showAISuggestions": "✨ Show AI Suggestions",
+    "editEntryTitle": "Edit Time Entry",
+    "editEntryDateLabel": "Date",
+    "editEntryRunningTitle": "This timer is currently running.",
+    "editEntryRunningHint": "To edit this entry, stop the timer first.",
+    "editEntryStopNow": "Stop timer now",
+    "editEntryDiscardConfirm": "Discard changes?",
+    "editEntryGenericError": "Could not save changes. Please try again.",
+    "editEntryDuration": "Duration"
   },
 
   "timer": {

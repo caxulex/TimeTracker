@@ -10,6 +10,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Card, Button, Modal, LoadingOverlay, Input } from '../components/common';
 import { TimerWidget } from '../components/time/TimerWidget';
+import { EditEntryModal } from '../components/time/EditEntryModal';
 import { SuggestionDropdown, ChatInterface } from '../components/ai';
 import { timeEntriesApi, projectsApi, tasksApi } from '../api/client';
 import { formatDuration, formatDate, formatTimeOnly, cn } from '../utils/helpers';
@@ -152,29 +153,16 @@ export function TimePage() {
     },
   });
 
-  // Update mutation
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<TimeEntry> }) =>
-      timeEntriesApi.update(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['time-entries'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      setShowModal(false);
-      setEditingEntry(null);
-      addNotification({
-        type: 'success',
-        title: t('time.entryUpdated'),
-        message: t('time.entryUpdatedMsg'),
-      });
-    },
-    onError: () => {
-      addNotification({
-        type: 'error',
-        title: t('time.failedToUpdate'),
-        message: t('time.couldNotUpdate'),
-      });
-    },
-  });
+  // Edit-modal save handler (PATCH /api/time/entries/{id} via EditEntryModal).
+  const handleEditSaved = () => {
+    queryClient.invalidateQueries({ queryKey: ['time-entries'] });
+    queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    addNotification({
+      type: 'success',
+      title: t('time.entryUpdated'),
+      message: t('time.entryUpdatedMsg'),
+    });
+  };
 
   // Group entries by date
   const entriesByDate = entries.reduce(
@@ -355,21 +343,15 @@ export function TimePage() {
         </div>
       )}
 
-      {/* Edit Modal */}
-      <TimeEntryModal
+      {/* Edit Modal — PATCH /api/time/entries/{id} */}
+      <EditEntryModal
         isOpen={showModal}
+        entry={editingEntry}
         onClose={() => {
           setShowModal(false);
           setEditingEntry(null);
         }}
-        entry={editingEntry}
-        projects={projects}
-        onSubmit={(data) => {
-          if (editingEntry) {
-            updateMutation.mutate({ id: editingEntry.id, data });
-          }
-        }}
-        isLoading={updateMutation.isPending}
+        onSaved={handleEditSaved}
       />
 
       {/* Manual Entry Modal */}
@@ -466,123 +448,6 @@ function TimeEntryCard({ entry, projects, onEdit, onDelete }: TimeEntryCardProps
         </div>
       </div>
     </Card>
-  );
-}
-
-// Time Entry Modal Component (for editing)
-interface TimeEntryModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  entry: TimeEntry | null;
-  projects: Project[];
-  onSubmit: (data: Partial<TimeEntryCreate>) => void;
-  isLoading: boolean;
-}
-
-function TimeEntryModal({ isOpen, onClose, entry, projects, onSubmit, isLoading }: TimeEntryModalProps) {
-  const { t } = useTranslation();
-  const [description, setDescription] = useState('');
-  const [projectId, setProjectId] = useState<number | ''>('');
-
-  // Fetch tasks for selected project
-  const { data: tasksData } = useQuery({
-    queryKey: ['tasks', projectId],
-    queryFn: () => tasksApi.getAll({ project_id: projectId as number }),
-    enabled: !!projectId,
-  });
-
-  const tasks = tasksData?.items || [];
-  const [taskId, setTaskId] = useState<number | ''>('');
-
-  // Reset form when modal opens or entry changes
-  React.useEffect(() => {
-    if (entry) {
-      setDescription(entry.description || '');
-      setProjectId(entry.project_id || '');
-      setTaskId(entry.task_id || '');
-    } else {
-      setDescription('');
-      setProjectId('');
-      setTaskId('');
-    }
-  }, [entry, isOpen]);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSubmit({
-      description: description || undefined,
-      project_id: projectId || undefined,
-      task_id: taskId || undefined,
-    });
-  };
-
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} title={t('time.editTimeEntry')}>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {t('time.descriptionLabel')}
-          </label>
-          <input
-            type="text"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder={t('time.descriptionPlaceholder')}
-            className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {t('time.projectLabel')}
-          </label>
-          <select
-            value={projectId}
-            onChange={(e) => {
-              setProjectId(e.target.value ? Number(e.target.value) : '');
-              setTaskId('');
-            }}
-            className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            <option value="">{t('time.noProject')}</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {projectId && (tasks.length > 0 || taskId) && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Task
-            </label>
-            <select
-              value={taskId}
-              onChange={(e) => setTaskId(e.target.value ? Number(e.target.value) : '')}
-              className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="">No task</option>
-              {tasks.map((task: Task) => (
-                <option key={task.id} value={task.id}>
-                  {task.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        <div className="flex justify-end gap-2 pt-4">
-          <Button type="button" variant="secondary" onClick={onClose}>
-            {t('common.cancel')}
-          </Button>
-          <Button type="submit" isLoading={isLoading}>
-            {t('common.saveChanges')}
-          </Button>
-        </div>
-      </form>
-    </Modal>
   );
 }
 
