@@ -95,7 +95,7 @@ export function DashboardPage() {
   }
 
   const dailyChartData = weekly?.daily_breakdown?.map((day) => ({
-    name: new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' }),
+    name: new Date(day.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' }),
     hours: Math.round((day.total_seconds / 3600) * 10) / 10,
   })) || [];
 

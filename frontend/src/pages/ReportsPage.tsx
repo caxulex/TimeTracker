@@ -161,7 +161,7 @@ export function ReportsPage() {
 
   // Prepare chart data
   const dailyChartData = weeklyData?.daily_breakdown?.map((day) => ({
-    name: new Date(day.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+    name: new Date(day.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
     hours: secondsToHours(day.total_seconds),
     entries: day.entry_count,
   })) || [];
