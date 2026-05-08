@@ -141,6 +141,37 @@ services:
     networks:
       - timetracker-network
 
+  # Hourly scheduler: long-timer warning emails (PR-A long timer warning)
+  scheduler-hourly:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: timetracker-scheduler-hourly
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:-timetracker}:${DB_PASSWORD:-timetracker_secure_password}@postgres:5432/${DB_NAME:-time_tracker}
+      SMTP_SERVER: ${SMTP_SERVER:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Time Tracker}
+      APP_DASHBOARD_URL: ${APP_DASHBOARD_URL:-}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Hourly scheduler started. Will run long-timer warning job every hour."
+        while true; do
+          echo "[Scheduler-Hourly] Running long-timer warning job..."
+          python scripts/send_long_timer_warnings.py || echo "[Scheduler-Hourly] job exited non-zero (continuing)"
+          sleep 3600
+        done
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - timetracker-network
+
 volumes:
   postgres_data:
     driver: local
