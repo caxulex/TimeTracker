@@ -71,6 +71,14 @@ services:
       CORS_WILDCARD_DOMAINS: ${CORS_WILDCARD_DOMAINS:-["timetracker.shaemarcus.com"]}
       # Backwards-compat (older docs); safe to keep
       CORS_ORIGINS: ${CORS_ORIGINS:-https://timetracker.shaemarcus.com}
+      # SMTP / Email configuration
+      SMTP_SERVER: ${SMTP_SERVER:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Time Tracker}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
     ports:
       # Bind to localhost only; public access via Caddy reverse proxy
       - "127.0.0.1:8080:8080"
@@ -156,6 +164,7 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Time Tracker}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
       APP_DASHBOARD_URL: ${APP_DASHBOARD_URL:-}
     entrypoint: ["/bin/sh", "-c"]
     command:
