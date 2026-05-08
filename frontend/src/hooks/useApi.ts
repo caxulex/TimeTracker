@@ -17,7 +17,6 @@ import type {
   TaskUpdate,
   TaskFilters,
   TimeEntryCreate,
-  TimeEntryUpdate,
   TimeEntryFilters,
   TeamCreate,
   TeamUpdate,
@@ -144,18 +143,6 @@ export function useCreateTimeEntry() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: TimeEntryCreate) => timeEntriesApi.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['timeEntries'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-    },
-  });
-}
-
-export function useUpdateTimeEntry() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, data }: { id: number; data: TimeEntryUpdate }) =>
-      timeEntriesApi.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['timeEntries'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });

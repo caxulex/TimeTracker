@@ -130,6 +130,7 @@ export function EditEntryModal({ entry, isOpen, onClose, onSaved }: EditEntryMod
     setError(null);
     try {
       await timeEntriesApi.stopTimer();
+      onSaved();
       onClose();
     } catch (err) {
       setError(extractErrorMessage(err, t));
