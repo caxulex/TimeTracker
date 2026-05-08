@@ -385,6 +385,13 @@ class TimeEntry(Base):
     paused_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     pause_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
+    # Long-timer warning email idempotency stamp (migration 024).
+    # Set by the hourly long-timer warning job after a successful send;
+    # NULL means no warning email has been sent for this entry.
+    long_timer_email_sent_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # Relationships
     user: Mapped[User] = relationship("User", back_populates="time_entries")
     project: Mapped[Optional[Project]] = relationship("Project", back_populates="time_entries")
