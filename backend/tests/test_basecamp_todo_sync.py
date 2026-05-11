@@ -792,6 +792,126 @@ class TestTodoSync:
         names = sorted(t.name for t in rows.scalars().all())
         assert names == ["[Engineering] Build", "[Marketing] Promote"]
 
+    # ------------------------------------------------------------------
+    # v3.0.2: Smart-truncate long task names; preserve full content in
+    # tasks.description so VARCHAR(255) overflow can't crash the sync.
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_long_todo_content_truncated_in_task_name(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        company = await _mk_company(db_session)
+        _, team = await _mk_owner_and_team(db_session, company)
+        await _mk_project_and_mapping(
+            db_session, company, team, basecamp_project_id="bcp-1"
+        )
+        creds = _mk_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        long_content = "x" * 300
+        todolists = {"bcp-1": [{"id": "list-1", "title": "Sprint A"}]}
+        todos = {
+            "list-1": [
+                {"id": "td-1", "content": long_content, "completed": False},
+            ]
+        }
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos)
+        with p1, p2, p3:
+            report = await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        assert report["todos_created"] == 1
+        assert report["todo_errors"] == []
+        rows = await db_session.execute(select(Task))
+        tasks = rows.scalars().all()
+        assert len(tasks) == 1
+        assert len(tasks[0].name) <= 255
+        assert tasks[0].name.startswith("[Sprint A] ")
+        assert tasks[0].name.endswith("\u2026")
+
+    @pytest.mark.asyncio
+    async def test_full_content_preserved_in_task_description(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        company = await _mk_company(db_session)
+        _, team = await _mk_owner_and_team(db_session, company)
+        await _mk_project_and_mapping(
+            db_session, company, team, basecamp_project_id="bcp-1"
+        )
+        creds = _mk_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        long_content = "Detailed plan: " + ("a" * 500)
+        todolists = {"bcp-1": [{"id": "list-1", "title": "Sprint A"}]}
+        todos = {
+            "list-1": [
+                {"id": "td-1", "content": long_content, "completed": False},
+            ]
+        }
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos)
+        with p1, p2, p3:
+            await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        rows = await db_session.execute(select(Task))
+        tasks = rows.scalars().all()
+        assert len(tasks) == 1
+        # Name was truncated but full content lives in description.
+        assert len(tasks[0].name) <= 255
+        assert tasks[0].description == long_content
+
+    @pytest.mark.asyncio
+    async def test_truncated_name_updates_on_resync(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        company = await _mk_company(db_session)
+        _, team = await _mk_owner_and_team(db_session, company)
+        await _mk_project_and_mapping(
+            db_session, company, team, basecamp_project_id="bcp-1"
+        )
+        creds = _mk_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        # First sync: short content, name fits as-is.
+        todolists = {"bcp-1": [{"id": "list-1", "title": "Sprint A"}]}
+        todos = {
+            "list-1": [
+                {"id": "td-1", "content": "Short", "completed": False},
+            ]
+        }
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos)
+        with p1, p2, p3:
+            await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        rows = await db_session.execute(select(Task))
+        task_before = rows.scalars().one()
+        assert task_before.name == "[Sprint A] Short"
+        assert task_before.description == "Short"
+
+        # Re-sync: content now long, must trigger truncation + description update.
+        long_content = "y" * 600
+        todos["list-1"][0]["content"] = long_content
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos)
+        with p1, p2, p3:
+            r2 = await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+        assert r2["todos_updated"] == 1
+
+        await db_session.refresh(task_before)
+        assert len(task_before.name) <= 255
+        assert task_before.name.startswith("[Sprint A] ")
+        assert task_before.name.endswith("\u2026")
+        assert task_before.description == long_content
+
 
 # ----------------------------------------------------------------------
 # URL resolution tests (v3.0.1 hotfix)
