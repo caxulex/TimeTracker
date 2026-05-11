@@ -10,6 +10,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Card, Button, Modal, LoadingOverlay, Input } from '../components/common';
 import { TimerWidget } from '../components/time/TimerWidget';
+import { LongTimerBanner } from '../components/time/LongTimerBanner';
 import { EditEntryModal } from '../components/time/EditEntryModal';
 import { SuggestionDropdown, ChatInterface } from '../components/ai';
 import { timeEntriesApi, projectsApi, tasksApi } from '../api/client';
@@ -201,6 +202,7 @@ export function TimePage() {
       </div>
 
       {/* Timer widget */}
+      <LongTimerBanner />
       <TimerWidget />
 
       {/* NLP Chat Interface */}

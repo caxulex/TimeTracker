@@ -223,7 +223,16 @@
     "editEntryStopNow": "Stop timer now",
     "editEntryDiscardConfirm": "Discard changes?",
     "editEntryGenericError": "Could not save changes. Please try again.",
-    "editEntryDuration": "Duration"
+    "editEntryDuration": "Duration",
+    "longTimerBanner": {
+      "title": "Your timer has been running for over {{hours}} hours",
+      "subtitle": "Are you still working on this task?",
+      "keepGoing": "Yes, keep going",
+      "stopNow": "Stop now",
+      "adjustEndTime": "Adjust end time",
+      "notificationTitle": "TimeTracker - long-running timer",
+      "notificationBody": "Your timer for \"{{taskName}}\" has been running for over {{hours}} hours"
+    }
   },
 
   "timer": {
