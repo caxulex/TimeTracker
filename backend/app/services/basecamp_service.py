@@ -76,6 +76,47 @@ def _is_configured() -> bool:
     return bool(settings.BASECAMP_CLIENT_ID and settings.BASECAMP_CLIENT_SECRET)
 
 
+# Unicode horizontal ellipsis (single codepoint, len() == 1).
+_ELLIPSIS = "\u2026"
+
+
+def _truncate_task_name(
+    list_title: str, todo_content: str, max_len: int = 255
+) -> str:
+    """Format and truncate a task name to fit in ``tasks.name`` VARCHAR(255).
+
+    Format is ``"[list_title] todo_content"``. If it exceeds ``max_len``,
+    the ``todo_content`` portion is truncated and a Unicode ellipsis
+    (``\u2026``) is appended *within* the ``max_len`` budget. In the
+    extreme case where even ``"[list_title] \u2026"`` would exceed
+    ``max_len``, ``list_title`` is truncated as well.
+
+    The returned string is always ``<= max_len`` characters (codepoints).
+    """
+    list_title = list_title or ""
+    todo_content = todo_content or ""
+
+    prefix = f"[{list_title}] "
+    full = f"{prefix}{todo_content}"
+    if len(full) <= max_len:
+        return full
+
+    # Need to truncate. Budget for the content tail = max_len - len(prefix) - 1
+    # (the trailing ellipsis costs 1 codepoint).
+    content_budget = max_len - len(prefix) - 1
+    if content_budget >= 0:
+        return f"{prefix}{todo_content[:content_budget]}{_ELLIPSIS}"
+
+    # Prefix alone is too long; truncate list_title too. Fixed overhead
+    # of "[]" + space + ellipsis = 4 codepoints.
+    title_budget = max_len - 4
+    if title_budget >= 0:
+        return f"[{list_title[:title_budget]}] {_ELLIPSIS}"
+
+    # Pathological: max_len < 4. Fall back to truncated ellipsis-only.
+    return _ELLIPSIS[:max_len] if max_len > 0 else ""
+
+
 class BasecampService:
     """Tenant-scoped wrapper around Basecamp 4 OAuth + projects API."""
 
@@ -744,7 +785,15 @@ class BasecampService:
     ) -> None:
         """Create or update a single Task + its BasecampTaskMapping row."""
         todo_id = todo["id"]
-        target_name = f"[{list_title}] {todo['content']}"
+        todo_content = todo["content"]
+        target_name = _truncate_task_name(list_title, todo_content)
+        # Preserve the full untruncated content (and optionally any
+        # richer Basecamp description body) in tasks.description so the
+        # smart-truncated name never loses information.
+        bc_description = todo.get("description")
+        target_description = (
+            bc_description if bc_description else todo_content
+        )
         target_status = "DONE" if todo["completed"] else "TODO"
 
         existing_row = await db.execute(
@@ -763,6 +812,7 @@ class BasecampService:
             task = Task(
                 project_id=internal_project_id,
                 name=target_name,
+                description=target_description,
                 status=target_status,
             )
             db.add(task)
@@ -793,6 +843,7 @@ class BasecampService:
             task = Task(
                 project_id=internal_project_id,
                 name=target_name,
+                description=target_description,
                 status=target_status,
             )
             db.add(task)
@@ -804,10 +855,15 @@ class BasecampService:
             report["todos_created"] += 1
             return
 
-        changed = (task.name != target_name) or (task.status != target_status)
+        changed = (
+            task.name != target_name
+            or task.status != target_status
+            or task.description != target_description
+        )
         if changed:
             if not dry_run:
                 task.name = target_name
+                task.description = target_description
                 task.status = target_status
                 mapping.basecamp_todolist_id = todolist_id
                 mapping.basecamp_project_id = basecamp_project_id
