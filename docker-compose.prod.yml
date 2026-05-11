@@ -181,6 +181,36 @@ services:
     networks:
       - timetracker-network
 
+  # 4-hourly scheduler: Basecamp opt-in auto-sync (v2)
+  scheduler-4hourly:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: timetracker-scheduler-4hourly
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:-timetracker}:${DB_PASSWORD:-timetracker_secure_password}@postgres:5432/${DB_NAME:-time_tracker}
+      # Required to decrypt OAuth tokens stored in basecamp_credentials.
+      API_KEY_ENCRYPTION_KEY: ${API_KEY_ENCRYPTION_KEY:-}
+      # Basecamp OAuth client credentials (needed for token refresh).
+      BASECAMP_CLIENT_ID: ${BASECAMP_CLIENT_ID:-}
+      BASECAMP_CLIENT_SECRET: ${BASECAMP_CLIENT_SECRET:-}
+      BASECAMP_REDIRECT_URI: ${BASECAMP_REDIRECT_URI:-}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "4-hourly scheduler started. Will run Basecamp auto-sync every 4 hours."
+        while true; do
+          echo "[Scheduler-4Hourly] Running Basecamp auto-sync job..."
+          python scripts/sync_basecamp_projects.py || echo "[Scheduler-4Hourly] job exited non-zero (continuing)"
+          sleep 14400
+        done
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - timetracker-network
+
 volumes:
   postgres_data:
     driver: local

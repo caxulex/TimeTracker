@@ -21,7 +21,20 @@ vi.mock('../../api/basecamp', () => ({
     getConnectUrl: vi.fn(),
     sync: vi.fn(),
     disconnect: vi.fn(),
+    updateSettings: vi.fn(),
   },
+}));
+
+vi.mock('../../hooks/useApi', () => ({
+  useTeams: vi.fn(() => ({
+    data: {
+      items: [
+        { id: 1, name: 'Engineering' },
+        { id: 2, name: 'Sales' },
+      ],
+    },
+    isLoading: false,
+  })),
 }));
 
 // Silence WebSocketContext / NotificationProvider backend calls
@@ -37,6 +50,7 @@ const mockedApi = basecampApi as unknown as {
   getConnectUrl: ReturnType<typeof vi.fn>;
   sync: ReturnType<typeof vi.fn>;
   disconnect: ReturnType<typeof vi.fn>;
+  updateSettings: ReturnType<typeof vi.fn>;
 };
 
 function setUser(role: 'super_admin' | 'admin' | 'regular_user' | 'member' | null) {
@@ -63,6 +77,9 @@ const connectedStatus = {
   account_name: 'Acme Co',
   last_sync_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
   expires_at: new Date(Date.now() + 7 * 86400 * 1000).toISOString(),
+  target_team_id: null,
+  target_team_name: null,
+  auto_sync_enabled: false,
 };
 
 const disconnectedStatus = {
@@ -70,6 +87,9 @@ const disconnectedStatus = {
   account_name: null,
   last_sync_at: null,
   expires_at: null,
+  target_team_id: null,
+  target_team_name: null,
+  auto_sync_enabled: false,
 };
 
 beforeEach(() => {
@@ -284,5 +304,73 @@ describe('IntegrationsPage - OAuth callback handling', () => {
     expect(
       await screen.findByText(/Successfully connected to Basecamp/i)
     ).toBeInTheDocument();
+  });
+});
+
+describe('IntegrationsPage - sync settings (target team + auto-sync)', () => {
+  it('displays team picker when connected', async () => {
+    mockedApi.getStatus.mockResolvedValue(connectedStatus);
+    renderPage();
+    const select = await screen.findByTestId('basecamp-target-team-select');
+    expect(select).toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: 'Engineering' })).toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: 'Sales' })).toBeInTheDocument();
+  });
+
+  it('displays auto-sync toggle when connected', async () => {
+    mockedApi.getStatus.mockResolvedValue(connectedStatus);
+    renderPage();
+    const toggle = await screen.findByTestId('basecamp-auto-sync-toggle');
+    expect(toggle).toBeInTheDocument();
+    expect(toggle).not.toBeChecked();
+  });
+
+  it('updates target team on dropdown change', async () => {
+    mockedApi.getStatus.mockResolvedValue(connectedStatus);
+    mockedApi.updateSettings.mockResolvedValue({
+      ...connectedStatus,
+      target_team_id: 2,
+      target_team_name: 'Sales',
+    });
+    renderPage();
+    const select = (await screen.findByTestId(
+      'basecamp-target-team-select'
+    )) as HTMLSelectElement;
+    await userEvent.selectOptions(select, '2');
+    await waitFor(() => {
+      expect(mockedApi.updateSettings).toHaveBeenCalledWith({ target_team_id: 2 });
+    });
+  });
+
+  it('toggles auto-sync on checkbox change', async () => {
+    mockedApi.getStatus.mockResolvedValue(connectedStatus);
+    mockedApi.updateSettings.mockResolvedValue({
+      ...connectedStatus,
+      auto_sync_enabled: true,
+    });
+    renderPage();
+    const toggle = await screen.findByTestId('basecamp-auto-sync-toggle');
+    await userEvent.click(toggle);
+    await waitFor(() => {
+      expect(mockedApi.updateSettings).toHaveBeenCalledWith({ auto_sync_enabled: true });
+    });
+  });
+
+  it('renders read-only sync settings for admin (non-super)', async () => {
+    setUser('admin');
+    mockedApi.getStatus.mockResolvedValue({
+      ...connectedStatus,
+      target_team_id: 1,
+      target_team_name: 'Engineering',
+      auto_sync_enabled: true,
+    });
+    renderPage();
+    const select = (await screen.findByTestId(
+      'basecamp-target-team-select'
+    )) as HTMLSelectElement;
+    const toggle = screen.getByTestId('basecamp-auto-sync-toggle') as HTMLInputElement;
+    expect(select).toBeDisabled();
+    expect(toggle).toBeDisabled();
+    expect(toggle).toBeChecked();
   });
 });

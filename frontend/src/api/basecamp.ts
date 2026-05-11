@@ -2,7 +2,8 @@
 // TIME TRACKER - BASECAMP INTEGRATION API
 // ============================================
 // Typed wrappers around /api/integrations/basecamp/* endpoints.
-// Backend auth: super_admin for connect/sync/disconnect; admin or super_admin for status.
+// Backend auth: super_admin for connect/sync/settings/disconnect;
+// admin or super_admin for status.
 // ============================================
 
 import api from './client';
@@ -12,6 +13,9 @@ export interface BasecampStatus {
   account_name: string | null;
   last_sync_at: string | null;
   expires_at: string | null;
+  target_team_id: number | null;
+  target_team_name: string | null;
+  auto_sync_enabled: boolean;
 }
 
 export interface BasecampSyncResult {
@@ -24,6 +28,11 @@ export interface BasecampSyncResult {
 
 export interface BasecampConnectResponse {
   authorization_url: string;
+}
+
+export interface BasecampSettingsUpdate {
+  target_team_id?: number | null;
+  auto_sync_enabled?: boolean;
 }
 
 const BASE = '/api/integrations/basecamp';
@@ -43,6 +52,14 @@ export const basecampApi = {
     const { data } = await api.post<BasecampSyncResult>(`${BASE}/sync`, {
       dry_run: dryRun,
     });
+    return data;
+  },
+
+  async updateSettings(settings: BasecampSettingsUpdate): Promise<BasecampStatus> {
+    const { data } = await api.patch<BasecampStatus>(
+      `${BASE}/settings`,
+      settings
+    );
     return data;
   },
 

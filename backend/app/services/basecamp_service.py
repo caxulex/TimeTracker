@@ -324,12 +324,33 @@ class BasecampService:
             "dry_run": dry_run,
         }
 
-        # Resolve target team: pick the lowest-id team for this company.
-        # Project rows require a non-null team_id.
-        team_row = await db.execute(
-            select(Team).where(Team.company_id == company_id).order_by(Team.id).limit(1)
-        )
-        team = team_row.scalar_one_or_none()
+        # Resolve target team:
+        #   - If credentials.target_team_id is set AND points to a team
+        #     in this company, use it.
+        #   - Otherwise fall back to the legacy behavior: lowest-id team
+        #     for the company. Project rows require a non-null team_id.
+        team = None
+        if credentials.target_team_id is not None:
+            target_row = await db.execute(
+                select(Team).where(
+                    Team.id == credentials.target_team_id,
+                    Team.company_id == company_id,
+                )
+            )
+            team = target_row.scalar_one_or_none()
+            if team is None:
+                # Configured team was deleted or reassigned; fall back.
+                logger.warning(
+                    "basecamp.sync.target_team_missing company_id=%s "
+                    "target_team_id=%s — falling back to lowest-id team",
+                    company_id, credentials.target_team_id,
+                )
+
+        if team is None:
+            team_row = await db.execute(
+                select(Team).where(Team.company_id == company_id).order_by(Team.id).limit(1)
+            )
+            team = team_row.scalar_one_or_none()
         if team is None:
             report["errors"].append(
                 f"Company {company_id} has no team to host imported projects"
