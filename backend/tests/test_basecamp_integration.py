@@ -645,7 +645,9 @@ class TestRouter:
                 }
             ]
 
-        with patch.object(BasecampService, "list_projects", side_effect=fake_list):
+        with patch.object(BasecampService, "list_projects", side_effect=fake_list), \
+             patch.object(BasecampService, "_list_todolists", new=AsyncMock(return_value=[])), \
+             patch.object(BasecampService, "_get_valid_access_token", new=AsyncMock(return_value="tok")):
             resp = await client.post(
                 "/api/integrations/basecamp/sync",
                 headers=_bearer(super_admin),
@@ -656,6 +658,11 @@ class TestRouter:
         body = resp.json()
         assert body["dry_run"] is True
         assert body["created"] == 1
+        # New v3.0 to-do fields are present (zero, since no mappings exist yet)
+        assert body["todos_created"] == 0
+        assert body["todos_updated"] == 0
+        assert body["todos_unchanged"] == 0
+        assert body["todo_errors"] == []
         # No persisted rows
         rows = await db_session.execute(select(BasecampProjectMapping))
         assert rows.scalars().all() == []
@@ -685,7 +692,9 @@ class TestRouter:
                 }
             ]
 
-        with patch.object(BasecampService, "list_projects", side_effect=fake_list):
+        with patch.object(BasecampService, "list_projects", side_effect=fake_list), \
+             patch.object(BasecampService, "_list_todolists", new=AsyncMock(return_value=[])), \
+             patch.object(BasecampService, "_get_valid_access_token", new=AsyncMock(return_value="tok")):
             resp = await client.post(
                 "/api/integrations/basecamp/sync",
                 headers=_bearer(super_admin),
@@ -693,7 +702,13 @@ class TestRouter:
             )
 
         assert resp.status_code == 200
-        assert resp.json()["created"] == 1
+        body = resp.json()
+        assert body["created"] == 1
+        # New v3.0 to-do response fields are present (zero, no to-dos returned)
+        assert body["todos_created"] == 0
+        assert body["todos_updated"] == 0
+        assert body["todos_unchanged"] == 0
+        assert body["todo_errors"] == []
 
         rows = await db_session.execute(select(BasecampProjectMapping))
         assert len(rows.scalars().all()) == 1

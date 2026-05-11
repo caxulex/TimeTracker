@@ -1116,3 +1116,55 @@ class BasecampProjectMapping(Base):
             f"internal_project_id={self.internal_project_id})>"
         )
 
+
+class BasecampTaskMapping(Base):
+    """Maps a Basecamp to-do to an internal TimeTracker ``Task`` row.
+
+    The triple (``company_id``, ``basecamp_account_id``,
+    ``basecamp_todo_id``) is UNIQUE so the to-do sync routine is
+    idempotent and multi-tenant safe: the same Basecamp to-do id
+    observed by two different connected accounts on two different
+    TimeTracker companies will not collide.
+
+    ``basecamp_todolist_id`` is preserved (not part of the UNIQUE) so
+    v3.1 can surface to-do list grouping without a schema migration.
+    """
+    __tablename__ = "basecamp_task_mappings"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, index=True)
+    company_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    basecamp_account_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    basecamp_project_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    basecamp_todolist_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    basecamp_todo_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    task_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    last_synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "basecamp_account_id",
+            "basecamp_todo_id",
+            name="uq_basecamp_task_mapping_external",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<BasecampTaskMapping(id={self.id}, company_id={self.company_id}, "
+            f"basecamp_todo_id={self.basecamp_todo_id}, "
+            f"task_id={self.task_id})>"
+        )
+
