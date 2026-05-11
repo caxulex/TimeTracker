@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_active_user
-from app.models import BasecampCredentials, User
+from app.models import BasecampCredentials, Team, User
 from app.services.basecamp_service import (
     BasecampAPIError,
     BasecampAuthError,
@@ -108,6 +108,16 @@ class StatusResponse(BaseModel):
     account_name: Optional[str] = None
     last_sync_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
+    target_team_id: Optional[int] = None
+    target_team_name: Optional[str] = None
+    auto_sync_enabled: bool = False
+
+
+class SettingsUpdateRequest(BaseModel):
+    target_team_id: Optional[int] = None
+    auto_sync_enabled: Optional[bool] = None
+
+    model_config = {"extra": "forbid"}
 
 
 class SyncRequest(BaseModel):
@@ -270,11 +280,102 @@ async def get_status(
     creds = row.scalar_one_or_none()
     if creds is None:
         return StatusResponse(connected=False)
+
+    target_team_name: Optional[str] = None
+    if creds.target_team_id is not None:
+        team_row = await db.execute(
+            select(Team).where(Team.id == creds.target_team_id)
+        )
+        team = team_row.scalar_one_or_none()
+        if team is not None:
+            target_team_name = team.name
+
     return StatusResponse(
         connected=True,
         account_name=creds.account_name,
         last_sync_at=creds.last_sync_at,
         expires_at=creds.expires_at,
+        target_team_id=creds.target_team_id,
+        target_team_name=target_team_name,
+        auto_sync_enabled=creds.auto_sync_enabled,
+    )
+
+
+@router.patch("/settings", response_model=StatusResponse)
+async def update_settings(
+    body: SettingsUpdateRequest,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update Basecamp integration settings (target team, auto-sync)."""
+    company_id = _ensure_company_scope(current_user)
+
+    row = await db.execute(
+        select(BasecampCredentials).where(
+            BasecampCredentials.company_id == company_id
+        )
+    )
+    creds = row.scalar_one_or_none()
+    if creds is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Basecamp is not connected for this company",
+        )
+
+    fields = body.model_dump(exclude_unset=True)
+    target_team_name: Optional[str] = None
+
+    if "target_team_id" in fields:
+        new_team_id = fields["target_team_id"]
+        if new_team_id is None:
+            creds.target_team_id = None
+        else:
+            team_row = await db.execute(
+                select(Team).where(Team.id == new_team_id)
+            )
+            team = team_row.scalar_one_or_none()
+            if team is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Target team not found",
+                )
+            if team.company_id != company_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Target team belongs to a different company",
+                )
+            creds.target_team_id = team.id
+            target_team_name = team.name
+
+    if "auto_sync_enabled" in fields and fields["auto_sync_enabled"] is not None:
+        creds.auto_sync_enabled = bool(fields["auto_sync_enabled"])
+
+    await db.commit()
+    await db.refresh(creds)
+
+    if creds.target_team_id is not None and target_team_name is None:
+        team_row = await db.execute(
+            select(Team).where(Team.id == creds.target_team_id)
+        )
+        team = team_row.scalar_one_or_none()
+        if team is not None:
+            target_team_name = team.name
+
+    logger.info(
+        "basecamp.settings.updated company_id=%s target_team_id=%s "
+        "auto_sync_enabled=%s by_user_id=%s",
+        company_id, creds.target_team_id, creds.auto_sync_enabled,
+        current_user.id,
+    )
+
+    return StatusResponse(
+        connected=True,
+        account_name=creds.account_name,
+        last_sync_at=creds.last_sync_at,
+        expires_at=creds.expires_at,
+        target_team_id=creds.target_team_id,
+        target_team_name=target_team_name,
+        auto_sync_enabled=creds.auto_sync_enabled,
     )
 
 

@@ -10,6 +10,7 @@ import axios from 'axios';
 import { Plug } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import { useNotifications } from '../hooks/useNotifications';
+import { useTeams } from '../hooks/useApi';
 import { isAdminUser, isSuperAdmin } from '../utils/helpers';
 import {
   basecampApi,
@@ -118,6 +119,9 @@ export function IntegrationsPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [lastSync, setLastSync] = useState<BasecampSyncResult | null>(null);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
+  const [savingTeam, setSavingTeam] = useState(false);
+  const [savingAutoSync, setSavingAutoSync] = useState(false);
+  const teamsQuery = useTeams();
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -208,6 +212,44 @@ export function IntegrationsPage() {
       addNotification({ type: 'error', title: 'Sync failed', message });
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const onTargetTeamChange = async (raw: string) => {
+    const next = raw === '' ? null : Number(raw);
+    setSavingTeam(true);
+    try {
+      const updated = await basecampApi.updateSettings({ target_team_id: next });
+      setState({ kind: 'ready', status: updated });
+      addNotification({ type: 'success', title: 'Target team updated' });
+    } catch (err) {
+      const message =
+        (axios.isAxiosError(err) &&
+          (err.response?.data as { detail?: string } | undefined)?.detail) ||
+        'Failed to update target team.';
+      addNotification({ type: 'error', title: 'Update failed', message });
+    } finally {
+      setSavingTeam(false);
+    }
+  };
+
+  const onAutoSyncToggle = async (next: boolean) => {
+    setSavingAutoSync(true);
+    try {
+      const updated = await basecampApi.updateSettings({ auto_sync_enabled: next });
+      setState({ kind: 'ready', status: updated });
+      addNotification({
+        type: 'success',
+        title: next ? 'Auto-sync enabled' : 'Auto-sync disabled',
+      });
+    } catch (err) {
+      const message =
+        (axios.isAxiosError(err) &&
+          (err.response?.data as { detail?: string } | undefined)?.detail) ||
+        'Failed to update auto-sync.';
+      addNotification({ type: 'error', title: 'Update failed', message });
+    } finally {
+      setSavingAutoSync(false);
     }
   };
 
@@ -367,6 +409,73 @@ export function IntegrationsPage() {
                     </dd>
                   </div>
                 </dl>
+
+                <div
+                  className="mt-2 rounded-md border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/40"
+                  data-testid="basecamp-sync-settings"
+                >
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    Sync Settings
+                  </h3>
+                  <div className="mt-3 space-y-3">
+                    <label
+                      className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-200 sm:flex-row sm:items-center sm:gap-3"
+                      htmlFor="basecamp-target-team"
+                    >
+                      <span className="sm:w-48">Projects sync to:</span>
+                      <select
+                        id="basecamp-target-team"
+                        data-testid="basecamp-target-team-select"
+                        value={state.status.target_team_id ?? ''}
+                        disabled={!canMutate || savingTeam || teamsQuery.isLoading}
+                        onChange={(e) => onTargetTeamChange(e.target.value)}
+                        className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm shadow-sm disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      >
+                        <option value="">
+                          (Default: lowest-id team
+                          {state.status.target_team_id === null &&
+                          state.status.target_team_name === null
+                            ? ''
+                            : ''}
+                          )
+                        </option>
+                        {(teamsQuery.data?.items ?? []).map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
+                      {savingTeam && (
+                        <span
+                          className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent"
+                          aria-label="Saving"
+                        />
+                      )}
+                    </label>
+
+                    <label
+                      className="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-200"
+                      htmlFor="basecamp-auto-sync"
+                    >
+                      <input
+                        id="basecamp-auto-sync"
+                        data-testid="basecamp-auto-sync-toggle"
+                        type="checkbox"
+                        checked={state.status.auto_sync_enabled}
+                        disabled={!canMutate || savingAutoSync}
+                        onChange={(e) => onAutoSyncToggle(e.target.checked)}
+                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-60"
+                      />
+                      <span>Auto-sync every 4 hours</span>
+                      {savingAutoSync && (
+                        <span
+                          className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent"
+                          aria-label="Saving"
+                        />
+                      )}
+                    </label>
+                  </div>
+                </div>
 
                 {canMutate ? (
                   <div className="flex flex-wrap gap-3 pt-2">

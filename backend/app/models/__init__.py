@@ -1045,6 +1045,16 @@ class BasecampCredentials(Base):
     last_sync_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # v2: optional target team. NULL = legacy behavior (lowest-id team).
+    target_team_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("teams.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # v2: opt-in 4-hourly auto-sync. Defaults to False.
+    auto_sync_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -200,6 +200,8 @@ class TestSchema:
             "expires_at",
             "connected_by_user_id",
             "last_sync_at",
+            "target_team_id",
+            "auto_sync_enabled",
             "created_at",
             "updated_at",
         }
