@@ -27,7 +27,9 @@ from app.config import settings
 from app.models import (
     BasecampCredentials,
     BasecampProjectMapping,
+    BasecampTaskMapping,
     Project,
+    Task,
     Team,
 )
 from app.services.encryption_service import EncryptionService
@@ -446,6 +448,317 @@ class BasecampService:
             await db.flush()
 
         return report
+
+    # ------------------------------------------------------------------
+    # To-do mirroring (v3.0)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _list_todolists(
+        token: str,
+        account_id: str,
+        basecamp_project_id: str,
+    ) -> list[dict]:
+        """Fetch every active to-do list under a Basecamp project.
+
+        Paginates via the standard ``Link: <...>; rel="next"`` header.
+        Archived or trashed lists are filtered out by passing
+        ``status=active`` so we never resurrect tasks that the
+        Basecamp user has retired.
+        """
+        url = (
+            f"https://3.basecampapi.com/{account_id}/buckets/"
+            f"{basecamp_project_id}/todolists.json?status=active"
+        )
+        out: list[dict] = []
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "User-Agent": USER_AGENT,
+            },
+        ) as client:
+            next_url: Optional[str] = url
+            while next_url:
+                resp = await client.get(next_url)
+                if resp.status_code != 200:
+                    raise BasecampAPIError(
+                        f"todolists.json returned HTTP {resp.status_code}"
+                    )
+                for lst in resp.json():
+                    out.append(
+                        {
+                            "id": str(lst.get("id")),
+                            "title": lst.get("title") or lst.get("name") or "",
+                        }
+                    )
+                next_url = _parse_next_link(resp.headers.get("Link"))
+        return out
+
+    @staticmethod
+    async def _list_todos_in_list(
+        token: str,
+        account_id: str,
+        basecamp_project_id: str,
+        todolist_id: str,
+    ) -> list[dict]:
+        """Fetch every to-do (active + completed) under a to-do list.
+
+        Basecamp paginates by Link header and returns ``completed=False``
+        items by default; request ``completed=true`` separately to
+        capture completed to-dos as well so they sync as DONE in
+        TimeTracker.
+        """
+        base = (
+            f"https://3.basecampapi.com/{account_id}/buckets/"
+            f"{basecamp_project_id}/todolists/{todolist_id}/todos.json"
+        )
+        results: list[dict] = []
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "User-Agent": USER_AGENT,
+            },
+        ) as client:
+            for query in ("", "?completed=true"):
+                next_url: Optional[str] = base + query
+                while next_url:
+                    resp = await client.get(next_url)
+                    if resp.status_code != 200:
+                        raise BasecampAPIError(
+                            f"todos.json returned HTTP {resp.status_code}"
+                        )
+                    for t in resp.json():
+                        results.append(
+                            {
+                                "id": str(t.get("id")),
+                                "content": t.get("content") or "",
+                                "description": t.get("description") or "",
+                                "completed": bool(t.get("completed", False)),
+                            }
+                        )
+                    next_url = _parse_next_link(resp.headers.get("Link"))
+        return results
+
+    @staticmethod
+    async def sync_todos_for_company(
+        credentials: BasecampCredentials,
+        company_id: int,
+        db: AsyncSession,
+        dry_run: bool = False,
+    ) -> dict:
+        """Mirror Basecamp to-dos as TimeTracker ``Task`` rows.
+
+        For every ``basecamp_project_mappings`` row owned by the
+        company, fetch the to-do lists + to-dos under that Basecamp
+        project and upsert a ``Task`` per to-do. Idempotent: re-running
+        on unchanged data produces ``todos_created=0`` and
+        ``todos_updated=0``.
+
+        Error boundaries:
+          * Per-project: a failure fetching to-do lists is recorded in
+            ``todo_errors`` and the next project still runs.
+          * Per-list: a failure fetching to-dos is recorded and the
+            next list still runs.
+          * Per-to-do: a per-row exception is recorded and the next
+            to-do still runs.
+
+        Task name format::
+
+            "[List title] To-do content"
+
+        Status mapping (verified against the actual ``Task.status``
+        values in the TimeTracker codebase — comment in
+        ``app/models/__init__.py`` documents them as TODO /
+        IN_PROGRESS / DONE):
+          * Basecamp ``completed=True``  -> TimeTracker ``status="DONE"``
+          * Basecamp ``completed=False`` -> TimeTracker ``status="TODO"``
+        """
+        report: dict[str, Any] = {
+            "todos_created": 0,
+            "todos_updated": 0,
+            "todos_unchanged": 0,
+            "todo_errors": [],
+            "dry_run": dry_run,
+        }
+
+        mapping_rows = await db.execute(
+            select(BasecampProjectMapping).where(
+                BasecampProjectMapping.company_id == company_id,
+                BasecampProjectMapping.basecamp_account_id
+                == credentials.account_id,
+            )
+        )
+        project_mappings = mapping_rows.scalars().all()
+        if not project_mappings:
+            return report
+
+        try:
+            token = await BasecampService._get_valid_access_token(
+                credentials, db
+            )
+        except BasecampError as exc:
+            report["todo_errors"].append(str(exc))
+            return report
+
+        for proj_mapping in project_mappings:
+            bc_project_id = proj_mapping.basecamp_project_id
+            internal_project_id = proj_mapping.internal_project_id
+
+            try:
+                todolists = await BasecampService._list_todolists(
+                    token, credentials.account_id, bc_project_id
+                )
+            except BasecampError as exc:
+                report["todo_errors"].append(
+                    f"project {bc_project_id} todolists: {exc}"
+                )
+                continue
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("basecamp.todos.todolists_failed")
+                report["todo_errors"].append(
+                    f"project {bc_project_id} todolists: {exc}"
+                )
+                continue
+
+            for lst in todolists:
+                lst_id = lst["id"]
+                lst_title = lst["title"]
+
+                try:
+                    todos = await BasecampService._list_todos_in_list(
+                        token,
+                        credentials.account_id,
+                        bc_project_id,
+                        lst_id,
+                    )
+                except BasecampError as exc:
+                    report["todo_errors"].append(
+                        f"list {lst_id}: {exc}"
+                    )
+                    continue
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("basecamp.todos.list_failed")
+                    report["todo_errors"].append(
+                        f"list {lst_id}: {exc}"
+                    )
+                    continue
+
+                for td in todos:
+                    try:
+                        await BasecampService._upsert_todo(
+                            db=db,
+                            company_id=company_id,
+                            account_id=credentials.account_id,
+                            basecamp_project_id=bc_project_id,
+                            todolist_id=lst_id,
+                            list_title=lst_title,
+                            internal_project_id=internal_project_id,
+                            todo=td,
+                            dry_run=dry_run,
+                            report=report,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.exception("basecamp.todos.todo_failed")
+                        report["todo_errors"].append(
+                            f"todo {td.get('id')}: {exc}"
+                        )
+
+        if not dry_run:
+            await db.flush()
+
+        return report
+
+    @staticmethod
+    async def _upsert_todo(
+        *,
+        db: AsyncSession,
+        company_id: int,
+        account_id: str,
+        basecamp_project_id: str,
+        todolist_id: str,
+        list_title: str,
+        internal_project_id: int,
+        todo: dict,
+        dry_run: bool,
+        report: dict,
+    ) -> None:
+        """Create or update a single Task + its BasecampTaskMapping row."""
+        todo_id = todo["id"]
+        target_name = f"[{list_title}] {todo['content']}"
+        target_status = "DONE" if todo["completed"] else "TODO"
+
+        existing_row = await db.execute(
+            select(BasecampTaskMapping).where(
+                BasecampTaskMapping.company_id == company_id,
+                BasecampTaskMapping.basecamp_account_id == account_id,
+                BasecampTaskMapping.basecamp_todo_id == todo_id,
+            )
+        )
+        mapping = existing_row.scalar_one_or_none()
+
+        if mapping is None:
+            if dry_run:
+                report["todos_created"] += 1
+                return
+            task = Task(
+                project_id=internal_project_id,
+                name=target_name,
+                status=target_status,
+            )
+            db.add(task)
+            await db.flush()
+            db.add(
+                BasecampTaskMapping(
+                    company_id=company_id,
+                    basecamp_account_id=account_id,
+                    basecamp_project_id=basecamp_project_id,
+                    basecamp_todolist_id=todolist_id,
+                    basecamp_todo_id=todo_id,
+                    task_id=task.id,
+                    last_synced_at=datetime.now(timezone.utc),
+                )
+            )
+            report["todos_created"] += 1
+            return
+
+        task_row = await db.execute(
+            select(Task).where(Task.id == mapping.task_id)
+        )
+        task = task_row.scalar_one_or_none()
+        if task is None:
+            # Linked task was deleted out from under us; recreate.
+            if dry_run:
+                report["todos_created"] += 1
+                return
+            task = Task(
+                project_id=internal_project_id,
+                name=target_name,
+                status=target_status,
+            )
+            db.add(task)
+            await db.flush()
+            mapping.task_id = task.id
+            mapping.basecamp_todolist_id = todolist_id
+            mapping.basecamp_project_id = basecamp_project_id
+            mapping.last_synced_at = datetime.now(timezone.utc)
+            report["todos_created"] += 1
+            return
+
+        changed = (task.name != target_name) or (task.status != target_status)
+        if changed:
+            if not dry_run:
+                task.name = target_name
+                task.status = target_status
+                mapping.basecamp_todolist_id = todolist_id
+                mapping.basecamp_project_id = basecamp_project_id
+                mapping.last_synced_at = datetime.now(timezone.utc)
+            report["todos_updated"] += 1
+        else:
+            if not dry_run:
+                mapping.last_synced_at = datetime.now(timezone.utc)
+            report["todos_unchanged"] += 1
 
     # ------------------------------------------------------------------
     # Disconnect helpers

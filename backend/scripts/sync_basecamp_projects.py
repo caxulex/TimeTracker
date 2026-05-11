@@ -99,6 +99,9 @@ async def sync_all_enabled_companies(db: AsyncSession) -> dict:
             report = await BasecampService.sync_projects_to_company(
                 creds, company_id, db, dry_run=False
             )
+            todo_report = await BasecampService.sync_todos_for_company(
+                creds, company_id, db, dry_run=False
+            )
             await db.commit()
             summary["companies_succeeded"] += 1
             summary["results"].append(
@@ -108,16 +111,25 @@ async def sync_all_enabled_companies(db: AsyncSession) -> dict:
                     "updated": report.get("updated", 0),
                     "unchanged": report.get("unchanged", 0),
                     "errors": report.get("errors", []),
+                    "todos_created": todo_report.get("todos_created", 0),
+                    "todos_updated": todo_report.get("todos_updated", 0),
+                    "todos_unchanged": todo_report.get("todos_unchanged", 0),
+                    "todo_errors": todo_report.get("todo_errors", []),
                 }
             )
+            proj_errs = len(report.get("errors", []) or [])
+            todo_errs = len(todo_report.get("todo_errors", []) or [])
             logger.info(
-                "basecamp.autosync.company_done company_id=%s created=%s "
-                "updated=%s unchanged=%s errors=%s",
+                "basecamp.autosync.company_done company_id=%s "
+                "projects=(%s/%s/%s) todos=(%s/%s/%s) errors=%s",
                 company_id,
                 report.get("created", 0),
                 report.get("updated", 0),
                 report.get("unchanged", 0),
-                len(report.get("errors", []) or []),
+                todo_report.get("todos_created", 0),
+                todo_report.get("todos_updated", 0),
+                todo_report.get("todos_unchanged", 0),
+                proj_errs + todo_errs,
             )
         except BasecampError as exc:
             await db.rollback()

@@ -125,10 +125,19 @@ class SyncRequest(BaseModel):
 
 
 class SyncResponse(BaseModel):
+    # Project counts (unchanged from v1+v2): per-Basecamp-project mirror
+    # results.
     created: int
     updated: int
     unchanged: int
     errors: list[str]
+    # To-do counts (new in v3.0): per-Basecamp-to-do mirror results.
+    # Only populated for projects that have a basecamp_project_mappings
+    # row. dry_run=True returns counts without writing to either tier.
+    todos_created: int = 0
+    todos_updated: int = 0
+    todos_unchanged: int = 0
+    todo_errors: list[str] = []
     dry_run: bool
 
 
@@ -405,6 +414,9 @@ async def sync_projects(
         report = await BasecampService.sync_projects_to_company(
             creds, company_id, db, dry_run=body.dry_run
         )
+        todo_report = await BasecampService.sync_todos_for_company(
+            creds, company_id, db, dry_run=body.dry_run
+        )
     except BasecampError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -416,11 +428,22 @@ async def sync_projects(
 
     logger.info(
         "basecamp.sync.completed company_id=%s dry_run=%s created=%s updated=%s "
-        "unchanged=%s errors=%s",
+        "unchanged=%s errors=%s todos_created=%s todos_updated=%s "
+        "todos_unchanged=%s todo_errors=%s",
         company_id, body.dry_run, report["created"], report["updated"],
         report["unchanged"], len(report.get("errors", [])),
+        todo_report["todos_created"], todo_report["todos_updated"],
+        todo_report["todos_unchanged"],
+        len(todo_report.get("todo_errors", [])),
     )
-    return SyncResponse(**report)
+    merged = {
+        **report,
+        "todos_created": todo_report["todos_created"],
+        "todos_updated": todo_report["todos_updated"],
+        "todos_unchanged": todo_report["todos_unchanged"],
+        "todo_errors": todo_report.get("todo_errors", []),
+    }
+    return SyncResponse(**merged)
 
 
 @router.delete("/disconnect")
