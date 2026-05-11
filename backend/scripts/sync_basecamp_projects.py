@@ -121,7 +121,9 @@ async def sync_all_enabled_companies(db: AsyncSession) -> dict:
             todo_errs = len(todo_report.get("todo_errors", []) or [])
             logger.info(
                 "basecamp.autosync.company_done company_id=%s "
-                "projects=(%s/%s/%s) todos=(%s/%s/%s) errors=%s",
+                "created=%s updated=%s unchanged=%s "
+                "todos_created=%s todos_updated=%s todos_unchanged=%s "
+                "errors=%s",
                 company_id,
                 report.get("created", 0),
                 report.get("updated", 0),

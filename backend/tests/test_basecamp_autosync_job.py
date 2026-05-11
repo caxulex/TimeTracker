@@ -206,3 +206,127 @@ class TestAutoSyncJob:
             "errors": [],
             "results": [],
         }
+
+    @pytest.mark.asyncio
+    async def test_autosync_calls_todo_sync_per_company(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        co_a = await _mk_company(db_session)
+        co_b = await _mk_company(db_session)
+        await _mk_owner_and_team(db_session, co_a)
+        await _mk_owner_and_team(db_session, co_b)
+        db_session.add(_mk_creds(co_a.id, auto=True))
+        db_session.add(_mk_creds(co_b.id, auto=True))
+        await db_session.commit()
+
+        todo_seen: list[int] = []
+
+        async def fake_project_sync(creds, company_id, db, dry_run=False):
+            return {"created": 0, "updated": 0, "unchanged": 0, "errors": []}
+
+        async def fake_todo_sync(creds, company_id, db, dry_run=False):
+            todo_seen.append(company_id)
+            return {
+                "todos_created": 0,
+                "todos_updated": 0,
+                "todos_unchanged": 0,
+                "todo_errors": [],
+            }
+
+        with patch.object(
+            BasecampService, "sync_projects_to_company",
+            side_effect=fake_project_sync,
+        ), patch.object(
+            BasecampService, "sync_todos_for_company",
+            side_effect=fake_todo_sync,
+        ):
+            await sync_all_enabled_companies(db_session)
+
+        assert sorted(todo_seen) == sorted([co_a.id, co_b.id])
+
+    @pytest.mark.asyncio
+    async def test_autosync_per_company_result_includes_todo_counts(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        co = await _mk_company(db_session)
+        await _mk_owner_and_team(db_session, co)
+        db_session.add(_mk_creds(co.id, auto=True))
+        await db_session.commit()
+
+        async def fake_project_sync(creds, company_id, db, dry_run=False):
+            return {"created": 1, "updated": 2, "unchanged": 3, "errors": []}
+
+        async def fake_todo_sync(creds, company_id, db, dry_run=False):
+            return {
+                "todos_created": 4,
+                "todos_updated": 5,
+                "todos_unchanged": 6,
+                "todo_errors": ["one error"],
+            }
+
+        with patch.object(
+            BasecampService, "sync_projects_to_company",
+            side_effect=fake_project_sync,
+        ), patch.object(
+            BasecampService, "sync_todos_for_company",
+            side_effect=fake_todo_sync,
+        ):
+            summary = await sync_all_enabled_companies(db_session)
+
+        assert len(summary["results"]) == 1
+        r = summary["results"][0]
+        for k in (
+            "company_id", "created", "updated", "unchanged", "errors",
+            "todos_created", "todos_updated", "todos_unchanged",
+            "todo_errors",
+        ):
+            assert k in r, f"missing key {k} in result"
+        assert r["todos_created"] == 4
+        assert r["todos_updated"] == 5
+        assert r["todos_unchanged"] == 6
+        assert r["todo_errors"] == ["one error"]
+
+    @pytest.mark.asyncio
+    async def test_autosync_log_line_includes_todo_counts(
+        self, db_session: AsyncSession, _enc_key, caplog
+    ):
+        import logging as _logging
+
+        co = await _mk_company(db_session)
+        await _mk_owner_and_team(db_session, co)
+        db_session.add(_mk_creds(co.id, auto=True))
+        await db_session.commit()
+
+        async def fake_project_sync(creds, company_id, db, dry_run=False):
+            return {"created": 1, "updated": 2, "unchanged": 3, "errors": []}
+
+        async def fake_todo_sync(creds, company_id, db, dry_run=False):
+            return {
+                "todos_created": 4,
+                "todos_updated": 5,
+                "todos_unchanged": 6,
+                "todo_errors": ["x"],
+            }
+
+        with caplog.at_level(
+            _logging.INFO, logger="scripts.sync_basecamp_projects"
+        ), patch.object(
+            BasecampService, "sync_projects_to_company",
+            side_effect=fake_project_sync,
+        ), patch.object(
+            BasecampService, "sync_todos_for_company",
+            side_effect=fake_todo_sync,
+        ):
+            await sync_all_enabled_companies(db_session)
+
+        msgs = [r.getMessage() for r in caplog.records]
+        joined = "\n".join(msgs)
+        assert "basecamp.autosync.company_done" in joined
+        # Per-company line uses explicit key=value pairs (v3.0.1 format)
+        assert "created=1" in joined
+        assert "updated=2" in joined
+        assert "unchanged=3" in joined
+        assert "todos_created=4" in joined
+        assert "todos_updated=5" in joined
+        assert "todos_unchanged=6" in joined
+        assert "errors=1" in joined  # 0 project errs + 1 todo err

@@ -502,13 +502,37 @@ class TestTodoSync:
         page1.headers = {
             "Link": (
                 '<https://3.basecampapi.com/acct-1/buckets/bcp-1/'
-                'todolists.json?page=2>; rel="next"'
+                'todosets/55/todolists.json?page=2&status=active>; rel="next"'
             )
         }
         page2 = MagicMock()
         page2.status_code = 200
         page2.json.return_value = [{"id": 20, "title": "List 2"}]
         page2.headers = {}
+
+        # Project + todoset responses needed to resolve the
+        # ``todolists_url`` via dock traversal.
+        project_resp = MagicMock()
+        project_resp.status_code = 200
+        project_resp.json.return_value = {
+            "id": "bcp-1",
+            "dock": [
+                {"name": "message_board", "id": 11, "enabled": True},
+                {"name": "todoset", "id": 55, "enabled": True},
+            ],
+        }
+        project_resp.headers = {}
+
+        todoset_resp = MagicMock()
+        todoset_resp.status_code = 200
+        todoset_resp.json.return_value = {
+            "id": 55,
+            "todolists_url": (
+                "https://3.basecampapi.com/acct-1/buckets/bcp-1/"
+                "todosets/55/todolists.json"
+            ),
+        }
+        todoset_resp.headers = {}
 
         # Todos for list 10 + 20, no pagination for to-dos.
         todos_10 = MagicMock()
@@ -532,9 +556,13 @@ class TestTodoSync:
         # once for each list's todos). Build a side_effect that returns
         # the right response based on URL.
         def make_response(url: str):
+            if "/projects/bcp-1.json" in url:
+                return project_resp
+            if "/todosets/55.json" in url:
+                return todoset_resp
             if "todolists.json?page=2" in url:
                 return page2
-            if "todolists.json" in url and "page=" not in url:
+            if "todosets/55/todolists.json" in url:
                 return page1
             if "todolists/10/todos.json" in url and "completed=true" in url:
                 return empty_completed
@@ -763,3 +791,240 @@ class TestTodoSync:
         rows = await db_session.execute(select(Task))
         names = sorted(t.name for t in rows.scalars().all())
         assert names == ["[Engineering] Build", "[Marketing] Promote"]
+
+
+# ----------------------------------------------------------------------
+# URL resolution tests (v3.0.1 hotfix)
+# ----------------------------------------------------------------------
+
+
+def _mock_async_client_with_responses(responses_by_url_match):
+    """Build a patcher for ``httpx.AsyncClient`` returning per-URL mocks.
+
+    ``responses_by_url_match`` is a list of ``(matcher, response)`` pairs.
+    ``matcher`` is a callable ``str -> bool``. The first match wins.
+    ``response`` is a ``MagicMock`` with ``status_code`` / ``json`` /
+    ``headers`` configured. Unknown URLs raise ``AssertionError``.
+    """
+    async def fake_get(url):
+        for matcher, resp in responses_by_url_match:
+            if matcher(url):
+                return resp
+        raise AssertionError(f"Unexpected URL: {url}")
+
+    async_client = MagicMock()
+    async_client.get = AsyncMock(side_effect=fake_get)
+    p = patch("app.services.basecamp_service.httpx.AsyncClient")
+    return p, async_client
+
+
+def _resp(status_code=200, json_data=None, headers=None):
+    r = MagicMock()
+    r.status_code = status_code
+    r.json.return_value = json_data if json_data is not None else []
+    r.headers = headers or {}
+    return r
+
+
+class TestTodolistUrlResolution:
+    """Verify the dock-traversal URL chain used by ``_list_todolists``.
+
+    PR #10 (v3.0) shipped with the wrong endpoint:
+    ``/buckets/{id}/todolists.json`` which returns 404. v3.0.1 reads
+    the project's ``dock`` to find the ``todoset`` entry, fetches the
+    todoset, and uses its published ``todolists_url``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_todolist_url_resolved_via_dock_todoset(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        company = await _mk_company(db_session)
+        _, team = await _mk_owner_and_team(db_session, company)
+        await _mk_project_and_mapping(
+            db_session, company, team, basecamp_project_id="bcp-1"
+        )
+        creds = _mk_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        project_resp = _resp(json_data={
+            "id": "bcp-1",
+            "dock": [
+                {"name": "schedule", "id": 7, "enabled": True},
+                {"name": "todoset", "id": 99, "enabled": True},
+            ],
+        })
+        todoset_resp = _resp(json_data={
+            "id": 99,
+            "todolists_url": (
+                "https://3.basecampapi.com/acct-1/buckets/bcp-1/"
+                "todosets/99/todolists.json"
+            ),
+        })
+        todolists_resp = _resp(json_data=[
+            {"id": 1001, "title": "Sprint Alpha"},
+        ])
+        empty = _resp(json_data=[])
+
+        seen_urls: list[str] = []
+
+        responses = [
+            (lambda u: "/projects/bcp-1.json" in u, project_resp),
+            (lambda u: "/todosets/99.json" in u, todoset_resp),
+            (lambda u: "/todosets/99/todolists.json" in u, todolists_resp),
+            (lambda u: "todolists/1001/todos.json" in u and "completed=true" in u, empty),
+            (lambda u: "todolists/1001/todos.json" in u, empty),
+        ]
+
+        p, async_client = _mock_async_client_with_responses(responses)
+
+        original_get = async_client.get
+        async def tracking_get(url):
+            seen_urls.append(url)
+            return await original_get(url)
+        async_client.get = AsyncMock(side_effect=tracking_get)
+
+        async def fake_token(_creds, _db):
+            return "tok"
+
+        with p as AC, patch.object(
+            BasecampService, "_get_valid_access_token", side_effect=fake_token
+        ):
+            AC.return_value.__aenter__.return_value = async_client
+            report = await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        assert report["todo_errors"] == []
+        # The three resolution requests in order: project, todoset,
+        # todolists_url (then the per-list todos calls).
+        assert any("/projects/bcp-1.json" in u for u in seen_urls)
+        assert any("/todosets/99.json" in u for u in seen_urls)
+        assert any("/todosets/99/todolists.json" in u for u in seen_urls)
+        # Critically: the broken v3.0 endpoint must NOT be called.
+        assert not any(
+            u.endswith("/buckets/bcp-1/todolists.json")
+            or "/buckets/bcp-1/todolists.json?" in u
+            for u in seen_urls
+        )
+
+    @pytest.mark.asyncio
+    async def test_todolist_url_skipped_when_todoset_disabled(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        company = await _mk_company(db_session)
+        _, team = await _mk_owner_and_team(db_session, company)
+        await _mk_project_and_mapping(
+            db_session, company, team, basecamp_project_id="bcp-1"
+        )
+        creds = _mk_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        project_resp = _resp(json_data={
+            "id": "bcp-1",
+            "dock": [{"name": "todoset", "id": 99, "enabled": False}],
+        })
+
+        responses = [
+            (lambda u: "/projects/bcp-1.json" in u, project_resp),
+        ]
+        p, async_client = _mock_async_client_with_responses(responses)
+
+        async def fake_token(_creds, _db):
+            return "tok"
+
+        with p as AC, patch.object(
+            BasecampService, "_get_valid_access_token", side_effect=fake_token
+        ):
+            AC.return_value.__aenter__.return_value = async_client
+            report = await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        # Disabled todoset is a valid Basecamp config — no error.
+        assert report["todo_errors"] == []
+        assert report["todos_created"] == 0
+
+    @pytest.mark.asyncio
+    async def test_todolist_url_skipped_when_no_todoset_entry(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        company = await _mk_company(db_session)
+        _, team = await _mk_owner_and_team(db_session, company)
+        await _mk_project_and_mapping(
+            db_session, company, team, basecamp_project_id="bcp-1"
+        )
+        creds = _mk_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        project_resp = _resp(json_data={
+            "id": "bcp-1",
+            "dock": [
+                {"name": "message_board", "id": 1, "enabled": True},
+                {"name": "schedule", "id": 2, "enabled": True},
+            ],
+        })
+
+        responses = [
+            (lambda u: "/projects/bcp-1.json" in u, project_resp),
+        ]
+        p, async_client = _mock_async_client_with_responses(responses)
+
+        async def fake_token(_creds, _db):
+            return "tok"
+
+        with p as AC, patch.object(
+            BasecampService, "_get_valid_access_token", side_effect=fake_token
+        ):
+            AC.return_value.__aenter__.return_value = async_client
+            report = await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        assert report["todo_errors"] == []
+        assert report["todos_created"] == 0
+
+    @pytest.mark.asyncio
+    async def test_todoset_endpoint_404_logged_as_error(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        company = await _mk_company(db_session)
+        _, team = await _mk_owner_and_team(db_session, company)
+        await _mk_project_and_mapping(
+            db_session, company, team, basecamp_project_id="bcp-1"
+        )
+        creds = _mk_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        project_resp = _resp(json_data={
+            "id": "bcp-1",
+            "dock": [{"name": "todoset", "id": 99, "enabled": True}],
+        })
+        todoset_404 = _resp(status_code=404, json_data={})
+
+        responses = [
+            (lambda u: "/projects/bcp-1.json" in u, project_resp),
+            (lambda u: "/todosets/99.json" in u, todoset_404),
+        ]
+        p, async_client = _mock_async_client_with_responses(responses)
+
+        async def fake_token(_creds, _db):
+            return "tok"
+
+        with p as AC, patch.object(
+            BasecampService, "_get_valid_access_token", side_effect=fake_token
+        ):
+            AC.return_value.__aenter__.return_value = async_client
+            report = await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        assert report["todos_created"] == 0
+        assert len(report["todo_errors"]) == 1
+        msg = report["todo_errors"][0]
+        assert "bcp-1" in msg
+        assert "404" in msg

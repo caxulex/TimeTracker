@@ -461,29 +461,87 @@ class BasecampService:
     ) -> list[dict]:
         """Fetch every active to-do list under a Basecamp project.
 
-        Paginates via the standard ``Link: <...>; rel="next"`` header.
-        Archived or trashed lists are filtered out by passing
-        ``status=active`` so we never resurrect tasks that the
-        Basecamp user has retired.
+        Basecamp 3 does not expose ``/buckets/{id}/todolists.json``
+        directly: that endpoint returns 404. Instead each project
+        carries a ``dock`` array of feature pointers; the ``todoset``
+        entry's id identifies the project's todoset, whose response
+        publishes a ``todolists_url`` we can paginate. See
+        https://github.com/basecamp/bc3-api/blob/master/sections/todolists.md.
+
+        Projects whose to-dos tool is disabled (no ``todoset`` dock
+        entry or ``enabled: false``) are skipped quietly — that is a
+        valid Basecamp configuration, not an error.
         """
-        url = (
-            f"https://3.basecampapi.com/{account_id}/buckets/"
-            f"{basecamp_project_id}/todolists.json?status=active"
-        )
-        out: list[dict] = []
-        async with httpx.AsyncClient(
-            timeout=30.0,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "User-Agent": USER_AGENT,
-            },
-        ) as client:
-            next_url: Optional[str] = url
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "User-Agent": USER_AGENT,
+        }
+        async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
+            # Step 1: fetch the project to find the todoset dock entry.
+            project_url = (
+                f"https://3.basecampapi.com/{account_id}/projects/"
+                f"{basecamp_project_id}.json"
+            )
+            proj_resp = await client.get(project_url)
+            if proj_resp.status_code != 200:
+                raise BasecampAPIError(
+                    f"projects/{basecamp_project_id}.json returned HTTP "
+                    f"{proj_resp.status_code}"
+                )
+            project = proj_resp.json()
+            dock = project.get("dock") or []
+            todoset_entry = next(
+                (d for d in dock if d.get("name") == "todoset"), None
+            )
+            if todoset_entry is None:
+                logger.debug(
+                    "basecamp.todos.no_todoset_entry project=%s",
+                    basecamp_project_id,
+                )
+                return []
+            if not todoset_entry.get("enabled", True):
+                logger.debug(
+                    "basecamp.todos.todoset_disabled project=%s",
+                    basecamp_project_id,
+                )
+                return []
+            todoset_id = todoset_entry.get("id")
+            if todoset_id is None:
+                logger.debug(
+                    "basecamp.todos.todoset_missing_id project=%s",
+                    basecamp_project_id,
+                )
+                return []
+
+            # Step 2: fetch the todoset to obtain its ``todolists_url``.
+            todoset_url = (
+                f"https://3.basecampapi.com/{account_id}/buckets/"
+                f"{basecamp_project_id}/todosets/{todoset_id}.json"
+            )
+            ts_resp = await client.get(todoset_url)
+            if ts_resp.status_code != 200:
+                raise BasecampAPIError(
+                    f"todosets/{todoset_id}.json returned HTTP "
+                    f"{ts_resp.status_code}"
+                )
+            todoset = ts_resp.json()
+            todolists_url = todoset.get("todolists_url")
+            if not todolists_url:
+                raise BasecampAPIError(
+                    f"todoset {todoset_id} response missing todolists_url"
+                )
+
+            # Step 3: paginate the published todolists_url. Filter to
+            # ``status=active`` so archived/trashed lists don't
+            # resurrect their tasks.
+            sep = "&" if "?" in todolists_url else "?"
+            next_url: Optional[str] = f"{todolists_url}{sep}status=active"
+            out: list[dict] = []
             while next_url:
                 resp = await client.get(next_url)
                 if resp.status_code != 200:
                     raise BasecampAPIError(
-                        f"todolists.json returned HTTP {resp.status_code}"
+                        f"todolists returned HTTP {resp.status_code}"
                     )
                 for lst in resp.json():
                     out.append(
