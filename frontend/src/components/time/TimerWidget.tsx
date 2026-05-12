@@ -44,7 +44,7 @@ export function TimerWidget() {
   });
 
   // Fetch tasks for selected project
-  const { data: tasksData } = useQuery({
+  const { data: tasksData, isPending: isTasksPending } = useQuery({
     queryKey: ['tasks', selectedProject],
     queryFn: () => tasksApi.getAll({ project_id: selectedProject }),
     enabled: !!selectedProject,
@@ -273,7 +273,13 @@ export function TimerWidget() {
                 controlsDisabled && "opacity-50 cursor-not-allowed"
               )}
             >
-              <option value="">No task</option>
+              <option value="">
+                {isTasksPending
+                  ? 'Loading tasks…'
+                  : tasks.length === 0
+                    ? 'No tasks for this project'
+                    : 'No task'}
+              </option>
               {tasks.map((task: Task) => (
                 <option key={task.id} value={task.id} className="text-gray-900">
                   {task.name}
