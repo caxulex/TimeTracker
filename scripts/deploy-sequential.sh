@@ -5,6 +5,14 @@
 # ⚠️  CRITICAL: This script builds ONE container at a time
 #     to prevent Out-Of-Memory crashes on 1GB RAM servers.
 #
+# 📝 NOTE: Scheduler containers (scheduler, scheduler-hourly,
+#     scheduler-4hourly) share the backend image
+#     (image: timetracker-backend:latest in docker-compose.prod.yml)
+#     and therefore do NOT require separate build steps. The
+#     `docker compose up -d` step below will detect the updated
+#     backend image and recreate the scheduler containers
+#     automatically so they always run the latest backend code.
+#
 # ❌ NEVER USE: docker compose up -d --build
 # ❌ NEVER USE: docker compose build --no-cache
 # ❌ NEVER USE: docker compose build (without specifying service)
