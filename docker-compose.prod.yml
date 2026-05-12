@@ -44,6 +44,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    image: timetracker-backend:latest
     container_name: timetracker-backend
     restart: unless-stopped
     environment:
@@ -119,9 +120,7 @@ services:
 
   # Scheduler for daily cleanup tasks (closes stale sessions at midnight)
   scheduler:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: timetracker-backend:latest
     container_name: timetracker-scheduler
     restart: unless-stopped
     environment:
@@ -151,9 +150,7 @@ services:
 
   # Hourly scheduler: long-timer warning emails (PR-A long timer warning)
   scheduler-hourly:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: timetracker-backend:latest
     container_name: timetracker-scheduler-hourly
     restart: unless-stopped
     environment:
@@ -183,9 +180,7 @@ services:
 
   # 4-hourly scheduler: Basecamp opt-in auto-sync (v2)
   scheduler-4hourly:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: timetracker-backend:latest
     container_name: timetracker-scheduler-4hourly
     restart: unless-stopped
     environment:
