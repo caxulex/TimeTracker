@@ -1142,6 +1142,15 @@ class BasecampTaskMapping(Base):
     basecamp_project_id: Mapped[str] = mapped_column(String(64), nullable=False)
     basecamp_todolist_id: Mapped[str] = mapped_column(String(64), nullable=False)
     basecamp_todo_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    basecamp_due_on: Mapped[Optional[date]] = mapped_column(
+        Date, nullable=True
+    )
+    basecamp_todo_created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    basecamp_todo_position: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
     task_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("tasks.id", ondelete="CASCADE"),

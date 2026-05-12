@@ -20,7 +20,7 @@ patches; no real network traffic.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -177,6 +177,9 @@ class TestTodoSyncSchema:
             "basecamp_project_id",
             "basecamp_todolist_id",
             "basecamp_todo_id",
+            "basecamp_due_on",
+            "basecamp_todo_created_at",
+            "basecamp_todo_position",
             "task_id",
             "last_synced_at",
         }
@@ -1148,3 +1151,250 @@ class TestTodolistUrlResolution:
         msg = report["todo_errors"][0]
         assert "bcp-1" in msg
         assert "404" in msg
+
+
+# ----------------------------------------------------------------------
+# Disambiguation metadata (due_on / created_at / position)
+# ----------------------------------------------------------------------
+
+
+class TestTodoDisambiguationMetadata:
+    """Tests for the three new ``BasecampTaskMapping`` metadata
+    columns that disambiguate duplicate-named to-dos in the dashboard
+    dropdown (PR-13).
+    """
+
+    @pytest.mark.asyncio
+    async def test_list_todos_extracts_metadata_fields(self):
+        """``_list_todos_in_list`` must surface ``due_on``,
+        ``created_at`` and ``position`` from the Basecamp JSON so
+        ``_upsert_todo`` can persist them.
+        """
+        page = MagicMock()
+        page.status_code = 200
+        page.json.return_value = [
+            {
+                "id": 1,
+                "content": "A",
+                "description": "",
+                "completed": False,
+                "due_on": "2026-05-31",
+                "created_at": "2026-01-15T09:30:00.000Z",
+                "position": 4,
+            },
+            {
+                "id": 2,
+                "content": "B",
+                "description": "",
+                "completed": True,
+                # Intentionally missing fields -> stored as None
+            },
+        ]
+        page.headers = {}
+        empty = MagicMock()
+        empty.status_code = 200
+        empty.json.return_value = []
+        empty.headers = {}
+
+        # First call (?completed=false default) returns the two todos;
+        # the second call (?completed=true) returns nothing.
+        client = MagicMock()
+        client.get = AsyncMock(side_effect=[page, empty])
+        ac = MagicMock()
+        ac.__aenter__ = AsyncMock(return_value=client)
+        ac.__aexit__ = AsyncMock(return_value=None)
+
+        with patch(
+            "app.services.basecamp_service.httpx.AsyncClient",
+            return_value=ac,
+        ):
+            todos = await BasecampService._list_todos_in_list(
+                "tok", "acct-1", "bcp-1", "list-1"
+            )
+
+        assert len(todos) == 2
+        first = next(t for t in todos if t["id"] == "1")
+        assert first["due_on"] == "2026-05-31"
+        assert first["created_at"] == "2026-01-15T09:30:00.000Z"
+        assert first["position"] == 4
+        second = next(t for t in todos if t["id"] == "2")
+        assert second["due_on"] is None
+        assert second["created_at"] is None
+        assert second["position"] is None
+
+    @pytest.mark.asyncio
+    async def test_upsert_persists_metadata_on_insert(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        """First-time sync of a to-do must persist parsed
+        ``basecamp_due_on``, ``basecamp_todo_created_at`` and
+        ``basecamp_todo_position`` on the new ``BasecampTaskMapping``
+        row.
+        """
+        company = await _mk_company(db_session)
+        _, team = await _mk_owner_and_team(db_session, company)
+        await _mk_project_and_mapping(
+            db_session, company, team, basecamp_project_id="bcp-1"
+        )
+        creds = _mk_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        todolists = {"bcp-1": [{"id": "list-1", "title": "Monthly Reports"}]}
+        todos = {
+            "list-1": [
+                {
+                    "id": "td-1",
+                    "content": "Generate Monthly Report",
+                    "completed": False,
+                    "due_on": "2026-05-31",
+                    "created_at": "2026-01-15T09:30:00.000Z",
+                    "position": 4,
+                }
+            ]
+        }
+
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos)
+        with p1, p2, p3:
+            report = await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+        assert report["todos_created"] == 1
+
+        mapping = (
+            await db_session.execute(select(BasecampTaskMapping))
+        ).scalar_one()
+        assert mapping.basecamp_due_on == date(2026, 5, 31)
+        assert mapping.basecamp_todo_created_at is not None
+        assert mapping.basecamp_todo_created_at.year == 2026
+        assert mapping.basecamp_todo_created_at.month == 1
+        assert mapping.basecamp_todo_created_at.tzinfo is not None
+        assert mapping.basecamp_todo_position == 4
+
+    @pytest.mark.asyncio
+    async def test_upsert_backfills_metadata_on_existing_mapping(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        """Existing mapping rows with NULL metadata columns (the
+        6020 rows already in production at the time of the migration)
+        must be updated when Basecamp now exposes non-null values for
+        ``due_on`` / ``created_at`` / ``position``. The change-
+        detection logic must NOT mark such rows as "unchanged".
+        """
+        company = await _mk_company(db_session)
+        _, team = await _mk_owner_and_team(db_session, company)
+        await _mk_project_and_mapping(
+            db_session, company, team, basecamp_project_id="bcp-1"
+        )
+        creds = _mk_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        # First sync: payload omits the new fields entirely -> mapping
+        # row is created with NULLs on all three.
+        todolists = {"bcp-1": [{"id": "list-1", "title": "L"}]}
+        todos_v1 = {
+            "list-1": [{"id": "td-1", "content": "X", "completed": False}]
+        }
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos_v1)
+        with p1, p2, p3:
+            await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        mapping = (
+            await db_session.execute(select(BasecampTaskMapping))
+        ).scalar_one()
+        assert mapping.basecamp_due_on is None
+        assert mapping.basecamp_todo_created_at is None
+        assert mapping.basecamp_todo_position is None
+
+        # Second sync: same content / status, but now Basecamp surfaces
+        # the metadata. The mapping must be backfilled, not skipped as
+        # "unchanged".
+        todos_v2 = {
+            "list-1": [
+                {
+                    "id": "td-1",
+                    "content": "X",
+                    "completed": False,
+                    "due_on": "2026-07-15",
+                    "created_at": "2026-02-01T12:00:00Z",
+                    "position": 7,
+                }
+            ]
+        }
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos_v2)
+        with p1, p2, p3:
+            report = await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        assert report["todos_updated"] == 1
+        assert report["todos_unchanged"] == 0
+
+        await db_session.refresh(mapping)
+        assert mapping.basecamp_due_on == date(2026, 7, 15)
+        assert mapping.basecamp_todo_created_at is not None
+        assert mapping.basecamp_todo_position == 7
+
+    @pytest.mark.asyncio
+    async def test_upsert_unchanged_when_metadata_matches(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        """If metadata + name/status/description are all unchanged
+        from the previous sync, the row is reported as unchanged.
+        """
+        company = await _mk_company(db_session)
+        _, team = await _mk_owner_and_team(db_session, company)
+        await _mk_project_and_mapping(
+            db_session, company, team, basecamp_project_id="bcp-1"
+        )
+        creds = _mk_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        todolists = {"bcp-1": [{"id": "list-1", "title": "L"}]}
+        todos = {
+            "list-1": [
+                {
+                    "id": "td-1",
+                    "content": "X",
+                    "completed": False,
+                    "due_on": "2026-07-15",
+                    "created_at": "2026-02-01T12:00:00Z",
+                    "position": 7,
+                }
+            ]
+        }
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos)
+        with p1, p2, p3:
+            await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos)
+        with p1, p2, p3:
+            report = await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+        assert report["todos_updated"] == 0
+        assert report["todos_unchanged"] == 1
+
+    def test_parse_basecamp_date_handles_bad_inputs(self):
+        from app.services.basecamp_service import _parse_basecamp_date
+
+        assert _parse_basecamp_date(None) is None
+        assert _parse_basecamp_date("") is None
+        assert _parse_basecamp_date("not-a-date") is None
+        assert _parse_basecamp_date("2026-05-31") == date(2026, 5, 31)
+
+    def test_parse_basecamp_datetime_handles_trailing_z(self):
+        from app.services.basecamp_service import _parse_basecamp_datetime
+
+        assert _parse_basecamp_datetime(None) is None
+        assert _parse_basecamp_datetime("") is None
+        parsed = _parse_basecamp_datetime("2026-01-15T09:30:00.000Z")
+        assert parsed is not None
+        assert parsed.tzinfo is not None
+        assert parsed.year == 2026
