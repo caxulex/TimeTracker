@@ -1,7 +1,7 @@
 // ============================================
 // TIME TRACKER - TIMER WIDGET COMPONENT
 // ============================================
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card } from '../common';
 import { useTimerStore } from '../../stores/timerStore';
@@ -51,7 +51,37 @@ export function TimerWidget() {
   });
 
   const projects = projectsData?.items || [];
-  const tasks = tasksData?.items || [];
+  const tasks = useMemo(() => tasksData?.items || [], [tasksData]);
+
+  // Detect tasks with duplicate names in the current dropdown so we
+  // can suffix a Basecamp-sourced disambiguator (due date / created
+  // / position). Unique names render as-is.
+  const nameCounts = useMemo(() => {
+    return tasks.reduce<Record<string, number>>((acc, t) => {
+      acc[t.name] = (acc[t.name] || 0) + 1;
+      return acc;
+    }, {});
+  }, [tasks]);
+
+  const formatTaskLabel = (task: Task): string => {
+    const isDuplicate = (nameCounts[task.name] || 0) > 1;
+    if (!isDuplicate) return task.name;
+
+    if (task.basecamp_due_on) {
+      const d = new Date(task.basecamp_due_on);
+      const formatted = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      return `${task.name} (Due ${formatted})`;
+    }
+    if (task.basecamp_todo_created_at) {
+      const d = new Date(task.basecamp_todo_created_at);
+      const formatted = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      return `${task.name} (${formatted})`;
+    }
+    if (task.basecamp_todo_position != null) {
+      return `${task.name} (#${task.basecamp_todo_position})`;
+    }
+    return task.name;
+  };
 
   // Fetch timer status on mount AND when component becomes visible
   useEffect(() => {
@@ -282,7 +312,7 @@ export function TimerWidget() {
               </option>
               {tasks.map((task: Task) => (
                 <option key={task.id} value={task.id} className="text-gray-900">
-                  {task.name}
+                  {formatTaskLabel(task)}
                 </option>
               ))}
             </select>

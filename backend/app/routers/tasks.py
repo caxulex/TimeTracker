@@ -2,7 +2,7 @@
 Tasks management router
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -16,7 +16,7 @@ from app.dependencies import (
     get_company_filter,
     get_current_active_user,
 )
-from app.models import Project, Task, Team, TeamMember, User
+from app.models import BasecampTaskMapping, Project, Task, Team, TeamMember, User
 from app.routers.websocket import manager as ws_manager
 from app.schemas.auth import Message
 
@@ -46,6 +46,12 @@ class TaskResponse(BaseModel):
     status: str
     created_at: datetime
     updated_at: Optional[datetime]
+    # Basecamp-sourced disambiguation metadata. Always ``None`` for
+    # native (non-Basecamp) tasks; populated via LEFT JOIN to
+    # ``basecamp_task_mappings`` on list/get.
+    basecamp_due_on: Optional[date] = None
+    basecamp_todo_created_at: Optional[datetime] = None
+    basecamp_todo_position: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -96,7 +102,17 @@ async def list_tasks(
     current_user: User = Depends(get_current_active_user)
 ):
     """List tasks"""
-    base_query = select(Task)
+    base_query = (
+        select(
+            Task,
+            BasecampTaskMapping.basecamp_due_on,
+            BasecampTaskMapping.basecamp_todo_created_at,
+            BasecampTaskMapping.basecamp_todo_position,
+        )
+        .outerjoin(
+            BasecampTaskMapping, BasecampTaskMapping.task_id == Task.id
+        )
+    )
     count_query = select(func.count(Task.id))
 
     # Filter by accessible projects
@@ -127,17 +143,17 @@ async def list_tasks(
     offset = (page - 1) * page_size
     query = base_query.offset(offset).limit(page_size).order_by(Task.created_at.desc())
     result = await db.execute(query)
-    tasks = result.scalars().all()
+    rows = result.all()
 
     # Get project names
-    project_ids = list(set(t.project_id for t in tasks))
+    project_ids = list({row[0].project_id for row in rows})
     project_names = {}
     if project_ids:
         projects_result = await db.execute(select(Project.id, Project.name).where(Project.id.in_(project_ids)))
         project_names = dict(projects_result.all())
 
     items = []
-    for task in tasks:
+    for task, bc_due_on, bc_created_at, bc_position in rows:
         items.append(TaskResponse(
             id=task.id,
             name=task.name,
@@ -146,7 +162,10 @@ async def list_tasks(
             project_name=project_names.get(task.project_id),
             status=task.status,
             created_at=task.created_at,
-            updated_at=task.updated_at
+            updated_at=task.updated_at,
+            basecamp_due_on=bc_due_on,
+            basecamp_todo_created_at=bc_created_at,
+            basecamp_todo_position=bc_position,
         ))
 
     return PaginatedTasks(
@@ -165,11 +184,24 @@ async def get_task(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get task details"""
-    result = await db.execute(select(Task).where(Task.id == task_id))
-    task = result.scalar_one_or_none()
+    result = await db.execute(
+        select(
+            Task,
+            BasecampTaskMapping.basecamp_due_on,
+            BasecampTaskMapping.basecamp_todo_created_at,
+            BasecampTaskMapping.basecamp_todo_position,
+        )
+        .outerjoin(
+            BasecampTaskMapping, BasecampTaskMapping.task_id == Task.id
+        )
+        .where(Task.id == task_id)
+    )
+    row = result.one_or_none()
 
-    if not task:
+    if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    task, bc_due_on, bc_created_at, bc_position = row
 
     # Check access
     has_access = await check_project_access(db, task.project_id, current_user)
@@ -188,7 +220,10 @@ async def get_task(
         project_name=project_name,
         status=task.status,
         created_at=task.created_at,
-        updated_at=task.updated_at
+        updated_at=task.updated_at,
+        basecamp_due_on=bc_due_on,
+        basecamp_todo_created_at=bc_created_at,
+        basecamp_todo_position=bc_position,
     )
 
 
