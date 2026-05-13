@@ -345,7 +345,10 @@ class Task(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     project_id: Mapped[int] = mapped_column(Integer, ForeignKey("projects.id"), nullable=False)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # ``Text`` (not ``String(255)``) so Basecamp-mirrored to-do titles
+    # longer than 255 chars persist without truncation. See migration
+    # 028_tasks_name_text.
+    name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(50), default="TODO", nullable=False)  # TODO, IN_PROGRESS, DONE
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

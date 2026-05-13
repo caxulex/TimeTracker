@@ -796,12 +796,12 @@ class TestTodoSync:
         assert names == ["[Engineering] Build", "[Marketing] Promote"]
 
     # ------------------------------------------------------------------
-    # v3.0.2: Smart-truncate long task names; preserve full content in
-    # tasks.description so VARCHAR(255) overflow can't crash the sync.
+    # v3.0.3 / migration 028_tasks_name_text: tasks.name is now ``TEXT``
+    # so Basecamp to-do titles persist end-to-end without truncation.
     # ------------------------------------------------------------------
 
     @pytest.mark.asyncio
-    async def test_long_todo_content_truncated_in_task_name(
+    async def test_long_todo_content_persists_without_truncation(
         self, db_session: AsyncSession, _enc_key
     ):
         company = await _mk_company(db_session)
@@ -813,7 +813,7 @@ class TestTodoSync:
         db_session.add(creds)
         await db_session.flush()
 
-        long_content = "x" * 300
+        long_content = "x" * 600
         todolists = {"bcp-1": [{"id": "list-1", "title": "Sprint A"}]}
         todos = {
             "list-1": [
@@ -831,9 +831,11 @@ class TestTodoSync:
         rows = await db_session.execute(select(Task))
         tasks = rows.scalars().all()
         assert len(tasks) == 1
-        assert len(tasks[0].name) <= 255
-        assert tasks[0].name.startswith("[Sprint A] ")
-        assert tasks[0].name.endswith("\u2026")
+        # Full title preserved verbatim, no ellipsis appended.
+        expected_name = f"[Sprint A] {long_content}"
+        assert tasks[0].name == expected_name
+        assert len(tasks[0].name) == len("[Sprint A] ") + 600
+        assert "\u2026" not in tasks[0].name
 
     @pytest.mark.asyncio
     async def test_full_content_preserved_in_task_description(
@@ -864,12 +866,12 @@ class TestTodoSync:
         rows = await db_session.execute(select(Task))
         tasks = rows.scalars().all()
         assert len(tasks) == 1
-        # Name was truncated but full content lives in description.
-        assert len(tasks[0].name) <= 255
+        # Full content persists in both name and description.
+        assert tasks[0].name == f"[Sprint A] {long_content}"
         assert tasks[0].description == long_content
 
     @pytest.mark.asyncio
-    async def test_truncated_name_updates_on_resync(
+    async def test_name_updates_on_resync_when_content_changes(
         self, db_session: AsyncSession, _enc_key
     ):
         company = await _mk_company(db_session)
@@ -881,7 +883,7 @@ class TestTodoSync:
         db_session.add(creds)
         await db_session.flush()
 
-        # First sync: short content, name fits as-is.
+        # First sync: short content.
         todolists = {"bcp-1": [{"id": "list-1", "title": "Sprint A"}]}
         todos = {
             "list-1": [
@@ -899,7 +901,7 @@ class TestTodoSync:
         assert task_before.name == "[Sprint A] Short"
         assert task_before.description == "Short"
 
-        # Re-sync: content now long, must trigger truncation + description update.
+        # Re-sync: content now 600 chars, full name must persist (no truncation).
         long_content = "y" * 600
         todos["list-1"][0]["content"] = long_content
         p1, p2, p3 = _patch_basecamp_api(todolists, todos)
@@ -910,9 +912,8 @@ class TestTodoSync:
         assert r2["todos_updated"] == 1
 
         await db_session.refresh(task_before)
-        assert len(task_before.name) <= 255
-        assert task_before.name.startswith("[Sprint A] ")
-        assert task_before.name.endswith("\u2026")
+        assert task_before.name == f"[Sprint A] {long_content}"
+        assert "\u2026" not in task_before.name
         assert task_before.description == long_content
 
 
