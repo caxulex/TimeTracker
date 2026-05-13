@@ -80,10 +80,12 @@ echo "🗄️  Step 7/9: Applying database migrations..."
 echo "   This must precede container startup, or the scheduler"
 echo "   containers' on-startup sync loop will race the un-migrated"
 echo "   schema and produce cascading 'transaction aborted' errors."
-docker compose -f docker-compose.prod.yml up -d db
+# NOTE: 'postgres' here matches the service name defined in docker-compose.prod.yml.
+# If that service is ever renamed, update both references below.
+docker compose -f docker-compose.prod.yml up -d postgres
 echo "   Waiting for DB to be ready..."
 for i in {1..30}; do
-  if docker compose -f docker-compose.prod.yml exec -T db pg_isready -U postgres > /dev/null 2>&1; then
+  if docker compose -f docker-compose.prod.yml exec -T postgres pg_isready -U postgres > /dev/null 2>&1; then
     echo "✅ DB ready"
     break
   fi
