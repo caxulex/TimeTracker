@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { TimerWidget } from './TimerWidget';
 import { NotificationProvider } from '../../components/Notifications';
 import { useTimerStore } from '../../stores/timerStore';
+import { tasksApi } from '../../api/client';
 
 // Mock the timer store
 vi.mock('../../stores/timerStore', () => ({
@@ -374,6 +375,126 @@ describe('TimerWidget', () => {
       await waitFor(() => {
         expect(mockFetchTimer).toHaveBeenCalled();
       });
+    });
+  });
+
+  describe('Duplicate task name disambiguation & sort', () => {
+    // Mirror the component's date formatting so the assertions are
+    // independent of the host timezone (Date parses YYYY-MM-DD as UTC
+    // and toLocaleDateString shifts to the host TZ).
+    const md = (iso: string) =>
+      new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const mdy = (iso: string) =>
+      new Date(iso).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      });
+    const my = (iso: string) =>
+      new Date(iso).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+
+    const renderWithTasksAndSelectProject = async (items: unknown[]) => {
+      vi.mocked(tasksApi.getAll).mockResolvedValue({ items, total: items.length } as never);
+      const user = userEvent.setup();
+      render(
+        <TestWrapper>
+          <TimerWidget />
+        </TestWrapper>
+      );
+      const projectSelect = await screen.findByRole('combobox');
+      await waitFor(() => {
+        expect(screen.getByRole('option', { name: 'Project A' })).toBeInTheDocument();
+      });
+      await user.selectOptions(projectSelect, '1');
+      await waitFor(() => {
+        expect(screen.getAllByRole('combobox')).toHaveLength(2);
+      });
+      const taskSelect = screen.getAllByRole('combobox')[1] as HTMLSelectElement;
+      // wait for tasks to render
+      await waitFor(() => {
+        expect(taskSelect.querySelectorAll('option').length).toBeGreaterThan(1);
+      });
+      return taskSelect;
+    };
+
+    it('sorts duplicate-named tasks by basecamp_due_on DESC and uses (Due Mon D) when no collision', async () => {
+      const taskSelect = await renderWithTasksAndSelectProject([
+        { id: 1, name: 'Monthly Report', project_id: 1, is_active: true, basecamp_due_on: '2026-01-04' },
+        { id: 2, name: 'Monthly Report', project_id: 1, is_active: true, basecamp_due_on: '2026-05-04' },
+        { id: 3, name: 'Monthly Report', project_id: 1, is_active: true, basecamp_due_on: '2026-03-04' },
+        { id: 4, name: 'Standalone', project_id: 1, is_active: true },
+      ]);
+
+      const labels = Array.from(taskSelect.querySelectorAll('option'))
+        .map((o) => (o.textContent || '').trim())
+        .slice(1);
+
+      expect(labels).toEqual([
+        `Monthly Report (Due ${md('2026-05-04')})`,
+        `Monthly Report (Due ${md('2026-03-04')})`,
+        `Monthly Report (Due ${md('2026-01-04')})`,
+        'Standalone',
+      ]);
+    });
+
+    it('appends year only on month-day collision within the same name group', async () => {
+      const taskSelect = await renderWithTasksAndSelectProject([
+        { id: 1, name: 'Recurring', project_id: 1, is_active: true, basecamp_due_on: '2025-11-04' },
+        { id: 2, name: 'Recurring', project_id: 1, is_active: true, basecamp_due_on: '2026-11-04' },
+        { id: 3, name: 'Recurring', project_id: 1, is_active: true, basecamp_due_on: '2026-05-04' },
+      ]);
+
+      const labels = Array.from(taskSelect.querySelectorAll('option'))
+        .map((o) => (o.textContent || '').trim())
+        .slice(1);
+
+      expect(labels).toEqual([
+        `Recurring (Due ${mdy('2026-11-04')})`,
+        `Recurring (Due ${md('2026-05-04')})`,
+        `Recurring (Due ${mdy('2025-11-04')})`,
+      ]);
+    });
+
+    it('within a group, due_on tasks come before tasks without due_on (created_at DESC, then position ASC)', async () => {
+      const taskSelect = await renderWithTasksAndSelectProject([
+        { id: 1, name: 'Mixed', project_id: 1, is_active: true, basecamp_todo_position: 5 },
+        { id: 2, name: 'Mixed', project_id: 1, is_active: true, basecamp_due_on: '2026-02-01' },
+        { id: 3, name: 'Mixed', project_id: 1, is_active: true, basecamp_todo_created_at: '2026-04-01T10:00:00Z' },
+        { id: 4, name: 'Mixed', project_id: 1, is_active: true, basecamp_todo_position: 1 },
+        { id: 5, name: 'Mixed', project_id: 1, is_active: true, basecamp_todo_created_at: '2026-04-15T10:00:00Z' },
+        { id: 6, name: 'Mixed', project_id: 1, is_active: true, basecamp_due_on: '2026-06-01' },
+      ]);
+
+      const labels = Array.from(taskSelect.querySelectorAll('option'))
+        .map((o) => (o.textContent || '').trim())
+        .slice(1);
+
+      expect(labels[0]).toBe(`Mixed (Due ${md('2026-06-01')})`);
+      expect(labels[1]).toBe(`Mixed (Due ${md('2026-02-01')})`);
+      expect(labels[2]).toBe(`Mixed (${my('2026-04-15T10:00:00Z')})`);
+      expect(labels[3]).toBe(`Mixed (${my('2026-04-01T10:00:00Z')})`);
+      expect(labels[4]).toBe('Mixed (#1)');
+      expect(labels[5]).toBe('Mixed (#5)');
+    });
+
+    it('preserves position of unique-named tasks; duplicate group lands at first-occurrence slot', async () => {
+      const taskSelect = await renderWithTasksAndSelectProject([
+        { id: 1, name: 'Alpha', project_id: 1, is_active: true },
+        { id: 2, name: 'Report', project_id: 1, is_active: true, basecamp_due_on: '2026-01-04' },
+        { id: 3, name: 'Beta', project_id: 1, is_active: true },
+        { id: 4, name: 'Report', project_id: 1, is_active: true, basecamp_due_on: '2026-05-04' },
+      ]);
+
+      const labels = Array.from(taskSelect.querySelectorAll('option'))
+        .map((o) => (o.textContent || '').trim())
+        .slice(1);
+
+      expect(labels).toEqual([
+        'Alpha',
+        `Report (Due ${md('2026-05-04')})`,
+        `Report (Due ${md('2026-01-04')})`,
+        'Beta',
+      ]);
     });
   });
 });
