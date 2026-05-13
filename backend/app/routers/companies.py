@@ -3,6 +3,7 @@ Company/Tenant Management API Router
 Handles company registration, management, and white-label configuration.
 """
 
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -18,7 +19,10 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import Company, User, WhiteLabelConfig
 from app.services.auth_service import AuthService
+from app.services.email_service import email_service
 from app.utils.password_validator import validate_password_strength
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -303,6 +307,20 @@ async def register_company(
     # Build login URL (adjust based on your domain setup)
     base_url = "http://localhost:5173"  # Change in production
     login_url = f"{base_url}/login?company={slug}"
+
+    # Send welcome email to new company admin (non-blocking)
+    try:
+        await email_service.send_welcome_email(
+            to_email=admin_user.email,
+            user_name=admin_user.name,
+            login_url=login_url,
+        )
+    except Exception as exc:
+        logger.error(
+            "Failed to send welcome email to company admin %s: %s",
+            admin_user.email,
+            exc,
+        )
 
     return LoginInfo(
         company_name=company.name,
@@ -884,14 +902,15 @@ async def send_welcome_credentials(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Send welcome credentials email to a new staff member"""
+    """Send welcome credentials email to a new staff member.
+
+    Routes through the central EmailService (send_email_for_company) so company-
+    specific SMTP settings are honoured by the same tested code path as every
+    other transactional email. The HTML/text body is built inline here; templating
+    is intentionally out of scope.
+    """
     import smtplib
     import time
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
-    from email.utils import formataddr
-
-    from app.services.encryption_service import EncryptionService
 
     try:
         if current_user.role not in ["company_admin", "admin", "super_admin"]:
@@ -924,7 +943,8 @@ async def send_welcome_credentials(
                 message="Email is not enabled for this company. Please enable email in Admin Settings first."
             )
 
-        # Check if SMTP is configured
+        # Check if SMTP is configured (the email service will also fall back to
+        # global SMTP, but we surface a clearer message here to match prior UX).
         smtp_server = getattr(company, 'smtp_server', None)
         smtp_username = getattr(company, 'smtp_username', None)
         smtp_password_encrypted = getattr(company, 'smtp_password_encrypted', None)
@@ -935,27 +955,7 @@ async def send_welcome_credentials(
                 message="SMTP settings are not fully configured. Please configure email settings first."
             )
 
-        # Decrypt password
-        encryption_service = EncryptionService()
-        try:
-            smtp_password = encryption_service.decrypt(smtp_password_encrypted)
-        except Exception as e:
-            return WelcomeCredentialsResponse(
-                success=False,
-                message=f"Failed to decrypt SMTP password: {str(e)}"
-            )
-
-        # Prepare welcome email
-        from_name = getattr(company, 'smtp_from_name', None) or company.name
-        from_email = getattr(company, 'smtp_from_email', None) or smtp_username
-        smtp_port = getattr(company, 'smtp_port', 587) or 587
-        smtp_use_tls = getattr(company, 'smtp_use_tls', True)
         login_url = f"https://{company.subdomain}.timetracker.com" if getattr(company, 'subdomain', None) else "https://timetracker.shaemarcus.com"
-
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = f"Welcome to {company.name} - Your Login Credentials"
-        msg['From'] = formataddr((from_name, from_email))
-        msg['To'] = data.recipient_email
 
         # Build optional info section
         optional_info = ""
@@ -963,6 +963,8 @@ async def send_welcome_credentials(
             optional_info += f"<p><strong>Job Title:</strong> {data.job_title}</p>"
         if data.department:
             optional_info += f"<p><strong>Department:</strong> {data.department}</p>"
+
+        subject = f"Welcome to {company.name} - Your Login Credentials"
 
         html_body = f"""
         <html>
@@ -1027,17 +1029,16 @@ Best regards,
 {company.name} Team
         """
 
-        msg.attach(MIMEText(text_body, 'plain'))
-        msg.attach(MIMEText(html_body, 'html'))
-
-        # Send email and measure latency
+        # Send via the central email service (uses company SMTP, falls back to global).
         start_time = time.time()
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            if smtp_use_tls:
-                server.starttls()
-            server.login(smtp_username, smtp_password)
-            server.sendmail(from_email, data.recipient_email, msg.as_string())
-
+        await email_service.send_email_for_company(
+            company_id=company.id,
+            to_email=data.recipient_email,
+            subject=subject,
+            body_html=html_body,
+            body_text=text_body,
+            db=db,
+        )
         latency_ms = int((time.time() - start_time) * 1000)
 
         return WelcomeCredentialsResponse(

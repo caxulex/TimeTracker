@@ -20,7 +20,12 @@ from app.models import User
 from app.schemas.auth import Message, UserResponse
 from app.services.audit_logger import AuditAction, AuditLogger
 from app.services.auth_service import auth_service
+from app.services.email_service import email_service
 from app.utils.password_validator import validate_password_strength
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -284,6 +289,19 @@ async def create_user(
         details=f"Created user {new_user.email} with role {new_user.role}"
     )
     await db.commit()
+
+    # Send welcome email (non-blocking: SMTP failures must not fail user creation)
+    try:
+        await email_service.send_welcome_email(
+            to_email=new_user.email,
+            user_name=new_user.name,
+        )
+    except Exception as exc:
+        logger.error(
+            "Failed to send welcome email to %s after user creation: %s",
+            new_user.email,
+            exc,
+        )
 
     return new_user
 
