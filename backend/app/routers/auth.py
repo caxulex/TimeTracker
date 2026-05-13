@@ -35,6 +35,7 @@ from app.schemas.auth import (
 )
 from app.services.audit_log import AuditEventType, audit_log
 from app.services.auth_service import auth_service
+from app.services.email_service import email_service
 from app.services.login_security import login_security
 from app.services.token_blacklist import token_blacklist
 from app.utils.password_validator import validate_password_strength
@@ -166,6 +167,19 @@ async def register(
         user_agent=request.headers.get("User-Agent"),
         action="register"
     )
+
+    # Send welcome email (non-blocking: SMTP failures must not fail registration)
+    try:
+        await email_service.send_welcome_email(
+            to_email=new_user.email,
+            user_name=new_user.name,
+        )
+    except Exception as exc:
+        logger.error(
+            "Failed to send welcome email to %s after registration: %s",
+            new_user.email,
+            exc,
+        )
 
     return new_user
 

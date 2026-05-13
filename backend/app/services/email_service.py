@@ -15,10 +15,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from typing import Dict, List, Optional
 
 from app.config import settings
 
@@ -57,17 +54,6 @@ class EmailService:
         self.from_email = getattr(settings, 'SMTP_FROM_EMAIL', None) or self.smtp_username
         self.from_name = getattr(settings, 'SMTP_FROM_NAME', 'Time Tracker')
 
-        # Setup Jinja2 for email templates
-        template_dir = Path(__file__).parent.parent / "templates" / "email"
-        if template_dir.exists():
-            self.jinja_env = Environment(
-                loader=FileSystemLoader(str(template_dir)),
-                autoescape=select_autoescape(['html', 'xml'])
-            )
-        else:
-            self.jinja_env = None
-            logger.warning(f"Email template directory not found: {template_dir}")
-
     @property
     def is_configured(self) -> bool:
         """Check if email service is properly configured"""
@@ -101,22 +87,6 @@ class EmailService:
         msg.attach(MIMEText(body_html, 'html'))
 
         return msg
-
-    def _render_template(
-        self,
-        template_name: str,
-        context: Dict[str, Any]
-    ) -> str:
-        """Render an email template with context"""
-        if not self.jinja_env:
-            raise EmailConfigurationError("Email templates not configured")
-
-        try:
-            template = self.jinja_env.get_template(template_name)
-            return template.render(**context)
-        except Exception as e:
-            logger.error(f"Failed to render template {template_name}: {e}")
-            raise EmailServiceError(f"Template rendering failed: {e}")
 
     async def send_email(
         self,
