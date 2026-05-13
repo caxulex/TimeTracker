@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Optional, Tuple
 from urllib.parse import urlencode
@@ -789,6 +789,9 @@ class BasecampService:
                                 "content": t.get("content") or "",
                                 "description": t.get("description") or "",
                                 "completed": bool(t.get("completed", False)),
+                                "due_on": t.get("due_on"),
+                                "created_at": t.get("created_at"),
+                                "position": t.get("position"),
                             }
                         )
                     next_url = _parse_next_link(resp.headers.get("Link"))
@@ -950,6 +953,15 @@ class BasecampService:
         )
         target_status = "DONE" if todo["completed"] else "TODO"
 
+        # Parse the disambiguation metadata once. ``due_on`` is a
+        # date string ("YYYY-MM-DD"); ``created_at`` is ISO 8601
+        # (Basecamp emits a trailing "Z" that ``fromisoformat`` only
+        # handles natively from Python 3.11+; replace to be safe).
+        target_due_on = _parse_basecamp_date(todo.get("due_on"))
+        target_created_at = _parse_basecamp_datetime(todo.get("created_at"))
+        raw_position = todo.get("position")
+        target_position = int(raw_position) if raw_position is not None else None
+
         existing_row = await db.execute(
             select(BasecampTaskMapping).where(
                 BasecampTaskMapping.company_id == company_id,
@@ -978,6 +990,9 @@ class BasecampService:
                     basecamp_project_id=basecamp_project_id,
                     basecamp_todolist_id=todolist_id,
                     basecamp_todo_id=todo_id,
+                    basecamp_due_on=target_due_on,
+                    basecamp_todo_created_at=target_created_at,
+                    basecamp_todo_position=target_position,
                     task_id=task.id,
                     last_synced_at=datetime.now(timezone.utc),
                 )
@@ -1005,14 +1020,27 @@ class BasecampService:
             mapping.task_id = task.id
             mapping.basecamp_todolist_id = todolist_id
             mapping.basecamp_project_id = basecamp_project_id
+            mapping.basecamp_due_on = target_due_on
+            mapping.basecamp_todo_created_at = target_created_at
+            mapping.basecamp_todo_position = target_position
             mapping.last_synced_at = datetime.now(timezone.utc)
             report["todos_created"] += 1
             return
 
+        # Change detection: include the new metadata fields so the
+        # existing 6020 mapping rows backfill their NULL columns on
+        # the next sync run instead of being marked "unchanged"
+        # forever based purely on name/status/description.
+        metadata_changed = (
+            mapping.basecamp_due_on != target_due_on
+            or mapping.basecamp_todo_created_at != target_created_at
+            or mapping.basecamp_todo_position != target_position
+        )
         changed = (
             task.name != target_name
             or task.status != target_status
             or task.description != target_description
+            or metadata_changed
         )
         if changed:
             if not dry_run:
@@ -1021,6 +1049,9 @@ class BasecampService:
                 task.status = target_status
                 mapping.basecamp_todolist_id = todolist_id
                 mapping.basecamp_project_id = basecamp_project_id
+                mapping.basecamp_due_on = target_due_on
+                mapping.basecamp_todo_created_at = target_created_at
+                mapping.basecamp_todo_position = target_position
                 mapping.last_synced_at = datetime.now(timezone.utc)
             report["todos_updated"] += 1
         else:
@@ -1069,3 +1100,35 @@ def _parse_next_link(link_header: Optional[str]) -> Optional[str]:
             if s.strip().lower() in ('rel="next"', "rel=next"):
                 return url
     return None
+
+
+def _parse_basecamp_date(value: Any) -> Optional[date]:
+    """Parse Basecamp's ``due_on`` ("YYYY-MM-DD") into a ``date``.
+
+    Returns ``None`` for missing / empty / unparseable values rather
+    than propagating an error: the disambiguation metadata is
+    best-effort and must not break to-do sync.
+    """
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        logger.warning("basecamp.todo.due_on.unparseable: %r", value)
+        return None
+
+
+def _parse_basecamp_datetime(value: Any) -> Optional[datetime]:
+    """Parse a Basecamp ISO 8601 timestamp (e.g. ``created_at``).
+
+    Basecamp emits timestamps with a trailing ``Z``; Python's
+    ``datetime.fromisoformat`` only handles that natively from 3.11+,
+    so we replace it to be safe on any supported runtime.
+    """
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        logger.warning("basecamp.todo.created_at.unparseable: %r", value)
+        return None

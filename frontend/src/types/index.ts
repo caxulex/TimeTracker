@@ -142,6 +142,10 @@ export interface Task {
   status: TaskStatus;
   created_at: string;
   project?: Project;
+  // Basecamp-sourced disambiguation metadata (null for native tasks).
+  basecamp_due_on?: string | null;
+  basecamp_todo_created_at?: string | null;
+  basecamp_todo_position?: number | null;
 }
 
 export interface TaskCreate {
