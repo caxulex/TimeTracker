@@ -63,14 +63,97 @@ export function TimerWidget() {
     }, {});
   }, [tasks]);
 
+  // Sort tasks within each duplicate-name group chronologically
+  // (due_on DESC, then created_at DESC, then position ASC). Tasks
+  // missing all three sort to the end of their group. Unique-named
+  // tasks keep their original position; each duplicate group is
+  // emitted at the slot of the first occurrence in the original
+  // order so the most-recent same-named task takes that slot.
+  const sortedTasks = useMemo(() => {
+    if (tasks.length === 0) return tasks;
+
+    type Group = { firstIndex: number; items: Task[] };
+    const groups = new Map<string, Group>();
+    tasks.forEach((t, i) => {
+      const existing = groups.get(t.name);
+      if (existing) {
+        existing.items.push(t);
+      } else {
+        groups.set(t.name, { firstIndex: i, items: [t] });
+      }
+    });
+
+    const cmpStrDesc = (a: string | null | undefined, b: string | null | undefined): number => {
+      const av = a || '';
+      const bv = b || '';
+      if (av && bv) {
+        if (av === bv) return 0;
+        return av < bv ? 1 : -1;
+      }
+      if (av) return -1;
+      if (bv) return 1;
+      return 0;
+    };
+
+    for (const g of groups.values()) {
+      if (g.items.length <= 1) continue;
+      g.items.sort((a, b) => {
+        const dueCmp = cmpStrDesc(a.basecamp_due_on, b.basecamp_due_on);
+        if (dueCmp !== 0) return dueCmp;
+        const createdCmp = cmpStrDesc(a.basecamp_todo_created_at, b.basecamp_todo_created_at);
+        if (createdCmp !== 0) return createdCmp;
+        const aPos = a.basecamp_todo_position;
+        const bPos = b.basecamp_todo_position;
+        if (aPos != null && bPos != null) return aPos - bPos;
+        if (aPos != null) return -1;
+        if (bPos != null) return 1;
+        return 0;
+      });
+    }
+
+    return Array.from(groups.values())
+      .sort((a, b) => a.firstIndex - b.firstIndex)
+      .flatMap((g) => g.items);
+  }, [tasks]);
+
+  // Within each duplicate-name group, detect Mon D collisions across
+  // different years so we can render the year only when needed.
+  const collidingDueKeys = useMemo(() => {
+    const counts = new Map<string, number>();
+    tasks.forEach((t) => {
+      if ((nameCounts[t.name] || 0) <= 1) return;
+      if (!t.basecamp_due_on) return;
+      const md = new Date(t.basecamp_due_on).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+      });
+      const key = `${t.name}|${md}`;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    const collisions = new Set<string>();
+    counts.forEach((c, k) => {
+      if (c > 1) collisions.add(k);
+    });
+    return collisions;
+  }, [tasks, nameCounts]);
+
   const formatTaskLabel = (task: Task): string => {
     const isDuplicate = (nameCounts[task.name] || 0) > 1;
     if (!isDuplicate) return task.name;
 
     if (task.basecamp_due_on) {
       const d = new Date(task.basecamp_due_on);
-      const formatted = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      return `${task.name} (Due ${formatted})`;
+      const md = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const key = `${task.name}|${md}`;
+      if (collidingDueKeys.has(key)) {
+        const withYear = d.toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        });
+        return `${task.name} (Due ${withYear})`;
+      }
+      return `${task.name} (Due ${md})`;
     }
     if (task.basecamp_todo_created_at) {
       const d = new Date(task.basecamp_todo_created_at);
@@ -310,7 +393,7 @@ export function TimerWidget() {
                     ? 'No tasks for this project'
                     : 'No task'}
               </option>
-              {tasks.map((task: Task) => (
+              {sortedTasks.map((task: Task) => (
                 <option key={task.id} value={task.id} className="text-gray-900">
                   {formatTaskLabel(task)}
                 </option>
