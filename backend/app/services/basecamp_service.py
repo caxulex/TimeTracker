@@ -14,8 +14,11 @@ References:
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 from datetime import date, datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Optional, Tuple
 from urllib.parse import urlencode
 
@@ -66,6 +69,138 @@ class BasecampNotConfiguredError(BasecampError):
 
 class BasecampAPIError(BasecampError):
     """Raised on non-2xx responses from the Basecamp API."""
+
+
+# ---------------------------------------------------------------------------
+# HTTP retry / backoff
+# ---------------------------------------------------------------------------
+#
+# Basecamp's v3 API rate-limits aggressively (per-account, sliding window).
+# Without retry, the 4-hourly autosync sees 2-7 HTTP 429 responses per run,
+# each causing a single to-do list to be skipped until the next cron tick
+# (a 2-5% per-run data gap visible as briefly-stale Basecamp data).
+#
+# These constants tune the per-call retry policy applied centrally by
+# ``_http_request_with_retry``. They are intentionally module-level so the
+# test suite can monkey-patch them (e.g. to drive ``asyncio.sleep`` to 0).
+
+# Maximum retry attempts after the initial request (so up to 4 HTTP calls
+# total per logical request).
+HTTP_429_MAX_RETRIES = 3
+
+# Cap any single Retry-After-driven wait (Basecamp occasionally returns
+# very large values during sustained throttling; >30s blocks the cron more
+# than the data gap it prevents).
+HTTP_429_MAX_SINGLE_WAIT_SECONDS = 30.0
+
+# Total cumulative wait budget across all retries for a single logical
+# request. Prevents a pathological hang if Basecamp keeps emitting
+# very-long Retry-After values back-to-back.
+HTTP_429_MAX_TOTAL_WAIT_SECONDS = 60.0
+
+
+def _parse_retry_after(value: Optional[str]) -> Optional[float]:
+    """Parse an HTTP ``Retry-After`` header per RFC 7231 section 7.1.3.
+
+    Accepts either delta-seconds (integer) or an HTTP-date. Returns the
+    number of seconds to wait as a non-negative float, or ``None`` if the
+    header is missing/blank/unparseable. Negative deltas and past dates
+    clamp to ``0``.
+    """
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    # delta-seconds form (most common from Basecamp).
+    try:
+        seconds = float(value)
+        return max(0.0, seconds)
+    except ValueError:
+        pass
+    # HTTP-date form.
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    delta = (when - datetime.now(timezone.utc)).total_seconds()
+    return max(0.0, delta)
+
+
+async def _http_request_with_retry(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    **kwargs: Any,
+) -> httpx.Response:
+    """Issue an HTTP request with 429-aware retry + jittered backoff.
+
+    On HTTP 429 the ``Retry-After`` header (if present and parseable) is
+    honoured up to ``HTTP_429_MAX_SINGLE_WAIT_SECONDS``. Otherwise we fall
+    back to exponential backoff (2s, 4s, 8s per attempt). A random 0-1s
+    jitter is added to every wait to avoid synchronized retries with
+    other clients sharing the same Basecamp account.
+
+    Retries up to ``HTTP_429_MAX_RETRIES`` times; if the cumulative wait
+    would exceed ``HTTP_429_MAX_TOTAL_WAIT_SECONDS`` we stop early and
+    return the most recent 429 response, letting the caller's existing
+    non-200 handling raise ``BasecampAPIError`` (the per-list ``try/except``
+    in the sync orchestrator then swallows it and continues).
+
+    All non-429 responses (including 5xx) are returned to the caller
+    unchanged — only 429 is retried here.
+    """
+    total_wait = 0.0
+    last_response: Optional[httpx.Response] = None
+    method_lower = method.lower()
+    for attempt in range(HTTP_429_MAX_RETRIES + 1):
+        # Dispatch via the method-specific client attribute (``client.get``,
+        # ``client.post``) rather than ``client.request`` so existing test
+        # mocks that stub ``.get`` / ``.post`` keep working.
+        call = getattr(client, method_lower)
+        resp = await call(url, **kwargs)
+        last_response = resp
+        if resp.status_code != 429:
+            return resp
+        if attempt >= HTTP_429_MAX_RETRIES:
+            # Out of retries: return the 429 so the caller raises as before.
+            return resp
+
+        retry_after = _parse_retry_after(resp.headers.get("Retry-After"))
+        if retry_after is None:
+            # Exponential backoff: 2, 4, 8 for attempts 0, 1, 2.
+            base_wait = 2.0 * (2 ** attempt)
+        else:
+            base_wait = retry_after
+        wait_s = min(base_wait, HTTP_429_MAX_SINGLE_WAIT_SECONDS)
+        wait_s += random.uniform(0, 1)
+
+        if total_wait + wait_s > HTTP_429_MAX_TOTAL_WAIT_SECONDS:
+            logger.info(
+                "basecamp.http.429.retry_budget_exhausted "
+                "attempt=%d total_wait_s=%.2f url=%s",
+                attempt + 1,
+                total_wait,
+                url,
+            )
+            return resp
+
+        logger.info(
+            "basecamp.http.429.retry attempt=%d wait_s=%.2f url=%s",
+            attempt + 1,
+            wait_s,
+            url,
+        )
+        await asyncio.sleep(wait_s)
+        total_wait += wait_s
+
+    # Unreachable: the loop always returns. Kept for type-checker clarity.
+    assert last_response is not None
+    return last_response
 
 
 def _encryption() -> EncryptionService:
@@ -254,7 +389,9 @@ class BasecampService:
             async with httpx.AsyncClient(
                 timeout=30.0, headers={"User-Agent": USER_AGENT}
             ) as client:
-                resp = await client.post(LAUNCHPAD_TOKEN_URL, params=params)
+                resp = await _http_request_with_retry(
+                    client, "POST", LAUNCHPAD_TOKEN_URL, params=params
+                )
         except httpx.HTTPError as exc:
             raise BasecampAuthError(f"Refresh HTTP error: {exc}") from exc
 
@@ -324,7 +461,9 @@ class BasecampService:
             ) as client:
                 next_url: Optional[str] = url
                 while next_url:
-                    resp = await client.get(next_url)
+                    resp = await _http_request_with_retry(
+                        client, "GET", next_url
+                    )
                     if resp.status_code != 200:
                         raise BasecampAPIError(
                             f"projects.json returned HTTP {resp.status_code}"
@@ -523,7 +662,9 @@ class BasecampService:
                 f"https://3.basecampapi.com/{account_id}/projects/"
                 f"{basecamp_project_id}.json"
             )
-            proj_resp = await client.get(project_url)
+            proj_resp = await _http_request_with_retry(
+                client, "GET", project_url
+            )
             if proj_resp.status_code != 200:
                 raise BasecampAPIError(
                     f"projects/{basecamp_project_id}.json returned HTTP "
@@ -559,7 +700,9 @@ class BasecampService:
                 f"https://3.basecampapi.com/{account_id}/buckets/"
                 f"{basecamp_project_id}/todosets/{todoset_id}.json"
             )
-            ts_resp = await client.get(todoset_url)
+            ts_resp = await _http_request_with_retry(
+                client, "GET", todoset_url
+            )
             if ts_resp.status_code != 200:
                 raise BasecampAPIError(
                     f"todosets/{todoset_id}.json returned HTTP "
@@ -579,7 +722,9 @@ class BasecampService:
             next_url: Optional[str] = f"{todolists_url}{sep}status=active"
             out: list[dict] = []
             while next_url:
-                resp = await client.get(next_url)
+                resp = await _http_request_with_retry(
+                    client, "GET", next_url
+                )
                 if resp.status_code != 200:
                     raise BasecampAPIError(
                         f"todolists returned HTTP {resp.status_code}"
@@ -623,12 +768,21 @@ class BasecampService:
             for query in ("", "?completed=true"):
                 next_url: Optional[str] = base + query
                 while next_url:
-                    resp = await client.get(next_url)
+                    resp = await _http_request_with_retry(
+                        client, "GET", next_url
+                    )
                     if resp.status_code != 200:
                         raise BasecampAPIError(
                             f"todos.json returned HTTP {resp.status_code}"
                         )
                     for t in resp.json():
+                        # Note: Basecamp omits ``position`` on completed
+                        # to-dos, so this field is None for ~90% of
+                        # mirrored rows (all DONE-status; diagnosed
+                        # 2026-05-13: 100% of TODO rows have position,
+                        # 0% of DONE rows do). Any disambiguation that
+                        # uses position must fall back to
+                        # ``due_on`` / ``created_at`` in that case.
                         results.append(
                             {
                                 "id": str(t.get("id")),
@@ -918,7 +1072,9 @@ class BasecampService:
             async with httpx.AsyncClient(
                 timeout=10.0, headers={"User-Agent": USER_AGENT}
             ) as client:
-                resp = await client.post(
+                resp = await _http_request_with_retry(
+                    client,
+                    "POST",
                     LAUNCHPAD_REVOKE_URL,
                     params={"token": access_token},
                     headers={"Authorization": f"Bearer {access_token}"},
