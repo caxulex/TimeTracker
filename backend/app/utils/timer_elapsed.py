@@ -44,3 +44,25 @@ def compute_display_elapsed_seconds(entry: Any, now: datetime | None = None) -> 
     pause_seconds = int(getattr(entry, "pause_seconds", 0) or 0)
     elapsed = int((end_ref - start).total_seconds()) - pause_seconds
     return max(elapsed, 0)
+
+
+def compute_state_elapsed_seconds(
+    state_started_at: datetime, now: datetime | None = None
+) -> int:
+    """Return ``(now - state_started_at)`` in whole seconds, clamped to >= 0.
+
+    Used by the "Who's Working Now" panel to display the duration of the
+    user's CURRENT activity state (work / break / meeting) — i.e. the
+    elapsed time since the active SessionBreak / SessionMeeting started,
+    or since the running TimeEntry started while ``working``.
+
+    Unlike :func:`compute_display_elapsed_seconds`, this helper does NOT
+    subtract any pause_seconds: it is a pure "seconds since this state
+    began" reading.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    s = state_started_at
+    if s.tzinfo is None:
+        s = s.replace(tzinfo=timezone.utc)
+    return max(int((now - s).total_seconds()), 0)

@@ -36,7 +36,10 @@ from app.schemas.sessions import (
     WorkSessionResponse,
     WorkSessionWithDetails,
 )
-from app.utils.timer_elapsed import compute_display_elapsed_seconds
+from app.utils.timer_elapsed import (
+    compute_display_elapsed_seconds,
+    compute_state_elapsed_seconds,
+)
 from app.utils.timewindow import day_bounds, local_today, range_bounds
 
 router = APIRouter(prefix="/api/work-sessions", tags=["work-sessions"])
@@ -67,13 +70,21 @@ async def get_active_session(db: AsyncSession, user_id: int) -> Optional[WorkSes
 
 def _activity_payload(state: str, *, break_type: Optional[str] = None,
                        meeting_type: Optional[str] = None,
-                       meeting_title: Optional[str] = None) -> dict:
-    """Build the activity-state subset of an active-timer cache entry."""
+                       meeting_title: Optional[str] = None,
+                       state_started_at: Optional[datetime] = None) -> dict:
+    """Build the activity-state subset of an active-timer cache entry.
+
+    ``state_started_at`` carries the timestamp at which the user entered
+    the current state — the active SessionBreak/SessionMeeting.start_time
+    for break/meeting states. ``_refresh_active_timer_cache`` falls back
+    to the TimeEntry.start_time when this is ``None`` (i.e. "working").
+    """
     return {
         "activity_state": state,
         "break_type": break_type if state == "break" else None,
         "meeting_type": meeting_type if state == "meeting" else None,
         "meeting_title": meeting_title if state == "meeting" else None,
+        "state_started_at": state_started_at,
     }
 
 
@@ -115,6 +126,18 @@ async def _refresh_active_timer_cache(
     # while on break and resumes correctly after end_break.
     elapsed = compute_display_elapsed_seconds(entry)
 
+    # Surface the activity-state anchor + duration so the "Who's Working
+    # Now" panel can display the current state's elapsed time (work,
+    # break, or meeting) rather than always displaying work-time.
+    activity_payload = dict(activity)
+    state_started_at = activity_payload.pop("state_started_at", None)
+    if state_started_at is None:
+        state_started_at = entry.start_time
+    if activity_payload.get("activity_state") == "working":
+        state_elapsed = elapsed
+    else:
+        state_elapsed = compute_state_elapsed_seconds(state_started_at)
+
     timer_entry = {
         "user_id": user.id,
         "user_name": user.name,
@@ -126,7 +149,9 @@ async def _refresh_active_timer_cache(
         "description": entry.description,
         "start_time": entry.start_time.isoformat(),
         "elapsed_seconds": elapsed,
-        **activity,
+        "state_started_at": state_started_at.isoformat(),
+        "state_elapsed_seconds": state_elapsed,
+        **activity_payload,
     }
     ws_manager.set_active_timer(user.id, timer_entry)
     await ws_manager.broadcast_timer_updated(
@@ -469,7 +494,11 @@ async def start_break(
     await _refresh_active_timer_cache(
         db,
         current_user,
-        _activity_payload("break", break_type=new_break.break_type),
+        _activity_payload(
+            "break",
+            break_type=new_break.break_type,
+            state_started_at=new_break.start_time,
+        ),
     )
 
     return SessionBreakResponse.model_validate(new_break)
@@ -664,6 +693,7 @@ async def start_meeting(
             "meeting",
             meeting_type=new_meeting.meeting_type,
             meeting_title=new_meeting.title,
+            state_started_at=new_meeting.start_time,
         ),
     )
 

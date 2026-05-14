@@ -31,6 +31,18 @@ interface ActiveTimer {
   description?: string;
   start_time: string;
   elapsed_seconds?: number;
+  /**
+   * Timestamp at which the user entered the CURRENT activity state.
+   *  - "working": equals ``start_time`` of the running TimeEntry.
+   *  - "break":   ``SessionBreak.start_time`` of the open break.
+   *  - "meeting": ``SessionMeeting.start_time`` of the open meeting.
+   * The "Who's Working Now" panel anchors its displayed duration to
+   * this so break/meeting time shows the elapsed time IN that state,
+   * not the (frozen or otherwise) work-time elapsed.
+   */
+  state_started_at?: string;
+  /** Server-computed (now - state_started_at) at response time. */
+  state_elapsed_seconds?: number;
   activity_state?: 'working' | 'break' | 'meeting';
   break_type?: 'short' | 'lunch' | 'other' | null;
   meeting_type?: 'internal' | 'external' | 'client' | null;
