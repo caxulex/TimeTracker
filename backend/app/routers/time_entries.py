@@ -24,6 +24,8 @@ from app.dependencies import (
 )
 from app.models import (
     Project,
+    SessionBreak,
+    SessionMeeting,
     Task,
     Team,
     TeamMember,
@@ -397,6 +399,48 @@ async def get_active_timers(
     rows = result.all()
     active_timers = []
 
+    # Build a map of user_id -> (activity_state, break info, meeting info)
+    # by joining each user's active WorkSession plus any open SessionBreak/SessionMeeting.
+    user_ids = [user.id for _entry, user, _project, _task in rows]
+    activity_by_user: dict[int, dict] = {}
+    if user_ids:
+        ws_q = (
+            select(WorkSession)
+            .where(
+                WorkSession.user_id.in_(user_ids),
+                WorkSession.end_time.is_(None),
+            )
+            .options(
+                selectinload(WorkSession.breaks),
+                selectinload(WorkSession.meetings),
+            )
+        )
+        ws_rows = (await db.execute(ws_q)).scalars().all()
+        for ws in ws_rows:
+            state = "working"
+            break_type = None
+            meeting_type = None
+            meeting_title = None
+            if ws.status == "break":
+                state = "break"
+                for brk in ws.breaks:
+                    if brk.end_time is None:
+                        break_type = brk.break_type
+                        break
+            elif ws.status == "meeting":
+                state = "meeting"
+                for mtg in ws.meetings:
+                    if mtg.end_time is None:
+                        meeting_type = mtg.meeting_type
+                        meeting_title = mtg.title
+                        break
+            activity_by_user[ws.user_id] = {
+                "activity_state": state,
+                "break_type": break_type,
+                "meeting_type": meeting_type,
+                "meeting_title": meeting_title,
+            }
+
     for entry, user, project, task in rows:
         # Calculate elapsed seconds
         start = entry.start_time
@@ -404,6 +448,13 @@ async def get_active_timers(
             start = start.replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
         elapsed = int((now - start).total_seconds())
+
+        activity = activity_by_user.get(user.id) or {
+            "activity_state": "working",
+            "break_type": None,
+            "meeting_type": None,
+            "meeting_title": None,
+        }
 
         active_timers.append({
             "user_id": user.id,
@@ -414,7 +465,11 @@ async def get_active_timers(
             "task_name": task.name if task else None,
             "description": entry.description,
             "start_time": entry.start_time.isoformat(),
-            "elapsed_seconds": elapsed
+            "elapsed_seconds": elapsed,
+            "activity_state": activity["activity_state"],
+            "break_type": activity["break_type"],
+            "meeting_type": activity["meeting_type"],
+            "meeting_title": activity["meeting_title"],
         })
 
     return active_timers

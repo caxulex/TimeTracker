@@ -31,6 +31,10 @@ interface ActiveTimer {
   description?: string;
   start_time: string;
   elapsed_seconds?: number;
+  activity_state?: 'working' | 'break' | 'meeting';
+  break_type?: 'short' | 'lunch' | 'other' | null;
+  meeting_type?: 'internal' | 'external' | 'client' | null;
+  meeting_title?: string | null;
 }
 
 // ============================================
@@ -200,6 +204,19 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const stopData = (message.data || message) as any;
               setActiveTimers(prev => prev.filter(t => t.user_id !== stopData.user_id));
+              break;
+            }
+            case 'timer_updated': {
+              // Canonical channel for in-place activity_state mutations
+              // (break/meeting start/end). Payload is the full active-timer
+              // cache entry — replace the matching user's row.
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const updated = (message.data || message) as any;
+              if (!updated || typeof updated.user_id !== 'number') break;
+              setActiveTimers(prev => {
+                const filtered = prev.filter(t => t.user_id !== updated.user_id);
+                return [...filtered, updated as ActiveTimer];
+              });
               break;
             }
             case 'team_added':

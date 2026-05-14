@@ -64,6 +64,78 @@ async def get_active_session(db: AsyncSession, user_id: int) -> Optional[WorkSes
     return result.scalar_one_or_none()
 
 
+def _activity_payload(state: str, *, break_type: Optional[str] = None,
+                       meeting_type: Optional[str] = None,
+                       meeting_title: Optional[str] = None) -> dict:
+    """Build the activity-state subset of an active-timer cache entry."""
+    return {
+        "activity_state": state,
+        "break_type": break_type if state == "break" else None,
+        "meeting_type": meeting_type if state == "meeting" else None,
+        "meeting_title": meeting_title if state == "meeting" else None,
+    }
+
+
+async def _refresh_active_timer_cache(
+    db: AsyncSession,
+    user: User,
+    activity: dict,
+) -> Optional[dict]:
+    """Rebuild and broadcast the active-timer cache entry for ``user``.
+
+    Looks up the user's currently-open TimeEntry (if any) and merges the
+    given activity payload (state/break_type/meeting_*) into the entry
+    cached in ``ws_manager.active_timers``. Then emits ``timer_updated``
+    so the "Who's Working Now" panel can mutate locally without a full
+    snapshot refresh.
+
+    Returns the new cache entry, or ``None`` if no open entry exists.
+    """
+    from app.models import Project, Task
+
+    stmt = (
+        select(TimeEntry, Project, Task)
+        .outerjoin(Project, TimeEntry.project_id == Project.id)
+        .outerjoin(Task, TimeEntry.task_id == Task.id)
+        .where(
+            TimeEntry.user_id == user.id,
+            TimeEntry.end_time.is_(None),
+        )
+        .order_by(TimeEntry.start_time.desc())
+        .limit(1)
+    )
+    row = (await db.execute(stmt)).first()
+    if row is None:
+        ws_manager.clear_active_timer(user.id)
+        return None
+
+    entry, project, task = row
+    start = entry.start_time
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    elapsed = int((datetime.now(timezone.utc) - start).total_seconds())
+
+    timer_entry = {
+        "user_id": user.id,
+        "user_name": user.name,
+        "company_id": user.company_id,
+        "project_id": project.id if project else None,
+        "project_name": project.name if project else ("Meeting" if entry.project_id is None else None),
+        "task_id": task.id if task else None,
+        "task_name": task.name if task else None,
+        "description": entry.description,
+        "start_time": entry.start_time.isoformat(),
+        "elapsed_seconds": elapsed,
+        **activity,
+    }
+    ws_manager.set_active_timer(user.id, timer_entry)
+    await ws_manager.broadcast_timer_updated(
+        company_id=user.company_id,
+        timer_entry=ws_manager.active_timers.get(user.id, timer_entry),
+    )
+    return timer_entry
+
+
 # ============================================
 # SESSION STATUS ENDPOINT
 # ============================================
@@ -393,6 +465,13 @@ async def start_break(
         }
     )
 
+    # Refresh the active-timer cache so "Who's Working Now" shows the break state.
+    await _refresh_active_timer_cache(
+        db,
+        current_user,
+        _activity_payload("break", break_type=new_break.break_type),
+    )
+
     return SessionBreakResponse.model_validate(new_break)
 
 
@@ -456,6 +535,13 @@ async def end_break(
             "duration_seconds": active_break.duration_seconds,
             "end_time": now.isoformat()
         }
+    )
+
+    # Restore working state in the active-timer cache.
+    await _refresh_active_timer_cache(
+        db,
+        current_user,
+        _activity_payload("working"),
     )
 
     return SessionBreakResponse.model_validate(active_break)
@@ -570,6 +656,17 @@ async def start_meeting(
         }
     )
 
+    # Replace the cache entry with the new meeting TimeEntry (no project).
+    await _refresh_active_timer_cache(
+        db,
+        current_user,
+        _activity_payload(
+            "meeting",
+            meeting_type=new_meeting.meeting_type,
+            meeting_title=new_meeting.title,
+        ),
+    )
+
     return SessionMeetingResponse.model_validate(new_meeting)
 
 
@@ -663,6 +760,15 @@ async def end_meeting(
             "duration_seconds": active_meeting.duration_seconds,
             "end_time": now.isoformat()
         }
+    )
+
+    # Replace the cache entry with the resumed project TimeEntry (if any),
+    # restoring "working" state. If no resume happened the helper will
+    # clear the cache instead.
+    await _refresh_active_timer_cache(
+        db,
+        current_user,
+        _activity_payload("working"),
     )
 
     return SessionMeetingResponse.model_validate(active_meeting)

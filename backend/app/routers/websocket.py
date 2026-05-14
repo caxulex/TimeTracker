@@ -244,6 +244,21 @@ class ConnectionManager:
             "data": task_data
         }, company_id=company_id)
 
+    async def broadcast_timer_updated(self, company_id: int | None, timer_entry: dict):
+        """Canonical channel for in-place active-timer mutations.
+
+        Used by start/end break and start/end meeting handlers so the
+        "Who's Working Now" panel can reflect activity_state changes
+        without a full snapshot refresh. ``timer_entry`` is the full
+        cache entry for the affected user (same shape as ``active_timers``
+        items).
+        """
+        await self.broadcast_to_company({
+            "type": "timer_updated",
+            "user_id": timer_entry.get("user_id"),
+            "data": timer_entry,
+        }, company_id=company_id)
+
 
 # Global connection manager instance
 manager = ConnectionManager()
@@ -271,7 +286,15 @@ async def load_active_timers_from_db(company_id: Optional[int] = None) -> int:
     from sqlalchemy import select
 
     from app.database import async_session
-    from app.models import Project, Task, TimeEntry, User
+    from app.models import (
+        Project,
+        SessionBreak,
+        SessionMeeting,
+        Task,
+        TimeEntry,
+        User,
+        WorkSession,
+    )
 
     try:
         async with async_session() as db:
@@ -288,6 +311,57 @@ async def load_active_timers_from_db(company_id: Optional[int] = None) -> int:
             result = await db.execute(stmt)
             rows = result.all()
 
+            # Hydrate activity_state from active WorkSession + open
+            # SessionBreak / SessionMeeting rows so the cache snapshot mirrors
+            # what the HTTP endpoint returns.
+            activity_by_user: Dict[int, dict] = {}
+            user_ids = [user.id for _e, user, _p, _t in rows]
+            if user_ids:
+                ws_rows = (await db.execute(
+                    select(WorkSession).where(
+                        WorkSession.user_id.in_(user_ids),
+                        WorkSession.end_time.is_(None),
+                    )
+                )).scalars().all()
+                for ws in ws_rows:
+                    activity_by_user[ws.user_id] = {
+                        "activity_state": (
+                            "break" if ws.status == "break"
+                            else "meeting" if ws.status == "meeting"
+                            else "working"
+                        ),
+                        "work_session_id": ws.id,
+                        "ws_status": ws.status,
+                        "break_type": None,
+                        "meeting_type": None,
+                        "meeting_title": None,
+                    }
+                if activity_by_user:
+                    ws_ids = [v["work_session_id"] for v in activity_by_user.values()]
+                    brk_rows = (await db.execute(
+                        select(SessionBreak).where(
+                            SessionBreak.work_session_id.in_(ws_ids),
+                            SessionBreak.end_time.is_(None),
+                        )
+                    )).scalars().all()
+                    brk_by_ws = {b.work_session_id: b for b in brk_rows}
+                    mtg_rows = (await db.execute(
+                        select(SessionMeeting).where(
+                            SessionMeeting.work_session_id.in_(ws_ids),
+                            SessionMeeting.end_time.is_(None),
+                        )
+                    )).scalars().all()
+                    mtg_by_ws = {m.work_session_id: m for m in mtg_rows}
+                    for info in activity_by_user.values():
+                        ws_id = info["work_session_id"]
+                        if info["ws_status"] == "break":
+                            brk = brk_by_ws.get(ws_id)
+                            info["break_type"] = brk.break_type if brk else None
+                        elif info["ws_status"] == "meeting":
+                            mtg = mtg_by_ws.get(ws_id)
+                            info["meeting_type"] = mtg.meeting_type if mtg else None
+                            info["meeting_title"] = mtg.title if mtg else None
+
             new_entries: Dict[int, dict] = {}
             for entry, user, project, task in rows:
                 start = entry.start_time
@@ -295,6 +369,7 @@ async def load_active_timers_from_db(company_id: Optional[int] = None) -> int:
                     start = start.replace(tzinfo=timezone.utc)
                 elapsed = int((now_utc() - start).total_seconds())
 
+                info = activity_by_user.get(user.id) or {}
                 new_entries[user.id] = {
                     "user_id": user.id,
                     "user_name": user.name,
@@ -306,6 +381,10 @@ async def load_active_timers_from_db(company_id: Optional[int] = None) -> int:
                     "description": entry.description,
                     "start_time": entry.start_time.isoformat(),
                     "elapsed_seconds": elapsed,
+                    "activity_state": info.get("activity_state", "working"),
+                    "break_type": info.get("break_type"),
+                    "meeting_type": info.get("meeting_type"),
+                    "meeting_title": info.get("meeting_title"),
                 }
 
             # Merge — never replace the entire cache. Entries for tenants

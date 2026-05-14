@@ -90,6 +90,58 @@ export function ActiveTimers({ teamId, className = '' }: ActiveTimersProps) {
 
   const connectionDotClass = isConnected ? 'bg-green-500' : 'bg-gray-400';
 
+  const formatBreakType = (t?: string | null): string => {
+    if (!t) return '';
+    if (t === 'lunch') return 'Lunch';
+    if (t === 'short') return 'Short break';
+    if (t === 'other') return 'Other';
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  };
+
+  const renderActivity = (timer: ActiveTimer) => {
+    const state = timer.activity_state || 'working';
+    if (state === 'break') {
+      const detail = formatBreakType(timer.break_type);
+      const project = timer.project_name;
+      return (
+        <p className="text-sm text-amber-700 truncate">
+          ☕ On break{detail ? ' · ' + detail : ''}
+          {project ? <span className="text-gray-400"> · {project}</span> : null}
+        </p>
+      );
+    }
+    if (state === 'meeting') {
+      const title = timer.meeting_title;
+      return (
+        <p className="text-sm text-amber-700 truncate">
+          📞 In meeting{title ? ' · ' + title : ''}
+        </p>
+      );
+    }
+    return (
+      <p className="text-sm text-gray-500 truncate">
+        {timer.project_name || timer.description || 'Working...'}
+        {timer.task_name ? ' • ' + timer.task_name : ''}
+      </p>
+    );
+  };
+
+  const badgeClassFor = (timer: ActiveTimer): string => {
+    const state = timer.activity_state || 'working';
+    if (state === 'break' || state === 'meeting') {
+      return 'inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 text-amber-700 rounded-full text-sm font-mono';
+    }
+    return 'inline-flex items-center gap-1.5 px-2.5 py-1 bg-green-100 text-green-700 rounded-full text-sm font-mono';
+  };
+
+  const dotClassFor = (timer: ActiveTimer): string => {
+    const state = timer.activity_state || 'working';
+    if (state === 'break' || state === 'meeting') {
+      return 'w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse';
+    }
+    return 'w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse';
+  };
+
   return (
     <Card className={className}>
       <div className="p-4">
@@ -139,16 +191,13 @@ export function ActiveTimers({ teamId, className = '' }: ActiveTimersProps) {
                   <p className="font-medium text-gray-900 truncate">
                     {timer.user_name}
                   </p>
-                  <p className="text-sm text-gray-500 truncate">
-                    {timer.project_name || timer.description || 'Working...'}
-                    {timer.task_name ? ' • ' + timer.task_name : ''}
-                  </p>
+                  {renderActivity(timer)}
                 </div>
 
                 {/* Timer Duration */}
                 <div className="flex-shrink-0">
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-green-100 text-green-700 rounded-full text-sm font-mono">
-                    <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
+                  <span className={badgeClassFor(timer)}>
+                    <span className={dotClassFor(timer)}></span>
                     {formatElapsed(timer.start_time)}
                   </span>
                 </div>
