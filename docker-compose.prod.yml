@@ -131,9 +131,9 @@ services:
         echo "Scheduler started. Will run cleanup at midnight daily."
         while true; do
           # Calculate seconds until next midnight
-          CURRENT_HOUR=$$(date +%H)
-          CURRENT_MIN=$$(date +%M)
-          CURRENT_SEC=$$(date +%S)
+          CURRENT_HOUR=$$(date +%-H)
+          CURRENT_MIN=$$(date +%-M)
+          CURRENT_SEC=$$(date +%-S)
           SECS_UNTIL_MIDNIGHT=$$(( (24 - $$CURRENT_HOUR - 1) * 3600 + (60 - $$CURRENT_MIN - 1) * 60 + (60 - $$CURRENT_SEC) ))
           echo "[Scheduler] Next cleanup in $$SECS_UNTIL_MIDNIGHT seconds (at midnight)"
           sleep $$SECS_UNTIL_MIDNIGHT
@@ -145,6 +145,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      disable: true
     networks:
       - timetracker-network
 
@@ -175,6 +177,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      disable: true
     networks:
       - timetracker-network
 
@@ -203,6 +207,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      disable: true
     networks:
       - timetracker-network
 
