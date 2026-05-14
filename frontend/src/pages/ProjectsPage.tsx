@@ -174,7 +174,7 @@ export function ProjectsPage() {
           >
             {showArchived ? 'Show Active' : 'Show Archived'}
           </Button>
-          {isAdmin && (
+          {user && (
             <Button onClick={() => setShowModal(true)}>
               <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -193,9 +193,9 @@ export function ProjectsPage() {
           </svg>
           <h3 className="mt-4 text-lg font-medium text-gray-900">No projects yet</h3>
           <p className="mt-2 text-gray-500">
-            {isAdmin ? 'Create your first project to start tracking time.' : 'No projects available. Contact your admin.'}
+            {user ? 'Create your first project to start tracking time.' : 'No projects available. Contact your admin.'}
           </p>
-          {isAdmin && (
+          {user && (
             <Button className="mt-4" onClick={() => setShowModal(true)}>
               Create Project
             </Button>
@@ -281,8 +281,8 @@ export function ProjectsPage() {
         </div>
       </Modal>
 
-      {/* Create/Edit Modal - Admin only */}
-      {isAdmin && (
+      {/* Create modal open to all team members; edit still admin-only */}
+      {user && (
         <ProjectModal
           isOpen={showModal}
           onClose={() => {

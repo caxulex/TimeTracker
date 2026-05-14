@@ -274,7 +274,24 @@ async def create_project(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Create a new project"""
+    """Create a new project.
+
+    Open to any authenticated user who has access to the target team
+    via :func:`check_team_access`:
+
+    - ``super_admin`` / ``admin`` / ``company_admin``: any team in
+      their company (super_admin: any team, any company).
+    - Regular users: only teams they are a ``TeamMember`` of.
+
+    Mirrors the staff task-creation relaxation made on 2026-05-14
+    (PR #23 / option ``a``): creation is gated by visibility, not by
+    role. Editing, archiving, and deleting existing projects remain
+    admin-only (see :func:`update_project` and friends).
+
+    Admin-only fields (``budget_amount`` and ``deadline``) are
+    silently dropped when submitted by a non-admin, so the UI can
+    safely hide them without the backend rejecting the request.
+    """
     # Check team access
     has_access = await check_team_access(db, project_data.team_id, current_user)
     if not has_access:
