@@ -66,7 +66,26 @@ class PaginatedTasks(BaseModel):
 
 
 async def check_project_access(db: AsyncSession, project_id: int, user: User) -> bool:
-    """Check if user has access to project (within their company)"""
+    """Return True if ``user`` has visibility into ``project_id``.
+
+    The rule mirrors ``GET /api/projects`` (see
+    :func:`app.routers.projects.list_projects`) so that any project a
+    user can *see* in the project list is also a project they can
+    create / read / update / delete tasks on:
+
+    - ``super_admin``: every project, every company.
+    - ``admin`` / ``company_admin``: every project within their own
+      company (company filter applied via
+      :func:`app.dependencies.get_company_filter`).
+    - Regular users: only projects whose team they are a member of,
+      and only within their own company.
+
+    Task-creation deliberately reuses this helper so staff users can
+    create tasks on any project they can already list, matching the
+    behaviour of Basecamp (the upstream system) and the product
+    decision made on 2026-05-14 (option ``a``: visibility-based, not
+    a separate team-membership gate).
+    """
     # Multi-tenancy: join with team to filter by company
     query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
     company_id = get_company_filter(user)
@@ -81,7 +100,7 @@ async def check_project_access(db: AsyncSession, project_id: int, user: User) ->
     if user.role in ["super_admin", "admin", "company_admin"]:
         return True
 
-    # Regular users need team membership
+    # Regular users need team membership (same rule as list_projects)
     member_result = await db.execute(
         select(TeamMember).where(
             TeamMember.team_id == project.team_id,
@@ -233,8 +252,15 @@ async def create_task(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Create a new task"""
-    # Check project access
+    """Create a new task.
+
+    Open to any authenticated user who has visibility into the target
+    project (same rule as ``GET /api/projects`` — see
+    :func:`check_project_access`). User-created tasks have no
+    ``BasecampTaskMapping`` row, so the Basecamp autosync job (which
+    keys off ``basecamp_todo_id``) leaves them untouched.
+    """
+    # Check project access (visibility-based; same rule as GET /api/projects)
     has_access = await check_project_access(db, task_data.project_id, current_user)
     if not has_access:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found or access denied")
