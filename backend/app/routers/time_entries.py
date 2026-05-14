@@ -35,6 +35,7 @@ from app.models import (
 )
 from app.routers.websocket import manager as ws_manager
 from app.schemas.auth import Message
+from app.utils.timer_elapsed import compute_display_elapsed_seconds
 from app.utils.timewindow import day_bounds
 
 logger = logging.getLogger(__name__)
@@ -442,12 +443,11 @@ async def get_active_timers(
             }
 
     for entry, user, project, task in rows:
-        # Calculate elapsed seconds
-        start = entry.start_time
-        if start.tzinfo is None:
-            start = start.replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
-        elapsed = int((now - start).total_seconds())
+        # Calculate elapsed seconds. While the entry is paused (user on
+        # break) this freezes at paused_at so the panel matches the user's
+        # own timer widget; otherwise it counts forward from start_time
+        # minus any accumulated pause time.
+        elapsed = compute_display_elapsed_seconds(entry)
 
         activity = activity_by_user.get(user.id) or {
             "activity_state": "working",

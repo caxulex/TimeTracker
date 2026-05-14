@@ -36,6 +36,7 @@ from app.schemas.sessions import (
     WorkSessionResponse,
     WorkSessionWithDetails,
 )
+from app.utils.timer_elapsed import compute_display_elapsed_seconds
 from app.utils.timewindow import day_bounds, local_today, range_bounds
 
 router = APIRouter(prefix="/api/work-sessions", tags=["work-sessions"])
@@ -110,10 +111,9 @@ async def _refresh_active_timer_cache(
         return None
 
     entry, project, task = row
-    start = entry.start_time
-    if start.tzinfo is None:
-        start = start.replace(tzinfo=timezone.utc)
-    elapsed = int((datetime.now(timezone.utc) - start).total_seconds())
+    # Honor is_paused/paused_at/pause_seconds so the cached elapsed freezes
+    # while on break and resumes correctly after end_break.
+    elapsed = compute_display_elapsed_seconds(entry)
 
     timer_entry = {
         "user_id": user.id,
