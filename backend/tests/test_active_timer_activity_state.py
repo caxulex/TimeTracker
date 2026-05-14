@@ -7,6 +7,7 @@
 #   - start_break / end_break / start_meeting / end_meeting
 #     mutate ws_manager.active_timers and broadcast timer_updated.
 # ============================================
+import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
@@ -250,3 +251,130 @@ class TestCacheTransitions:
         assert cached["meeting_title"] is None
         # The resumed entry is associated with the original project.
         assert cached["project_id"] == _project.id
+
+
+class TestElapsedSecondsFreezesDuringBreak:
+    """Regression tests for fix(active-timers): elapsed_seconds must freeze
+    at paused_at while the user is on break, then resume counting after
+    end_break without jumping forward by the break duration.
+    """
+
+    @pytest.mark.asyncio
+    async def test_active_endpoint_freezes_elapsed_during_break(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        _running_entry: TimeEntry,
+    ):
+        # Start a break — entry becomes is_paused with paused_at = now.
+        r = await client.post(
+            "/api/work-sessions/break/start",
+            json={"break_type": "short"},
+            headers=auth_headers,
+        )
+        assert r.status_code == 200, r.text
+
+        first = await client.get("/api/time/active", headers=auth_headers)
+        assert first.status_code == 200
+        elapsed_a = first.json()[0]["elapsed_seconds"]
+
+        # Wait long enough that any non-frozen clock would tick at least 1s.
+        await asyncio.sleep(1.2)
+
+        second = await client.get("/api/time/active", headers=auth_headers)
+        assert second.status_code == 200
+        elapsed_b = second.json()[0]["elapsed_seconds"]
+
+        assert elapsed_a == elapsed_b, (
+            f"elapsed_seconds must be frozen during a break, "
+            f"got {elapsed_a} then {elapsed_b}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_active_endpoint_resumes_after_end_break_without_jump(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        _running_entry: TimeEntry,
+    ):
+        # Snapshot elapsed BEFORE the break to establish the baseline.
+        pre = await client.get("/api/time/active", headers=auth_headers)
+        assert pre.status_code == 200
+        elapsed_pre = pre.json()[0]["elapsed_seconds"]
+
+        r1 = await client.post(
+            "/api/work-sessions/break/start",
+            json={"break_type": "short"},
+            headers=auth_headers,
+        )
+        assert r1.status_code == 200, r1.text
+
+        # Take a measurable break.
+        break_seconds = 2
+        await asyncio.sleep(break_seconds + 0.1)
+
+        r2 = await client.post(
+            "/api/work-sessions/break/end",
+            headers=auth_headers,
+        )
+        assert r2.status_code == 200, r2.text
+
+        post = await client.get("/api/time/active", headers=auth_headers)
+        assert post.status_code == 200
+        elapsed_post = post.json()[0]["elapsed_seconds"]
+
+        # After resume, elapsed should be close to where it was when the
+        # break started (within a small tolerance for test scheduling
+        # jitter). It must NOT jump forward by the break duration.
+        delta = elapsed_post - elapsed_pre
+        assert 0 <= delta <= 1, (
+            f"elapsed jumped by {delta}s after a {break_seconds}s break; "
+            f"expected ~0 (pause_seconds should absorb the break)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_break_start_broadcast_carries_frozen_elapsed(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        test_user: User,
+        _running_entry: TimeEntry,
+    ):
+        r = await client.post(
+            "/api/work-sessions/break/start",
+            json={"break_type": "short"},
+            headers=auth_headers,
+        )
+        assert r.status_code == 200, r.text
+
+        # The cache snapshot taken at break-start is what gets broadcast.
+        cached = ws_manager.active_timers[test_user.id]
+        cached_elapsed = cached["elapsed_seconds"]
+
+        # Wait and re-hit the HTTP endpoint — it must agree with the
+        # broadcast snapshot (both frozen at paused_at).
+        await asyncio.sleep(1.2)
+        resp = await client.get("/api/time/active", headers=auth_headers)
+        assert resp.status_code == 200
+        endpoint_elapsed = resp.json()[0]["elapsed_seconds"]
+
+        # Allow a 1-second tolerance: the broadcast snapshot and the
+        # endpoint may have captured paused_at fractions of a second apart.
+        assert abs(endpoint_elapsed - cached_elapsed) <= 1, (
+            f"broadcast elapsed ({cached_elapsed}) and endpoint elapsed "
+            f"({endpoint_elapsed}) must agree while frozen"
+        )
+
+        # And ws_manager.broadcast_timer_updated was actually awaited as
+        # part of the break-start flow.
+        ws_manager.broadcast_timer_updated.assert_awaited()
+        call_kwargs = ws_manager.broadcast_timer_updated.await_args.kwargs
+        broadcast_entry = call_kwargs.get("timer_entry") or (
+            ws_manager.broadcast_timer_updated.await_args.args[1]
+            if len(ws_manager.broadcast_timer_updated.await_args.args) > 1
+            else None
+        )
+        assert broadcast_entry is not None
+        assert broadcast_entry["activity_state"] == "break"
+        assert broadcast_entry["elapsed_seconds"] == cached_elapsed
+

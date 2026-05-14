@@ -362,12 +362,13 @@ async def load_active_timers_from_db(company_id: Optional[int] = None) -> int:
                             info["meeting_type"] = mtg.meeting_type if mtg else None
                             info["meeting_title"] = mtg.title if mtg else None
 
+            from app.utils.timer_elapsed import compute_display_elapsed_seconds
+
             new_entries: Dict[int, dict] = {}
             for entry, user, project, task in rows:
-                start = entry.start_time
-                if start.tzinfo is None:
-                    start = start.replace(tzinfo=timezone.utc)
-                elapsed = int((now_utc() - start).total_seconds())
+                # Freeze at paused_at if the entry is currently paused so
+                # the cache mirrors what /api/time/active returns.
+                elapsed = compute_display_elapsed_seconds(entry, now=now_utc())
 
                 info = activity_by_user.get(user.id) or {}
                 new_entries[user.id] = {
