@@ -335,6 +335,7 @@ async def load_active_timers_from_db(company_id: Optional[int] = None) -> int:
                         "break_type": None,
                         "meeting_type": None,
                         "meeting_title": None,
+                        "state_started_at": None,
                     }
                 if activity_by_user:
                     ws_ids = [v["work_session_id"] for v in activity_by_user.values()]
@@ -356,13 +357,20 @@ async def load_active_timers_from_db(company_id: Optional[int] = None) -> int:
                         ws_id = info["work_session_id"]
                         if info["ws_status"] == "break":
                             brk = brk_by_ws.get(ws_id)
-                            info["break_type"] = brk.break_type if brk else None
+                            if brk:
+                                info["break_type"] = brk.break_type
+                                info["state_started_at"] = brk.start_time
                         elif info["ws_status"] == "meeting":
                             mtg = mtg_by_ws.get(ws_id)
-                            info["meeting_type"] = mtg.meeting_type if mtg else None
-                            info["meeting_title"] = mtg.title if mtg else None
+                            if mtg:
+                                info["meeting_type"] = mtg.meeting_type
+                                info["meeting_title"] = mtg.title
+                                info["state_started_at"] = mtg.start_time
 
-            from app.utils.timer_elapsed import compute_display_elapsed_seconds
+            from app.utils.timer_elapsed import (
+                compute_display_elapsed_seconds,
+                compute_state_elapsed_seconds,
+            )
 
             new_entries: Dict[int, dict] = {}
             for entry, user, project, task in rows:
@@ -371,6 +379,15 @@ async def load_active_timers_from_db(company_id: Optional[int] = None) -> int:
                 elapsed = compute_display_elapsed_seconds(entry, now=now_utc())
 
                 info = activity_by_user.get(user.id) or {}
+                activity_state = info.get("activity_state", "working")
+                state_started_at = info.get("state_started_at") or entry.start_time
+                if activity_state == "working":
+                    state_elapsed = elapsed
+                else:
+                    state_elapsed = compute_state_elapsed_seconds(
+                        state_started_at, now=now_utc()
+                    )
+
                 new_entries[user.id] = {
                     "user_id": user.id,
                     "user_name": user.name,
@@ -382,7 +399,9 @@ async def load_active_timers_from_db(company_id: Optional[int] = None) -> int:
                     "description": entry.description,
                     "start_time": entry.start_time.isoformat(),
                     "elapsed_seconds": elapsed,
-                    "activity_state": info.get("activity_state", "working"),
+                    "state_started_at": state_started_at.isoformat(),
+                    "state_elapsed_seconds": state_elapsed,
+                    "activity_state": activity_state,
                     "break_type": info.get("break_type"),
                     "meeting_type": info.get("meeting_type"),
                     "meeting_title": info.get("meeting_title"),

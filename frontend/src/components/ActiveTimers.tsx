@@ -53,10 +53,32 @@ export function ActiveTimers({ teamId, className = '' }: ActiveTimersProps) {
     }
   }, [isConnected, refetch]);
 
-  const formatElapsed = (startTime: string): string => {
-    const start = new Date(startTime);
-    const diffMs = currentTime.getTime() - start.getTime();
-    const seconds = Math.floor(diffMs / 1000);
+  const formatElapsed = (timer: ActiveTimer): string => {
+    // Anchor the displayed duration to the moment the user entered their
+    // CURRENT activity state (working / break / meeting). The server sets
+    // state_started_at to:
+    //   - the running TimeEntry.start_time when activity_state == "working",
+    //   - the active SessionBreak.start_time when "break",
+    //   - the active SessionMeeting.start_time when "meeting".
+    // Recomputing from this timestamp every second guarantees the panel
+    // displays "how long has this person been on break / in this meeting"
+    // and naturally resets on every state transition. It also prevents
+    // the previous drift bug where the client kept incrementing the work
+    // elapsed locally even after the server had frozen it at paused_at.
+    let baseTimeMs: number;
+    if (timer.state_started_at) {
+      baseTimeMs = new Date(timer.state_started_at).getTime();
+    } else {
+      baseTimeMs = new Date(timer.start_time).getTime();
+    }
+    let seconds = Math.floor((currentTime.getTime() - baseTimeMs) / 1000);
+    // Fall back to the server-provided state_elapsed_seconds when the
+    // anchor would yield a smaller value (e.g. clock skew between client
+    // and server). Also guard against negatives.
+    if (typeof timer.state_elapsed_seconds === 'number') {
+      seconds = Math.max(seconds, timer.state_elapsed_seconds);
+    }
+    seconds = Math.max(seconds, 0);
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
@@ -198,7 +220,7 @@ export function ActiveTimers({ teamId, className = '' }: ActiveTimersProps) {
                 <div className="flex-shrink-0">
                   <span className={badgeClassFor(timer)}>
                     <span className={dotClassFor(timer)}></span>
-                    {formatElapsed(timer.start_time)}
+                    {formatElapsed(timer)}
                   </span>
                 </div>
               </div>

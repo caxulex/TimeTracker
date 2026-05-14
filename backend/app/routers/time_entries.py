@@ -35,7 +35,10 @@ from app.models import (
 )
 from app.routers.websocket import manager as ws_manager
 from app.schemas.auth import Message
-from app.utils.timer_elapsed import compute_display_elapsed_seconds
+from app.utils.timer_elapsed import (
+    compute_display_elapsed_seconds,
+    compute_state_elapsed_seconds,
+)
 from app.utils.timewindow import day_bounds
 
 logger = logging.getLogger(__name__)
@@ -422,11 +425,19 @@ async def get_active_timers(
             break_type = None
             meeting_type = None
             meeting_title = None
+            # state_started_at is the moment the user entered the current
+            # activity state (work / break / meeting). For "working" it is
+            # left as None here and filled in below from the running
+            # TimeEntry.start_time; for break/meeting it points at the
+            # active SessionBreak/SessionMeeting.start_time so the panel
+            # can display the duration of the current state.
+            state_started_at = None
             if ws.status == "break":
                 state = "break"
                 for brk in ws.breaks:
                     if brk.end_time is None:
                         break_type = brk.break_type
+                        state_started_at = brk.start_time
                         break
             elif ws.status == "meeting":
                 state = "meeting"
@@ -434,12 +445,14 @@ async def get_active_timers(
                     if mtg.end_time is None:
                         meeting_type = mtg.meeting_type
                         meeting_title = mtg.title
+                        state_started_at = mtg.start_time
                         break
             activity_by_user[ws.user_id] = {
                 "activity_state": state,
                 "break_type": break_type,
                 "meeting_type": meeting_type,
                 "meeting_title": meeting_title,
+                "state_started_at": state_started_at,
             }
 
     for entry, user, project, task in rows:
@@ -454,7 +467,19 @@ async def get_active_timers(
             "break_type": None,
             "meeting_type": None,
             "meeting_title": None,
+            "state_started_at": None,
         }
+
+        # Anchor the panel's displayed duration to the moment the current
+        # activity state began. For "working" this is the TimeEntry's own
+        # start_time; for break/meeting it's the active row's start_time.
+        state_started_at = activity.get("state_started_at") or entry.start_time
+        if activity["activity_state"] == "working":
+            # Mirror the existing pause-aware reading so working users see
+            # the same number on the panel as on their own timer widget.
+            state_elapsed = elapsed
+        else:
+            state_elapsed = compute_state_elapsed_seconds(state_started_at)
 
         active_timers.append({
             "user_id": user.id,
@@ -466,6 +491,8 @@ async def get_active_timers(
             "description": entry.description,
             "start_time": entry.start_time.isoformat(),
             "elapsed_seconds": elapsed,
+            "state_started_at": state_started_at.isoformat(),
+            "state_elapsed_seconds": state_elapsed,
             "activity_state": activity["activity_state"],
             "break_type": activity["break_type"],
             "meeting_type": activity["meeting_type"],

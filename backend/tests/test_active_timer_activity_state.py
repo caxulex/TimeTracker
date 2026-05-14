@@ -378,3 +378,176 @@ class TestElapsedSecondsFreezesDuringBreak:
         assert broadcast_entry["activity_state"] == "break"
         assert broadcast_entry["elapsed_seconds"] == cached_elapsed
 
+
+class TestStateAnchoredElapsed:
+    """Regression tests for the panel showing break/meeting DURATION
+    (not the frozen work-time) on the "Who's Working Now" view.
+
+    The API and WS cache must expose two anchor fields:
+      * ``state_started_at``      — ISO timestamp of when the user
+        entered the current activity state.
+      * ``state_elapsed_seconds`` — whole seconds since that timestamp.
+
+    These let the dashboard render "On break · 00:01:14" ticking upward
+    instead of freezing at the work-time pause point.
+    """
+
+    @pytest.mark.asyncio
+    async def test_working_state_anchors_to_time_entry_start(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        _running_entry: TimeEntry,
+    ):
+        resp = await client.get("/api/time/active", headers=auth_headers)
+        assert resp.status_code == 200
+        row = resp.json()[0]
+        # Anchor is the running TimeEntry's start_time.
+        assert row["state_started_at"] == row["start_time"]
+        # And the displayed duration matches the work-time elapsed.
+        assert row["state_elapsed_seconds"] == row["elapsed_seconds"]
+
+    @pytest.mark.asyncio
+    async def test_break_state_anchors_to_break_start_time(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        db_session: AsyncSession,
+        _running_entry: TimeEntry,
+    ):
+        from app.models import SessionBreak
+
+        r = await client.post(
+            "/api/work-sessions/break/start",
+            json={"break_type": "lunch"},
+            headers=auth_headers,
+        )
+        assert r.status_code == 200, r.text
+
+        # Look up the open SessionBreak directly so the test is anchored
+        # to the actual DB row, not whatever the API computed.
+        from sqlalchemy import select
+
+        brk_rows = (await db_session.execute(
+            select(SessionBreak).where(SessionBreak.end_time.is_(None))
+        )).scalars().all()
+        assert brk_rows, "expected an open SessionBreak after break/start"
+        brk = brk_rows[-1]
+
+        await asyncio.sleep(1.1)
+
+        resp = await client.get("/api/time/active", headers=auth_headers)
+        assert resp.status_code == 200
+        row = resp.json()[0]
+
+        assert row["activity_state"] == "break"
+        # Anchor matches the SessionBreak's start_time (ISO compare).
+        # Normalize tz suffixes; the row.value comes from .isoformat().
+        api_anchor = row["state_started_at"]
+        # Drop microseconds and timezone differences by parsing.
+        from datetime import datetime as _dt
+        api_dt = _dt.fromisoformat(api_anchor.replace("Z", "+00:00"))
+        brk_start = brk.start_time
+        if brk_start.tzinfo is None:
+            brk_start = brk_start.replace(tzinfo=timezone.utc)
+        assert abs((api_dt - brk_start).total_seconds()) < 1.0, (
+            f"state_started_at {api_anchor} should track SessionBreak.start_time {brk_start}"
+        )
+
+        # state_elapsed_seconds should reflect the BREAK duration, not the
+        # frozen work elapsed. After ~1.1s of sleep it must be > 0 and
+        # MUST advance independently of the frozen ``elapsed_seconds``.
+        assert row["state_elapsed_seconds"] >= 1, row
+
+    @pytest.mark.asyncio
+    async def test_break_state_elapsed_advances_over_time(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        _running_entry: TimeEntry,
+    ):
+        r = await client.post(
+            "/api/work-sessions/break/start",
+            json={"break_type": "short"},
+            headers=auth_headers,
+        )
+        assert r.status_code == 200, r.text
+
+        first = await client.get("/api/time/active", headers=auth_headers)
+        a = first.json()[0]
+        await asyncio.sleep(1.2)
+        second = await client.get("/api/time/active", headers=auth_headers)
+        b = second.json()[0]
+
+        # Work elapsed stays frozen (PR #26 behavior) ...
+        assert a["elapsed_seconds"] == b["elapsed_seconds"]
+        # ... but the break duration MUST advance.
+        assert b["state_elapsed_seconds"] > a["state_elapsed_seconds"], (
+            f"state_elapsed_seconds must advance during a break: "
+            f"{a['state_elapsed_seconds']} -> {b['state_elapsed_seconds']}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_meeting_state_anchors_to_meeting_start_time(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        db_session: AsyncSession,
+        _running_entry: TimeEntry,
+    ):
+        from app.models import SessionMeeting
+        from sqlalchemy import select
+
+        r = await client.post(
+            "/api/work-sessions/meeting/start",
+            json={"meeting_type": "internal", "title": "Standup"},
+            headers=auth_headers,
+        )
+        assert r.status_code == 200, r.text
+
+        mtg = (await db_session.execute(
+            select(SessionMeeting).where(SessionMeeting.end_time.is_(None))
+        )).scalars().first()
+        assert mtg is not None
+
+        await asyncio.sleep(1.1)
+
+        resp = await client.get("/api/time/active", headers=auth_headers)
+        assert resp.status_code == 200
+        row = resp.json()[0]
+        assert row["activity_state"] == "meeting"
+
+        from datetime import datetime as _dt
+        api_dt = _dt.fromisoformat(row["state_started_at"].replace("Z", "+00:00"))
+        mtg_start = mtg.start_time
+        if mtg_start.tzinfo is None:
+            mtg_start = mtg_start.replace(tzinfo=timezone.utc)
+        assert abs((api_dt - mtg_start).total_seconds()) < 1.0
+
+        # Meeting duration advances from 0 and reflects the actual elapsed
+        # since meeting/start (1.1s sleep above).
+        assert row["state_elapsed_seconds"] >= 1, row
+
+    @pytest.mark.asyncio
+    async def test_cache_entry_carries_state_fields_on_break_start(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        test_user: User,
+        _running_entry: TimeEntry,
+    ):
+        r = await client.post(
+            "/api/work-sessions/break/start",
+            json={"break_type": "lunch"},
+            headers=auth_headers,
+        )
+        assert r.status_code == 200, r.text
+        cached = ws_manager.active_timers[test_user.id]
+        # Cache snapshot the broadcast uses must include the anchor fields.
+        assert "state_started_at" in cached
+        assert "state_elapsed_seconds" in cached
+        assert cached["activity_state"] == "break"
+
+
+
+
