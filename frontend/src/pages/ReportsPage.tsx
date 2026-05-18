@@ -145,9 +145,9 @@ export function ReportsPage() {
 
   // Fetch weekly summary (user's own data)
   const { data: weeklyData, isLoading: weeklyLoading } = useQuery<WeeklySummary>({
-    queryKey: ['weekly-report', startDate],
-    queryFn: () => reportsApi.getWeekly(startDate),
-    enabled: !!startDate,
+    queryKey: ['weekly-report', startDate, endDate],
+    queryFn: () => reportsApi.getWeekly(startDate, endDate),
+    enabled: !!startDate && !!endDate,
   });
 
   // Fetch project breakdown (user's own data)

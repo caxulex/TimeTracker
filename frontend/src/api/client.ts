@@ -513,9 +513,12 @@ export const reportsApi = {
     return response.data;
   },
 
-  getWeekly: async (startDate?: string): Promise<WeeklySummary> => {
+  getWeekly: async (startDate?: string, endDate?: string): Promise<WeeklySummary> => {
+    const params: Record<string, string> = {};
+    if (startDate) params.start_date = startDate;
+    if (endDate) params.end_date = endDate;
     const response = await api.get<WeeklySummary>('/api/reports/weekly', {
-      params: startDate ? { start_date: startDate } : undefined,
+      params: Object.keys(params).length > 0 ? params : undefined,
     });
     return response.data;
   },
