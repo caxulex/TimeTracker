@@ -292,15 +292,27 @@ async def get_dashboard_stats(
 @router.get("/weekly", response_model=WeeklySummary)
 async def get_weekly_summary(
     start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
     week_offset: int = Query(0, ge=-52, le=0, description="Weeks ago (0 = current week)"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     tz: str = Depends(get_company_timezone),
 ):
-    """Get personal weekly time summary for the authenticated user.
+    """Get personal time summary for the authenticated user over an arbitrary date range.
 
     Returns ONLY the current user's time entries regardless of role. Admins
     who want company-wide views should use /api/reports/admin/dashboard.
+
+    Date range behavior:
+    - If both ``start_date`` and ``end_date`` are provided, the window spans that
+      caller-controlled range (inclusive). The ``daily_breakdown`` will contain
+      one entry per day in the range.
+    - If only ``start_date`` is provided, the window is the 7 days starting at
+      ``start_date`` (backwards compatible with the original weekly behavior).
+    - If neither is provided, the window is the current week in the tenant's
+      timezone, optionally offset by ``week_offset``.
+
+    The range is capped at 366 days to prevent excessively large responses.
     """
     now = now_utc()
     today_local = local_today(tz)
@@ -311,7 +323,25 @@ async def get_weekly_summary(
     else:
         week_start = today_local - timedelta(days=today_local.weekday()) - timedelta(weeks=abs(week_offset))
 
-    week_end = week_start + timedelta(days=6)
+    # Honor caller-supplied end_date when present; otherwise keep the historical
+    # 7-day window so existing callers continue to work unchanged.
+    if end_date is not None:
+        week_end = end_date
+    else:
+        week_end = week_start + timedelta(days=6)
+
+    if week_end < week_start:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="end_date must be on or after start_date",
+        )
+
+    range_days = (week_end - week_start).days + 1
+    if range_days > 366:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Date range too large (max 366 days)",
+        )
 
     # Half-open bounds in tenant local time (B7)
     start_datetime, end_datetime = range_bounds(week_start, week_end, tz)
@@ -319,21 +349,21 @@ async def get_weekly_summary(
     # Personal scope: always filter to the current user's own entries.
     user_filter = TimeEntry.user_id == current_user.id
 
-    # Fetch entries that OVERLAP with this week (not just started within)
+    # Fetch entries that OVERLAP with this window (not just started within)
     entries_query = select(TimeEntry).where(
-        TimeEntry.start_time < end_datetime,  # Started before week ends
-        (TimeEntry.end_time >= start_datetime) | (TimeEntry.end_time.is_(None)),  # Ended after week started OR still running
+        TimeEntry.start_time < end_datetime,  # Started before window ends
+        (TimeEntry.end_time >= start_datetime) | (TimeEntry.end_time.is_(None)),  # Ended after window started OR still running
         user_filter,
     )
     entries_result = await db.execute(entries_query)
     all_entries = entries_result.scalars().all()
 
-    # Calculate total seconds for the week using period overlap
+    # Calculate total seconds for the window using period overlap
     total_seconds = sum(calculate_entry_duration_for_period(e, start_datetime, end_datetime, now) for e in all_entries)
 
-    # Daily breakdown - calculate overlap for each day
+    # Daily breakdown - calculate overlap for each day in the range
     daily_breakdown = []
-    for i in range(7):
+    for i in range(range_days):
         day = week_start + timedelta(days=i)
         day_start, day_end = day_bounds(day, tz)
 

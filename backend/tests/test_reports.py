@@ -96,6 +96,61 @@ class TestWeeklySummary:
         assert "total_seconds" in data
         assert "daily_breakdown" in data
 
+    @pytest.mark.asyncio
+    async def test_weekly_summary_honors_end_date(
+        self, client: AsyncClient, auth_headers: dict, populated_data
+    ):
+        """When end_date is supplied, the window spans the full caller-controlled range."""
+        start = "2026-05-01"
+        end = "2026-05-15"
+        response = await client.get(
+            f"/api/reports/weekly?start_date={start}&end_date={end}",
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["week_start"] == start
+        assert data["week_end"] == end
+        # 15 days inclusive
+        assert len(data["daily_breakdown"]) == 15
+
+    @pytest.mark.asyncio
+    async def test_weekly_summary_without_end_date_is_seven_days(
+        self, client: AsyncClient, auth_headers: dict, populated_data
+    ):
+        """Backwards compatibility: omitting end_date keeps the original 7-day window."""
+        response = await client.get(
+            "/api/reports/weekly?start_date=2026-05-01",
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["daily_breakdown"]) == 7
+        assert data["week_start"] == "2026-05-01"
+        assert data["week_end"] == "2026-05-07"
+
+    @pytest.mark.asyncio
+    async def test_weekly_summary_end_before_start_returns_400(
+        self, client: AsyncClient, auth_headers: dict, populated_data
+    ):
+        """end_date before start_date should be rejected."""
+        response = await client.get(
+            "/api/reports/weekly?start_date=2026-05-15&end_date=2026-05-01",
+            headers=auth_headers,
+        )
+        assert response.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_weekly_summary_range_too_large_returns_400(
+        self, client: AsyncClient, auth_headers: dict, populated_data
+    ):
+        """Ranges exceeding 366 days should be rejected."""
+        response = await client.get(
+            "/api/reports/weekly?start_date=2024-01-01&end_date=2025-12-31",
+            headers=auth_headers,
+        )
+        assert response.status_code == 400
+
 
 class TestProjectReport:
     """Test project-based report endpoint."""
