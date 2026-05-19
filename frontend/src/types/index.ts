@@ -303,6 +303,10 @@ export interface TimeEntryFilters {
   start_date?: string;
   end_date?: string;
   page?: number;
+  // Backend (`GET /api/time`) declares the query param as `page_size`.
+  // `size` is kept for back-compat with other paginated endpoints but is
+  // ignored by the time-entries endpoint — pass `page_size` for that one.
+  page_size?: number;
   size?: number;
 }
 

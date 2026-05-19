@@ -5,7 +5,7 @@
 // With NLP Chat Interface
 // ============================================
 import React, { useState, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Card, Button, Modal, LoadingOverlay, Input } from '../components/common';
@@ -89,17 +89,38 @@ export function TimePage() {
     }
   }, [searchParams, nlpEnabled]);
 
-  // Fetch time entries
+  // Fetch time entries — paginated via Load More.
+  // Bug history: previously this used `size: 50`, but the FastAPI endpoint
+  // declares the query param as `page_size`, so the value was silently
+  // dropped at the server boundary and the default `page_size=20` kicked
+  // in — visibly capping the list at ~6 days for active users. We now
+  // request 100 (the server's `le=100` ceiling) per page and let users
+  // click "Load More" to fetch additional pages.
   const dateRange = getDateRange();
-  const { data: entriesData, isLoading } = useQuery({
+  const PAGE_SIZE = 100;
+  const {
+    data: entriesData,
+    isLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ['time-entries', filterProject, filterDateRange, customStartDate, customEndDate],
-    queryFn: () =>
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) =>
       timeEntriesApi.getAll({
         project_id: filterProject || undefined,
         start_date: dateRange.start_date,
         end_date: dateRange.end_date,
-        size: 50,
+        page: pageParam as number,
+        page_size: PAGE_SIZE,
       }),
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((acc, p) => acc + (p.items?.length || 0), 0);
+      const total = lastPage?.total ?? 0;
+      if (loaded >= total) return undefined;
+      return allPages.length + 1;
+    },
   });
 
   // Fetch projects for filter
@@ -108,7 +129,8 @@ export function TimePage() {
     queryFn: () => projectsApi.getAll({ include_archived: false }),
   });
 
-  const entries = entriesData?.items || [];
+  const entries = (entriesData?.pages ?? []).flatMap((p) => p.items || []);
+  const totalEntries = entriesData?.pages?.[0]?.total ?? entries.length;
   const projects = projectsData?.items || [];
 
   // Create mutation for manual entries
@@ -342,6 +364,29 @@ export function TimePage() {
               </div>
             );
           })}
+          {/* Load More — server-side pagination via useInfiniteQuery.
+              Hidden once everything is loaded; disabled while the next
+              page is in flight. */}
+          {(hasNextPage || entries.length < totalEntries) && (
+            <div className="flex flex-col items-center gap-2 pt-2">
+              <p className="text-xs text-gray-500">
+                {t('time.showingXofY', {
+                  shown: entries.length,
+                  total: totalEntries,
+                  defaultValue: `Showing ${entries.length} of ${totalEntries} entries`,
+                })}
+              </p>
+              <Button
+                variant="secondary"
+                onClick={() => fetchNextPage()}
+                disabled={isFetchingNextPage || !hasNextPage}
+              >
+                {isFetchingNextPage
+                  ? t('common.loading', { defaultValue: 'Loading…' })
+                  : t('time.loadMore', { defaultValue: 'Load More' })}
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
