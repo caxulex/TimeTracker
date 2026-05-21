@@ -659,7 +659,7 @@ async def stop_timer(
     # Stop the timer
     end_time = datetime.now(timezone.utc)
     entry.end_time = end_time
-    entry.duration_seconds = calculate_duration_seconds(entry.start_time, end_time)
+    entry.duration_seconds = calculate_duration_seconds(entry.start_time, end_time, entry.pause_seconds or 0)
     entry.is_running = False
 
     await db.commit()
@@ -808,7 +808,7 @@ async def switch_task(
     old_entry.is_running = False
     old_entry.is_paused = False
     if old_entry.start_time:
-        old_entry.duration_seconds = calculate_duration_seconds(old_entry.start_time, now)
+        old_entry.duration_seconds = calculate_duration_seconds(old_entry.start_time, now, old_entry.pause_seconds or 0)
 
     # 5. Create the new entry linked to the same work session
     new_entry = TimeEntry(
