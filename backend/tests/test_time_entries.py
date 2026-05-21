@@ -264,3 +264,165 @@ class TestTimeEntryDelete:
         )
         # Check for successful deletion (200 or 204)
         assert response.status_code in [200, 204]
+
+
+class TestStopAndSwitchHonorPauseSeconds:
+    """
+    Regression tests for the pause_seconds bug where /stop and /switch
+    persisted duration_seconds without subtracting accumulated break time.
+
+    See PR fix/stop-endpoint-honor-pause-seconds.
+    """
+
+    @pytest_asyncio.fixture
+    async def running_entry_with_pause(
+        self, db_session: AsyncSession, test_user: User, test_project: Project
+    ) -> TimeEntry:
+        """Running entry started 1h ago, with 600s of accumulated pause time
+        (i.e. user took a 10-minute break that has already ended)."""
+        now = datetime.now(timezone.utc)
+        work_session = WorkSession(
+            user_id=test_user.id,
+            company_id=test_user.company_id,
+            start_time=now - timedelta(hours=2),
+            status="active",
+        )
+        db_session.add(work_session)
+        await db_session.flush()
+
+        entry = TimeEntry(
+            user_id=test_user.id,
+            project_id=test_project.id,
+            work_session_id=work_session.id,
+            description="Entry with pause",
+            start_time=now - timedelta(hours=1),
+            end_time=None,
+            duration_seconds=None,
+            is_running=True,
+            is_paused=False,
+            paused_at=None,
+            pause_seconds=600,
+        )
+        db_session.add(entry)
+        await db_session.flush()
+        await db_session.refresh(entry)
+        return entry
+
+    @pytest.mark.asyncio
+    async def test_stop_subtracts_pause_seconds(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        running_entry_with_pause: TimeEntry,
+    ):
+        """Stopping a 1h timer with 600s pause should yield ~3000s duration."""
+        response = await client.post("/api/time/stop", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        # Wall clock ~3600s, pause 600s → expect ~3000s. Allow small jitter
+        # for execution time between fixture creation and request handling.
+        assert 2990 <= data["duration_seconds"] <= 3010, (
+            f"Expected ~3000s (3600 - 600), got {data['duration_seconds']}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_stop_with_zero_pause_unchanged(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        running_time_entry: TimeEntry,
+    ):
+        """Entries with pause_seconds=0 should still record full wall-clock duration."""
+        # The running_time_entry fixture has pause_seconds default (0) and a
+        # 30-minute start offset.
+        response = await client.post("/api/time/stop", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        # Wall clock ~1800s, no pause → ~1800s.
+        assert 1790 <= data["duration_seconds"] <= 1810, (
+            f"Expected ~1800s with no pause, got {data['duration_seconds']}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_stop_clamps_when_pause_exceeds_wallclock(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        db_session: AsyncSession,
+        test_user: User,
+        test_project: Project,
+    ):
+        """Defensive: pause_seconds > wall-clock should clamp to 0, not go negative."""
+        now = datetime.now(timezone.utc)
+        work_session = WorkSession(
+            user_id=test_user.id,
+            company_id=test_user.company_id,
+            start_time=now - timedelta(hours=1),
+            status="active",
+        )
+        db_session.add(work_session)
+        await db_session.flush()
+
+        entry = TimeEntry(
+            user_id=test_user.id,
+            project_id=test_project.id,
+            work_session_id=work_session.id,
+            description="Corrupt pause",
+            start_time=now - timedelta(seconds=60),
+            end_time=None,
+            duration_seconds=None,
+            is_running=True,
+            is_paused=False,
+            pause_seconds=99999,  # absurd, larger than wall-clock
+        )
+        db_session.add(entry)
+        await db_session.flush()
+
+        response = await client.post("/api/time/stop", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["duration_seconds"] == 0
+
+    @pytest.mark.asyncio
+    async def test_switch_subtracts_pause_seconds_from_old_entry(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        db_session: AsyncSession,
+        running_entry_with_pause: TimeEntry,
+        test_team: Team,
+    ):
+        """Switching tasks must finalize the old entry honoring its pause_seconds."""
+        # Need a second project to switch to.
+        other_project = Project(
+            name="Other Project",
+            description="Switch target",
+            team_id=test_team.id,
+            color="#10B981",
+        )
+        db_session.add(other_project)
+        await db_session.flush()
+        await db_session.refresh(other_project)
+
+        old_entry_id = running_entry_with_pause.id
+
+        response = await client.post(
+            "/api/time/switch",
+            json={
+                "project_id": other_project.id,
+                "description": "Switched task",
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+
+        # Reload the old entry from the DB and verify duration honors pause.
+        # Note: expire_all() is sync on AsyncSession (no await).
+        db_session.expire_all()
+        old_entry = await db_session.get(TimeEntry, old_entry_id)
+        assert old_entry is not None
+        assert old_entry.is_running is False
+        assert old_entry.duration_seconds is not None
+        assert 2990 <= old_entry.duration_seconds <= 3010, (
+            f"Expected ~3000s (3600 - 600) on old entry, got {old_entry.duration_seconds}"
+        )
