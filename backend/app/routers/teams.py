@@ -7,7 +7,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -16,7 +16,7 @@ from app.dependencies import (
     get_company_filter,
     get_current_active_user,
 )
-from app.models import Team, TeamMember, User
+from app.models import Project, Team, TeamMember, TimeEntry, User
 from app.routers.websocket import manager as ws_manager
 from app.schemas.auth import Message
 from app.services.audit_logger import AuditAction, AuditLogger
@@ -372,6 +372,50 @@ async def delete_team(
         )
         if not member.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only team owner can delete")
+
+    # Pre-flight guard: refuse deletion if any project in this team has time
+    # entries. Deleting the team would otherwise cascade-delete those projects
+    # (and their tasks) via the SQLAlchemy ORM relationship, leaving the
+    # time entries orphaned with project_id=NULL. Mirrors the safeguard on
+    # DELETE /projects/{id} in app/routers/projects.py.
+    projects_with_entries = await db.scalar(
+        select(func.count(distinct(Project.id)))
+        .select_from(Project)
+        .join(TimeEntry, TimeEntry.project_id == Project.id)
+        .where(Project.team_id == team_id)
+    )
+    if projects_with_entries and projects_with_entries > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Cannot delete team while {projects_with_entries} project(s) "
+                "still have time entries. Archive those projects first, or "
+                "move their time entries to another team."
+            ),
+        )
+
+    # Per-project audit logs for the upcoming ORM cascade. The cascade itself
+    # happens silently at flush time, so we record each project's deletion
+    # explicitly before the team is removed. Closes the audit-coverage gap
+    # that hid the 2026-05-21 "Development" project incident.
+    cascaded_projects = (
+        await db.execute(
+            select(Project.id, Project.name).where(Project.team_id == team_id)
+        )
+    ).all()
+    for project_id, project_name in cascaded_projects:
+        await AuditLogger.log(
+            db=db,
+            action=AuditAction.DELETE,
+            resource_type="project",
+            resource_id=project_id,
+            user_id=current_user.id,
+            user_email=current_user.email,
+            old_values={"name": project_name, "team_id": team_id},
+            details=(
+                f"Cascaded delete from team '{team.name}' (team_id={team_id})"
+            ),
+        )
 
     # Audit log before deletion
     await AuditLogger.log(
