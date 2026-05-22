@@ -166,6 +166,58 @@ class TestProjectReport:
         assert isinstance(data, list)
 
 
+class TestTeamTimesheetPauseAware:
+    """Integration test: team-timesheet must exclude pause time (fix lives in helpers)."""
+
+    @pytest.mark.asyncio
+    async def test_team_timesheet_subtracts_pause_seconds(
+        self,
+        client: AsyncClient,
+        admin_auth_headers: dict,
+        admin_user: User,
+        db_session: AsyncSession,
+    ):
+        """Entry with a 1h48m break should display 4:46 (duration_seconds), not 6:34 (wall-clock).
+
+        Reproduces production case (user_id=7 Laura on 2026-05-20) at the test level.
+        """
+        # Use a fixed past day to avoid timezone/today edge cases.
+        day = datetime(2026, 5, 20, tzinfo=timezone.utc)
+        # 09:00 -> 15:34 wall-clock = 6h34m = 23640s; 1h48m pause = 6480s.
+        # Stored duration = 23640 - 6480 = 17160s = 4h46m.
+        entry = TimeEntry(
+            user_id=admin_user.id,
+            description="With long lunch",
+            start_time=day.replace(hour=9, minute=0, second=0, microsecond=0),
+            end_time=day.replace(hour=15, minute=34, second=0, microsecond=0),
+            duration_seconds=17160,
+            pause_seconds=6480,
+            is_running=False,
+        )
+        db_session.add(entry)
+        await db_session.flush()
+
+        response = await client.get(
+            "/api/reports/team-timesheet?start_date=2026-05-20&end_date=2026-05-20",
+            headers=admin_auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        # Find the admin row
+        row = next(u for u in data["users"] if u["user_id"] == admin_user.id)
+        assert row["total_seconds"] == 17160
+        assert row["total_formatted"] == "4:46"
+
+        # Per-day cell matches
+        cell = next(d for d in row["daily_hours"] if d["date"] == "2026-05-20")
+        assert cell["seconds"] == 17160
+        assert cell["formatted"] == "4:46"
+
+        # Grand total should be pause-corrected
+        assert data["grand_total_seconds"] == 17160
+
+
 class TestExportReport:
     """Test report export endpoint."""
     

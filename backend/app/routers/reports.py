@@ -22,6 +22,7 @@ from app.dependencies import (
 )
 from app.models import Project, Task, Team, TeamMember, TimeEntry, User
 from app.services.email_log_utils import log_email_failed, log_email_sent
+from app.utils.timer_elapsed import compute_display_elapsed_seconds
 from app.utils.timewindow import (
     day_bounds,
     local_today,
@@ -147,21 +148,35 @@ def format_seconds_to_hhmm(seconds: int) -> str:
 
 
 def calculate_entry_duration(entry: TimeEntry, now: datetime) -> int:
-    """Calculate duration for a time entry, including running timers"""
+    """Calculate duration for a time entry, including running timers.
+
+    For running timers, returns the pause-aware live elapsed (frozen while
+    on break, otherwise wall-clock minus accumulated pause_seconds). For
+    closed entries, returns the stored ``duration_seconds`` which is itself
+    pause-corrected at /stop and /switch time (see PR #31).
+    """
     if entry.end_time is None:
-        # Active timer - calculate elapsed time
-        start = entry.start_time
-        if start.tzinfo is None:
-            start = start.replace(tzinfo=timezone.utc)
-        return int((now - start).total_seconds())
-    else:
-        return entry.duration_seconds or 0
+        # Active timer - use the shared pause-aware helper so reports agree
+        # with the live "Who's Working Now" / timer widget displays.
+        return compute_display_elapsed_seconds(entry, now=now)
+    return entry.duration_seconds or 0
 
 
 def calculate_entry_duration_for_period(entry: TimeEntry, period_start: datetime, period_end: datetime, now: datetime) -> int:
     """
     Calculate duration of a time entry that overlaps with a specific period.
     This handles entries that span multiple days by only counting time within the period.
+
+    Pause-aware (PR fixing reports overlap to honor pause_seconds):
+    - Closed entry fully within period: return entry.duration_seconds (already
+      pause-corrected from PR #31). This is the hot path.
+    - Closed entry partially overlaps period: compute wall-clock overlap and
+      subtract a prorated share of pause_seconds based on the fraction of the
+      entry that falls within the period.
+    - Running entry: use compute_display_elapsed_seconds for the full entry,
+      then prorate by the overlap fraction (treats current pause_seconds as
+      uniformly distributed across the elapsed window, consistent with the
+      closed-entry proration above).
 
     Args:
         entry: The time entry
@@ -170,7 +185,7 @@ def calculate_entry_duration_for_period(entry: TimeEntry, period_start: datetime
         now: Current time (for running timers)
 
     Returns:
-        Seconds of the entry that fall within the period
+        Seconds of the entry that fall within the period, with pause time excluded.
     """
     # Get entry start time with timezone
     entry_start = entry.start_time
@@ -178,6 +193,7 @@ def calculate_entry_duration_for_period(entry: TimeEntry, period_start: datetime
         entry_start = entry_start.replace(tzinfo=timezone.utc)
 
     # Get entry end time (or now for running timers)
+    is_running = entry.end_time is None
     if entry.end_time is None:
         entry_end = now
     else:
@@ -193,7 +209,33 @@ def calculate_entry_duration_for_period(entry: TimeEntry, period_start: datetime
     if overlap_start >= overlap_end:
         return 0
 
-    return int((overlap_end - overlap_start).total_seconds())
+    overlap_seconds = int((overlap_end - overlap_start).total_seconds())
+
+    # Closed entry fully within period: stored duration is already pause-corrected.
+    # Hot path — just a column read, no datetime math.
+    if not is_running and entry_start >= period_start and entry_end <= period_end:
+        return int(entry.duration_seconds or 0)
+
+    entry_wall_seconds = int((entry_end - entry_start).total_seconds())
+
+    if is_running:
+        # For running entries, ask the live helper for the pause-aware elapsed
+        # of the entry so far. If the entry is entirely within the period,
+        # return it directly; otherwise prorate by the overlap fraction.
+        live_elapsed = compute_display_elapsed_seconds(entry, now=now)
+        if entry_wall_seconds <= 0:
+            return 0
+        if entry_start >= period_start and entry_end <= period_end:
+            return live_elapsed
+        return max(0, int(live_elapsed * overlap_seconds / entry_wall_seconds))
+
+    # Closed entry, partial overlap: prorate pause_seconds by overlap fraction.
+    pause_seconds = int(getattr(entry, "pause_seconds", 0) or 0)
+    if entry_wall_seconds > 0 and pause_seconds > 0:
+        prorated_pause = int(pause_seconds * overlap_seconds / entry_wall_seconds)
+        return max(0, overlap_seconds - prorated_pause)
+
+    return overlap_seconds
 
 
 @router.get("/dashboard", response_model=DashboardStats)
