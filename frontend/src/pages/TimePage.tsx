@@ -123,10 +123,20 @@ export function TimePage() {
     },
   });
 
-  // Fetch projects for filter
+  // Fetch projects for the filter dropdown.
+  // page_size: 100 is the backend's `le=100` ceiling (see
+  // app/routers/projects.py). Same pagination-default footgun as PR #30:
+  // without overriding it the server returns 20 projects max, and any
+  // project beyond that disappears from the filter. Note: a future tenant
+  // with > 100 active projects will need either a dedicated
+  // "all projects for filter" endpoint or pagination on the filter UI
+  // itself. The per-entry project label below no longer depends on this
+  // list — it reads entry.project_name / entry.project_color from the
+  // time-entry response — so a missing project here only affects the
+  // filter dropdown, not the entry cards.
   const { data: projectsData } = useQuery({
     queryKey: ['projects'],
-    queryFn: () => projectsApi.getAll({ include_archived: false }),
+    queryFn: () => projectsApi.getAll({ include_archived: false, page_size: 100 }),
   });
 
   const entries = (entriesData?.pages ?? []).flatMap((p) => p.items || []);
@@ -355,7 +365,6 @@ export function TimePage() {
                     <TimeEntryCard
                       key={entry.id}
                       entry={entry}
-                      projects={projects}
                       onEdit={() => handleEdit(entry)}
                       onDelete={() => deleteMutation.mutate(entry.id)}
                     />
@@ -416,14 +425,21 @@ export function TimePage() {
 // Time Entry Card Component
 interface TimeEntryCardProps {
   entry: TimeEntry;
-  projects: Project[];
   onEdit: () => void;
   onDelete: () => void;
 }
 
-function TimeEntryCard({ entry, projects, onEdit, onDelete }: TimeEntryCardProps) {
+function TimeEntryCard({ entry, onEdit, onDelete }: TimeEntryCardProps) {
   const { t } = useTranslation();
-  const project = projects.find((p) => p.id === entry.project_id);
+  // Render the project label/color from the time-entry response itself
+  // (TimeEntryResponse.project_name / project_color), NOT from a lookup
+  // against the locally-cached projects list. The cached list is page-
+  // capped at 100 and any entry whose project is beyond that page (or
+  // archived) would otherwise silently render with no label — looking
+  // exactly like "the project was deleted" to the user. See PR
+  // fix/entry-project-label-from-response for context.
+  const projectName = entry.project_name ?? null;
+  const projectColor = entry.project_color ?? null;
 
   return (
     <Card padding="sm">
@@ -432,7 +448,7 @@ function TimeEntryCard({ entry, projects, onEdit, onDelete }: TimeEntryCardProps
           {/* Project color indicator */}
           <div
             className="w-1 h-12 rounded-full flex-shrink-0"
-            style={{ backgroundColor: project?.color || '#9CA3AF' }}
+            style={{ backgroundColor: projectColor || '#9CA3AF' }}
           />
 
           {/* Entry details */}
@@ -453,12 +469,12 @@ function TimeEntryCard({ entry, projects, onEdit, onDelete }: TimeEntryCardProps
               )}
             </div>
             <div className="flex items-center gap-3 mt-1 text-sm text-gray-500">
-              {project && (
+              {projectName && (
                 <span className="flex items-center gap-1">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                   </svg>
-                  {project.name}
+                  {projectName}
                 </span>
               )}
               <span>

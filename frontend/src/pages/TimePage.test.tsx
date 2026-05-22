@@ -516,4 +516,147 @@ describe('TimePage', () => {
       });
     });
   });
+
+  // -----------------------------------------------------------------
+  // Regression: fix/entry-project-label-from-response
+  // The entry card must render the project label/color directly from
+  // TimeEntryResponse.project_name / project_color, not from a lookup
+  // against the locally-cached projects list. Otherwise a tenant with
+  // > 20 active projects would see entries from "older" projects render
+  // unlabeled (the projects list endpoint default-paginates at 20).
+  // -----------------------------------------------------------------
+  describe('Project label rendering reads from entry, not projects list', () => {
+    it('renders project name + color for an entry whose project is NOT in the locally-cached projects list', async () => {
+      const { timeEntriesApi, projectsApi } = await import('../api/client');
+
+      // Projects list is intentionally short — entry.project_id=99 is
+      // NOT in it. With the old projects.find() lookup this entry
+      // would render unlabeled with a gray bar.
+      vi.mocked(projectsApi.getAll).mockResolvedValueOnce({
+        items: [
+          { id: 1, name: 'Project A', company_id: 1, is_active: true } as never,
+        ],
+        total: 1,
+        page: 1,
+        page_size: 100,
+        pages: 1,
+      } as never);
+
+      vi.mocked(timeEntriesApi.getAll).mockResolvedValueOnce({
+        items: [
+          {
+            id: 42,
+            user_id: 1,
+            project_id: 99,
+            project_name: 'Beyond Pagination Project',
+            project_color: '#FF00AA',
+            task_id: null,
+            description: 'Entry whose project is past the page',
+            start_time: '2026-01-08T09:00:00Z',
+            end_time: '2026-01-08T10:00:00Z',
+            duration_seconds: 3600,
+            is_running: false,
+            created_at: '2026-01-08T09:00:00Z',
+          },
+        ],
+        total: 1,
+        page: 1,
+        size: 100,
+        pages: 1,
+      } as never);
+
+      render(
+        <TestWrapper>
+          <TimePage />
+        </TestWrapper>
+      );
+
+      // Project name appears even though it's NOT in projects list.
+      await waitFor(() => {
+        expect(
+          screen.getByText('Beyond Pagination Project')
+        ).toBeInTheDocument();
+      });
+
+      // Color comes from entry.project_color (the colored bar uses
+      // inline style backgroundColor). Look for the indicator element.
+      const description = screen.getByText(
+        'Entry whose project is past the page'
+      );
+      const card = description.closest('div.flex.items-center.justify-between');
+      expect(card).not.toBeNull();
+      const colorBar = card!.querySelector('div[style*="background"]') as HTMLElement | null;
+      expect(colorBar).not.toBeNull();
+      // jsdom normalizes hex to rgb; match either form.
+      const bg = colorBar!.style.backgroundColor.toLowerCase();
+      expect(bg === '#ff00aa' || bg === 'rgb(255, 0, 170)').toBe(true);
+    });
+
+    it('renders no project label for a meeting entry (project_name: null)', async () => {
+      const { timeEntriesApi } = await import('../api/client');
+
+      vi.mocked(timeEntriesApi.getAll).mockResolvedValueOnce({
+        items: [
+          {
+            id: 7,
+            user_id: 1,
+            project_id: null,
+            project_name: null,
+            project_color: null,
+            task_id: null,
+            description: 'Sync meeting',
+            start_time: '2026-01-08T15:00:00Z',
+            end_time: '2026-01-08T15:30:00Z',
+            duration_seconds: 1800,
+            is_running: false,
+            created_at: '2026-01-08T15:00:00Z',
+          },
+        ],
+        total: 1,
+        page: 1,
+        size: 100,
+        pages: 1,
+      } as never);
+
+      render(
+        <TestWrapper>
+          <TimePage />
+        </TestWrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Sync meeting')).toBeInTheDocument();
+      });
+
+      // Only the filter dropdown contains "Project A" / "Project B" —
+      // the meeting card itself has no project label. Confirm the card
+      // structure has no project name <span>.
+      const description = screen.getByText('Sync meeting');
+      const card = description.closest('div.flex.items-center.justify-between');
+      expect(card).not.toBeNull();
+      // The project label, when present, is a span containing exactly
+      // the project name as its trailing text node next to an icon.
+      // For a meeting card we expect zero project labels matching the
+      // typical project names from the default projects mock.
+      expect(card!.textContent || '').not.toMatch(/Project A|Project B/);
+    });
+
+    it('requests projects list with page_size: 100 so the filter dropdown is not capped at the server default', async () => {
+      const { projectsApi } = await import('../api/client');
+
+      render(
+        <TestWrapper>
+          <TimePage />
+        </TestWrapper>
+      );
+
+      await waitFor(() => {
+        expect(vi.mocked(projectsApi.getAll)).toHaveBeenCalled();
+      });
+
+      const args = vi.mocked(projectsApi.getAll).mock.calls[0][0] ?? {};
+      expect(args).toHaveProperty('page_size', 100);
+      expect(args).toHaveProperty('include_archived', false);
+    });
+  });
 });
