@@ -166,6 +166,78 @@ class TestTimeEntryList:
         data = response.json()
         assert "items" in data
 
+    @pytest.mark.asyncio
+    async def test_list_time_entries_includes_project_name_and_color(
+        self, client: AsyncClient, auth_headers: dict, test_time_entry: TimeEntry,
+        test_project: Project
+    ):
+        """GET /api/time must surface project_name and project_color on each
+        entry so the frontend can render the project label without an
+        id-based lookup against a separately-paginated projects list.
+        Regression coverage for fix/entry-project-label-from-response.
+        """
+        response = await client.get("/api/time", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["items"], "expected at least one entry"
+        entry = next(e for e in data["items"] if e["id"] == test_time_entry.id)
+        assert entry["project_id"] == test_project.id
+        assert entry["project_name"] == test_project.name
+        assert entry["project_color"] == test_project.color
+        # Sanity: both fields are present (not stripped) — keys exist
+        # rather than being absent.
+        assert "project_name" in entry
+        assert "project_color" in entry
+
+    @pytest.mark.asyncio
+    async def test_list_time_entries_null_project_yields_null_fields(
+        self, client: AsyncClient, auth_headers: dict, db_session: AsyncSession,
+        test_user: User
+    ):
+        """Entries with project_id IS NULL (e.g. meeting/break entries)
+        must surface project_name and project_color as JSON null — not
+        empty string, not missing key. Frontend distinguishes
+        "no project" from "project not yet loaded" by null-check.
+        """
+        now = datetime.now(timezone.utc)
+        entry = TimeEntry(
+            user_id=test_user.id,
+            project_id=None,
+            description="Meeting with no project",
+            start_time=now - timedelta(hours=1),
+            end_time=now - timedelta(minutes=30),
+            duration_seconds=1800,
+            is_running=False,
+        )
+        db_session.add(entry)
+        await db_session.commit()
+        await db_session.refresh(entry)
+
+        response = await client.get("/api/time", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        match = next(e for e in data["items"] if e["id"] == entry.id)
+        assert match["project_id"] is None
+        assert match["project_name"] is None
+        assert match["project_color"] is None
+
+    @pytest.mark.asyncio
+    async def test_get_single_time_entry_includes_project_color(
+        self, client: AsyncClient, auth_headers: dict, test_time_entry: TimeEntry,
+        test_project: Project
+    ):
+        """GET /api/time/{id} also surfaces project_color (the single-entry
+        endpoint runs a separate query path from the list endpoint, so it
+        is covered independently).
+        """
+        response = await client.get(
+            f"/api/time/{test_time_entry.id}", headers=auth_headers
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["project_name"] == test_project.name
+        assert data["project_color"] == test_project.color
+
 
 class TestTimerOperations:
     """Test timer start/stop endpoints."""

@@ -106,6 +106,7 @@ class TimeEntryResponse(BaseModel):
     task_name: Optional[str] = None
     project_id: Optional[int] = None
     project_name: Optional[str] = None
+    project_color: Optional[str] = None
     description: Optional[str]
     start_time: datetime
     end_time: Optional[datetime]
@@ -183,7 +184,7 @@ def calculate_duration_seconds(start: datetime, end: datetime, pause_seconds: in
     return max(0, total_elapsed - (pause_seconds or 0))
 
 
-def make_entry_response(entry: TimeEntry, project_name: str = None, task_name: str = None, user_name: str = None) -> TimeEntryResponse:
+def make_entry_response(entry: TimeEntry, project_name: str = None, task_name: str = None, user_name: str = None, project_color: str = None) -> TimeEntryResponse:
     """Helper to create TimeEntryResponse"""
     duration_seconds = entry.duration_seconds
     duration_minutes = int(duration_seconds / 60) if duration_seconds else None
@@ -196,6 +197,7 @@ def make_entry_response(entry: TimeEntry, project_name: str = None, task_name: s
         task_name=task_name,
         project_id=entry.project_id,
         project_name=project_name,
+        project_color=project_color,
         description=entry.description,
         start_time=entry.start_time,
         end_time=entry.end_time,
@@ -618,7 +620,7 @@ async def start_timer(
         "start_time": entry.start_time.isoformat()
     })
 
-    return make_entry_response(entry, project.name, task_name, current_user.name)
+    return make_entry_response(entry, project.name, task_name, current_user.name, project_color=project.color)
 
 
 @router.post("/stop", response_model=TimeEntryResponse)
@@ -858,7 +860,7 @@ async def switch_task(
         "start_time": new_entry.start_time.isoformat()
     })
 
-    return make_entry_response(new_entry, new_project.name, new_task_name, current_user.name)
+    return make_entry_response(new_entry, new_project.name, new_task_name, current_user.name, project_color=new_project.color)
 
 
 @router.post("", response_model=TimeEntryResponse, status_code=status.HTTP_201_CREATED)
@@ -937,7 +939,7 @@ async def create_manual_entry(
         }
     }, company_id=current_user.company_id)
 
-    return make_entry_response(entry, project.name, task_name, current_user.name)
+    return make_entry_response(entry, project.name, task_name, current_user.name, project_color=project.color)
 
 
 @router.get("", response_model=PaginatedTimeEntries)
@@ -1064,6 +1066,7 @@ async def list_time_entries(
             entry.project.name if entry.project else None,
             entry.task.name if entry.task else None,
             entry.user.name if entry.user else None,
+            project_color=entry.project.color if entry.project else None,
         )
         for entry in entries
     ]
@@ -1109,9 +1112,14 @@ async def get_time_entry(
 
     # Get names (guard for null project_id — e.g. meeting entries)
     project_name = None
+    project_color = None
     if entry.project_id:
-        project_result = await db.execute(select(Project.name).where(Project.id == entry.project_id))
-        project_name = project_result.scalar()
+        project_result = await db.execute(
+            select(Project.name, Project.color).where(Project.id == entry.project_id)
+        )
+        row = project_result.first()
+        if row is not None:
+            project_name, project_color = row
 
     task_name = None
     if entry.task_id:
@@ -1121,7 +1129,7 @@ async def get_time_entry(
     user_result = await db.execute(select(User.name).where(User.id == entry.user_id))
     user_name = user_result.scalar()
 
-    return make_entry_response(entry, project_name, task_name, user_name)
+    return make_entry_response(entry, project_name, task_name, user_name, project_color=project_color)
 
 
 @router.put("/{entry_id}", response_model=TimeEntryResponse)

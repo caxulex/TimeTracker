@@ -166,6 +166,8 @@ export interface TimeEntry {
   id: number;
   user_id: number;
   project_id: number | null;
+  project_name?: string | null;
+  project_color?: string | null;
   task_id: number | null;
   start_time: string;
   end_time: string | null;
@@ -316,6 +318,10 @@ export interface ProjectFilters {
   search?: string;
   page?: number;
   size?: number;
+  // Backend's actual query-param name (see app/routers/projects.py). The
+  // `size` field above is kept for any legacy callsites but the server
+  // only honors `page_size`. PR fix/entry-project-label-from-response.
+  page_size?: number;
 }
 
 export interface TaskFilters {
