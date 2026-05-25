@@ -289,8 +289,10 @@ export const authApi = {
 // ============================================
 export const usersApi = {
   getAll: async (page = 1, size = 20): Promise<PaginatedResponse<User>> => {
+    // Backend's actual query-param name is `page_size` (see app/routers/users.py).
+    // Sending `size` was silently ignored and capped at the default 20.
     const response = await api.get<PaginatedResponse<User>>('/api/users', {
-      params: { page, size },
+      params: { page, page_size: size },
     });
     return response.data;
   },
@@ -330,8 +332,10 @@ export const usersApi = {
 // ============================================
 export const teamsApi = {
   getAll: async (page = 1, size = 20): Promise<PaginatedResponse<Team>> => {
+    // Backend's actual query-param name is `page_size` (see app/routers/teams.py).
+    // Sending `size` was silently ignored and capped at the default 20.
     const response = await api.get<PaginatedResponse<Team>>('/api/teams', {
-      params: { page, size },
+      params: { page, page_size: size },
     });
     return response.data;
   },
