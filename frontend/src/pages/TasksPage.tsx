@@ -2,9 +2,16 @@
 // TIME TRACKER - TASKS PAGE
 // ============================================
 import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  useQuery,
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+  keepPreviousData,
+} from '@tanstack/react-query';
 import { Card, CardHeader, Button, Input, Modal, LoadingOverlay, Select } from '../components/common';
 import { TaskEstimationCard } from '../components/ai';
+import { ProjectSelect } from '../components/projects/ProjectSelect';
 import { tasksApi, projectsApi } from '../api/client';
 import { formatDate, cn } from '../utils/helpers';
 import { useFeatureEnabled } from '../hooks/useAIFeatures';
@@ -26,29 +33,75 @@ export function TasksPage() {
   const queryClient = useQueryClient();
   const [showModal, setShowModal] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [filterProject, setFilterProject] = useState<number | ''>('');
+  const [filterProject, setFilterProject] = useState<number | null>(null);
   const [filterStatus, setFilterStatus] = useState<TaskStatus | ''>('');
 
   // AI Feature flag
   const { data: taskEstimationEnabled } = useFeatureEnabled('ai_task_estimation');
 
-  // Fetch tasks
-  const { data: tasksData, isLoading } = useQuery({
-    queryKey: ['tasks', filterProject, filterStatus],
-    queryFn: () =>
+  // Fetch tasks — paginated via Load More.
+  //
+  // Mirrors the pagination-shadow fix shipped for TimePage entries
+  // (PR #30) and ProjectsPage (PR #35): the server defaults to
+  // page_size=20 and silently caps the list, so any project with
+  // more than 20 tasks lost everything past the cutoff from the
+  // main render. useInfiniteQuery with page_size=50 + a
+  // "Showing X of Y" indicator + Load More keeps the full list
+  // reachable. Filters (project/status) are part of the query key,
+  // so flipping a filter cleanly refetches page 1 — we don't try to
+  // preserve loaded pages across filter changes.
+  const TASKS_PAGE_SIZE = 50;
+  const {
+    data: tasksData,
+    isLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['tasks', 'paginated', filterProject, filterStatus],
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) =>
       tasksApi.getAll({
-        project_id: filterProject || undefined,
+        project_id: filterProject ?? undefined,
         status: filterStatus || undefined,
+        page: pageParam as number,
+        page_size: TASKS_PAGE_SIZE,
       }),
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce(
+        (acc, p) => acc + (p.items?.length || 0),
+        0
+      );
+      const total = lastPage?.total ?? 0;
+      if (loaded >= total) return undefined;
+      return allPages.length + 1;
+    },
+    // While a filter change is fetching the new first page, keep
+    // the previous result rendered so the page doesn't flash a
+    // full-screen loading overlay over the (still-mounted) filter
+    // controls — that lets the user keep interacting with the
+    // ProjectSelect / status dropdown without losing focus.
+    placeholderData: keepPreviousData,
   });
 
-  // Fetch projects for filter
+  const tasks: Task[] = (tasksData?.pages ?? []).flatMap(
+    (p) => p.items || []
+  );
+  const totalTasks = tasksData?.pages?.[0]?.total ?? tasks.length;
+
+  // Fetch projects for the TaskModal's required-project picker.
+  // The page's project filter uses <ProjectSelect> directly (it
+  // owns its own paginated fetch via the shared
+  // ACTIVE_PROJECTS_QUERY_KEY cache), so this list only needs to
+  // cover the modal's <select>. We bump page_size to 100 — same
+  // ceiling the typeahead uses — so the modal isn't silently
+  // capped at 20 either.
   const { data: projectsData } = useQuery({
-    queryKey: ['projects'],
-    queryFn: () => projectsApi.getAll({ include_archived: false }),
+    queryKey: ['projects', 'active'],
+    queryFn: () =>
+      projectsApi.getAll({ include_archived: false, page_size: 100 }),
   });
 
-  const tasks = tasksData?.items || [];
   const projects = projectsData?.items || [];
 
   // Create mutation
@@ -135,7 +188,7 @@ export function TasksPage() {
             Get AI-powered time estimates for your tasks based on historical data and project patterns.
           </p>
           <TaskEstimationCard 
-            projectId={filterProject || undefined}
+            projectId={filterProject ?? undefined}
             compact={false}
           />
         </div>
@@ -143,24 +196,23 @@ export function TasksPage() {
 
       {/* Filters */}
       <Card padding="sm">
-        <div className="flex flex-wrap gap-4">
-          <select
-            value={filterProject}
-            onChange={(e) => setFilterProject(e.target.value ? Number(e.target.value) : '')}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="">All Projects</option>
-            {projects.map((project: Project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
+        <div className="flex flex-wrap gap-4 items-center">
+          <div className="min-w-[14rem]">
+            <ProjectSelect
+              value={filterProject}
+              onChange={setFilterProject}
+              clearable
+              clearLabel="All projects"
+              placeholder="All projects"
+              ariaLabel="Filter by project"
+            />
+          </div>
 
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value as TaskStatus | '')}
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Filter by status"
           >
             <option value="">All Statuses</option>
             {STATUS_OPTIONS.map((status) => (
@@ -171,6 +223,17 @@ export function TasksPage() {
           </select>
         </div>
       </Card>
+
+      {/* "Showing X of Y tasks" indicator. X is the number of tasks
+          currently loaded across all fetched pages; Y is the
+          server-reported total for the current filter set. The
+          Load More button below advances to the next page until
+          everything is loaded. */}
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500" data-testid="tasks-count">
+          Showing {tasks.length} of {totalTasks} tasks
+        </p>
+      </div>
 
       {/* Kanban board */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -204,6 +267,22 @@ export function TasksPage() {
           </div>
         ))}
       </div>
+
+      {/* Load More \u2014 server-side pagination via useInfiniteQuery.
+          Hidden once everything is loaded; disabled while the next
+          page is in flight. */}
+      {hasNextPage && (
+        <div className="flex justify-center pt-2">
+          <Button
+            variant="secondary"
+            onClick={() => fetchNextPage()}
+            disabled={isFetchingNextPage}
+            data-testid="tasks-load-more"
+          >
+            {isFetchingNextPage ? 'Loading\u2026' : 'Load More'}
+          </Button>
+        </div>
+      )}
 
       {/* Create/Edit Modal */}
       <TaskModal

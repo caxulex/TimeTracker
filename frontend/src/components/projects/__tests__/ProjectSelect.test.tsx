@@ -199,4 +199,79 @@ describe('ProjectSelect', () => {
       });
     });
   });
+
+  // ----- clearable -----------------------------------------------
+  describe('clearable', () => {
+    it('default (clearable=false): no clear option is rendered', () => {
+      renderSelect();
+      const input = screen.getByRole('combobox');
+      fireEvent.focus(input);
+      expect(screen.queryByTestId('project-select-clear')).not.toBeInTheDocument();
+    });
+
+    it('clearable=true: dropdown shows the "All projects" clear option at the top', () => {
+      renderSelect({ clearable: true });
+      const input = screen.getByRole('combobox');
+      fireEvent.focus(input);
+      const clear = screen.getByTestId('project-select-clear');
+      expect(clear).toBeInTheDocument();
+      expect(clear.textContent).toMatch(/All projects/i);
+    });
+
+    it('clearable=true: custom clearLabel is rendered', () => {
+      renderSelect({ clearable: true, clearLabel: 'Any project' });
+      const input = screen.getByRole('combobox');
+      fireEvent.focus(input);
+      expect(screen.getByTestId('project-select-clear').textContent).toMatch(
+        /Any project/
+      );
+    });
+
+    it('clearable=true: clicking clear option calls onChange(null)', () => {
+      const { onChange } = renderSelect({ clearable: true, value: 3 });
+      const input = screen.getByRole('combobox');
+      fireEvent.focus(input);
+      fireEvent.mouseDown(screen.getByTestId('project-select-clear'));
+      expect(onChange).toHaveBeenCalledWith(null);
+    });
+
+    it('clearable=true: null value renders an empty input (placeholder visible)', () => {
+      renderSelect({ clearable: true, value: null, placeholder: 'All projects' });
+      const input = screen.getByRole('combobox') as HTMLInputElement;
+      expect(input.value).toBe('');
+      expect(input.placeholder).toBe('All projects');
+    });
+
+    it('clearable=true: keyboard nav Enter on clear option calls onChange(null)', async () => {
+      const user = userEvent.setup();
+      const { onChange } = renderSelect({ clearable: true, value: null });
+      const input = screen.getByRole('combobox');
+      await user.click(input);
+      // With no selection, default highlight should be the clear
+      // option (index 0). Enter commits it.
+      await user.keyboard('{Enter}');
+      expect(onChange).toHaveBeenCalledWith(null);
+    });
+
+    it('clearable=true: ArrowDown moves past clear into projects, Enter selects project', async () => {
+      const user = userEvent.setup();
+      const { onChange } = renderSelect({ clearable: true, value: null });
+      const input = screen.getByRole('combobox');
+      await user.click(input);
+      // highlight 0 = clear. ArrowDown -> highlight 1 = Alpha (id 1).
+      await user.keyboard('{ArrowDown}{Enter}');
+      expect(onChange).toHaveBeenCalledWith(1);
+    });
+
+    it('clearable=true: still renders project options when query has no matches', async () => {
+      const user = userEvent.setup();
+      renderSelect({ clearable: true });
+      const input = screen.getByRole('combobox');
+      await user.click(input);
+      await user.type(input, 'xyz');
+      // Clear is still reachable even when nothing matches.
+      expect(screen.getByTestId('project-select-clear')).toBeInTheDocument();
+      expect(screen.getByTestId('project-select-empty')).toBeInTheDocument();
+    });
+  });
 });
