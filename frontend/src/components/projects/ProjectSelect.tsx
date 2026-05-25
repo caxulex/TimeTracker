@@ -85,6 +85,22 @@ export interface ProjectSelectProps {
    * the manual-entry modal).
    */
   projects?: Project[];
+  /**
+   * When true, the picker supports an explicit "no selection" state:
+   *   - a `null` value renders an empty input (just the placeholder),
+   *   - a clear option is rendered at the top of the dropdown that
+   *     calls `onChange(null)` when picked.
+   * Defaults to `false` to preserve the existing required-project
+   * contract across the timer / entry-modal callsites where a
+   * project must always be selected.
+   */
+  clearable?: boolean;
+  /**
+   * Label for the clear option in the dropdown when `clearable` is
+   * true. Defaults to "All projects" — matching the filter use case
+   * on TasksPage. Has no effect when `clearable` is false.
+   */
+  clearLabel?: string;
 }
 
 /**
@@ -107,6 +123,8 @@ export function ProjectSelect({
   dotClassName,
   ariaLabel,
   projects: projectsProp,
+  clearable = false,
+  clearLabel = 'All projects',
 }: ProjectSelectProps) {
   const reactId = useId();
   const inputId = id ?? `project-select-${reactId}`;
@@ -152,27 +170,37 @@ export function ProjectSelect({
     return projects.filter((p) => p.name.toLowerCase().includes(q));
   }, [projects, query]);
 
-  // Keep the highlight inside the filtered range. When filtered
+  // When `clearable` is true the dropdown carries an extra synthetic
+  // option at index 0 (the "All projects" / clear affordance). All
+  // keyboard-navigation math has to account for this offset so
+  // arrows + Enter address the right entry.
+  const clearOffset = clearable ? 1 : 0;
+  const totalOptions = clearOffset + filtered.length;
+
+  // Keep the highlight inside the option range. When the option list
   // shrinks past the current highlight, clamp to the last available
-  // option (or -1 when there are no matches).
+  // option (or -1 when there are no options at all).
   useEffect(() => {
     if (!open) {
       setHighlight(-1);
       return;
     }
-    if (filtered.length === 0) {
+    if (totalOptions === 0) {
       setHighlight(-1);
-    } else if (highlight >= filtered.length) {
-      setHighlight(filtered.length - 1);
+    } else if (highlight >= totalOptions) {
+      setHighlight(totalOptions - 1);
     } else if (highlight < 0) {
       // Pre-select the currently-selected project when present, else
-      // the first match so Enter immediately commits something.
-      const idx = selected
-        ? filtered.findIndex((p) => p.id === selected.id)
-        : 0;
-      setHighlight(idx >= 0 ? idx : 0);
+      // the clear option (when present), else the first project, so
+      // Enter immediately commits something sensible.
+      if (selected) {
+        const idx = filtered.findIndex((p) => p.id === selected.id);
+        setHighlight(idx >= 0 ? idx + clearOffset : 0);
+      } else {
+        setHighlight(0);
+      }
     }
-  }, [open, filtered, highlight, selected]);
+  }, [open, totalOptions, filtered, highlight, selected, clearOffset]);
 
   const openPanel = useCallback(() => {
     if (disabled) return;
@@ -197,6 +225,22 @@ export function ProjectSelect({
     [onChange, closePanel]
   );
 
+  const commitClear = useCallback(() => {
+    onChange(null);
+    closePanel();
+    inputRef.current?.blur();
+  }, [onChange, closePanel]);
+
+  const commitHighlight = useCallback(() => {
+    if (highlight < 0) return;
+    if (clearable && highlight === 0) {
+      commitClear();
+      return;
+    }
+    const project = filtered[highlight - clearOffset];
+    if (project) commitSelection(project);
+  }, [highlight, clearable, clearOffset, filtered, commitClear, commitSelection]);
+
   // ------------ Click-outside ------------
   useEffect(() => {
     if (!open) return;
@@ -220,20 +264,20 @@ export function ProjectSelect({
         openPanel();
         return;
       }
-      if (filtered.length === 0) return;
-      setHighlight((h) => (h + 1) % filtered.length);
+      if (totalOptions === 0) return;
+      setHighlight((h) => (h + 1) % totalOptions);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       if (!open) {
         openPanel();
         return;
       }
-      if (filtered.length === 0) return;
-      setHighlight((h) => (h <= 0 ? filtered.length - 1 : h - 1));
+      if (totalOptions === 0) return;
+      setHighlight((h) => (h <= 0 ? totalOptions - 1 : h - 1));
     } else if (e.key === 'Enter') {
-      if (open && highlight >= 0 && filtered[highlight]) {
+      if (open && highlight >= 0) {
         e.preventDefault();
-        commitSelection(filtered[highlight]);
+        commitHighlight();
       }
     } else if (e.key === 'Escape') {
       if (open) {
@@ -318,49 +362,79 @@ export function ProjectSelect({
             >
               Loading projects…
             </li>
-          ) : filtered.length === 0 ? (
-            <li
-              role="option"
-              aria-selected="false"
-              aria-disabled="true"
-              className="px-3 py-2 text-gray-500"
-              data-testid="project-select-empty"
-            >
-              No projects match &lsquo;{query.trim()}&rsquo;
-            </li>
           ) : (
-            filtered.map((project, idx) => {
-              const isHighlighted = idx === highlight;
-              const isSelected = selected?.id === project.id;
-              return (
+            <>
+              {clearable && (
                 <li
-                  key={project.id}
                   role="option"
-                  aria-selected={isSelected}
-                  data-testid={`project-select-option-${project.id}`}
-                  // `onMouseDown` (not `onClick`) so the blur from
-                  // mousedown doesn't beat us to the close-panel
-                  // race.
+                  aria-selected={value === null}
+                  data-testid="project-select-clear"
                   onMouseDown={(e) => {
                     e.preventDefault();
-                    commitSelection(project);
+                    commitClear();
                   }}
-                  onMouseEnter={() => setHighlight(idx)}
+                  onMouseEnter={() => setHighlight(0)}
                   className={cn(
-                    'flex items-center gap-2 px-3 py-2 cursor-pointer',
-                    isHighlighted ? 'bg-blue-50 text-blue-900' : 'text-gray-900',
-                    isSelected && !isHighlighted && 'font-medium'
+                    'flex items-center gap-2 px-3 py-2 cursor-pointer border-b border-gray-100',
+                    highlight === 0
+                      ? 'bg-blue-50 text-blue-900'
+                      : 'text-gray-700',
+                    value === null && highlight !== 0 && 'font-medium'
                   )}
                 >
                   <span
                     aria-hidden="true"
-                    className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: project.color }}
+                    className="w-2.5 h-2.5 rounded-full flex-shrink-0 border border-gray-300 bg-white"
                   />
-                  <span className="truncate">{project.name}</span>
+                  <span className="truncate">{clearLabel}</span>
                 </li>
-              );
-            })
+              )}
+              {filtered.length === 0 ? (
+                <li
+                  role="option"
+                  aria-selected="false"
+                  aria-disabled="true"
+                  className="px-3 py-2 text-gray-500"
+                  data-testid="project-select-empty"
+                >
+                  No projects match &lsquo;{query.trim()}&rsquo;
+                </li>
+              ) : (
+                filtered.map((project, idx) => {
+                  const optionIdx = idx + clearOffset;
+                  const isHighlighted = optionIdx === highlight;
+                  const isSelected = selected?.id === project.id;
+                  return (
+                    <li
+                      key={project.id}
+                      role="option"
+                      aria-selected={isSelected}
+                      data-testid={`project-select-option-${project.id}`}
+                      // `onMouseDown` (not `onClick`) so the blur from
+                      // mousedown doesn't beat us to the close-panel
+                      // race.
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        commitSelection(project);
+                      }}
+                      onMouseEnter={() => setHighlight(optionIdx)}
+                      className={cn(
+                        'flex items-center gap-2 px-3 py-2 cursor-pointer',
+                        isHighlighted ? 'bg-blue-50 text-blue-900' : 'text-gray-900',
+                        isSelected && !isHighlighted && 'font-medium'
+                      )}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: project.color }}
+                      />
+                      <span className="truncate">{project.name}</span>
+                    </li>
+                  );
+                })
+              )}
+            </>
           )}
         </ul>
       )}
