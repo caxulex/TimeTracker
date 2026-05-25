@@ -393,7 +393,10 @@ describe('TimerWidget', () => {
     const my = (iso: string) =>
       new Date(iso).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 
-    const renderWithTasksAndSelectProject = async (items: unknown[]) => {
+    // Drives the project picker (typeahead combobox), then opens the
+    // task picker (also a typeahead combobox — TaskSelect) and
+    // returns the rendered option labels in dropdown order.
+    const renderWithTasksAndCollectTaskLabels = async (items: unknown[]) => {
       vi.mocked(tasksApi.getAll).mockResolvedValue({ items, total: items.length } as never);
       const user = userEvent.setup();
       render(
@@ -401,38 +404,37 @@ describe('TimerWidget', () => {
           <TimerWidget />
         </TestWrapper>
       );
-      // The project picker is now a typeahead combobox
-      // (ProjectSelect). Open it and click the Project A option to
-      // trigger the same selection behavior the legacy native <select>
-      // exercised via selectOptions().
       const projectCombobox = await screen.findByRole('combobox', {
         name: /select project/i,
       });
       await user.click(projectCombobox);
       const projectAOption = await screen.findByTestId('project-select-option-1');
       fireEvent.mouseDown(projectAOption);
-      // Once a project is committed the native task <select> appears.
-      // Wait for it (still rendered as a native <select>, so role
-      // "combobox" applies to it as well).
-      await waitFor(() => {
-        const taskSelectEl = document.querySelector('select');
-        expect(taskSelectEl).not.toBeNull();
-        expect(taskSelectEl!.querySelectorAll('option').length).toBeGreaterThan(1);
+
+      // The TaskSelect combobox now appears with its own placeholder.
+      const taskCombobox = await screen.findByRole('combobox', {
+        name: /select task/i,
       });
-      return document.querySelector('select') as HTMLSelectElement;
+      fireEvent.focus(taskCombobox);
+      // Wait for the listbox to populate.
+      const listbox = await screen.findByTestId('task-select-listbox');
+      await waitFor(() => {
+        expect(listbox.querySelectorAll('[data-testid^="task-select-option-"]').length)
+          .toBeGreaterThan(0);
+      });
+      const options = Array.from(
+        listbox.querySelectorAll('[data-testid^="task-select-option-"]')
+      );
+      return options.map((o) => (o.textContent || '').trim());
     };
 
     it('sorts duplicate-named tasks by basecamp_due_on DESC and uses (Due Mon D) when no collision', async () => {
-      const taskSelect = await renderWithTasksAndSelectProject([
+      const labels = await renderWithTasksAndCollectTaskLabels([
         { id: 1, name: 'Monthly Report', project_id: 1, is_active: true, basecamp_due_on: '2026-01-04' },
         { id: 2, name: 'Monthly Report', project_id: 1, is_active: true, basecamp_due_on: '2026-05-04' },
         { id: 3, name: 'Monthly Report', project_id: 1, is_active: true, basecamp_due_on: '2026-03-04' },
         { id: 4, name: 'Standalone', project_id: 1, is_active: true },
       ]);
-
-      const labels = Array.from(taskSelect.querySelectorAll('option'))
-        .map((o) => (o.textContent || '').trim())
-        .slice(1);
 
       expect(labels).toEqual([
         `Monthly Report (Due ${md('2026-05-04')})`,
@@ -443,15 +445,11 @@ describe('TimerWidget', () => {
     });
 
     it('appends year only on month-day collision within the same name group', async () => {
-      const taskSelect = await renderWithTasksAndSelectProject([
+      const labels = await renderWithTasksAndCollectTaskLabels([
         { id: 1, name: 'Recurring', project_id: 1, is_active: true, basecamp_due_on: '2025-11-04' },
         { id: 2, name: 'Recurring', project_id: 1, is_active: true, basecamp_due_on: '2026-11-04' },
         { id: 3, name: 'Recurring', project_id: 1, is_active: true, basecamp_due_on: '2026-05-04' },
       ]);
-
-      const labels = Array.from(taskSelect.querySelectorAll('option'))
-        .map((o) => (o.textContent || '').trim())
-        .slice(1);
 
       expect(labels).toEqual([
         `Recurring (Due ${mdy('2026-11-04')})`,
@@ -461,7 +459,7 @@ describe('TimerWidget', () => {
     });
 
     it('within a group, due_on tasks come before tasks without due_on (created_at DESC, then position ASC)', async () => {
-      const taskSelect = await renderWithTasksAndSelectProject([
+      const labels = await renderWithTasksAndCollectTaskLabels([
         { id: 1, name: 'Mixed', project_id: 1, is_active: true, basecamp_todo_position: 5 },
         { id: 2, name: 'Mixed', project_id: 1, is_active: true, basecamp_due_on: '2026-02-01' },
         { id: 3, name: 'Mixed', project_id: 1, is_active: true, basecamp_todo_created_at: '2026-04-01T10:00:00Z' },
@@ -469,10 +467,6 @@ describe('TimerWidget', () => {
         { id: 5, name: 'Mixed', project_id: 1, is_active: true, basecamp_todo_created_at: '2026-04-15T10:00:00Z' },
         { id: 6, name: 'Mixed', project_id: 1, is_active: true, basecamp_due_on: '2026-06-01' },
       ]);
-
-      const labels = Array.from(taskSelect.querySelectorAll('option'))
-        .map((o) => (o.textContent || '').trim())
-        .slice(1);
 
       expect(labels[0]).toBe(`Mixed (Due ${md('2026-06-01')})`);
       expect(labels[1]).toBe(`Mixed (Due ${md('2026-02-01')})`);
@@ -483,16 +477,12 @@ describe('TimerWidget', () => {
     });
 
     it('preserves position of unique-named tasks; duplicate group lands at first-occurrence slot', async () => {
-      const taskSelect = await renderWithTasksAndSelectProject([
+      const labels = await renderWithTasksAndCollectTaskLabels([
         { id: 1, name: 'Alpha', project_id: 1, is_active: true },
         { id: 2, name: 'Report', project_id: 1, is_active: true, basecamp_due_on: '2026-01-04' },
         { id: 3, name: 'Beta', project_id: 1, is_active: true },
         { id: 4, name: 'Report', project_id: 1, is_active: true, basecamp_due_on: '2026-05-04' },
       ]);
-
-      const labels = Array.from(taskSelect.querySelectorAll('option'))
-        .map((o) => (o.textContent || '').trim())
-        .slice(1);
 
       expect(labels).toEqual([
         'Alpha',

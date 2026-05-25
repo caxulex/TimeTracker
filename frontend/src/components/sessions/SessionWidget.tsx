@@ -5,14 +5,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card } from '../common';
+import { TaskSelect } from '../tasks/TaskSelect';
 import { useSessionStore, formatDuration, getSessionStatusInfo } from '../../stores/sessionStore';
 import { useTimerStore } from '../../stores/timerStore';
-import { projectsApi, tasksApi } from '../../api/client';
+import { projectsApi } from '../../api/client';
 import { cn } from '../../utils/helpers';
 import { useNotifications } from '../../hooks/useNotifications';
 import { BreakControls } from './BreakControls';
 import { MeetingControls } from './MeetingControls';
-import type { Project, Task } from '../../types';
+import type { Project } from '../../types';
 
 export function SessionWidget() {
   const {
@@ -57,15 +58,7 @@ export function SessionWidget() {
     queryFn: () => projectsApi.getAll({ include_archived: false }),
   });
 
-  // Fetch tasks for selected project
-  const { data: tasksData } = useQuery({
-    queryKey: ['tasks', selectedProject],
-    queryFn: () => tasksApi.getAll({ project_id: selectedProject }),
-    enabled: !!selectedProject,
-  });
-
   const projects = projectsData?.items || [];
-  const tasks = tasksData?.items || [];
 
   // Fetch session and timer status on mount
   useEffect(() => {
@@ -241,18 +234,12 @@ export function SessionWidget() {
               {selectedProject && (
                 <div>
                   <label className="block text-sm font-medium text-gray-600 mb-1">Task (optional)</label>
-                  <select
-                    value={selectedTask || ''}
-                    onChange={(e) => setSelectedTask(e.target.value ? Number(e.target.value) : undefined)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option value="">No specific task</option>
-                    {tasks.map((task: Task) => (
-                      <option key={task.id} value={task.id}>
-                        {task.name}
-                      </option>
-                    ))}
-                  </select>
+                  <TaskSelect
+                    projectId={selectedProject}
+                    value={selectedTask ?? null}
+                    onChange={(id) => setSelectedTask(id ?? undefined)}
+                    placeholder="No specific task"
+                  />
                 </div>
               )}
             </div>
