@@ -2,7 +2,7 @@
 // TIME TRACKER - PROJECTS PAGE
 // ============================================
 import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, Button, Input, Modal, LoadingOverlay } from '../components/common';
 import { projectsApi, teamsApi } from '../api/client';
 import { formatDate, cn, generateRandomColor, isAdminUser } from '../utils/helpers';
@@ -25,11 +25,46 @@ export function ProjectsPage() {
   const [showArchived, setShowArchived] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ type: 'archive' | 'restore' | 'delete'; project: Project } | null>(null);
 
-  // Fetch projects
-  // Fetch projects - always include archived so we can filter client-side
-  const { data: projectsData, isLoading } = useQuery({
-    queryKey: ['projects', 'all'],
-    queryFn: () => projectsApi.getAll({ include_archived: true }),
+  // Fetch projects — paginated via Load More.
+  //
+  // Same pagination-shadow problem as TimePage entries (PR #30) and
+  // the project selectors (this PR's Part 1): the server defaults to
+  // page_size=20 and silently caps the list. We use
+  // useInfiniteQuery with page_size=50 and surface a "Showing X of
+  // Y" indicator + Load More button so the list is always reachable
+  // regardless of how many projects a team accumulates.
+  //
+  // We fetch with include_archived: true (regardless of the
+  // showArchived toggle) so that flipping the toggle is instant and
+  // doesn't re-fetch — the toggle is a pure client-side filter on
+  // the loaded pages. (At ~hundreds of projects this is fine; if a
+  // tenant ever reaches thousands the right fix is to push the
+  // archived filter to the server.)
+  const PROJECTS_PAGE_SIZE = 50;
+  const {
+    data: projectsData,
+    isLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['projects', 'all', 'paginated'],
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) =>
+      projectsApi.getAll({
+        include_archived: true,
+        page: pageParam as number,
+        page_size: PROJECTS_PAGE_SIZE,
+      }),
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce(
+        (acc, p) => acc + (p.items?.length || 0),
+        0
+      );
+      const total = lastPage?.total ?? 0;
+      if (loaded >= total) return undefined;
+      return allPages.length + 1;
+    },
   });
 
   // Fetch teams for dropdown
@@ -39,10 +74,11 @@ export function ProjectsPage() {
   });
 
   // Filter projects based on showArchived toggle
-  const allProjects = projectsData?.items || [];
-  const projects = showArchived 
-    ? allProjects.filter(p => p.is_archived)
-    : allProjects.filter(p => !p.is_archived);
+  const allProjects = (projectsData?.pages ?? []).flatMap((p) => p.items || []);
+  const totalProjects = projectsData?.pages?.[0]?.total ?? allProjects.length;
+  const projects = showArchived
+    ? allProjects.filter((p) => p.is_archived)
+    : allProjects.filter((p) => !p.is_archived);
   const teams = teamsData?.items || [];
 
   // Create mutation (admin only)
@@ -202,21 +238,49 @@ export function ProjectsPage() {
           )}
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {projects.map((project: Project) => (
-            <ProjectCard
-              key={project.id}
-              project={project}
-              isAdmin={isAdmin}
-              showHealthButton={projectHealthEnabled}
-              onViewHealth={() => setSelectedProjectForHealth(project)}
-              onEdit={() => handleEdit(project)}
-              onArchive={() => setConfirmAction({ type: 'archive', project })}
-              onRestore={() => setConfirmAction({ type: 'restore', project })}
-              onDelete={() => setConfirmAction({ type: 'delete', project })}
-            />
-          ))}
-        </div>
+        <>
+          {/* "Showing X of Y projects" indicator. We show the count of
+              the currently-visible (toggle-filtered) projects against
+              the loaded total across all pages so the user can tell
+              when more pages remain to be fetched. */}
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-gray-500" data-testid="projects-count">
+              Showing {projects.length} of {totalProjects} projects
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {projects.map((project: Project) => (
+              <ProjectCard
+                key={project.id}
+                project={project}
+                isAdmin={isAdmin}
+                showHealthButton={projectHealthEnabled}
+                onViewHealth={() => setSelectedProjectForHealth(project)}
+                onEdit={() => handleEdit(project)}
+                onArchive={() => setConfirmAction({ type: 'archive', project })}
+                onRestore={() => setConfirmAction({ type: 'restore', project })}
+                onDelete={() => setConfirmAction({ type: 'delete', project })}
+              />
+            ))}
+          </div>
+
+          {/* Load More — server-side pagination via useInfiniteQuery.
+              Hidden once everything is loaded; disabled while the
+              next page is in flight. */}
+          {hasNextPage && (
+            <div className="flex justify-center pt-2">
+              <Button
+                variant="secondary"
+                onClick={() => fetchNextPage()}
+                disabled={isFetchingNextPage}
+                data-testid="projects-load-more"
+              >
+                {isFetchingNextPage ? 'Loading…' : 'Load More'}
+              </Button>
+            </div>
+          )}
+        </>
       )}
 
       {/* AI Project Health Panel */}

@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Modal, Button, Input } from '../common';
+import { ProjectSelect } from '../projects/ProjectSelect';
 import { projectsApi, tasksApi, timeEntriesApi } from '../../api/client';
 import { formatDuration } from '../../utils/helpers';
 import type { Project, Task, TimeEntry, TimeEntryUpdate } from '../../types';
@@ -82,9 +83,16 @@ export function EditEntryModal({ entry, isOpen, onClose, onSaved }: EditEntryMod
   }, [isOpen, entry]);
 
   // Project list (only when the form is shown).
+  //
+  // page_size=100 caps at the server's `le=100` ceiling. Without it,
+  // editing an entry whose project was outside the most-recent 20
+  // would render with the project field unselectable — same
+  // pagination-shadow class as PR #30 / PR #33. Query key kept in
+  // sync with the rest of the app so the cache is shared with
+  // ProjectSelect.
   const { data: projectsData } = useQuery({
-    queryKey: ['projects'],
-    queryFn: () => projectsApi.getAll({ include_archived: false }),
+    queryKey: ['projects', 'active'],
+    queryFn: () => projectsApi.getAll({ include_archived: false, page_size: 100 }),
     enabled: isOpen && !isRunning,
   });
   const projects: Project[] = projectsData?.items ?? [];
@@ -285,26 +293,20 @@ export function EditEntryModal({ entry, isOpen, onClose, onSaved }: EditEntryMod
           <label htmlFor="edit-entry-project" className="block text-sm font-medium text-gray-700 mb-1">
             {t('time.projectLabel')}
           </label>
-          <select
+          <ProjectSelect
             id="edit-entry-project"
-            value={form.projectId}
-            onChange={(e) =>
+            value={form.projectId === '' ? null : form.projectId}
+            onChange={(id) =>
               setForm({
                 ...form,
-                projectId: e.target.value ? Number(e.target.value) : '',
+                projectId: id ?? '',
                 // Project changed → clear task to avoid mismatched-project errors.
                 taskId: '',
               })
             }
-            className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            <option value="">{t('time.noProject')}</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+            projects={projects}
+            placeholder={t('time.noProject')}
+          />
         </div>
 
         {form.projectId !== '' && (

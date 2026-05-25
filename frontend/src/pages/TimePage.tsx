@@ -12,6 +12,7 @@ import { Card, Button, Modal, LoadingOverlay, Input } from '../components/common
 import { TimerWidget } from '../components/time/TimerWidget';
 import { LongTimerBanner } from '../components/time/LongTimerBanner';
 import { EditEntryModal } from '../components/time/EditEntryModal';
+import { ProjectSelect } from '../components/projects/ProjectSelect';
 import { SuggestionDropdown, ChatInterface } from '../components/ai';
 import { timeEntriesApi, projectsApi, tasksApi } from '../api/client';
 import { formatDuration, formatDate, formatTimeOnly, cn } from '../utils/helpers';
@@ -135,7 +136,7 @@ export function TimePage() {
   // time-entry response — so a missing project here only affects the
   // filter dropdown, not the entry cards.
   const { data: projectsData } = useQuery({
-    queryKey: ['projects'],
+    queryKey: ['projects', 'active'],
     queryFn: () => projectsApi.getAll({ include_archived: false, page_size: 100 }),
   });
 
@@ -682,23 +683,17 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
           <label className="block text-sm font-medium text-gray-700 mb-1">
             {t('time.projectLabel')} <span className="text-red-500">*</span>
           </label>
-          <select
-            value={projectId}
-            onChange={(e) => {
-              setProjectId(e.target.value ? Number(e.target.value) : '');
+          <ProjectSelect
+            value={projectId === '' ? null : projectId}
+            onChange={(id) => {
+              setProjectId(id ?? '');
               setTaskId('');
               setShowSuggestions(false);
             }}
-            className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            projects={projects}
+            placeholder={t('time.selectProject')}
             required
-          >
-            <option value="">{t('time.selectProject')}</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
+          />
         </div>
 
         {projectId && tasks.length > 0 && (
