@@ -694,7 +694,7 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
               {t('time.taskLabel')}
             </label>
             <TaskSelect
-              projectId={projectId === '' ? null : projectId}
+              projectId={projectId}
               value={taskId === '' ? null : taskId}
               onChange={(id) => setTaskId(id ?? '')}
               placeholder={t('time.noTask')}
