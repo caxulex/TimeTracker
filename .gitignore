@@ -282,3 +282,7 @@ test_out.txt
 frontend/test-results/
 frontend/playwright-report/
 frontend/playwright/.cache/
+
+# PR body drafts (belong in GitHub UI, not repo)
+PR_BODY*.md
+PR_BODY*.MD

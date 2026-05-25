@@ -13,6 +13,7 @@ import { TimerWidget } from '../components/time/TimerWidget';
 import { LongTimerBanner } from '../components/time/LongTimerBanner';
 import { EditEntryModal } from '../components/time/EditEntryModal';
 import { ProjectSelect } from '../components/projects/ProjectSelect';
+import { TaskSelect } from '../components/tasks/TaskSelect';
 import { SuggestionDropdown, ChatInterface } from '../components/ai';
 import { timeEntriesApi, projectsApi, tasksApi } from '../api/client';
 import { formatDuration, formatDate, formatTimeOnly, cn } from '../utils/helpers';
@@ -538,15 +539,6 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
   // Check if AI suggestions are enabled
   const { data: suggestionsEnabled } = useFeatureEnabled('ai_suggestions');
 
-  // Fetch tasks for selected project
-  const { data: tasksData } = useQuery({
-    queryKey: ['tasks', projectId],
-    queryFn: () => tasksApi.getAll({ project_id: projectId as number }),
-    enabled: !!projectId,
-  });
-
-  const tasks = tasksData?.items || [];
-
   // Reset form when modal closes
   React.useEffect(() => {
     if (!isOpen) {
@@ -696,23 +688,17 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
           />
         </div>
 
-        {projectId && tasks.length > 0 && (
+        {projectId && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               {t('time.taskLabel')}
             </label>
-            <select
-              value={taskId}
-              onChange={(e) => setTaskId(e.target.value ? Number(e.target.value) : '')}
-              className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="">{t('time.noTask')}</option>
-              {tasks.map((task: Task) => (
-                <option key={task.id} value={task.id}>
-                  {task.name}
-                </option>
-              ))}
-            </select>
+            <TaskSelect
+              projectId={projectId}
+              value={taskId === '' ? null : taskId}
+              onChange={(id) => setTaskId(id ?? '')}
+              placeholder={t('time.noTask')}
+            />
           </div>
         )}
 

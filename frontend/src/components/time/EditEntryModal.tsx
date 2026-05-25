@@ -8,9 +8,10 @@ import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Modal, Button, Input } from '../common';
 import { ProjectSelect } from '../projects/ProjectSelect';
-import { projectsApi, tasksApi, timeEntriesApi } from '../../api/client';
+import { TaskSelect } from '../tasks/TaskSelect';
+import { projectsApi, timeEntriesApi } from '../../api/client';
 import { formatDuration } from '../../utils/helpers';
-import type { Project, Task, TimeEntry, TimeEntryUpdate } from '../../types';
+import type { Project, TimeEntry, TimeEntryUpdate } from '../../types';
 
 export interface EditEntryModalProps {
   entry: TimeEntry | null;
@@ -96,14 +97,6 @@ export function EditEntryModal({ entry, isOpen, onClose, onSaved }: EditEntryMod
     enabled: isOpen && !isRunning,
   });
   const projects: Project[] = projectsData?.items ?? [];
-
-  // Task list scoped to the currently-selected project.
-  const { data: tasksData } = useQuery({
-    queryKey: ['tasks', form?.projectId],
-    queryFn: () => tasksApi.getAll({ project_id: form!.projectId as number }),
-    enabled: isOpen && !isRunning && !!form?.projectId,
-  });
-  const tasks: Task[] = tasksData?.items ?? [];
 
   const hasChanges = useMemo(() => {
     if (!form || !original) return false;
@@ -314,21 +307,15 @@ export function EditEntryModal({ entry, isOpen, onClose, onSaved }: EditEntryMod
             <label htmlFor="edit-entry-task" className="block text-sm font-medium text-gray-700 mb-1">
               {t('time.taskLabel')}
             </label>
-            <select
+            <TaskSelect
               id="edit-entry-task"
-              value={form.taskId}
-              onChange={(e) =>
-                setForm({ ...form, taskId: e.target.value ? Number(e.target.value) : '' })
+              projectId={form.projectId}
+              value={form.taskId === '' ? null : form.taskId}
+              onChange={(id) =>
+                setForm({ ...form, taskId: id ?? '' })
               }
-              className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="">{t('time.noTask')}</option>
-              {tasks.map((task) => (
-                <option key={task.id} value={task.id}>
-                  {task.name}
-                </option>
-              ))}
-            </select>
+              placeholder={t('time.noTask')}
+            />
           </div>
         )}
 

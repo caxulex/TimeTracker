@@ -209,8 +209,11 @@ describe('EditEntryModal', () => {
   it('changes to project trigger a task list reload (and clear task)', async () => {
     renderModal(buildCompletedEntry());
 
-    // Wait for the initial task fetch for project 1.
-    await waitFor(() => expect(tasksGetAllMock).toHaveBeenCalledWith({ project_id: 1 }));
+    // Wait for the initial task fetch for project 1 (TaskSelect uses
+    // page_size=100 to avoid the silent 20-cap).
+    await waitFor(() =>
+      expect(tasksGetAllMock).toHaveBeenCalledWith({ project_id: 1, page_size: 100 })
+    );
 
     const projectSelect = await screen.findByLabelText(/project/i) as HTMLInputElement;
     fireEvent.focus(projectSelect);
@@ -218,10 +221,15 @@ describe('EditEntryModal', () => {
     const option = await screen.findByTestId('project-select-option-2');
     fireEvent.mouseDown(option);
 
-    await waitFor(() => expect(tasksGetAllMock).toHaveBeenCalledWith({ project_id: 2 }));
+    await waitFor(() =>
+      expect(tasksGetAllMock).toHaveBeenCalledWith({ project_id: 2, page_size: 100 })
+    );
 
-    const taskSelect = screen.getByLabelText(/task/i) as HTMLSelectElement;
-    expect(taskSelect.value).toBe('');
+    // TaskSelect renders the task name in its input. After the project
+    // change, the previous task selection is cleared so the input is
+    // empty.
+    const taskInput = screen.getByLabelText(/task/i) as HTMLInputElement;
+    expect(taskInput.value).toBe('');
   });
 
   it('updates the live duration when start/end change', async () => {
