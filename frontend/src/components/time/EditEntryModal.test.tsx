@@ -212,8 +212,11 @@ describe('EditEntryModal', () => {
     // Wait for the initial task fetch for project 1.
     await waitFor(() => expect(tasksGetAllMock).toHaveBeenCalledWith({ project_id: 1 }));
 
-    const projectSelect = await screen.findByLabelText(/project/i) as HTMLSelectElement;
-    fireEvent.change(projectSelect, { target: { value: '2' } });
+    const projectSelect = await screen.findByLabelText(/project/i) as HTMLInputElement;
+    fireEvent.focus(projectSelect);
+    fireEvent.change(projectSelect, { target: { value: 'Project B' } });
+    const option = await screen.findByTestId('project-select-option-2');
+    fireEvent.mouseDown(option);
 
     await waitFor(() => expect(tasksGetAllMock).toHaveBeenCalledWith({ project_id: 2 }));
 

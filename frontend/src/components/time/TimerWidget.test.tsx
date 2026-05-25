@@ -401,20 +401,25 @@ describe('TimerWidget', () => {
           <TimerWidget />
         </TestWrapper>
       );
-      const projectSelect = await screen.findByRole('combobox');
-      await waitFor(() => {
-        expect(screen.getByRole('option', { name: 'Project A' })).toBeInTheDocument();
+      // The project picker is now a typeahead combobox
+      // (ProjectSelect). Open it and click the Project A option to
+      // trigger the same selection behavior the legacy native <select>
+      // exercised via selectOptions().
+      const projectCombobox = await screen.findByRole('combobox', {
+        name: /select project/i,
       });
-      await user.selectOptions(projectSelect, '1');
+      await user.click(projectCombobox);
+      const projectAOption = await screen.findByTestId('project-select-option-1');
+      fireEvent.mouseDown(projectAOption);
+      // Once a project is committed the native task <select> appears.
+      // Wait for it (still rendered as a native <select>, so role
+      // "combobox" applies to it as well).
       await waitFor(() => {
-        expect(screen.getAllByRole('combobox')).toHaveLength(2);
+        const taskSelectEl = document.querySelector('select');
+        expect(taskSelectEl).not.toBeNull();
+        expect(taskSelectEl!.querySelectorAll('option').length).toBeGreaterThan(1);
       });
-      const taskSelect = screen.getAllByRole('combobox')[1] as HTMLSelectElement;
-      // wait for tasks to render
-      await waitFor(() => {
-        expect(taskSelect.querySelectorAll('option').length).toBeGreaterThan(1);
-      });
-      return taskSelect;
+      return document.querySelector('select') as HTMLSelectElement;
     };
 
     it('sorts duplicate-named tasks by basecamp_due_on DESC and uses (Due Mon D) when no collision', async () => {

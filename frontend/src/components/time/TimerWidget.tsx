@@ -4,6 +4,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card } from '../common';
+import { ProjectSelect } from '../projects/ProjectSelect';
 import { useTimerStore } from '../../stores/timerStore';
 import { projectsApi, tasksApi } from '../../api/client';
 import { formatTime, formatDuration, cn } from '../../utils/helpers';
@@ -37,10 +38,20 @@ export function TimerWidget() {
   const [localError, setLocalError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Fetch projects
+  // Fetch projects.
+  //
+  // page_size=100 caps at the backend's `le=100` ceiling. Without
+  // this override the server's default (page_size=20) was kicking in
+  // and silently dropping any project beyond the 20 most recent —
+  // the same pagination-shadow bug that hit PR #30 (entry list) and
+  // PR #33 (entry-card labels). The ProjectSelect typeahead below
+  // makes the consequence less catastrophic — at the current ceiling
+  // (~100 active projects/team) a missing project would now be a
+  // hard cap, not just a silent disappearance.
   const { data: projectsData } = useQuery({
-    queryKey: ['projects'],
-    queryFn: () => projectsApi.getAll({ include_archived: false }),
+    queryKey: ['projects', 'active'],
+    queryFn: () =>
+      projectsApi.getAll({ include_archived: false, page_size: 100 }),
   });
 
   // Fetch tasks for selected project
@@ -50,7 +61,7 @@ export function TimerWidget() {
     enabled: !!selectedProject,
   });
 
-  const projects = projectsData?.items || [];
+  const projects = useMemo(() => projectsData?.items || [], [projectsData]);
   const tasks = useMemo(() => tasksData?.items || [], [tasksData]);
 
   // Detect tasks with duplicate names in the current dropdown so we
@@ -354,25 +365,26 @@ export function TimerWidget() {
 
         {/* Project/Task selectors — disabled during meeting/break to prevent state corruption */}
         <div className="flex gap-2">
-          <select
-            value={selectedProject || ''}
-            onChange={(e) => {
-              handleProjectChange(e.target.value ? Number(e.target.value) : undefined);
-            }}
+          <ProjectSelect
+            value={selectedProject ?? null}
+            onChange={(id) =>
+              handleProjectChange(id === null ? undefined : id)
+            }
             disabled={controlsDisabled}
-            className={cn(
-              "px-3 py-2 bg-white/20 border rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-white/50",
-              controlsDisabled && "opacity-50 cursor-not-allowed",
-              !selectedProject && !isRunning ? "border-yellow-300/70" : "border-white/30"
+            placeholder="Select project *"
+            projects={projects}
+            className="min-w-[12rem]"
+            // The timer card is a dark blue gradient; recolor the
+            // field so the typed text and the focus ring stay
+            // legible. The dropdown panel itself stays on its own
+            // white surface (kept inside ProjectSelect).
+            inputClassName={cn(
+              'bg-white/20 text-white placeholder-white/60 border focus:ring-white/50 focus:border-white/50',
+              !selectedProject && !isRunning
+                ? 'border-yellow-300/70'
+                : 'border-white/30'
             )}
-          >
-            <option value="">Select project *</option>
-            {projects.map((project: Project) => (
-              <option key={project.id} value={project.id} className="text-gray-900">
-                {project.name}
-              </option>
-            ))}
-          </select>
+          />
 
           {selectedProject && (
             <select

@@ -457,7 +457,7 @@ describe('TimePage', () => {
       // project picker may also be present — use the one with the
       // "all"/"today"/... options).
       const dateRangeSelect = selects.find((el) =>
-        Array.from((el as HTMLSelectElement).options).some((o) => o.value === 'today')
+        Array.from((el as HTMLSelectElement).options ?? []).some((o) => o.value === 'today')
       ) as HTMLSelectElement | undefined;
       expect(dateRangeSelect).toBeDefined();
 
@@ -494,7 +494,7 @@ describe('TimePage', () => {
       // "All Projects" translation key (the filter is the only one with
       // an empty-value "all" option among project pickers).
       const projectSelect = selects.find((el) => {
-        const opts = Array.from((el as HTMLSelectElement).options);
+        const opts = Array.from((el as HTMLSelectElement).options ?? []);
         const first = opts[0];
         return (
           first &&
