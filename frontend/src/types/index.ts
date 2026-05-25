@@ -328,7 +328,9 @@ export interface TaskFilters {
   project_id?: number;
   status?: TaskStatus;
   page?: number;
+  /** @deprecated Use `page_size`. Backend (app/routers/tasks.py) only honors `page_size`. */
   size?: number;
+  page_size?: number;
 }
 
 // ============================================
