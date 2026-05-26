@@ -291,7 +291,8 @@ describe('StaffDetailPage - entries table pagination', () => {
 
     // Capture which date pair was used for the initial (month) fetch
     // so we can prove the next fetch uses a different range.
-    const initialCall = timeEntriesGetAll.mock.calls.at(-1)?.[0] as {
+    const initialCalls = timeEntriesGetAll.mock.calls;
+    const initialCall = initialCalls[initialCalls.length - 1]?.[0] as {
       start_date: string;
       end_date: string;
     };
@@ -308,7 +309,8 @@ describe('StaffDetailPage - entries table pagination', () => {
         })
       );
     });
-    const newCall = timeEntriesGetAll.mock.calls.at(-1)?.[0] as {
+    const newCalls = timeEntriesGetAll.mock.calls;
+    const newCall = newCalls[newCalls.length - 1]?.[0] as {
       start_date: string;
     };
     // Last-week start_date must differ from the previous (month) range.
