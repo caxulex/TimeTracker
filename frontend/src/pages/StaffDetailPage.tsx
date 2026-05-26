@@ -3,7 +3,7 @@
 // ============================================
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
 import { usersApi, teamsApi, payRatesApi, timeEntriesApi, projectsApi, reportsApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
@@ -91,20 +91,53 @@ export function StaffDetailPage() {
     enabled: !!staffId && isAdmin,
   });
 
-  // Fetch a page of time entries for the table and charts on this page.
-  // Totals/aggregates come from analyticsData above — these items only feed
-  // the table preview, weekly chart, and recent activity timeline.
-  const { data: timeEntries } = useQuery({
-    queryKey: ['timeEntries', staffId, start, end],
-    queryFn: () => timeEntriesApi.getAll({
-      user_id: staffId,
-      start_date: start,
-      end_date: end,
-      page: 1,
-      size: 100,
-    }),
+  // Fetch time entries — paginated via Load More.
+  //
+  // Totals/aggregates come from analyticsData above — these items
+  // only feed the entries table, weekly chart, and recent activity
+  // timeline. Same pagination-shadow shape as ProjectsPage (PR #35)
+  // and TasksPage (PR #39): useInfiniteQuery with page_size=50 +
+  // "Showing X of Y" indicator + Load More so the table never
+  // silently hides entries past the server's default cap. The
+  // user_id + date range are part of the query key so changing
+  // the date range cleanly refetches page 1.
+  const ENTRIES_PAGE_SIZE = 50;
+  const {
+    data: timeEntriesData,
+    fetchNextPage: fetchNextEntries,
+    hasNextPage: hasNextEntries,
+    isFetchingNextPage: isFetchingNextEntries,
+  } = useInfiniteQuery({
+    queryKey: ['timeEntries', 'paginated', staffId, start, end],
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) =>
+      timeEntriesApi.getAll({
+        user_id: staffId,
+        start_date: start,
+        end_date: end,
+        page: pageParam as number,
+        page_size: ENTRIES_PAGE_SIZE,
+      }),
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce(
+        (acc, p) => acc + (p.items?.length || 0),
+        0
+      );
+      const total = lastPage?.total ?? 0;
+      if (loaded >= total) return undefined;
+      return allPages.length + 1;
+    },
     enabled: !!staffId && isAdmin,
   });
+
+  const loadedEntries: TimeEntry[] = (timeEntriesData?.pages ?? []).flatMap(
+    (p) => p.items || []
+  );
+  const totalEntries =
+    timeEntriesData?.pages?.[0]?.total ?? loadedEntries.length;
+  // Back-compat shape so the rest of the page (charts, recent
+  // activity, table render) can keep using `timeEntries.items`.
+  const timeEntries = { items: loadedEntries };
 
   // Fetch all teams
   const { data: teamsData } = useQuery({
@@ -737,41 +770,66 @@ export function StaffDetailPage() {
               </div>
 
               {/* Time Entries Table */}
-              {timeEntries && timeEntries.items.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Task</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {timeEntries.items.slice(0, 20).map((entry: TimeEntry) => (
-                        <tr key={entry.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                            {formatDate(entry.start_time)}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
-                            {entry.project?.name || '—'}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
-                            {entry.task?.name || '—'}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-indigo-600">
-                            {formatDuration(entry.duration_seconds)}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">
-                            {entry.description || '—'}
-                          </td>
+              {timeEntries.items.length > 0 ? (
+                <>
+                  {/* "Showing X of Y entries" indicator — counts
+                      the loaded entries against the server-reported
+                      total for the selected user + date range. */}
+                  <div className="flex items-center justify-between">
+                    <p
+                      className="text-sm text-gray-500"
+                      data-testid="staff-entries-count"
+                    >
+                      Showing {timeEntries.items.length} of {totalEntries} entries
+                    </p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Task</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {timeEntries.items.map((entry: TimeEntry) => (
+                          <tr key={entry.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                              {formatDate(entry.start_time)}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                              {entry.project?.name || '—'}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                              {entry.task?.name || '—'}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-indigo-600">
+                              {formatDuration(entry.duration_seconds)}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">
+                              {entry.description || '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {hasNextEntries && (
+                    <div className="flex justify-center pt-2">
+                      <Button
+                        variant="secondary"
+                        onClick={() => fetchNextEntries()}
+                        disabled={isFetchingNextEntries}
+                        data-testid="staff-entries-load-more"
+                      >
+                        {isFetchingNextEntries ? 'Loading…' : 'Load More'}
+                      </Button>
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="text-center py-12 bg-gray-50 rounded-lg">
                   <p className="text-gray-500">No time entries found</p>
