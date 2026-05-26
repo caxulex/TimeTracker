@@ -10,6 +10,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useNotifications } from '../hooks/useNotifications';
 import { useFeatureEnabled } from '../hooks/useAIFeatures';
 import ProjectHealthCard from '../components/ai/ProjectHealthCard';
+import { TeamSelect } from '../components/teams/TeamSelect';
 import type { Project, ProjectCreate, Team } from '../types';
 
 export function ProjectsPage() {
@@ -574,19 +575,14 @@ function ProjectModal({ isOpen, onClose, project, teams, onSubmit, isLoading, is
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Team
           </label>
-          <select
-            value={teamId}
-            onChange={(e) => setTeamId(Number(e.target.value))}
-            className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          <TeamSelect
+            value={teamId === '' ? null : teamId}
+            onChange={(id) => setTeamId(id ?? '')}
+            teams={teams}
+            placeholder="Select a team"
             required
-          >
-            <option value="">Select a team</option>
-            {teams.map((team) => (
-              <option key={team.id} value={team.id}>
-                {team.name}
-              </option>
-            ))}
-          </select>
+            ariaLabel="Team"
+          />
         </div>
 
         <div>

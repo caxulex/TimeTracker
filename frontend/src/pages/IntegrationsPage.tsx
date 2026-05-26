@@ -12,6 +12,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useNotifications } from '../hooks/useNotifications';
 import { useTeams } from '../hooks/useApi';
 import { isAdminUser, isSuperAdmin } from '../utils/helpers';
+import { TeamSelect } from '../components/teams/TeamSelect';
 import {
   basecampApi,
   type BasecampStatus,
@@ -423,28 +424,32 @@ export function IntegrationsPage() {
                       htmlFor="basecamp-target-team"
                     >
                       <span className="sm:w-48">Projects sync to:</span>
-                      <select
+                      {/*
+                        The clearable affordance now stands in for the
+                        old “(Default: lowest-id team)” empty option:
+                        clearing the picker calls onTargetTeamChange('')
+                        which the page already treats as “reset to
+                        backend-picked default”.
+                      */}
+                      <div
                         id="basecamp-target-team"
                         data-testid="basecamp-target-team-select"
-                        value={state.status.target_team_id ?? ''}
-                        disabled={!canMutate || savingTeam || teamsQuery.isLoading}
-                        onChange={(e) => onTargetTeamChange(e.target.value)}
-                        className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm shadow-sm disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                        className="min-w-[16rem]"
                       >
-                        <option value="">
-                          (Default: lowest-id team
-                          {state.status.target_team_id === null &&
-                          state.status.target_team_name === null
-                            ? ''
-                            : ''}
-                          )
-                        </option>
-                        {(teamsQuery.data?.items ?? []).map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.name}
-                          </option>
-                        ))}
-                      </select>
+                        <TeamSelect
+                          value={state.status.target_team_id ?? null}
+                          onChange={(id) =>
+                            onTargetTeamChange(id ? String(id) : '')
+                          }
+                          teams={teamsQuery.data?.items ?? []}
+                          clearable
+                          clearLabel="(Default: lowest-id team)"
+                          placeholder="(Default: lowest-id team)"
+                          disabled={!canMutate || savingTeam || teamsQuery.isLoading}
+                          ariaLabel="Projects sync target team"
+                          inputClassName="py-1.5 text-sm"
+                        />
+                      </div>
                       {savingTeam && (
                         <span
                           className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent"

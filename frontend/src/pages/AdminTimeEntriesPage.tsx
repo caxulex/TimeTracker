@@ -8,7 +8,8 @@ import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
 import { reportsApi, teamsApi, usersApi } from '../api/client';
 import { formatDuration, formatDate, toISODateString, getStartOfWeek, isAdminUser } from '../utils/helpers';
 import { useAuth } from '../hooks/useAuth';
-import type { User, Team } from '../types';
+import { UserSelect } from '../components/users/UserSelect';
+import { TeamSelect } from '../components/teams/TeamSelect';
 
 interface TimeEntryWithUser {
   id: number;
@@ -39,18 +40,24 @@ export function AdminTimeEntriesPage() {
   const [datePreset, setDatePreset] = useState<DatePreset>('today');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
-  const [selectedUser, setSelectedUser] = useState<number | ''>('');
-  const [selectedTeam, setSelectedTeam] = useState<number | ''>('');
+  // Filter state. `null` means "no filter applied" — matches the
+  // clearable semantics of UserSelect / TeamSelect.
+  const [selectedUser, setSelectedUser] = useState<number | null>(null);
+  const [selectedTeam, setSelectedTeam] = useState<number | null>(null);
 
+  // We still pre-fetch users + teams here (page=1, size=100) so the
+  // filter selects render their list immediately and the page can
+  // share the cached result with anything else that consumes the
+  // ['users', {active:true}] / ['teams'] keys.
   const { data: usersData } = useQuery({
-    queryKey: ['users'],
-    queryFn: () => usersApi.getAll(),
+    queryKey: ['users', { active: true }] as const,
+    queryFn: () => usersApi.getAll(1, 100),
     enabled: isAdmin,
   });
 
   const { data: teamsData } = useQuery({
-    queryKey: ['teams'],
-    queryFn: () => teamsApi.getAll(),
+    queryKey: ['teams'] as const,
+    queryFn: () => teamsApi.getAll(1, 100),
     enabled: isAdmin,
   });
 
@@ -95,8 +102,8 @@ export function AdminTimeEntriesPage() {
     queryFn: () => reportsApi.getAdminTimeEntries({
       start_date: startDate,
       end_date: endDate,
-      user_id: selectedUser || undefined,
-      team_id: selectedTeam || undefined,
+      user_id: selectedUser ?? undefined,
+      team_id: selectedTeam ?? undefined,
     }),
     enabled: isAdmin && !!startDate && !!endDate,
   });
@@ -159,16 +166,30 @@ export function AdminTimeEntriesPage() {
                 className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm" />
             </div>
           )}
-          <select value={selectedUser} onChange={(e) => setSelectedUser(e.target.value ? Number(e.target.value) : '')}
-            className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
-            <option value="">All Users</option>
-            {users.map((u: User) => (<option key={u.id} value={u.id}>{u.name}</option>))}
-          </select>
-          <select value={selectedTeam} onChange={(e) => setSelectedTeam(e.target.value ? Number(e.target.value) : '')}
-            className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
-            <option value="">All Teams</option>
-            {teams.map((t: Team) => (<option key={t.id} value={t.id}>{t.name}</option>))}
-          </select>
+          <div className="w-48">
+            <UserSelect
+              value={selectedUser}
+              onChange={setSelectedUser}
+              users={users}
+              clearable
+              clearLabel="All users"
+              placeholder="All users"
+              ariaLabel="Filter by user"
+              inputClassName="py-1.5 text-sm"
+            />
+          </div>
+          <div className="w-48">
+            <TeamSelect
+              value={selectedTeam}
+              onChange={setSelectedTeam}
+              teams={teams}
+              clearable
+              clearLabel="All teams"
+              placeholder="All teams"
+              ariaLabel="Filter by team"
+              inputClassName="py-1.5 text-sm"
+            />
+          </div>
         </div>
       </Card>
 

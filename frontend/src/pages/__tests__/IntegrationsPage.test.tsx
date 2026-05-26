@@ -2,9 +2,10 @@
 // TIME TRACKER - INTEGRATIONS PAGE TESTS
 // ============================================
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { IntegrationsPage } from '../IntegrationsPage';
 import { useAuthStore } from '../../stores/authStore';
 import { NotificationProvider } from '../../components/Notifications';
@@ -61,14 +62,21 @@ function setUser(role: 'super_admin' | 'admin' | 'regular_user' | 'member' | nul
 }
 
 function renderPage(initialPath: string = '/settings/integrations') {
+  // TeamSelect always invokes useQuery (even when teams are passed as a prop),
+  // so a QueryClientProvider is required at the test root.
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   return render(
-    <MemoryRouter initialEntries={[initialPath]}>
-      <NotificationProvider>
-        <Routes>
-          <Route path="/settings/integrations" element={<IntegrationsPage />} />
-        </Routes>
-      </NotificationProvider>
-    </MemoryRouter>
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[initialPath]}>
+        <NotificationProvider>
+          <Routes>
+            <Route path="/settings/integrations" element={<IntegrationsPage />} />
+          </Routes>
+        </NotificationProvider>
+      </MemoryRouter>
+    </QueryClientProvider>
   );
 }
 
@@ -313,8 +321,12 @@ describe('IntegrationsPage - sync settings (target team + auto-sync)', () => {
     renderPage();
     const select = await screen.findByTestId('basecamp-target-team-select');
     expect(select).toBeInTheDocument();
-    expect(within(select).getByRole('option', { name: 'Engineering' })).toBeInTheDocument();
-    expect(within(select).getByRole('option', { name: 'Sales' })).toBeInTheDocument();
+    // Open the combobox; options are rendered lazily by TeamSelect.
+    const combobox = within(select).getByRole('combobox');
+    await userEvent.click(combobox);
+    const listbox = await screen.findByTestId('team-select-listbox');
+    expect(within(listbox).getByText('Engineering')).toBeInTheDocument();
+    expect(within(listbox).getByText('Sales')).toBeInTheDocument();
   });
 
   it('displays auto-sync toggle when connected', async () => {
@@ -333,10 +345,11 @@ describe('IntegrationsPage - sync settings (target team + auto-sync)', () => {
       target_team_name: 'Sales',
     });
     renderPage();
-    const select = (await screen.findByTestId(
-      'basecamp-target-team-select'
-    )) as HTMLSelectElement;
-    await userEvent.selectOptions(select, '2');
+    const select = await screen.findByTestId('basecamp-target-team-select');
+    const combobox = within(select).getByRole('combobox');
+    await userEvent.click(combobox);
+    // mouseDown on the option to mirror TeamSelect's commit path.
+    fireEvent.mouseDown(await screen.findByTestId('team-select-option-2'));
     await waitFor(() => {
       expect(mockedApi.updateSettings).toHaveBeenCalledWith({ target_team_id: 2 });
     });
@@ -365,11 +378,10 @@ describe('IntegrationsPage - sync settings (target team + auto-sync)', () => {
       auto_sync_enabled: true,
     });
     renderPage();
-    const select = (await screen.findByTestId(
-      'basecamp-target-team-select'
-    )) as HTMLSelectElement;
+    const select = await screen.findByTestId('basecamp-target-team-select');
+    const combobox = within(select).getByRole('combobox') as HTMLInputElement;
     const toggle = screen.getByTestId('basecamp-auto-sync-toggle') as HTMLInputElement;
-    expect(select).toBeDisabled();
+    expect(combobox).toBeDisabled();
     expect(toggle).toBeDisabled();
     expect(toggle).toBeChecked();
   });
