@@ -2526,6 +2526,16 @@ function TimeTrackingModal({ staff, onClose }: { staff: User; onClose: () => voi
     },
   });
 
+  // Server-aggregated totals for the selected range (replaces client-side
+  // reduce over a paginated list, which was truncated at the /api/time cap).
+  const { data: rangeAnalytics } = useQuery({
+    queryKey: ['staff-analytics', staff.id, dateRange],
+    queryFn: () => {
+      const dates = getDateRange();
+      return reportsApi.getAdminUserAnalytics(staff.id, dates.start_date, dates.end_date);
+    },
+  });
+
   const formatDuration = (minutes: number) => {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
@@ -2540,11 +2550,9 @@ function TimeTrackingModal({ staff, onClose }: { staff: User; onClose: () => voi
     });
   };
 
-  const totalMinutes = timeEntries?.items.reduce((sum: number, entry: TimeEntry) => {
-    return sum + ((entry.duration_seconds || 0) / 60);
-  }, 0) || 0;
-
-  const totalHours = (totalMinutes / 60).toFixed(1);
+  // Totals come from the server-aggregated endpoint; never from the (capped)
+  // paginated list.
+  const totalHours = (rangeAnalytics?.total_hours ?? 0).toFixed(1);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -2570,7 +2578,7 @@ function TimeTrackingModal({ staff, onClose }: { staff: User; onClose: () => voi
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                 </svg>
                 <div>
-                  <div className="text-2xl font-bold text-purple-700">{timeEntries?.total || 0}</div>
+                  <div className="text-2xl font-bold text-purple-700">{rangeAnalytics?.total_entries ?? timeEntries?.total ?? 0}</div>
                   <div className="text-xs text-gray-600">Entries</div>
                 </div>
               </div>
@@ -2720,7 +2728,17 @@ function AnalyticsModal({ staff, onClose }: { staff: User; onClose: () => void }
 
   const { start, end } = getDateRange();
 
-  // Fetch time entries for analytics
+  // Server-aggregated analytics for the selected range. Replaces the previous
+  // client-side reduce/Set over a paginated time-entries list — that list is
+  // capped at 100 rows by /api/time and silently undercounted active users.
+  // See PR fix/staff-analytics-server-side-aggregation.
+  const { data: rangeAnalytics } = useQuery({
+    queryKey: ['staff-analytics', staff.id, start, end],
+    queryFn: () => reportsApi.getAdminUserAnalytics(staff.id, start, end),
+  });
+
+  // We still fetch the entries page to provide the rows for CSV/JSON export
+  // of individual entries. Totals must NOT be derived from this list.
   const { data: timeEntries, isLoading: loadingTime } = useQuery({
     queryKey: ['analytics-time', staff.id, start, end],
     queryFn: () => timeEntriesApi.getAll({
@@ -2728,7 +2746,7 @@ function AnalyticsModal({ staff, onClose }: { staff: User; onClose: () => void }
       start_date: start,
       end_date: end,
       page: 1,
-      size: 1000,
+      size: 100,
     }),
   });
 
@@ -2738,15 +2756,15 @@ function AnalyticsModal({ staff, onClose }: { staff: User; onClose: () => void }
     queryFn: () => payRatesApi.getUserCurrentRate(staff.id),
   });
 
-  // Calculate analytics
+  // Analytics: server-aggregated. Never derive from `timeEntries.items` —
+  // that list is capped at 100 rows by /api/time.
   const analytics = {
-    totalHours: timeEntries?.items.reduce((sum: number, entry: TimeEntry) => sum + ((entry.duration_seconds || 0) / 3600), 0) || 0,
-    totalEntries: timeEntries?.items.length || 0,
+    totalHours: rangeAnalytics?.total_hours ?? 0,
+    totalEntries: rangeAnalytics?.total_entries ?? 0,
     expectedHours: (staff.expected_hours_per_week || 40) * (dateRange === 'week' ? 1 : dateRange === 'month' ? 4 : 52),
-    avgHoursPerEntry: timeEntries?.items.length ? 
-      ((timeEntries.items.reduce((sum: number, entry: TimeEntry) => sum + ((entry.duration_seconds || 0) / 3600), 0) || 0) / timeEntries.items.length) : 0,
-    projectCount: new Set(timeEntries?.items.map((e: TimeEntry) => e.project_id).filter(Boolean)).size,
-    daysWorked: new Set(timeEntries?.items.map((e: TimeEntry) => e.start_time?.split('T')[0]).filter(Boolean)).size,
+    avgHoursPerEntry: rangeAnalytics?.avg_hours_per_entry ?? 0,
+    projectCount: rangeAnalytics?.project_count ?? 0,
+    daysWorked: rangeAnalytics?.days_worked ?? 0,
   };
 
   // Calculate productivity score (0-100)
@@ -2763,16 +2781,15 @@ function AnalyticsModal({ staff, onClose }: { staff: User; onClose: () => void }
       : 0
     : 0;
 
-  // Group by project
-  const projectBreakdown = timeEntries?.items.reduce((acc: Record<string, { hours: number; entries: number }>, entry: TimeEntry) => {
-    const projectName = entry.project?.name || 'No Project';
-    if (!acc[projectName]) {
-      acc[projectName] = { hours: 0, entries: 0 };
-    }
-    acc[projectName].hours += (entry.duration_seconds || 0) / 3600;
-    acc[projectName].entries += 1;
-    return acc;
-  }, {} as Record<string, { hours: number; entries: number }>) || {};
+  // Project breakdown — also server-aggregated (SUM over duration_seconds).
+  // Shape preserved for the existing UI/export code: { [name]: { hours, entries } }.
+  const projectBreakdown = (rangeAnalytics?.projects ?? []).reduce(
+    (acc: Record<string, { hours: number; entries: number }>, p) => {
+      acc[p.project_name] = { hours: p.total_hours, entries: p.entry_count };
+      return acc;
+    },
+    {} as Record<string, { hours: number; entries: number }>,
+  );
 
   // Export data
   const handleExport = (format: 'csv' | 'json') => {
