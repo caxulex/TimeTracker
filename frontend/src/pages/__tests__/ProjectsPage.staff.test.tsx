@@ -147,13 +147,15 @@ describe('ProjectsPage - staff project creation', () => {
     });
     await userEvent.click(newProjectBtn);
 
-    const teamSelect = await screen.findByRole('combobox');
-    // Only the placeholder + the single membership team should be
-    // present — the backend already filters teamsApi.getAll(),
-    // so the dropdown reflects that scoped list.
-    const options = teamSelect.querySelectorAll('option');
-    expect(options).toHaveLength(2);
-    expect(options[1].textContent).toBe('My Team');
+    // TeamSelect is a combobox-pattern typeahead: open it, then
+    // inspect the listbox. teamsApi.getAll is already scoped to the
+    // user's memberships server-side, so we expect exactly one option.
+    const teamCombobox = await screen.findByRole('combobox', { name: /team/i });
+    await userEvent.click(teamCombobox);
+    const listbox = await screen.findByTestId('team-select-listbox');
+    const options = listbox.querySelectorAll('[role="option"]');
+    expect(options).toHaveLength(1);
+    expect(options[0].textContent).toContain('My Team');
   });
 
   it('hides budget_amount and deadline fields in the modal for non-admin users', async () => {

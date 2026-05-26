@@ -9,6 +9,7 @@ import { formatDate, getInitials, isAdminUser, cn } from '../utils/helpers';
 import { useAuthStore } from '../stores/authStore';
 import { useAuth } from '../hooks/useAuth';
 import { useStaffNotifications } from '../hooks/useStaffNotifications';
+import { UserSelect } from '../components/users/UserSelect';
 import type { Team, TeamMember, User } from '../types';
 import axios from 'axios';
 
@@ -465,19 +466,14 @@ function AddMemberModal({ isOpen, onClose, users, onSubmit, isLoading }: AddMemb
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Select User
           </label>
-          <select
-            value={selectedUser}
-            onChange={(e) => setSelectedUser(Number(e.target.value))}
-            className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          <UserSelect
+            value={selectedUser === '' ? null : selectedUser}
+            onChange={(id) => setSelectedUser(id ?? '')}
+            users={users}
+            placeholder="Choose a user..."
             required
-          >
-            <option value="">Choose a user...</option>
-            {users.map((user) => (
-              <option key={user.id} value={user.id}>
-                {user.name} ({user.email})
-              </option>
-            ))}
-          </select>
+            ariaLabel="Select user to add"
+          />
         </div>
 
         <div>

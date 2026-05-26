@@ -16,6 +16,7 @@ import {
 } from '../../hooks/useAIFeatures';
 import { FEATURE_UI_CONFIG } from '../../types/aiFeatures';
 import type { AdminFeatureSummary, FeatureStatus } from '../../types/aiFeatures';
+import { UserSelect } from '../users/UserSelect';
 
 interface AdminAISettingsProps {
   className?: string;
@@ -27,7 +28,6 @@ export const AdminAISettings: React.FC<AdminAISettingsProps> = ({
   users = [],
 }) => {
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
 
   const { data: featuresData, isLoading: featuresLoading } = useAdminAIFeatures();
   const { data: usageData } = useUsageSummary(30);
@@ -49,12 +49,6 @@ export const AdminAISettings: React.FC<AdminAISettingsProps> = ({
   const handleRemoveOverride = (userId: number, featureId: string) => {
     removeOverrideMutation.mutate({ userId, featureId });
   };
-
-  const filteredUsers = users.filter(
-    (user) =>
-      user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchQuery.toLowerCase())
-  );
 
   if (featuresLoading) {
     return (
@@ -211,45 +205,27 @@ export const AdminAISettings: React.FC<AdminAISettingsProps> = ({
           </p>
         </div>
         <div className="p-6">
-          {/* User Search */}
+          {/* User picker (typeahead) */}
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Search User
             </label>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by name or email..."
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-            />
+            {users.length > 0 ? (
+              <UserSelect
+                value={selectedUserId}
+                onChange={setSelectedUserId}
+                users={users}
+                clearable
+                clearLabel="— no user selected —"
+                placeholder="Search by name or email..."
+                ariaLabel="Search user for AI override"
+              />
+            ) : (
+              <p className="text-gray-500 text-center py-4">
+                No users available. User list should be passed as a prop.
+              </p>
+            )}
           </div>
-
-          {/* User List */}
-          {users.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 mb-6 max-h-48 overflow-y-auto">
-              {filteredUsers.slice(0, 20).map((user) => (
-                <button
-                  key={user.id}
-                  onClick={() => setSelectedUserId(user.id)}
-                  className={`
-                    p-3 text-left rounded-lg border transition-colors
-                    ${selectedUserId === user.id 
-                      ? 'bg-purple-50 border-purple-300' 
-                      : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
-                    }
-                  `}
-                >
-                  <p className="font-medium text-gray-900 truncate">{user.name}</p>
-                  <p className="text-sm text-gray-500 truncate">{user.email}</p>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="text-gray-500 text-center py-4">
-              No users available. User list should be passed as a prop.
-            </p>
-          )}
 
           {/* Selected User Preferences */}
           {selectedUserId && (
