@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
-import { usersApi, teamsApi, payRatesApi, timeEntriesApi, projectsApi } from '../api/client';
+import { usersApi, teamsApi, payRatesApi, timeEntriesApi, projectsApi, reportsApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import { useStaffNotifications } from '../hooks/useStaffNotifications';
 import { usePermissions } from '../hooks/usePermissions';
@@ -81,7 +81,19 @@ export function StaffDetailPage() {
 
   const { start, end } = getDateRange();
 
-  // Fetch time entries
+  // Fetch server-side aggregated analytics for the selected range.
+  // This replaces the previous client-side reduce over a paginated time-entries
+  // list which silently undercounted users with >100 entries (the /api/time
+  // hard cap). See PR fix/staff-analytics-server-side-aggregation.
+  const { data: analyticsData } = useQuery({
+    queryKey: ['staff-analytics', staffId, start, end],
+    queryFn: () => reportsApi.getAdminUserAnalytics(staffId, start, end),
+    enabled: !!staffId && isAdmin,
+  });
+
+  // Fetch a page of time entries for the table and charts on this page.
+  // Totals/aggregates come from analyticsData above — these items only feed
+  // the table preview, weekly chart, and recent activity timeline.
   const { data: timeEntries } = useQuery({
     queryKey: ['timeEntries', staffId, start, end],
     queryFn: () => timeEntriesApi.getAll({
@@ -89,7 +101,7 @@ export function StaffDetailPage() {
       start_date: start,
       end_date: end,
       page: 1,
-      size: 1000,
+      size: 100,
     }),
     enabled: !!staffId && isAdmin,
   });
@@ -194,13 +206,15 @@ export function StaffDetailPage() {
     },
   });
 
-  // Calculate analytics
+  // Analytics now come from the server-aggregated endpoint
+  // (/api/reports/admin/users/{id}/analytics). Falls back to zeroes while
+  // loading; never derived from `timeEntries.items` which is paginated.
   const analytics = {
-    totalHours: timeEntries?.items.reduce((sum: number, entry: TimeEntry) => sum + (entry.duration_seconds / 3600), 0) || 0,
-    totalEntries: timeEntries?.items.length || 0,
+    totalHours: analyticsData?.total_hours ?? 0,
+    totalEntries: analyticsData?.total_entries ?? 0,
     expectedHours: (staff?.expected_hours_per_week || 40) * (dateRange === 'week' ? 1 : dateRange === 'month' ? 4 : 52),
-    projectCount: new Set(timeEntries?.items.map((e: TimeEntry) => e.project_id).filter(Boolean)).size,
-    daysWorked: new Set(timeEntries?.items.map((e: TimeEntry) => e.start_time?.split('T')[0]).filter(Boolean)).size,
+    projectCount: analyticsData?.project_count ?? 0,
+    daysWorked: analyticsData?.days_worked ?? 0,
   };
 
   const productivityScore = analytics.expectedHours > 0 

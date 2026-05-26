@@ -853,6 +853,28 @@ class IndividualUserMetrics(BaseModel):
     # Recent activity
     last_activity: Optional[datetime] = None
 
+
+class UserAnalyticsRangeMetrics(BaseModel):
+    """Aggregated metrics for a single user over a custom date range.
+
+    All totals are computed server-side via SQL aggregation. This endpoint
+    exists so views like StaffPage / StaffDetailPage do not have to fetch a
+    paginated list of time entries and reduce client-side (which silently
+    truncates at the /api/time page-size cap).
+    """
+    user_id: int
+    user_name: str
+    start_date: date
+    end_date: date
+    total_seconds: int
+    total_hours: float
+    total_entries: int
+    days_worked: int
+    project_count: int
+    avg_hours_per_entry: float
+    projects: List[ProjectSummary]
+
+
 @router.get("/admin/dashboard", response_model=AdminDashboardStats)
 async def get_admin_dashboard(
     db: AsyncSession = Depends(get_db),
@@ -1198,6 +1220,148 @@ async def get_team_analytics(
         ))
 
     return team_analytics
+
+
+@router.get(
+    "/admin/users/{user_id}/analytics",
+    response_model=UserAnalyticsRangeMetrics,
+)
+async def get_user_analytics_range(
+    user_id: int,
+    start_date: date = Query(..., description="Start of period (inclusive, local date)"),
+    end_date: date = Query(..., description="End of period (inclusive, local date)"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    tz: str = Depends(get_company_timezone),
+):
+    """Server-side aggregated analytics for a single user over a custom date range.
+
+    Returns totals + project breakdown computed by SQL (no client-side reduce
+    of a paginated time-entries list, which was capped at 100 rows by /api/time
+    and silently undercounted active users — see PR-A #36 and the May 22
+    reports-audit).
+
+    Used by StaffPage analytics, StaffPage TimeTrackingModal, StaffDetailPage.
+    Admin/company_admin/super_admin only; filtered by company for multi-tenancy.
+    Pause-aware via calculate_entry_duration_for_period (PR #34 helpers).
+    """
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+
+    if end_date < start_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="end_date must be on or after start_date",
+        )
+
+    # Multi-tenancy: filter user by company
+    company_id = get_company_filter(current_user)
+    user_query = select(User).where(User.id == user_id)
+    user_query = apply_company_filter(user_query, User.company_id, company_id)
+
+    user_result = await db.execute(user_query)
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    # Resolve the local-day window in UTC for filtering TimeEntry.start_time.
+    period_start, period_end = range_bounds(start_date, end_date, tz)
+    now = now_utc()
+
+    # Pull every entry that could overlap the window. We include entries whose
+    # start_time is before period_end (running timers can still contribute) and
+    # whose end_time is None or >= period_start. We still rely on
+    # calculate_entry_duration_for_period to clip overlap and apply pause math.
+    entries_query = (
+        select(TimeEntry, Project.name)
+        .outerjoin(Project, TimeEntry.project_id == Project.id)
+        .where(
+            and_(
+                TimeEntry.user_id == user_id,
+                TimeEntry.start_time < period_end,
+            )
+        )
+    )
+    entries_result = await db.execute(entries_query)
+    rows = entries_result.all()
+
+    total_seconds = 0
+    total_entries = 0
+    days_worked: set = set()
+    project_totals: Dict[int, Dict[str, Any]] = {}
+
+    for entry, project_name in rows:
+        # Skip closed entries that ended before the window starts.
+        entry_end = entry.end_time
+        if entry_end is not None:
+            if entry_end.tzinfo is None:
+                entry_end = entry_end.replace(tzinfo=timezone.utc)
+            if entry_end < period_start:
+                continue
+
+        seconds = calculate_entry_duration_for_period(
+            entry, period_start, period_end, now
+        )
+        if seconds <= 0:
+            continue
+
+        total_seconds += seconds
+        total_entries += 1
+
+        # Local day bucket for days_worked
+        entry_start = entry.start_time
+        if entry_start.tzinfo is None:
+            entry_start = entry_start.replace(tzinfo=timezone.utc)
+        # Clip to window start so an entry that began before the window only
+        # counts the days it actually overlapped.
+        bucket_day = max(entry_start, period_start).date()
+        days_worked.add(bucket_day)
+
+        pid = entry.project_id or 0
+        pname = project_name or "Meeting"
+        bucket = project_totals.get(pid)
+        if bucket is None:
+            bucket = {"name": pname, "seconds": 0, "entries": 0}
+            project_totals[pid] = bucket
+        bucket["seconds"] += seconds
+        bucket["entries"] += 1
+
+    projects = [
+        ProjectSummary(
+            project_id=pid,
+            project_name=data["name"],
+            total_seconds=data["seconds"],
+            total_hours=round(data["seconds"] / 3600, 2),
+            entry_count=data["entries"],
+        )
+        for pid, data in sorted(
+            project_totals.items(), key=lambda x: x[1]["seconds"], reverse=True
+        )
+    ]
+
+    avg_hours_per_entry = (
+        round((total_seconds / 3600) / total_entries, 2) if total_entries else 0.0
+    )
+
+    return UserAnalyticsRangeMetrics(
+        user_id=user.id,
+        user_name=user.name,
+        start_date=start_date,
+        end_date=end_date,
+        total_seconds=total_seconds,
+        total_hours=round(total_seconds / 3600, 2),
+        total_entries=total_entries,
+        days_worked=len(days_worked),
+        project_count=sum(1 for pid in project_totals if pid != 0),
+        avg_hours_per_entry=avg_hours_per_entry,
+        projects=projects,
+    )
 
 
 @router.get("/admin/users/{user_id}", response_model=IndividualUserMetrics)

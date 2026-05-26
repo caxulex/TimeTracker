@@ -178,6 +178,34 @@ vi.mock('../api/client', () => ({
   timeEntriesApi: {
     getAll: vi.fn(() => Promise.resolve(mockTimeEntries)),
   },
+  reportsApi: {
+    // PR fix/staff-analytics-server-side-aggregation: StaffDetailPage now
+    // pulls totals from this server-aggregated endpoint instead of reducing
+    // a paginated /api/time list (which was capped at 100 rows).
+    getAdminUserAnalytics: vi.fn(() =>
+      Promise.resolve({
+        user_id: 10,
+        user_name: 'Alice Johnson',
+        start_date: '2025-05-01',
+        end_date: '2025-06-01',
+        total_seconds: 14400,
+        total_hours: 4,
+        total_entries: 2,
+        days_worked: 2,
+        project_count: 1,
+        avg_hours_per_entry: 2,
+        projects: [
+          {
+            project_id: 1,
+            project_name: 'Project Alpha',
+            total_seconds: 14400,
+            total_hours: 4,
+            entry_count: 2,
+          },
+        ],
+      })
+    ),
+  },
   projectsApi: {
     getAll: vi.fn(() =>
       Promise.resolve({
@@ -529,6 +557,55 @@ describe('StaffDetailPage', () => {
         const content = document.body.textContent || '';
         expect(content.length).toBeGreaterThan(0);
       });
+    });
+  });
+
+  // ----------------------------------------
+  // Server-side aggregation (regression for the >100-entry undercounting bug).
+  // ----------------------------------------
+  describe('Server-Side Analytics', () => {
+    it('renders totals from reportsApi.getAdminUserAnalytics, not from the paginated time-entries list', async () => {
+      const { reportsApi, timeEntriesApi } = await import('../api/client');
+
+      // Server reports 250 entries / 500h — far more than the /api/time
+      // 100-row cap could ever surface client-side.
+      vi.mocked(reportsApi.getAdminUserAnalytics).mockResolvedValueOnce({
+        user_id: 10,
+        user_name: 'Alice Johnson',
+        start_date: '2025-05-01',
+        end_date: '2025-06-01',
+        total_seconds: 500 * 3600,
+        total_hours: 500,
+        total_entries: 250,
+        days_worked: 22,
+        project_count: 3,
+        avg_hours_per_entry: 2,
+        projects: [],
+      });
+      // Paginated list returns only 2 items — would have produced ~4h
+      // client-side under the old code path. Test asserts we DO NOT see that.
+      vi.mocked(timeEntriesApi.getAll).mockResolvedValueOnce(mockTimeEntries as never);
+
+      renderStaffDetailPage();
+
+      // Switch to time tab where the totals cards live.
+      await waitFor(() => {
+        expect(screen.getByText(/Time Tracking/i)).toBeInTheDocument();
+      });
+      const timeTab = screen.getAllByText(/Time Tracking/i)[0];
+      await userEvent.click(timeTab);
+
+      await waitFor(() => {
+        const content = document.body.textContent || '';
+        // Server total surfaces:
+        expect(content).toMatch(/500\.0/);
+        expect(content).toContain('250');
+        // Days worked / project count from server, not client Set():
+        expect(content).toContain('22');
+        expect(content).toContain('3');
+      });
+
+      expect(reportsApi.getAdminUserAnalytics).toHaveBeenCalled();
     });
   });
 });

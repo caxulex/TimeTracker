@@ -589,6 +589,36 @@ export const reportsApi = {
     return response.data;
   },
 
+  getAdminUserAnalytics: async (
+    userId: number,
+    startDate: string,
+    endDate: string,
+  ): Promise<{
+    user_id: number;
+    user_name: string;
+    start_date: string;
+    end_date: string;
+    total_seconds: number;
+    total_hours: number;
+    total_entries: number;
+    days_worked: number;
+    project_count: number;
+    avg_hours_per_entry: number;
+    projects: Array<{
+      project_id: number;
+      project_name: string;
+      total_seconds: number;
+      total_hours: number;
+      entry_count: number;
+    }>;
+  }> => {
+    const response = await api.get(
+      `/api/reports/admin/users/${userId}/analytics`,
+      { params: { start_date: startDate, end_date: endDate } },
+    );
+    return response.data;
+  },
+
   getAdminTimeEntries: async (params: {
     start_date: string;
     end_date: string;
