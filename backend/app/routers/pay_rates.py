@@ -44,7 +44,8 @@ async def create_pay_rate(
 @router.get("", response_model=dict)
 async def list_pay_rates(
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    page_size: int = Query(100, ge=1, le=1000),
+    limit: Optional[int] = Query(None, ge=1, le=1000, deprecated=True, description="Deprecated: use page_size"),
     active_only: bool = Query(True),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
@@ -53,11 +54,12 @@ async def list_pay_rates(
     List all pay rates with pagination.
     Admin only. Filtered by company for non-super admins.
     """
+    effective_page_size = limit if limit is not None else page_size
     service = PayRateService(db)
     # Filter by company_id using multi-tenant filter
     company_filter = get_company_filter(current_user)
     # For platform users (FILTER_NULL_COMPANY), the service layer handles the sentinel
-    pay_rates, total = await service.get_all_pay_rates(skip, limit, active_only, company_filter)
+    pay_rates, total = await service.get_all_pay_rates(skip, effective_page_size, active_only, company_filter)
 
     return {
         "items": [
@@ -81,7 +83,8 @@ async def list_pay_rates(
         ],
         "total": total,
         "skip": skip,
-        "limit": limit
+        "limit": effective_page_size,
+        "page_size": effective_page_size
     }
 
 

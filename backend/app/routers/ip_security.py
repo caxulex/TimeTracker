@@ -108,21 +108,25 @@ async def remove_from_blacklist(
 
 @router.get("/suspicious")
 async def get_suspicious_ips(
-    limit: int = Query(50, ge=1, le=200),
+    page_size: int = Query(50, ge=1, le=1000),
+    limit: Optional[int] = Query(None, ge=1, le=1000, deprecated=True, description="Deprecated: use page_size"),
     current_user: User = Depends(require_role(["admin"]))
 ):
     """Get list of suspicious IP addresses for review"""
-    return IPSecurityService.get_suspicious_ips(limit)
+    effective_page_size = limit if limit is not None else page_size
+    return IPSecurityService.get_suspicious_ips(effective_page_size)
 
 
 @router.get("/login-history/{email}")
 async def get_login_history(
     email: str,
-    limit: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
+    limit: Optional[int] = Query(None, ge=1, le=1000, deprecated=True, description="Deprecated: use page_size"),
     current_user: User = Depends(require_role(["admin", "manager"]))
 ):
     """Get login history for a specific user"""
-    return IPSecurityService.get_login_history(email, limit)
+    effective_page_size = limit if limit is not None else page_size
+    return IPSecurityService.get_login_history(email, effective_page_size)
 
 
 @router.get("/check/{ip_address}")

@@ -65,7 +65,8 @@ class AuditLogSummary(BaseModel):
 
 @router.get("", response_model=AuditLogListResponse)
 async def get_audit_logs(
-    limit: int = Query(100, ge=1, le=500, description="Maximum number of logs to return"),
+    page_size: int = Query(100, ge=1, le=1000, description="Maximum number of logs to return"),
+    limit: Optional[int] = Query(None, ge=1, le=1000, deprecated=True, description="Deprecated: use page_size"),
     event_type: Optional[str] = Query(None, description="Filter by event type"),
     current_user: User = Depends(get_current_admin_user)
 ):
@@ -75,6 +76,7 @@ async def get_audit_logs(
     Admin only.
     """
     try:
+        effective_page_size = limit if limit is not None else page_size
         # Convert event_type string to enum if provided
         filter_type = None
         if event_type:
@@ -86,7 +88,7 @@ async def get_audit_logs(
                     detail=f"Invalid event type: {event_type}"
                 )
 
-        logs = await audit_log.get_recent_logs(event_type=filter_type, limit=limit)
+        logs = await audit_log.get_recent_logs(event_type=filter_type, limit=effective_page_size)
 
         return AuditLogListResponse(
             items=[AuditLogEntry(**log) for log in logs],
@@ -103,7 +105,8 @@ async def get_audit_logs(
 @router.get("/user/{user_id}", response_model=AuditLogListResponse)
 async def get_user_audit_logs(
     user_id: int,
-    limit: int = Query(100, ge=1, le=500, description="Maximum number of logs to return"),
+    page_size: int = Query(100, ge=1, le=1000, description="Maximum number of logs to return"),
+    limit: Optional[int] = Query(None, ge=1, le=1000, deprecated=True, description="Deprecated: use page_size"),
     current_user: User = Depends(get_current_admin_user)
 ):
     """
@@ -111,7 +114,8 @@ async def get_user_audit_logs(
     Admin only.
     """
     try:
-        logs = await audit_log.get_user_logs(user_id=user_id, limit=limit)
+        effective_page_size = limit if limit is not None else page_size
+        logs = await audit_log.get_user_logs(user_id=user_id, limit=effective_page_size)
 
         return AuditLogListResponse(
             items=[AuditLogEntry(**log) for log in logs],

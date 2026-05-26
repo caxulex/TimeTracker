@@ -74,7 +74,8 @@ async def create_payroll_period(
 @router.get("/periods", response_model=dict)
 async def list_payroll_periods(
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    page_size: int = Query(100, ge=1, le=1000),
+    limit: Optional[int] = Query(None, ge=1, le=1000, deprecated=True, description="Deprecated: use page_size"),
     status: Optional[PeriodStatusEnum] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
@@ -83,10 +84,11 @@ async def list_payroll_periods(
     List all payroll periods with pagination.
     Admin only. Filtered by company for non-super admins.
     """
+    effective_page_size = limit if limit is not None else page_size
     service = PayrollPeriodService(db)
     # Multi-tenancy: ALWAYS filter by user's company (strict isolation)
     company_id = current_user.company_id
-    periods, total = await service.get_periods(skip, limit, status, company_id)
+    periods, total = await service.get_periods(skip, effective_page_size, status, company_id)
 
     return {
         "items": [
@@ -108,7 +110,8 @@ async def list_payroll_periods(
         ],
         "total": total,
         "skip": skip,
-        "limit": limit
+        "limit": effective_page_size,
+        "page_size": effective_page_size
     }
 
 
@@ -402,7 +405,8 @@ async def get_period_entries(
 async def get_user_payroll_entries(
     user_id: int,
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    page_size: int = Query(100, ge=1, le=1000),
+    limit: Optional[int] = Query(None, ge=1, le=1000, deprecated=True, description="Deprecated: use page_size"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -416,14 +420,16 @@ async def get_user_payroll_entries(
             detail="Can only view your own payroll entries"
         )
 
+    effective_page_size = limit if limit is not None else page_size
     service = PayrollEntryService(db)
-    entries, total = await service.get_user_entries(user_id, skip, limit)
+    entries, total = await service.get_user_entries(user_id, skip, effective_page_size)
 
     return {
         "items": entries,
         "total": total,
         "skip": skip,
-        "limit": limit
+        "limit": effective_page_size,
+        "page_size": effective_page_size
     }
 
 

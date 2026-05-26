@@ -52,11 +52,13 @@ async def get_pending_approvals(
     user_id: Optional[int] = Query(None, description="Filter by user"),
     project_id: Optional[int] = Query(None, description="Filter by project"),
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
+    page_size: int = Query(50, ge=1, le=1000),
+    limit: Optional[int] = Query(None, ge=1, le=1000, deprecated=True, description="Deprecated: use page_size"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(["admin", "manager", "company_admin"]))
 ):
     """Get all pending time entries for approval (managers/admins only) with multi-tenant filtering"""
+    effective_page_size = limit if limit is not None else page_size
     # Get company filter for multi-tenant data isolation
     company_filter = get_company_filter(current_user)
 
@@ -74,7 +76,7 @@ async def get_pending_approvals(
     if project_id:
         query = query.where(TimeEntry.project_id == project_id)
 
-    query = query.offset(skip).limit(limit).order_by(TimeEntry.start_time.desc())
+    query = query.offset(skip).limit(effective_page_size).order_by(TimeEntry.start_time.desc())
 
     result = await db.execute(query)
     entries = result.scalars().all()

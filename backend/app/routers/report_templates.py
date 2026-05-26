@@ -252,11 +252,13 @@ async def toggle_scheduled_report(
 
 @router.get("/scheduled/history")
 async def get_report_history(
-    limit: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
+    limit: Optional[int] = Query(None, ge=1, le=1000, deprecated=True, description="Deprecated: use page_size"),
     current_user: User = Depends(get_current_user)
 ):
     """Get report sending history for the current user"""
-    return ScheduledReportService.get_report_history(current_user.id, limit)
+    effective_page_size = limit if limit is not None else page_size
+    return ScheduledReportService.get_report_history(current_user.id, effective_page_size)
 
 
 
