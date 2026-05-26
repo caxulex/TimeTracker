@@ -2,7 +2,7 @@
 // TIME TRACKER - TEAMS PAGE
 // ============================================
 import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, Button, Input, Modal, LoadingOverlay } from '../components/common';
 import { teamsApi, usersApi } from '../api/client';
 import { formatDate, getInitials, isAdminUser, cn } from '../utils/helpers';
@@ -25,10 +25,35 @@ export function TeamsPage() {
   const [selectedTeam, setSelectedTeam] = useState<number | null>(null);
   const [showMemberModal, setShowMemberModal] = useState(false);
 
-  // Fetch teams
-  const { data: teamsData, isLoading, error: teamsError } = useQuery({
-    queryKey: ['teams'],
-    queryFn: () => teamsApi.getAll(),
+  // Fetch teams — paginated via Load More.
+  //
+  // Same pagination-shadow shape as ProjectsPage (PR #35) and
+  // TasksPage (PR #39): the server defaults to page_size=20 and
+  // silently caps the list. useInfiniteQuery with page_size=50
+  // plus a "Showing X of Y" indicator and a "Load More" button
+  // keeps every team reachable on tenants with many teams.
+  const TEAMS_PAGE_SIZE = 50;
+  const {
+    data: teamsData,
+    isLoading,
+    error: teamsError,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['teams', 'paginated'],
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) =>
+      teamsApi.getAll(pageParam as number, TEAMS_PAGE_SIZE),
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce(
+        (acc, p) => acc + (p.items?.length || 0),
+        0
+      );
+      const total = lastPage?.total ?? 0;
+      if (loaded >= total) return undefined;
+      return allPages.length + 1;
+    },
   });
 
   // Fetch selected team details
@@ -45,8 +70,16 @@ export function TeamsPage() {
     enabled: isAdmin,
   });
 
-  const teams = teamsData?.items || [];
+  const teams: Team[] = (teamsData?.pages ?? []).flatMap(
+    (p) => p.items || []
+  );
+  const totalTeams = teamsData?.pages?.[0]?.total ?? teams.length;
   const users = usersData?.items || [];
+
+  // Silence the unused-var lint warning when teamsError is only
+  // surfaced indirectly. (Kept around for parity with the previous
+  // shape — callers may decide to render an error banner later.)
+  void teamsError;
 
   // Create team mutation (admin only)
   const createMutation = useMutation({
@@ -177,6 +210,17 @@ export function TeamsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Teams list */}
         <div className="lg:col-span-1 space-y-3">
+          {/* "Showing X of Y teams" indicator. Counts loaded
+              teams against the server-reported total so admins
+              can see when more pages remain. */}
+          {teams.length > 0 && (
+            <p
+              className="text-sm text-gray-500 px-1"
+              data-testid="teams-count"
+            >
+              Showing {teams.length} of {totalTeams} teams
+            </p>
+          )}
           {teams.length === 0 ? (
             <Card className="text-center py-8">
               <svg className="mx-auto w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -215,6 +259,21 @@ export function TeamsPage() {
                 </div>
               </Card>
             ))
+          )}
+
+          {/* Load More — server-side pagination via useInfiniteQuery. */}
+          {hasNextPage && (
+            <div className="flex justify-center pt-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => fetchNextPage()}
+                disabled={isFetchingNextPage}
+                data-testid="teams-load-more"
+              >
+                {isFetchingNextPage ? 'Loading…' : 'Load More'}
+              </Button>
+            </div>
           )}
         </div>
 

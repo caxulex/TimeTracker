@@ -3,7 +3,7 @@
 // TASK-023: Admin user management page
 // ============================================
 import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, Button, Input, Modal, LoadingOverlay, Select } from '../components/common';
 import { usersApi } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
@@ -28,13 +28,46 @@ export function UsersPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [showDeactivated, setShowDeactivated] = useState(false);
 
-  // Fetch users
-  const { data: usersData, isLoading } = useQuery({
-    queryKey: ['users'],
-    queryFn: () => usersApi.getAll(1, 100),
+  // Fetch users — paginated via Load More.
+  //
+  // Same pagination-shadow shape as ProjectsPage (PR #35) and
+  // TasksPage (PR #39): the server defaults to page_size=20 and
+  // silently caps the list. We use useInfiniteQuery with
+  // page_size=50 plus a "Showing X of Y" indicator and a
+  // "Load More" button so admins can reach every user even on
+  // tenants with hundreds of accounts. The search and
+  // "show deactivated" filters are pure client-side filters over
+  // the loaded pages — they don't go in the query key — so the
+  // user can flip them without re-fetching what was already paged
+  // in. (If a tenant ever grows past a few hundred users the
+  // right fix is server-side search; out of scope here.)
+  const USERS_PAGE_SIZE = 50;
+  const {
+    data: usersData,
+    isLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['users', 'paginated'],
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) =>
+      usersApi.getAll(pageParam as number, USERS_PAGE_SIZE),
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce(
+        (acc, p) => acc + (p.items?.length || 0),
+        0
+      );
+      const total = lastPage?.total ?? 0;
+      if (loaded >= total) return undefined;
+      return allPages.length + 1;
+    },
   });
 
-  const users = usersData?.items || [];
+  const users: User[] = (usersData?.pages ?? []).flatMap(
+    (p) => p.items || []
+  );
+  const totalUsers = usersData?.pages?.[0]?.total ?? users.length;
 
   // Filter users
   const filteredUsers = users.filter((user: User) => {
@@ -157,6 +190,16 @@ export function UsersPage() {
         </Card>
       </div>
 
+      {/* "Showing X of Y users" indicator. Counts the
+          currently-visible (client-filtered) users against the
+          server-reported total so admins can see when more pages
+          remain to be loaded. */}
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500" data-testid="users-count">
+          Showing {filteredUsers.length} of {totalUsers} users
+        </p>
+      </div>
+
       {/* Users table */}
       <Card>
         <CardHeader title="All Users" subtitle={`${filteredUsers.length} users found`} />
@@ -257,6 +300,22 @@ export function UsersPage() {
           </table>
         </div>
       </Card>
+
+      {/* Load More — server-side pagination via useInfiniteQuery.
+          Hidden once everything is loaded; disabled while the
+          next page is in flight. */}
+      {hasNextPage && (
+        <div className="flex justify-center pt-2">
+          <Button
+            variant="secondary"
+            onClick={() => fetchNextPage()}
+            disabled={isFetchingNextPage}
+            data-testid="users-load-more"
+          >
+            {isFetchingNextPage ? 'Loading…' : 'Load More'}
+          </Button>
+        </div>
+      )}
 
       {/* Edit User Modal */}
       <UserEditModal
