@@ -945,7 +945,7 @@ async def create_manual_entry(
 @router.get("", response_model=PaginatedTimeEntries)
 async def list_time_entries(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
     project_id: Optional[int] = None,
     task_id: Optional[int] = None,
     user_id: Optional[int] = None,

@@ -745,9 +745,9 @@ export const payRatesApi = {
     return response.data;
   },
 
-  getAll: async (page = 1, limit = 100, activeOnly = true) => {
+  getAll: async (page = 1, pageSize = 100, activeOnly = true) => {
     const response = await api.get('/api/pay-rates', {
-      params: { skip: (page - 1) * limit, limit, active_only: activeOnly },
+      params: { skip: (page - 1) * pageSize, page_size: pageSize, active_only: activeOnly },
     });
     return response.data;
   },
