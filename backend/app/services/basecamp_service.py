@@ -35,6 +35,7 @@ from app.models import (
     Task,
     Team,
 )
+from app.services.audit_logger import AuditAction, AuditLogger
 from app.services.encryption_service import EncryptionService
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,11 @@ REFRESH_THRESHOLD_SECONDS = 60
 
 # User-Agent: Basecamp asks integrations to identify themselves.
 USER_AGENT = "TimeTracker by SMC (support@shaemarcus.com)"
+
+# System sync actor convention for unattended jobs:
+# keep ``user_id`` NULL to indicate non-human actor and set an explicit
+# synthetic email so audit trails remain searchable.
+BASECAMP_SYNC_SYSTEM_EMAIL = "basecamp-sync@system"
 
 
 class BasecampError(Exception):
@@ -450,6 +456,8 @@ class BasecampService:
         company_id: int,
         db: AsyncSession,
         dry_run: bool = False,
+        triggered_by_user_id: Optional[int] = None,
+        triggered_by_user_email: Optional[str] = None,
     ) -> dict:
         """Pull Basecamp projects and mirror them as internal Project rows.
 
@@ -510,6 +518,12 @@ class BasecampService:
                 bc_id = bc["id"]
                 bc_name = bc["name"]
                 bc_desc = bc.get("description") or None
+                actor_user_id, actor_user_email, sync_mode = (
+                    BasecampService._resolve_sync_actor(
+                        triggered_by_user_id,
+                        triggered_by_user_email,
+                    )
+                )
 
                 mapping_row = await db.execute(
                     select(BasecampProjectMapping).where(
@@ -532,14 +546,51 @@ class BasecampService:
                     )
                     db.add(project)
                     await db.flush()
-                    db.add(
-                        BasecampProjectMapping(
-                            company_id=company_id,
-                            basecamp_account_id=credentials.account_id,
-                            basecamp_project_id=bc_id,
-                            internal_project_id=project.id,
-                            last_synced_at=datetime.now(timezone.utc),
-                        )
+                    await AuditLogger.log(
+                        db=db,
+                        action=AuditAction.CREATE,
+                        resource_type="project",
+                        resource_id=project.id,
+                        user_id=actor_user_id,
+                        user_email=actor_user_email,
+                        new_values={
+                            "name": project.name,
+                            "description": project.description,
+                            "team_id": project.team_id,
+                            "basecamp_project_id": bc_id,
+                        },
+                        details=(
+                            f"Created from Basecamp project {bc_id} "
+                            f"via {sync_mode}"
+                        ),
+                    )
+
+                    mapping = BasecampProjectMapping(
+                        company_id=company_id,
+                        basecamp_account_id=credentials.account_id,
+                        basecamp_project_id=bc_id,
+                        internal_project_id=project.id,
+                        last_synced_at=datetime.now(timezone.utc),
+                    )
+                    db.add(mapping)
+                    await db.flush()
+                    await AuditLogger.log(
+                        db=db,
+                        action=AuditAction.CREATE,
+                        resource_type="basecamp_project_mapping",
+                        resource_id=mapping.id,
+                        user_id=actor_user_id,
+                        user_email=actor_user_email,
+                        new_values={
+                            "company_id": company_id,
+                            "basecamp_account_id": credentials.account_id,
+                            "basecamp_project_id": bc_id,
+                            "internal_project_id": project.id,
+                        },
+                        details=(
+                            f"Created Basecamp project mapping for project {bc_id} "
+                            f"via {sync_mode}"
+                        ),
                     )
                     report["created"] += 1
                 else:
@@ -558,6 +609,24 @@ class BasecampService:
                         )
                         db.add(project)
                         await db.flush()
+                        await AuditLogger.log(
+                            db=db,
+                            action=AuditAction.CREATE,
+                            resource_type="project",
+                            resource_id=project.id,
+                            user_id=actor_user_id,
+                            user_email=actor_user_email,
+                            new_values={
+                                "name": project.name,
+                                "description": project.description,
+                                "team_id": project.team_id,
+                                "basecamp_project_id": bc_id,
+                            },
+                            details=(
+                                f"Recreated missing project from Basecamp "
+                                f"project {bc_id} via {sync_mode}"
+                            ),
+                        )
                         mapping.internal_project_id = project.id
                         mapping.last_synced_at = datetime.now(timezone.utc)
                         report["created"] += 1
@@ -568,9 +637,37 @@ class BasecampService:
                     )
                     if changed:
                         if not dry_run:
+                            old_values: dict[str, Any] = {
+                                "basecamp_project_id": bc_id,
+                            }
+                            new_values: dict[str, Any] = {
+                                "basecamp_project_id": bc_id,
+                            }
+                            if project.name != bc_name:
+                                old_values["name"] = project.name
+                                new_values["name"] = bc_name
+                            if (project.description or None) != bc_desc:
+                                old_values["description"] = (
+                                    project.description or None
+                                )
+                                new_values["description"] = bc_desc
                             project.name = bc_name
                             project.description = bc_desc
                             mapping.last_synced_at = datetime.now(timezone.utc)
+                            await AuditLogger.log(
+                                db=db,
+                                action=AuditAction.UPDATE,
+                                resource_type="project",
+                                resource_id=project.id,
+                                user_id=actor_user_id,
+                                user_email=actor_user_email,
+                                old_values=old_values,
+                                new_values=new_values,
+                                details=(
+                                    f"Updated from Basecamp project {bc_id} "
+                                    f"via {sync_mode}"
+                                ),
+                            )
                         report["updated"] += 1
                     else:
                         if not dry_run:
@@ -762,6 +859,8 @@ class BasecampService:
         company_id: int,
         db: AsyncSession,
         dry_run: bool = False,
+        triggered_by_user_id: Optional[int] = None,
+        triggered_by_user_email: Optional[str] = None,
     ) -> dict:
         """Mirror Basecamp to-dos as TimeTracker ``Task`` rows.
 
@@ -873,6 +972,8 @@ class BasecampService:
                             todo=td,
                             dry_run=dry_run,
                             report=report,
+                            triggered_by_user_id=triggered_by_user_id,
+                            triggered_by_user_email=triggered_by_user_email,
                         )
                     except Exception as exc:  # noqa: BLE001
                         logger.exception("basecamp.todos.todo_failed")
@@ -898,6 +999,8 @@ class BasecampService:
         todo: dict,
         dry_run: bool,
         report: dict,
+        triggered_by_user_id: Optional[int],
+        triggered_by_user_email: Optional[str],
     ) -> None:
         """Create or update a single Task + its BasecampTaskMapping row."""
         todo_id = todo["id"]
@@ -920,6 +1023,12 @@ class BasecampService:
         target_created_at = _parse_basecamp_datetime(todo.get("created_at"))
         raw_position = todo.get("position")
         target_position = int(raw_position) if raw_position is not None else None
+        actor_user_id, actor_user_email, sync_mode = (
+            BasecampService._resolve_sync_actor(
+                triggered_by_user_id,
+                triggered_by_user_email,
+            )
+        )
 
         existing_row = await db.execute(
             select(BasecampTaskMapping).where(
@@ -942,6 +1051,26 @@ class BasecampService:
             )
             db.add(task)
             await db.flush()
+            await AuditLogger.log(
+                db=db,
+                action=AuditAction.CREATE,
+                resource_type="task",
+                resource_id=task.id,
+                user_id=actor_user_id,
+                user_email=actor_user_email,
+                new_values={
+                    "project_id": task.project_id,
+                    "name": task.name,
+                    "description": task.description,
+                    "status": task.status,
+                    "basecamp_project_id": basecamp_project_id,
+                    "basecamp_todo_id": todo_id,
+                },
+                details=(
+                    f"Created from Basecamp to-do {todo_id} in project "
+                    f"{basecamp_project_id} via {sync_mode}"
+                ),
+            )
             db.add(
                 BasecampTaskMapping(
                     company_id=company_id,
@@ -976,6 +1105,26 @@ class BasecampService:
             )
             db.add(task)
             await db.flush()
+            await AuditLogger.log(
+                db=db,
+                action=AuditAction.CREATE,
+                resource_type="task",
+                resource_id=task.id,
+                user_id=actor_user_id,
+                user_email=actor_user_email,
+                new_values={
+                    "project_id": task.project_id,
+                    "name": task.name,
+                    "description": task.description,
+                    "status": task.status,
+                    "basecamp_project_id": basecamp_project_id,
+                    "basecamp_todo_id": todo_id,
+                },
+                details=(
+                    f"Recreated missing task from Basecamp to-do {todo_id} "
+                    f"in project {basecamp_project_id} via {sync_mode}"
+                ),
+            )
             mapping.task_id = task.id
             mapping.basecamp_todolist_id = todolist_id
             mapping.basecamp_project_id = basecamp_project_id
@@ -1042,6 +1191,20 @@ class BasecampService:
         except httpx.HTTPError as exc:
             logger.warning("basecamp.revoke.failed: %s", exc)
             return False
+
+    @staticmethod
+    def _resolve_sync_actor(
+        triggered_by_user_id: Optional[int],
+        triggered_by_user_email: Optional[str],
+    ) -> tuple[Optional[int], str, str]:
+        """Resolve audit actor identity for manual vs unattended sync runs."""
+        if triggered_by_user_id is not None:
+            return (
+                triggered_by_user_id,
+                triggered_by_user_email or BASECAMP_SYNC_SYSTEM_EMAIL,
+                "manual sync",
+            )
+        return (None, BASECAMP_SYNC_SYSTEM_EMAIL, "4hourly scheduler")
 
 
 def _parse_next_link(link_header: Optional[str]) -> Optional[str]:

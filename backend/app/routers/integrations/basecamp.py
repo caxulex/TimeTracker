@@ -412,10 +412,20 @@ async def sync_projects(
 
     try:
         report = await BasecampService.sync_projects_to_company(
-            creds, company_id, db, dry_run=body.dry_run
+            creds,
+            company_id,
+            db,
+            dry_run=body.dry_run,
+            triggered_by_user_id=current_user.id,
+            triggered_by_user_email=current_user.email,
         )
         todo_report = await BasecampService.sync_todos_for_company(
-            creds, company_id, db, dry_run=body.dry_run
+            creds,
+            company_id,
+            db,
+            dry_run=body.dry_run,
+            triggered_by_user_id=current_user.id,
+            triggered_by_user_email=current_user.email,
         )
     except BasecampError as exc:
         raise HTTPException(
