@@ -5,6 +5,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
+import { UserSelect } from '../components/users/UserSelect';
 import { usersApi, teamsApi, payRatesApi, timeEntriesApi, projectsApi, reportsApi, companiesApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import { useStaffNotifications } from '../hooks/useStaffNotifications';
@@ -186,6 +187,16 @@ export function StaffPage() {
   const { data: teamsData } = useQuery({
     queryKey: ['teams'],
     queryFn: () => teamsApi.getAll(1, 100),
+    enabled: isAdmin,
+  });
+
+  // Fetch full active users list for manager assignment typeahead.
+  const { data: managersData } = useQuery({
+    queryKey: ['staff-managers'],
+    queryFn: async () => {
+      const response = await usersApi.getAll(1, 500);
+      return response.items.filter((u: User) => u.is_active && u.role === 'super_admin');
+    },
     enabled: isAdmin,
   });
 
@@ -1179,18 +1190,17 @@ export function StaffPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Manager</label>
-                    <select
-                      value={createForm.manager_id || ''}
-                      onChange={(e) => setCreateForm({ ...createForm, manager_id: e.target.value ? parseInt(e.target.value) : null })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">None</option>
-                      {usersData?.items.filter((u: User) => u.role === 'super_admin').map((user: User) => (
-                        <option key={user.id} value={user.id}>
-                          {user.name}
-                        </option>
-                      ))}
-                    </select>
+                    <UserSelect
+                      id="manager-select"
+                      value={createForm.manager_id}
+                      onChange={(managerId) => setCreateForm({ ...createForm, manager_id: managerId })}
+                      users={managersData || []}
+                      clearable
+                      clearLabel="None"
+                      placeholder="None"
+                      ariaLabel="Manager"
+                      inputClassName="w-full border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                    />
                   </div>
                 </div>
               )}
@@ -1944,7 +1954,7 @@ function ManageTeamsModal({ staff, onClose }: { staff: User; onClose: () => void
   // Fetch projects accessible through teams
   const { data: projectsData, isLoading: loadingProjects } = useQuery({
     queryKey: ['staff-projects', staff.id],
-    queryFn: () => projectsApi.getAll({ page: 1, size: 100 }),
+    queryFn: () => projectsApi.getAll({ page: 1, page_size: 100 }),
   });
 
   const addToTeamMutation = useMutation({

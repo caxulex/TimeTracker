@@ -71,7 +71,7 @@ export function ProjectsPage() {
   // Fetch teams for dropdown
   const { data: teamsData } = useQuery({
     queryKey: ['teams'],
-    queryFn: () => teamsApi.getAll(),
+    queryFn: () => teamsApi.getAll(1, 100),
   });
 
   // Filter projects based on showArchived toggle

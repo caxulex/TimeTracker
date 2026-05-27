@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
+import { UserSelect } from '../components/users/UserSelect';
 // Use lazy-loaded AI components to reduce initial bundle size (Task 6.1)
 import {
   LazyPayrollForecastPanel as PayrollForecastPanel,
@@ -70,6 +71,7 @@ interface TeamAnalytics {
 interface UserSummary {
   user_id: number;
   user_name: string;
+  user_email?: string;
   total_seconds: number;
   total_hours: number;
   entry_count: number;
@@ -196,6 +198,16 @@ export default function AdminReportsPage() {
         totalPages: usersResponse.total_pages,
       }
     : null;
+
+  const selectableUsers = useMemo(
+    () =>
+      (allUsersForDropdown ?? usersData).map((u) => ({
+        id: u.user_id,
+        name: u.user_name,
+        email: u.user_email ?? '',
+      })),
+    [allUsersForDropdown, usersData]
+  );
 
   // Fetch selected user detail
   const { data: selectedUserDetail, isLoading: isSelectedUserLoading } = useQuery<SelectedUserDetail>({
@@ -617,19 +629,20 @@ export default function AdminReportsPage() {
               <div className="flex flex-wrap items-center gap-4">
                 {/* User Selector Dropdown */}
                 <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Select Staff:</label>
-                  <select
-                    value={selectedUserId || ''}
-                    onChange={(e) => setSelectedUserId(e.target.value ? parseInt(e.target.value) : null)}
-                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none min-w-[200px]"
-                  >
-                    <option value="">-- All Staff Comparison --</option>
-                    {(allUsersForDropdown ?? usersData).map((u) => (
-                      <option key={u.user_id} value={u.user_id}>
-                        {u.user_name}
-                      </option>
-                    ))}
-                  </select>
+                  <label htmlFor="admin-reports-user-select" className="text-sm font-medium text-gray-700 dark:text-gray-300">Select Staff:</label>
+                  <div className="min-w-[240px]">
+                    <UserSelect
+                      id="admin-reports-user-select"
+                      value={selectedUserId}
+                      onChange={setSelectedUserId}
+                      users={selectableUsers}
+                      clearable
+                      clearLabel="-- All Staff Comparison --"
+                      placeholder="-- All Staff Comparison --"
+                      ariaLabel="Select staff"
+                      inputClassName="border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
                 </div>
                 
                 {/* Period Selector */}

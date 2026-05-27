@@ -444,22 +444,19 @@ function TaskModal({ isOpen, onClose, task, projects, onSubmit, isLoading }: Tas
         />
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="task-project-select" className="block text-sm font-medium text-gray-700 mb-1">
             Project <span className="text-red-500">*</span>
           </label>
-          <select
-            value={projectId}
-            onChange={(e) => setProjectId(Number(e.target.value))}
-            className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          <ProjectSelect
+            id="task-project-select"
+            value={projectId === '' ? null : projectId}
+            onChange={(value) => setProjectId(value ?? '')}
+            projects={projects}
+            placeholder="Select a project"
+            ariaLabel="Project"
             required
-          >
-            <option value="">Select a project</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
+            inputClassName="block w-full border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          />
         </div>
 
         <div>

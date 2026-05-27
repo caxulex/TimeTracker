@@ -6,7 +6,8 @@
 // can create tasks on any project they can already see.
 // ============================================
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { TasksPage } from '../TasksPage';
@@ -36,6 +37,8 @@ vi.mock('../../hooks/useAIFeatures', () => ({
 vi.mock('../../components/ai', () => ({
   TaskEstimationCard: () => null,
 }));
+
+import { tasksApi } from '../../api/client';
 
 function renderTasksPage() {
   const queryClient = new QueryClient({
@@ -68,6 +71,30 @@ describe('TasksPage - staff task creation', () => {
     renderTasksPage();
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /^tasks$/i })).toBeInTheDocument();
+    });
+  });
+
+  it('uses ProjectSelect typeahead in the task modal and submits selected project id', async () => {
+    const user = userEvent.setup();
+    renderTasksPage();
+
+    await user.click(await screen.findByRole('button', { name: /new task/i }));
+
+    const taskNameInput = await screen.findByLabelText(/task name/i);
+    await user.type(taskNameInput, 'Ship pagination audit');
+
+    const projectInput = await screen.findByLabelText(/^project/i);
+    await user.click(projectInput);
+    await user.type(projectInput, 'visible');
+
+    fireEvent.mouseDown(await screen.findByTestId('project-select-option-1'));
+
+    await user.click(screen.getByRole('button', { name: /create task/i }));
+
+    await waitFor(() => {
+      expect(tasksApi.create).toHaveBeenCalledWith(
+        expect.objectContaining({ project_id: 1, name: 'Ship pagination audit' })
+      );
     });
   });
 });
