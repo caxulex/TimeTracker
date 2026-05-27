@@ -66,7 +66,7 @@ export function TeamsPage() {
   // Fetch users for member add (admin only)
   const { data: usersData } = useQuery({
     queryKey: ['users'],
-    queryFn: () => usersApi.getAll(),
+    queryFn: () => usersApi.getAll(1, 100),
     enabled: isAdmin,
   });
 

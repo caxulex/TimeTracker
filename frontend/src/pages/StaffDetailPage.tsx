@@ -175,7 +175,7 @@ export function StaffDetailPage() {
   // Fetch projects
   const { data: projectsData } = useQuery({
     queryKey: ['projects'],
-    queryFn: () => projectsApi.getAll({ page: 1, size: 100 }),
+    queryFn: () => projectsApi.getAll({ page: 1, page_size: 100 }),
     enabled: isAdmin,
   });
 

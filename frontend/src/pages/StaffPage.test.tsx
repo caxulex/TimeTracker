@@ -3,7 +3,7 @@
 // Phase 2: Test Coverage - Staff Management
 // ============================================
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -89,6 +89,10 @@ vi.mock('../hooks/useStaffFormValidation', () => ({
   useStaffFormValidation: vi.fn(() => ({
     errors: {},
     validateStaffForm: vi.fn(() => ({ isValid: true, errors: {} })),
+    hasFieldError: vi.fn(() => false),
+    getFieldError: vi.fn(() => ''),
+    secureAndValidate: vi.fn((data: unknown) => ({ valid: true, securedData: data })),
+    clearErrors: vi.fn(),
   })),
 }));
 
@@ -123,6 +127,21 @@ vi.mock('../utils/helpers', async (importOriginal) => {
 
 // Sample staff data
 const mockStaffList = [
+  {
+    id: 2,
+    name: 'Admin User',
+    email: 'admin@example.com',
+    role: 'super_admin',
+    is_active: true,
+    company_id: 1,
+    phone: '555-0100',
+    job_title: 'Operations Lead',
+    department: 'Operations',
+    employment_type: 'full_time',
+    expected_hours_per_week: 40,
+    start_date: '2024-01-10',
+    created_at: '2024-01-10T00:00:00Z',
+  },
   {
     id: 10,
     name: 'Alice Johnson',
@@ -447,6 +466,37 @@ describe('StaffPage', () => {
           content.includes('permission') ||
           !content.includes('alice johnson')
         ).toBeTruthy();
+      });
+    });
+  });
+
+  describe('Create Modal Manager Picker', () => {
+    it('renders UserSelect for manager and supports typeahead selection', async () => {
+      const user = userEvent.setup();
+      const helpers = await import('../utils/helpers');
+
+      vi.mocked(helpers.isAdminUser).mockImplementation(
+        (u: User | null | undefined) =>
+          u?.role === 'super_admin' || u?.role === 'admin' || u?.role === 'company_admin'
+      );
+
+      render(
+        <TestWrapper>
+          <StaffPage />
+        </TestWrapper>
+      );
+
+      await user.click((await screen.findAllByRole('button', { name: /add staff/i }))[0]);
+      await user.click(await screen.findByRole('button', { name: /next/i }));
+
+      const managerInput = await screen.findByLabelText(/manager/i);
+      await user.click(managerInput);
+      await user.type(managerInput, 'admin');
+
+      fireEvent.mouseDown(await screen.findByTestId('user-select-option-2'));
+
+      await waitFor(() => {
+        expect(managerInput).toHaveValue('Admin User');
       });
     });
   });

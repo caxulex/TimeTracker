@@ -126,6 +126,10 @@ export function TimePage() {
   });
 
   // Fetch projects for the filter dropdown.
+  // This is a list filter (it has an explicit "All Projects"
+  // option), so we keep the native <select>. The projects endpoint
+  // currently enforces `page_size <= 100`, so 100 is the largest
+  // safe value we can request without 422s.
   // page_size: 100 is the backend's `le=100` ceiling (see
   // app/routers/projects.py). Same pagination-default footgun as PR #30:
   // without overriding it the server returns 20 projects max, and any
