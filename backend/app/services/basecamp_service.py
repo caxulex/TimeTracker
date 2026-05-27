@@ -848,10 +848,59 @@ class BasecampService:
                                 "due_on": t.get("due_on"),
                                 "created_at": t.get("created_at"),
                                 "position": t.get("position"),
+                                "updated_at": t.get("updated_at"),
                             }
                         )
                     next_url = _parse_next_link(resp.headers.get("Link"))
         return results
+
+    @staticmethod
+    async def _get_todo_detail(
+        token: str,
+        account_id: str,
+        bucket_id: str,
+        todo_id: str,
+    ) -> dict:
+        """Fetch a single Basecamp to-do detail including ``steps``."""
+        url = (
+            f"https://3.basecampapi.com/{account_id}/buckets/"
+            f"{bucket_id}/todos/{todo_id}.json"
+        )
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "User-Agent": USER_AGENT,
+            },
+        ) as client:
+            resp = await _http_request_with_retry(client, "GET", url)
+        if resp.status_code != 200:
+            raise BasecampAPIError(
+                f"todos/{todo_id}.json returned HTTP {resp.status_code}"
+            )
+        payload = resp.json()
+        if not isinstance(payload, dict):
+            raise BasecampAPIError(f"todos/{todo_id}.json returned non-object body")
+        return payload
+
+    @staticmethod
+    async def _find_task_mapping(
+        *,
+        db: AsyncSession,
+        company_id: int,
+        account_id: str,
+        basecamp_resource_id: str,
+        basecamp_type: str = "Todo",
+    ) -> Optional[BasecampTaskMapping]:
+        row = await db.execute(
+            select(BasecampTaskMapping).where(
+                BasecampTaskMapping.company_id == company_id,
+                BasecampTaskMapping.basecamp_account_id == account_id,
+                BasecampTaskMapping.basecamp_type == basecamp_type,
+                BasecampTaskMapping.basecamp_todo_id == basecamp_resource_id,
+            )
+        )
+        return row.scalar_one_or_none()
 
     @staticmethod
     async def sync_todos_for_company(
@@ -916,6 +965,13 @@ class BasecampService:
             report["todo_errors"].append(str(exc))
             return report
 
+        actor_user_id, actor_user_email, sync_mode = (
+            BasecampService._resolve_sync_actor(
+                triggered_by_user_id,
+                triggered_by_user_email,
+            )
+        )
+
         for proj_mapping in project_mappings:
             bc_project_id = proj_mapping.basecamp_project_id
             internal_project_id = proj_mapping.internal_project_id
@@ -961,7 +1017,33 @@ class BasecampService:
 
                 for td in todos:
                     try:
-                        await BasecampService._upsert_todo(
+                        todo_id = str(td.get("id"))
+                        mapping = await BasecampService._find_task_mapping(
+                            db=db,
+                            company_id=company_id,
+                            account_id=credentials.account_id,
+                            basecamp_resource_id=todo_id,
+                            basecamp_type="Todo",
+                        )
+
+                        list_updated_at = _parse_basecamp_datetime(td.get("updated_at"))
+                        if (
+                            mapping is not None
+                            and mapping.basecamp_updated_at is not None
+                            and list_updated_at is not None
+                            and list_updated_at <= mapping.basecamp_updated_at
+                        ):
+                            report["todos_unchanged"] += 1
+                            continue
+
+                        detail = await BasecampService._get_todo_detail(
+                            token,
+                            credentials.account_id,
+                            bc_project_id,
+                            todo_id,
+                        )
+
+                        parent_task, parent_mapping = await BasecampService._upsert_todo(
                             db=db,
                             company_id=company_id,
                             account_id=credentials.account_id,
@@ -969,12 +1051,77 @@ class BasecampService:
                             todolist_id=lst_id,
                             list_title=lst_title,
                             internal_project_id=internal_project_id,
-                            todo=td,
+                            todo=detail,
                             dry_run=dry_run,
                             report=report,
                             triggered_by_user_id=triggered_by_user_id,
                             triggered_by_user_email=triggered_by_user_email,
+                            basecamp_type="Todo",
+                            parent_task_id=None,
                         )
+
+                        detail_steps = detail.get("steps") or []
+                        for step in detail_steps:
+                            await BasecampService._upsert_step(
+                                db=db,
+                                company_id=company_id,
+                                account_id=credentials.account_id,
+                                basecamp_project_id=bc_project_id,
+                                todolist_id=lst_id,
+                                internal_project_id=internal_project_id,
+                                parent_task=parent_task,
+                                parent_basecamp_todo_id=todo_id,
+                                step=step,
+                                dry_run=dry_run,
+                                report=report,
+                                triggered_by_user_id=triggered_by_user_id,
+                                triggered_by_user_email=triggered_by_user_email,
+                            )
+
+                        await BasecampService._reconcile_missing_steps(
+                            db=db,
+                            company_id=company_id,
+                            account_id=credentials.account_id,
+                            parent_task=parent_task,
+                            current_steps=detail_steps,
+                            dry_run=dry_run,
+                            report=report,
+                        )
+
+                        parent_status = str(detail.get("status") or "").lower()
+                        if parent_status in {"archived", "trashed"}:
+                            await BasecampService._archive_child_steps_for_parent(
+                                db=db,
+                                company_id=company_id,
+                                account_id=credentials.account_id,
+                                parent_task=parent_task,
+                                dry_run=dry_run,
+                                report=report,
+                            )
+
+                        if not dry_run:
+                            detail_updated_at = _parse_basecamp_datetime(
+                                detail.get("updated_at")
+                            )
+                            parent_mapping.basecamp_updated_at = detail_updated_at
+                            parent_mapping.last_synced_at = datetime.now(timezone.utc)
+                    except BasecampError as exc:
+                        logger.exception("basecamp.todos.todo_detail_failed")
+                        report["todo_errors"].append(
+                            f"todo {td.get('id')}: {exc}"
+                        )
+                        if not dry_run:
+                            await AuditLogger.log(
+                                db=db,
+                                action=AuditAction.UPDATE,
+                                resource_type="basecamp.sync.errored",
+                                user_id=actor_user_id,
+                                user_email=actor_user_email,
+                                details=(
+                                    f"Failed syncing Basecamp todo {td.get('id')} "
+                                    f"in project {bc_project_id} via {sync_mode}: {exc}"
+                                ),
+                            )
                     except Exception as exc:  # noqa: BLE001
                         logger.exception("basecamp.todos.todo_failed")
                         report["todo_errors"].append(
@@ -1001,11 +1148,18 @@ class BasecampService:
         report: dict,
         triggered_by_user_id: Optional[int],
         triggered_by_user_email: Optional[str],
-    ) -> None:
+        basecamp_type: str = "Todo",
+        parent_task_id: Optional[int] = None,
+    ) -> tuple[Task, BasecampTaskMapping]:
         """Create or update a single Task + its BasecampTaskMapping row."""
-        todo_id = todo["id"]
-        todo_content = todo["content"]
-        target_name = f"[{list_title}] {todo_content}"
+        todo_id = str(todo["id"])
+        todo_content = (
+            todo.get("content")
+            or todo.get("title")
+            or todo.get("name")
+            or f"Basecamp item {todo_id}"
+        )
+        target_name = f"[{list_title}] {todo_content}" if list_title else todo_content
         # Preserve any richer Basecamp description body in
         # tasks.description; fall back to the to-do content so the
         # description always carries useful context.
@@ -1013,7 +1167,11 @@ class BasecampService:
         target_description = (
             bc_description if bc_description else todo_content
         )
-        target_status = "DONE" if todo["completed"] else "TODO"
+        basecamp_status = str(todo.get("status") or "").lower()
+        if basecamp_status in {"archived", "trashed"}:
+            target_status = "ARCHIVED"
+        else:
+            target_status = "DONE" if bool(todo.get("completed", False)) else "TODO"
 
         # Parse the disambiguation metadata once. ``due_on`` is a
         # date string ("YYYY-MM-DD"); ``created_at`` is ISO 8601
@@ -1034,6 +1192,7 @@ class BasecampService:
             select(BasecampTaskMapping).where(
                 BasecampTaskMapping.company_id == company_id,
                 BasecampTaskMapping.basecamp_account_id == account_id,
+                BasecampTaskMapping.basecamp_type == basecamp_type,
                 BasecampTaskMapping.basecamp_todo_id == todo_id,
             )
         )
@@ -1042,9 +1201,30 @@ class BasecampService:
         if mapping is None:
             if dry_run:
                 report["todos_created"] += 1
-                return
+                return (
+                    Task(
+                        project_id=internal_project_id,
+                        parent_task_id=parent_task_id,
+                        name=target_name,
+                        description=target_description,
+                        status=target_status,
+                    ),
+                    BasecampTaskMapping(
+                        company_id=company_id,
+                        basecamp_account_id=account_id,
+                        basecamp_project_id=basecamp_project_id,
+                        basecamp_todolist_id=todolist_id,
+                        basecamp_type=basecamp_type,
+                        basecamp_todo_id=todo_id,
+                        basecamp_due_on=target_due_on,
+                        basecamp_todo_created_at=target_created_at,
+                        basecamp_todo_position=target_position,
+                        task_id=0,
+                    ),
+                )
             task = Task(
                 project_id=internal_project_id,
+                parent_task_id=parent_task_id,
                 name=target_name,
                 description=target_description,
                 status=target_status,
@@ -1077,6 +1257,7 @@ class BasecampService:
                     basecamp_account_id=account_id,
                     basecamp_project_id=basecamp_project_id,
                     basecamp_todolist_id=todolist_id,
+                    basecamp_type=basecamp_type,
                     basecamp_todo_id=todo_id,
                     basecamp_due_on=target_due_on,
                     basecamp_todo_created_at=target_created_at,
@@ -1085,8 +1266,20 @@ class BasecampService:
                     last_synced_at=datetime.now(timezone.utc),
                 )
             )
+            await db.flush()
+            mapping = await BasecampService._find_task_mapping(
+                db=db,
+                company_id=company_id,
+                account_id=account_id,
+                basecamp_resource_id=todo_id,
+                basecamp_type=basecamp_type,
+            )
             report["todos_created"] += 1
-            return
+            if mapping is None:
+                raise RuntimeError(
+                    f"Failed to reload mapping for Basecamp {basecamp_type} {todo_id}"
+                )
+            return task, mapping
 
         task_row = await db.execute(
             select(Task).where(Task.id == mapping.task_id)
@@ -1096,9 +1289,19 @@ class BasecampService:
             # Linked task was deleted out from under us; recreate.
             if dry_run:
                 report["todos_created"] += 1
-                return
+                return (
+                    Task(
+                        project_id=internal_project_id,
+                        parent_task_id=parent_task_id,
+                        name=target_name,
+                        description=target_description,
+                        status=target_status,
+                    ),
+                    mapping,
+                )
             task = Task(
                 project_id=internal_project_id,
+                parent_task_id=parent_task_id,
                 name=target_name,
                 description=target_description,
                 status=target_status,
@@ -1128,12 +1331,13 @@ class BasecampService:
             mapping.task_id = task.id
             mapping.basecamp_todolist_id = todolist_id
             mapping.basecamp_project_id = basecamp_project_id
+            mapping.basecamp_type = basecamp_type
             mapping.basecamp_due_on = target_due_on
             mapping.basecamp_todo_created_at = target_created_at
             mapping.basecamp_todo_position = target_position
             mapping.last_synced_at = datetime.now(timezone.utc)
             report["todos_created"] += 1
-            return
+            return task, mapping
 
         # Change detection: include the new metadata fields so the
         # existing 6020 mapping rows backfill their NULL columns on
@@ -1155,8 +1359,10 @@ class BasecampService:
                 task.name = target_name
                 task.description = target_description
                 task.status = target_status
+                task.parent_task_id = parent_task_id
                 mapping.basecamp_todolist_id = todolist_id
                 mapping.basecamp_project_id = basecamp_project_id
+                mapping.basecamp_type = basecamp_type
                 mapping.basecamp_due_on = target_due_on
                 mapping.basecamp_todo_created_at = target_created_at
                 mapping.basecamp_todo_position = target_position
@@ -1164,8 +1370,161 @@ class BasecampService:
             report["todos_updated"] += 1
         else:
             if not dry_run:
+                task.parent_task_id = parent_task_id
                 mapping.last_synced_at = datetime.now(timezone.utc)
             report["todos_unchanged"] += 1
+        return task, mapping
+
+    @staticmethod
+    async def _upsert_step(
+        *,
+        db: AsyncSession,
+        company_id: int,
+        account_id: str,
+        basecamp_project_id: str,
+        todolist_id: str,
+        internal_project_id: int,
+        parent_task: Task,
+        parent_basecamp_todo_id: str,
+        step: dict,
+        dry_run: bool,
+        report: dict,
+        triggered_by_user_id: Optional[int],
+        triggered_by_user_email: Optional[str],
+    ) -> None:
+        """Create or update a Basecamp ``Kanban::Step`` child task."""
+        step_id_raw = step.get("id")
+        if step_id_raw is None:
+            logger.debug("basecamp.steps.missing_id parent_todo=%s", parent_basecamp_todo_id)
+            return
+        step_id = str(step_id_raw)
+
+        parent_data = step.get("parent")
+        parent_id = None
+        if isinstance(parent_data, dict) and parent_data.get("id") is not None:
+            parent_id = str(parent_data.get("id"))
+        if parent_id and parent_id != parent_basecamp_todo_id:
+            parent_mapping = await BasecampService._find_task_mapping(
+                db=db,
+                company_id=company_id,
+                account_id=account_id,
+                basecamp_resource_id=parent_id,
+                basecamp_type="Todo",
+            )
+            if parent_mapping is None:
+                logger.debug(
+                    "basecamp.steps.unknown_parent_skip step_id=%s parent_id=%s",
+                    step_id,
+                    parent_id,
+                )
+            else:
+                logger.debug(
+                    "basecamp.steps.parent_mismatch_skip step_id=%s expected_parent_id=%s actual_parent_id=%s",
+                    step_id,
+                    parent_basecamp_todo_id,
+                    parent_id,
+                )
+            return
+
+        step_payload = {
+            "id": step_id,
+            "content": step.get("content") or step.get("title") or step.get("name") or step_id,
+            "description": step.get("description"),
+            "completed": bool(step.get("completed", False)),
+            "due_on": step.get("due_on"),
+            "created_at": step.get("created_at"),
+            "position": step.get("position"),
+            "updated_at": step.get("updated_at"),
+        }
+        step_task, step_mapping = await BasecampService._upsert_todo(
+            db=db,
+            company_id=company_id,
+            account_id=account_id,
+            basecamp_project_id=basecamp_project_id,
+            todolist_id=todolist_id,
+            list_title="",
+            internal_project_id=internal_project_id,
+            todo=step_payload,
+            dry_run=dry_run,
+            report=report,
+            triggered_by_user_id=triggered_by_user_id,
+            triggered_by_user_email=triggered_by_user_email,
+            basecamp_type="Kanban::Step",
+            parent_task_id=parent_task.id,
+        )
+
+        if not dry_run:
+            if str((step.get("status") or "")).lower() in {"archived", "trashed"}:
+                step_task.status = "ARCHIVED"
+            if parent_task.status == "ARCHIVED":
+                step_task.status = "ARCHIVED"
+            step_mapping.basecamp_updated_at = _parse_basecamp_datetime(
+                step.get("updated_at")
+            )
+
+    @staticmethod
+    async def _reconcile_missing_steps(
+        *,
+        db: AsyncSession,
+        company_id: int,
+        account_id: str,
+        parent_task: Task,
+        current_steps: list[dict],
+        dry_run: bool,
+        report: dict,
+    ) -> None:
+        """Archive child step tasks no longer present in the latest detail payload."""
+        current_ids = {
+            str(step.get("id")) for step in (current_steps or []) if step.get("id") is not None
+        }
+        rows = await db.execute(
+            select(Task, BasecampTaskMapping)
+            .join(BasecampTaskMapping, BasecampTaskMapping.task_id == Task.id)
+            .where(
+                Task.parent_task_id == parent_task.id,
+                BasecampTaskMapping.company_id == company_id,
+                BasecampTaskMapping.basecamp_account_id == account_id,
+                BasecampTaskMapping.basecamp_type == "Kanban::Step",
+            )
+        )
+        for child_task, child_mapping in rows.all():
+            if child_mapping.basecamp_todo_id in current_ids:
+                continue
+            if child_task.status == "ARCHIVED":
+                continue
+            if not dry_run:
+                child_task.status = "ARCHIVED"
+                child_mapping.last_synced_at = datetime.now(timezone.utc)
+            report["todos_updated"] += 1
+
+    @staticmethod
+    async def _archive_child_steps_for_parent(
+        *,
+        db: AsyncSession,
+        company_id: int,
+        account_id: str,
+        parent_task: Task,
+        dry_run: bool,
+        report: dict,
+    ) -> None:
+        """Cascade archival from a parent to-do to all mapped child steps."""
+        rows = await db.execute(
+            select(Task, BasecampTaskMapping)
+            .join(BasecampTaskMapping, BasecampTaskMapping.task_id == Task.id)
+            .where(
+                Task.parent_task_id == parent_task.id,
+                BasecampTaskMapping.company_id == company_id,
+                BasecampTaskMapping.basecamp_account_id == account_id,
+                BasecampTaskMapping.basecamp_type == "Kanban::Step",
+            )
+        )
+        for child_task, child_mapping in rows.all():
+            if child_task.status == "ARCHIVED":
+                continue
+            if not dry_run:
+                child_task.status = "ARCHIVED"
+                child_mapping.last_synced_at = datetime.now(timezone.utc)
+            report["todos_updated"] += 1
 
     # ------------------------------------------------------------------
     # Disconnect helpers

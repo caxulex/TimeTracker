@@ -37,10 +37,12 @@ from app.models import (
     Project,
     Task,
     Team,
+    TimeEntry,
     User,
 )
 from app.services.auth_service import AuthService
 from app.services.basecamp_service import BasecampService
+from app.services.basecamp_service import BasecampAPIError
 from app.services.encryption_service import EncryptionService
 
 
@@ -145,24 +147,39 @@ def _patch_basecamp_api(todolists_by_project: dict, todos_by_list: dict):
     ``todos_by_list`` maps todolist_id -> list of
     ``{"id": str, "content": str, "completed": bool, ...}`` dicts.
     """
-    async def fake_token(_creds, _db):
-        return "fake-access-token"
-
     async def fake_lists(_token, _account_id, basecamp_project_id):
         return list(todolists_by_project.get(basecamp_project_id, []))
 
     async def fake_todos(_token, _account_id, _project_id, todolist_id):
         return list(todos_by_list.get(todolist_id, []))
 
+    async def fake_detail(_token, _account_id, _bucket_id, todo_id):
+        for rows in todos_by_list.values():
+            for td in rows:
+                if str(td.get("id")) == str(todo_id):
+                    return {
+                        "id": str(td.get("id")),
+                        "content": td.get("content") or "",
+                        "description": td.get("description") or "",
+                        "completed": bool(td.get("completed", False)),
+                        "status": td.get("status") or "active",
+                        "due_on": td.get("due_on"),
+                        "created_at": td.get("created_at"),
+                        "position": td.get("position"),
+                        "updated_at": td.get("updated_at"),
+                        "steps": td.get("steps") or [],
+                    }
+        raise BasecampAPIError(f"todos/{todo_id}.json returned HTTP 404")
+
     return (
-        patch.object(
-            BasecampService, "_get_valid_access_token", side_effect=fake_token
-        ),
         patch.object(
             BasecampService, "_list_todolists", side_effect=fake_lists
         ),
         patch.object(
             BasecampService, "_list_todos_in_list", side_effect=fake_todos
+        ),
+        patch.object(
+            BasecampService, "_get_todo_detail", side_effect=fake_detail
         ),
     )
 
@@ -176,11 +193,13 @@ class TestTodoSyncSchema:
             "basecamp_account_id",
             "basecamp_project_id",
             "basecamp_todolist_id",
+            "basecamp_type",
             "basecamp_todo_id",
             "basecamp_due_on",
             "basecamp_todo_created_at",
             "basecamp_todo_position",
             "task_id",
+            "basecamp_updated_at",
             "last_synced_at",
         }
 
@@ -554,6 +573,26 @@ class TestTodoSync:
             {"id": 200, "content": "T200", "completed": True}
         ]
         todos_20.headers = {}
+        detail_100 = MagicMock()
+        detail_100.status_code = 200
+        detail_100.json.return_value = {
+            "id": 100,
+            "content": "T100",
+            "completed": False,
+            "status": "active",
+            "steps": [],
+        }
+        detail_100.headers = {}
+        detail_200 = MagicMock()
+        detail_200.status_code = 200
+        detail_200.json.return_value = {
+            "id": 200,
+            "content": "T200",
+            "completed": True,
+            "status": "active",
+            "steps": [],
+        }
+        detail_200.headers = {}
 
         # The mocked AsyncClient is entered twice (once for todolists,
         # once for each list's todos). Build a side_effect that returns
@@ -575,6 +614,10 @@ class TestTodoSync:
                 return todos_20  # completed=True item shows up here
             if "todolists/20/todos.json" in url:
                 return empty_completed
+            if "/todos/100.json" in url:
+                return detail_100
+            if "/todos/200.json" in url:
+                return detail_200
             raise AssertionError(f"Unexpected URL: {url}")
 
         async def fake_get(url):
@@ -621,22 +664,29 @@ class TestTodoSync:
         await db_session.flush()
 
         todolists = {"bcp-1": [{"id": "list-1", "title": "L"}]}
-        # Three to-dos; the middle one will explode on dict access.
-        class _Exploder(dict):
-            def __getitem__(self, k):
-                if k == "content":
-                    raise RuntimeError("boom on to-do 2")
-                return super().__getitem__(k)
-
         todos = {
             "list-1": [
                 {"id": "td-1", "content": "Good 1", "completed": False},
-                _Exploder({"id": "td-2", "completed": False}),
+                {"id": "td-2", "content": "Bad 2", "completed": False},
                 {"id": "td-3", "content": "Good 3", "completed": False},
             ]
         }
+
+        async def fake_detail(_token, _account_id, _bucket_id, todo_id):
+            if todo_id == "td-2":
+                raise BasecampAPIError("todos/td-2.json returned HTTP 404")
+            return {
+                "id": todo_id,
+                "content": "Good 1" if todo_id == "td-1" else "Good 3",
+                "completed": False,
+                "status": "active",
+                "steps": [],
+            }
+
         p1, p2, p3 = _patch_basecamp_api(todolists, todos)
-        with p1, p2, p3:
+        with p1, p2, p3, patch.object(
+            BasecampService, "_get_todo_detail", side_effect=fake_detail
+        ):
             report = await BasecampService.sync_todos_for_company(
                 creds, company.id, db_session, dry_run=False
             )
@@ -915,6 +965,534 @@ class TestTodoSync:
         assert task_before.name == f"[Sprint A] {long_content}"
         assert "\u2026" not in task_before.name
         assert task_before.description == long_content
+
+
+class TestTodoSyncBC5Subtasks:
+    @pytest.mark.asyncio
+    async def test_sync_detail_steps_creates_parent_and_children(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        company = await _mk_company(db_session)
+        _, team = await _mk_owner_and_team(db_session, company)
+        project, _ = await _mk_project_and_mapping(
+            db_session, company, team, basecamp_project_id="bcp-1"
+        )
+        creds = _mk_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        todolists = {"bcp-1": [{"id": "list-1", "title": "Sprint"}]}
+        todos = {
+            "list-1": [
+                {
+                    "id": "todo-1",
+                    "content": "Parent",
+                    "completed": False,
+                    "updated_at": "2026-05-27T10:00:00Z",
+                }
+            ]
+        }
+        detail = {
+            "id": "todo-1",
+            "content": "Parent",
+            "description": "Parent desc",
+            "completed": False,
+            "status": "active",
+            "updated_at": "2026-05-27T10:00:00Z",
+            "steps": [
+                {
+                    "id": "step-1",
+                    "content": "Step one",
+                    "completed": False,
+                    "due_on": "2026-05-30",
+                    "position": 1,
+                    "parent": {"id": "todo-1"},
+                    "updated_at": "2026-05-27T10:00:00Z",
+                },
+                {
+                    "id": "step-2",
+                    "content": "Step two",
+                    "completed": True,
+                    "position": 2,
+                    "parent": {"id": "todo-1"},
+                    "updated_at": "2026-05-27T10:00:00Z",
+                },
+            ],
+        }
+
+        async def fake_detail(_token, _account_id, _bucket_id, _todo_id):
+            return detail
+
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos)
+        with p1, p2, p3, patch.object(
+            BasecampService, "_get_todo_detail", side_effect=fake_detail
+        ):
+            report = await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        assert report["todo_errors"] == []
+        rows = await db_session.execute(
+            select(Task).where(Task.project_id == project.id)
+        )
+        tasks = rows.scalars().all()
+        assert len(tasks) == 3
+
+        parent = next(t for t in tasks if t.parent_task_id is None)
+        children = [t for t in tasks if t.parent_task_id == parent.id]
+        assert len(children) == 2
+
+        map_rows = await db_session.execute(select(BasecampTaskMapping))
+        mappings = map_rows.scalars().all()
+        assert len(mappings) == 3
+        by_task = {m.task_id: m for m in mappings}
+        assert by_task[parent.id].basecamp_type == "Todo"
+        assert all(by_task[ch.id].basecamp_type == "Kanban::Step" for ch in children)
+
+    @pytest.mark.asyncio
+    async def test_reconcile_missing_steps_archives_children_without_delete(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        company = await _mk_company(db_session)
+        owner, team = await _mk_owner_and_team(db_session, company)
+        project, _ = await _mk_project_and_mapping(
+            db_session, company, team, basecamp_project_id="bcp-1"
+        )
+        creds = _mk_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        todolists = {"bcp-1": [{"id": "list-1", "title": "Sprint"}]}
+        todos = {
+            "list-1": [
+                {
+                    "id": "todo-1",
+                    "content": "Parent",
+                    "completed": False,
+                    "updated_at": "2026-05-27T10:00:00Z",
+                }
+            ]
+        }
+        detail_with_steps = {
+            "id": "todo-1",
+            "content": "Parent",
+            "completed": False,
+            "status": "active",
+            "updated_at": "2026-05-27T10:00:00Z",
+            "steps": [
+                {"id": "step-1", "content": "Step one", "parent": {"id": "todo-1"}},
+                {"id": "step-2", "content": "Step two", "parent": {"id": "todo-1"}},
+            ],
+        }
+        detail_without_steps = {
+            "id": "todo-1",
+            "content": "Parent",
+            "completed": False,
+            "status": "active",
+            "updated_at": "2026-05-27T11:00:00Z",
+            "steps": [],
+        }
+
+        async def fake_detail_first(_token, _account_id, _bucket_id, _todo_id):
+            return detail_with_steps
+
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos)
+        with p1, p2, p3, patch.object(
+            BasecampService, "_get_todo_detail", side_effect=fake_detail_first
+        ):
+            await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        rows = await db_session.execute(
+            select(Task).where(Task.project_id == project.id)
+        )
+        tasks_before = rows.scalars().all()
+        parent = next(t for t in tasks_before if t.parent_task_id is None)
+        child = next(t for t in tasks_before if t.parent_task_id == parent.id)
+        db_session.add(
+            TimeEntry(
+                user_id=owner.id,
+                project_id=project.id,
+                task_id=child.id,
+                start_time=datetime.now(timezone.utc),
+                end_time=datetime.now(timezone.utc),
+                duration_seconds=60,
+                description="work",
+                is_running=False,
+            )
+        )
+        await db_session.flush()
+
+        todos["list-1"][0]["updated_at"] = "2026-05-27T11:00:00Z"
+
+        async def fake_detail_second(_token, _account_id, _bucket_id, _todo_id):
+            return detail_without_steps
+
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos)
+        with p1, p2, p3, patch.object(
+            BasecampService, "_get_todo_detail", side_effect=fake_detail_second
+        ):
+            await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        rows = await db_session.execute(
+            select(Task).where(Task.parent_task_id == parent.id)
+        )
+        children = rows.scalars().all()
+        assert len(children) == 2
+        assert all(ch.status == "ARCHIVED" for ch in children)
+
+        te = await db_session.execute(select(TimeEntry).where(TimeEntry.task_id == child.id))
+        assert te.scalar_one_or_none() is not None
+
+    @pytest.mark.asyncio
+    async def test_parent_archived_cascades_to_children(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        company = await _mk_company(db_session)
+        _, team = await _mk_owner_and_team(db_session, company)
+        project, _ = await _mk_project_and_mapping(
+            db_session, company, team, basecamp_project_id="bcp-1"
+        )
+        creds = _mk_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        todolists = {"bcp-1": [{"id": "list-1", "title": "Sprint"}]}
+        todos = {
+            "list-1": [
+                {
+                    "id": "todo-1",
+                    "content": "Parent",
+                    "completed": False,
+                    "updated_at": "2026-05-27T10:00:00Z",
+                }
+            ]
+        }
+        active_detail = {
+            "id": "todo-1",
+            "content": "Parent",
+            "completed": False,
+            "status": "active",
+            "updated_at": "2026-05-27T10:00:00Z",
+            "steps": [
+                {"id": "step-1", "content": "Step one", "parent": {"id": "todo-1"}},
+                {"id": "step-2", "content": "Step two", "parent": {"id": "todo-1"}},
+            ],
+        }
+        archived_detail = {
+            "id": "todo-1",
+            "content": "Parent",
+            "completed": False,
+            "status": "archived",
+            "updated_at": "2026-05-27T11:00:00Z",
+            "steps": [
+                {"id": "step-1", "content": "Step one", "parent": {"id": "todo-1"}},
+                {"id": "step-2", "content": "Step two", "parent": {"id": "todo-1"}},
+            ],
+        }
+
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos)
+        with p1, p2, p3, patch.object(
+            BasecampService, "_get_todo_detail", new=AsyncMock(return_value=active_detail)
+        ):
+            await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        todos["list-1"][0]["updated_at"] = "2026-05-27T11:00:00Z"
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos)
+        with p1, p2, p3, patch.object(
+            BasecampService, "_get_todo_detail", new=AsyncMock(return_value=archived_detail)
+        ):
+            await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        rows = await db_session.execute(
+            select(Task).where(Task.project_id == project.id)
+        )
+        tasks = rows.scalars().all()
+        parent = next(t for t in tasks if t.parent_task_id is None)
+        children = [t for t in tasks if t.parent_task_id == parent.id]
+        assert parent.status == "ARCHIVED"
+        assert children and all(ch.status == "ARCHIVED" for ch in children)
+
+    @pytest.mark.asyncio
+    async def test_detail_404_logs_error_and_continues_without_advancing_failed_mapping(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        company = await _mk_company(db_session)
+        _, team = await _mk_owner_and_team(db_session, company)
+        project, _ = await _mk_project_and_mapping(
+            db_session, company, team, basecamp_project_id="bcp-1"
+        )
+        creds = _mk_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        stale_task = Task(project_id=project.id, name="[Sprint] stale", status="TODO")
+        db_session.add(stale_task)
+        await db_session.flush()
+        stale_updated_at = datetime(2026, 5, 27, 9, 0, tzinfo=timezone.utc)
+        db_session.add(
+            BasecampTaskMapping(
+                company_id=company.id,
+                basecamp_account_id="acct-1",
+                basecamp_project_id="bcp-1",
+                basecamp_todolist_id="list-1",
+                basecamp_type="Todo",
+                basecamp_todo_id="todo-2",
+                task_id=stale_task.id,
+                basecamp_updated_at=stale_updated_at,
+                last_synced_at=datetime.now(timezone.utc),
+            )
+        )
+        await db_session.flush()
+
+        todolists = {"bcp-1": [{"id": "list-1", "title": "Sprint"}]}
+        todos = {
+            "list-1": [
+                {"id": "todo-1", "content": "One", "completed": False, "updated_at": "2026-05-27T10:00:00Z"},
+                {"id": "todo-2", "content": "Two", "completed": False, "updated_at": "2026-05-27T10:00:00Z"},
+                {"id": "todo-3", "content": "Three", "completed": False, "updated_at": "2026-05-27T10:00:00Z"},
+            ]
+        }
+
+        async def fake_detail(_token, _account_id, _bucket_id, todo_id):
+            if todo_id == "todo-2":
+                raise BasecampAPIError("todos/todo-2.json returned HTTP 404")
+            return {
+                "id": todo_id,
+                "content": f"Detail {todo_id}",
+                "completed": False,
+                "status": "active",
+                "updated_at": "2026-05-27T10:00:00Z",
+                "steps": [],
+            }
+
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos)
+        with p1, p2, p3, patch.object(
+            BasecampService, "_get_todo_detail", side_effect=fake_detail
+        ), patch("app.services.basecamp_service.AuditLogger.log", new_callable=AsyncMock) as audit_log:
+            report = await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        assert len(report["todo_errors"]) == 1
+        assert any(
+            call.kwargs.get("resource_type") == "basecamp.sync.errored"
+            for call in audit_log.call_args_list
+        )
+        rows = await db_session.execute(select(Task).where(Task.project_id == project.id))
+        tasks = rows.scalars().all()
+        assert len(tasks) == 3
+
+        stale_row = await db_session.execute(
+            select(BasecampTaskMapping).where(
+                BasecampTaskMapping.company_id == company.id,
+                BasecampTaskMapping.basecamp_type == "Todo",
+                BasecampTaskMapping.basecamp_todo_id == "todo-2",
+            )
+        )
+        stale_mapping = stale_row.scalar_one()
+        assert stale_mapping.basecamp_updated_at == stale_updated_at
+
+    @pytest.mark.asyncio
+    async def test_skip_detail_fetch_when_updated_at_unchanged(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        company = await _mk_company(db_session)
+        _, team = await _mk_owner_and_team(db_session, company)
+        project, _ = await _mk_project_and_mapping(
+            db_session, company, team, basecamp_project_id="bcp-1"
+        )
+        creds = _mk_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        existing = Task(project_id=project.id, name="[Sprint] Existing", status="TODO")
+        db_session.add(existing)
+        await db_session.flush()
+        cached_updated_at = datetime(2026, 5, 27, 10, 0, tzinfo=timezone.utc)
+        db_session.add(
+            BasecampTaskMapping(
+                company_id=company.id,
+                basecamp_account_id="acct-1",
+                basecamp_project_id="bcp-1",
+                basecamp_todolist_id="list-1",
+                basecamp_type="Todo",
+                basecamp_todo_id="todo-1",
+                task_id=existing.id,
+                basecamp_updated_at=cached_updated_at,
+                last_synced_at=datetime.now(timezone.utc),
+            )
+        )
+        await db_session.flush()
+
+        todolists = {"bcp-1": [{"id": "list-1", "title": "Sprint"}]}
+        todos = {
+            "list-1": [
+                {
+                    "id": "todo-1",
+                    "content": "Existing",
+                    "completed": False,
+                    "updated_at": "2026-05-27T10:00:00Z",
+                }
+            ]
+        }
+
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos)
+        with p1, p2, p3, patch.object(
+            BasecampService, "_get_todo_detail", new=AsyncMock()
+        ) as detail_mock:
+            report = await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        assert report["todos_unchanged"] >= 1
+        detail_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_fetch_detail_when_updated_at_newer_and_advance_mapping(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        company = await _mk_company(db_session)
+        _, team = await _mk_owner_and_team(db_session, company)
+        project, _ = await _mk_project_and_mapping(
+            db_session, company, team, basecamp_project_id="bcp-1"
+        )
+        creds = _mk_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        existing = Task(project_id=project.id, name="[Sprint] Existing", status="TODO")
+        db_session.add(existing)
+        await db_session.flush()
+        cached_updated_at = datetime(2026, 5, 27, 9, 0, tzinfo=timezone.utc)
+        db_session.add(
+            BasecampTaskMapping(
+                company_id=company.id,
+                basecamp_account_id="acct-1",
+                basecamp_project_id="bcp-1",
+                basecamp_todolist_id="list-1",
+                basecamp_type="Todo",
+                basecamp_todo_id="todo-1",
+                task_id=existing.id,
+                basecamp_updated_at=cached_updated_at,
+                last_synced_at=datetime.now(timezone.utc),
+            )
+        )
+        await db_session.flush()
+
+        todolists = {"bcp-1": [{"id": "list-1", "title": "Sprint"}]}
+        todos = {
+            "list-1": [
+                {
+                    "id": "todo-1",
+                    "content": "Existing",
+                    "completed": False,
+                    "updated_at": "2026-05-27T10:00:00Z",
+                }
+            ]
+        }
+        detail = {
+            "id": "todo-1",
+            "content": "Existing",
+            "completed": False,
+            "status": "active",
+            "updated_at": "2026-05-27T10:00:00Z",
+            "steps": [],
+        }
+
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos)
+        with p1, p2, p3, patch.object(
+            BasecampService, "_get_todo_detail", new=AsyncMock(return_value=detail)
+        ) as detail_mock:
+            await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        detail_mock.assert_awaited_once()
+        refreshed = await db_session.execute(
+            select(BasecampTaskMapping).where(
+                BasecampTaskMapping.company_id == company.id,
+                BasecampTaskMapping.basecamp_type == "Todo",
+                BasecampTaskMapping.basecamp_todo_id == "todo-1",
+            )
+        )
+        mapping = refreshed.scalar_one()
+        assert mapping.basecamp_updated_at == datetime(
+            2026, 5, 27, 10, 0, tzinfo=timezone.utc
+        )
+
+    @pytest.mark.asyncio
+    async def test_step_with_unknown_parent_is_skipped_without_orphan_row(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        company = await _mk_company(db_session)
+        _, team = await _mk_owner_and_team(db_session, company)
+        project, _ = await _mk_project_and_mapping(
+            db_session, company, team, basecamp_project_id="bcp-1"
+        )
+        creds = _mk_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        todolists = {"bcp-1": [{"id": "list-1", "title": "Sprint"}]}
+        todos = {
+            "list-1": [
+                {
+                    "id": "todo-1",
+                    "content": "Parent",
+                    "completed": False,
+                    "updated_at": "2026-05-27T10:00:00Z",
+                }
+            ]
+        }
+        detail = {
+            "id": "todo-1",
+            "content": "Parent",
+            "completed": False,
+            "status": "active",
+            "updated_at": "2026-05-27T10:00:00Z",
+            "steps": [
+                {
+                    "id": "step-x",
+                    "content": "Orphan step",
+                    "completed": False,
+                    "parent": {"id": "todo-does-not-exist"},
+                }
+            ],
+        }
+
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos)
+        with p1, p2, p3, patch.object(
+            BasecampService, "_get_todo_detail", new=AsyncMock(return_value=detail)
+        ), patch("app.services.basecamp_service.logger.debug") as debug_log:
+            await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        rows = await db_session.execute(
+            select(Task).where(Task.project_id == project.id)
+        )
+        tasks = rows.scalars().all()
+        assert len(tasks) == 1
+
+        step_maps = await db_session.execute(
+            select(BasecampTaskMapping).where(
+                BasecampTaskMapping.company_id == company.id,
+                BasecampTaskMapping.basecamp_type == "Kanban::Step",
+            )
+        )
+        assert step_maps.scalars().all() == []
+        assert any(
+            "basecamp.steps.unknown_parent_skip" in str(call.args[0])
+            for call in debug_log.call_args_list
+        )
 
 
 # ----------------------------------------------------------------------

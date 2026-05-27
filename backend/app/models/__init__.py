@@ -345,6 +345,12 @@ class Task(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     project_id: Mapped[int] = mapped_column(Integer, ForeignKey("projects.id"), nullable=False)
+    parent_task_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     # ``Text`` (not ``String(255)``) so Basecamp-mirrored to-do titles
     # longer than 255 chars persist without truncation. See migration
     # 028_tasks_name_text.
@@ -356,6 +362,17 @@ class Task(Base):
 
     # Relationships
     project: Mapped[Project] = relationship("Project", back_populates="tasks")
+    parent_task: Mapped[Optional["Task"]] = relationship(
+        "Task",
+        remote_side=[id],
+        foreign_keys=[parent_task_id],
+        back_populates="child_tasks",
+    )
+    child_tasks: Mapped[list["Task"]] = relationship(
+        "Task",
+        back_populates="parent_task",
+        foreign_keys=[parent_task_id],
+    )
     time_entries: Mapped[list["TimeEntry"]] = relationship("TimeEntry", back_populates="task", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
@@ -1123,11 +1140,12 @@ class BasecampProjectMapping(Base):
 class BasecampTaskMapping(Base):
     """Maps a Basecamp to-do to an internal TimeTracker ``Task`` row.
 
-    The triple (``company_id``, ``basecamp_account_id``,
-    ``basecamp_todo_id``) is UNIQUE so the to-do sync routine is
-    idempotent and multi-tenant safe: the same Basecamp to-do id
-    observed by two different connected accounts on two different
-    TimeTracker companies will not collide.
+    The quadruple (``company_id``, ``basecamp_account_id``,
+    ``basecamp_type``, ``basecamp_todo_id``) is UNIQUE so the to-do
+    sync routine is idempotent and multi-tenant safe while still
+    allowing Basecamp entities from different id spaces (for example
+    ``Todo`` and ``Kanban::Step``) to coexist even when numeric ids
+    collide.
 
     ``basecamp_todolist_id`` is preserved (not part of the UNIQUE) so
     v3.1 can surface to-do list grouping without a schema migration.
@@ -1144,6 +1162,9 @@ class BasecampTaskMapping(Base):
     basecamp_account_id: Mapped[str] = mapped_column(String(64), nullable=False)
     basecamp_project_id: Mapped[str] = mapped_column(String(64), nullable=False)
     basecamp_todolist_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    basecamp_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="Todo", server_default="Todo", index=True
+    )
     basecamp_todo_id: Mapped[str] = mapped_column(String(64), nullable=False)
     basecamp_due_on: Mapped[Optional[date]] = mapped_column(
         Date, nullable=True
@@ -1160,6 +1181,9 @@ class BasecampTaskMapping(Base):
         nullable=False,
         index=True,
     )
+    basecamp_updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     last_synced_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -1168,6 +1192,7 @@ class BasecampTaskMapping(Base):
         UniqueConstraint(
             "company_id",
             "basecamp_account_id",
+            "basecamp_type",
             "basecamp_todo_id",
             name="uq_basecamp_task_mapping_external",
         ),

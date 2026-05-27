@@ -357,6 +357,22 @@ class TestBasecampSyncAudit:
                     }
                 ]
             ),
+        ), patch.object(
+            BasecampService,
+            "_get_todo_detail",
+            new=AsyncMock(
+                return_value={
+                    "id": "todo-1",
+                    "content": "Implement audit",
+                    "description": "traceability",
+                    "completed": False,
+                    "status": "active",
+                    "due_on": None,
+                    "created_at": "2026-05-26T10:05:00Z",
+                    "position": 1,
+                    "steps": [],
+                }
+            ),
         ):
             report = await BasecampService.sync_todos_for_company(
                 creds,
