@@ -3,17 +3,15 @@
 // Combined Clock In + Task Timer - starts both together
 // ============================================
 import { useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Card } from '../common';
+import { ProjectSelect } from '../projects/ProjectSelect';
 import { TaskSelect } from '../tasks/TaskSelect';
 import { useSessionStore, formatDuration, getSessionStatusInfo } from '../../stores/sessionStore';
 import { useTimerStore } from '../../stores/timerStore';
-import { projectsApi } from '../../api/client';
 import { cn } from '../../utils/helpers';
 import { useNotifications } from '../../hooks/useNotifications';
 import { BreakControls } from './BreakControls';
 import { MeetingControls } from './MeetingControls';
-import type { Project } from '../../types';
 
 export function SessionWidget() {
   const {
@@ -51,14 +49,6 @@ export function SessionWidget() {
   const [selectedProject, setSelectedProject] = useState<number | undefined>();
   const [selectedTask, setSelectedTask] = useState<number | undefined>();
   const [formError, setFormError] = useState<string | null>(null);
-
-  // Fetch projects
-  const { data: projectsData } = useQuery({
-    queryKey: ['projects'],
-    queryFn: () => projectsApi.getAll({ include_archived: false }),
-  });
-
-  const projects = projectsData?.items || [];
 
   // Fetch session and timer status on mount
   useEffect(() => {
@@ -106,12 +96,10 @@ export function SessionWidget() {
         project_id: selectedProject,
         task_id: selectedTask,
       });
-
-      const projectName = projects.find((p: Project) => p.id === selectedProject)?.name || 'your project';
       addNotification({
         type: 'success',
         title: 'Clocked In!',
-        message: `Session started. Now tracking time on ${projectName}`,
+        message: 'Session started. Now tracking time on your selected project.',
         duration: 3000,
       });
 
@@ -209,32 +197,28 @@ export function SessionWidget() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-600 mb-1">Project *</label>
-                <select
-                  value={selectedProject || ''}
-                  onChange={(e) => {
-                    setSelectedProject(e.target.value ? Number(e.target.value) : undefined);
+                <label htmlFor="session-clock-in-project" className="block text-sm font-medium text-gray-600 mb-1">Project *</label>
+                <ProjectSelect
+                  id="session-clock-in-project"
+                  value={selectedProject ?? null}
+                  onChange={(id) => {
+                    setSelectedProject(id ?? undefined);
                     setSelectedTask(undefined);
                     setFormError(null);
                   }}
-                  className={cn(
-                    "w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500",
-                    !selectedProject ? "border-amber-400" : "border-gray-300"
+                  placeholder="Select a project..."
+                  inputClassName={cn(
+                    'border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500',
+                    !selectedProject ? 'border-amber-400' : 'border-gray-300'
                   )}
-                >
-                  <option value="">Select a project...</option>
-                  {projects.map((project: Project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.name}
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
 
               {selectedProject && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1">Task (optional)</label>
+                  <label htmlFor="session-clock-in-task" className="block text-sm font-medium text-gray-600 mb-1">Task (optional)</label>
                   <TaskSelect
+                    id="session-clock-in-task"
                     projectId={selectedProject}
                     value={selectedTask ?? null}
                     onChange={(id) => setSelectedTask(id ?? undefined)}
