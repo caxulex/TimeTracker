@@ -35,6 +35,7 @@ from app.models import (
 )
 from app.routers.websocket import manager as ws_manager
 from app.schemas.auth import Message
+from app.services.time_entry_description import resolve_description
 from app.utils.timer_elapsed import (
     compute_display_elapsed_seconds,
     compute_state_elapsed_seconds,
@@ -537,11 +538,17 @@ async def start_timer(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Task not found in this project")
         task_name = task.name
 
+    resolved_description = await resolve_description(
+        description=entry_data.description,
+        task_id=entry_data.task_id,
+        db=db,
+    )
+
     entry = TimeEntry(
         user_id=current_user.id,
         task_id=entry_data.task_id,
         project_id=entry_data.project_id,
-        description=entry_data.description,
+        description=resolved_description,
         start_time=datetime.now(timezone.utc),
         end_time=None,
         duration_seconds=None,
@@ -813,11 +820,17 @@ async def switch_task(
         old_entry.duration_seconds = calculate_duration_seconds(old_entry.start_time, now, old_entry.pause_seconds or 0)
 
     # 5. Create the new entry linked to the same work session
+    resolved_description = await resolve_description(
+        description=switch_data.description,
+        task_id=switch_data.task_id,
+        db=db,
+    )
+
     new_entry = TimeEntry(
         user_id=current_user.id,
         project_id=switch_data.project_id,
         task_id=switch_data.task_id,
-        description=switch_data.description,
+        description=resolved_description,
         start_time=now,
         end_time=None,
         duration_seconds=None,
@@ -1221,6 +1234,12 @@ async def update_time_entry(
         entry.duration_seconds = calculate_duration_seconds(entry.start_time, entry.end_time)
         entry.is_running = False
 
+    entry.description = await resolve_description(
+        description=entry.description,
+        task_id=entry.task_id,
+        db=db,
+    )
+
     await db.commit()
     await db.refresh(entry)
 
@@ -1393,6 +1412,12 @@ async def patch_time_entry(
             entry.pause_seconds or 0,
         )
         entry.is_running = False
+
+    entry.description = await resolve_description(
+        description=entry.description,
+        task_id=entry.task_id,
+        db=db,
+    )
 
     await db.commit()
     await db.refresh(entry)

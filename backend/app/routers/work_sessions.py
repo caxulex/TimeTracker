@@ -36,6 +36,7 @@ from app.schemas.sessions import (
     WorkSessionResponse,
     WorkSessionWithDetails,
 )
+from app.services.time_entry_description import resolve_description
 from app.utils.timer_elapsed import (
     compute_display_elapsed_seconds,
     compute_state_elapsed_seconds,
@@ -757,12 +758,17 @@ async def end_meeting(
         )
         paused_entry = result.scalar_one_or_none()
         if paused_entry:
+            resumed_description = await resolve_description(
+                description=paused_entry.description,
+                task_id=paused_entry.task_id,
+                db=db,
+            )
             # Create a NEW time entry continuing the previous task
             resumed_entry = TimeEntry(
                 user_id=current_user.id,
                 project_id=paused_entry.project_id,
                 task_id=paused_entry.task_id,
-                description=paused_entry.description,
+                description=resumed_description,
                 start_time=now,
                 is_running=True,
                 is_paused=False,
