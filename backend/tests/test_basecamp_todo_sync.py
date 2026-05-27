@@ -1041,6 +1041,11 @@ class TestTodoSyncBC5Subtasks:
         parent = next(t for t in tasks if t.parent_task_id is None)
         children = [t for t in tasks if t.parent_task_id == parent.id]
         assert len(children) == 2
+        assert parent.name == "[Sprint] Parent"
+        assert sorted(ch.name for ch in children) == [
+            "[Sprint] Parent / Step one",
+            "[Sprint] Parent / Step two",
+        ]
 
         map_rows = await db_session.execute(select(BasecampTaskMapping))
         mappings = map_rows.scalars().all()
@@ -1048,6 +1053,77 @@ class TestTodoSyncBC5Subtasks:
         by_task = {m.task_id: m for m in mappings}
         assert by_task[parent.id].basecamp_type == "Todo"
         assert all(by_task[ch.id].basecamp_type == "Kanban::Step" for ch in children)
+
+    @pytest.mark.asyncio
+    async def test_sync_renames_existing_step_to_hierarchical_format(
+        self, db_session: AsyncSession, _enc_key
+    ):
+        company = await _mk_company(db_session)
+        _, team = await _mk_owner_and_team(db_session, company)
+        project, _ = await _mk_project_and_mapping(
+            db_session, company, team, basecamp_project_id="bcp-1"
+        )
+        creds = _mk_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        todolists = {"bcp-1": [{"id": "list-1", "title": "Sprint"}]}
+        todos = {
+            "list-1": [
+                {
+                    "id": "todo-1",
+                    "content": "Parent",
+                    "completed": False,
+                    "updated_at": "2026-05-27T10:00:00Z",
+                }
+            ]
+        }
+        detail = {
+            "id": "todo-1",
+            "content": "Parent",
+            "description": "Parent desc",
+            "completed": False,
+            "status": "active",
+            "updated_at": "2026-05-27T10:00:00Z",
+            "steps": [
+                {
+                    "id": "step-1",
+                    "content": "Step one",
+                    "completed": False,
+                    "parent": {"id": "todo-1"},
+                    "updated_at": "2026-05-27T10:00:00Z",
+                }
+            ],
+        }
+
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos)
+        with p1, p2, p3, patch.object(
+            BasecampService, "_get_todo_detail", new=AsyncMock(return_value=detail)
+        ):
+            await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        rows = await db_session.execute(
+            select(Task).where(Task.project_id == project.id)
+        )
+        tasks = rows.scalars().all()
+        child = next(t for t in tasks if t.parent_task_id is not None)
+        child.name = "Step one"
+        await db_session.flush()
+
+        todos["list-1"][0]["updated_at"] = "2026-05-27T11:00:00Z"
+        detail["updated_at"] = "2026-05-27T11:00:00Z"
+        p1, p2, p3 = _patch_basecamp_api(todolists, todos)
+        with p1, p2, p3, patch.object(
+            BasecampService, "_get_todo_detail", new=AsyncMock(return_value=detail)
+        ):
+            await BasecampService.sync_todos_for_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        await db_session.refresh(child)
+        assert child.name == "[Sprint] Parent / Step one"
 
     @pytest.mark.asyncio
     async def test_reconcile_missing_steps_archives_children_without_delete(

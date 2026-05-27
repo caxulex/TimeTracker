@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +40,7 @@ from app.services.basecamp_service import (
     BasecampService,
     _parse_next_link,
 )
+from app.services.audit_logger import AuditLogger
 from app.services.encryption_service import EncryptionService
 
 
@@ -464,6 +466,200 @@ class TestService:
             )
         )
         assert len(map_rows.scalars().all()) == 2
+
+    @pytest.mark.asyncio
+    async def test_sync_reuses_existing_mapping_without_duplicate_insert(
+        self, configured_basecamp, db_session, company, team
+    ):
+        creds = _make_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        existing_project = Project(
+            team_id=team.id,
+            name="Existing Name",
+            description="Existing Desc",
+        )
+        db_session.add(existing_project)
+        await db_session.flush()
+
+        old_synced_at = datetime(2026, 5, 26, 20, 0, tzinfo=timezone.utc)
+        existing_mapping = BasecampProjectMapping(
+            company_id=company.id,
+            basecamp_account_id=creds.account_id,
+            basecamp_project_id="47451916",
+            internal_project_id=existing_project.id,
+            last_synced_at=old_synced_at,
+        )
+        db_session.add(existing_mapping)
+        await db_session.flush()
+
+        async def fake_list(_creds, _db):
+            return [
+                {
+                    "id": 47451916,
+                    "name": "Existing Name",
+                    "description": "Existing Desc",
+                    "status": "active",
+                    "created_at": "2026-05-27T00:00:00Z",
+                }
+            ]
+
+        with patch.object(BasecampService, "list_projects", side_effect=fake_list):
+            report = await BasecampService.sync_projects_to_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        assert report["created"] == 0
+        assert report["updated"] == 0
+        assert report["unchanged"] == 1
+        assert report["errors"] == []
+
+        await db_session.refresh(existing_mapping)
+        assert existing_mapping.last_synced_at > old_synced_at
+
+        proj_rows = await db_session.execute(
+            select(Project).where(Project.team_id == team.id)
+        )
+        assert len(proj_rows.scalars().all()) == 1
+
+        map_rows = await db_session.execute(
+            select(BasecampProjectMapping).where(
+                BasecampProjectMapping.company_id == company.id,
+                BasecampProjectMapping.basecamp_project_id == "47451916",
+            )
+        )
+        assert len(map_rows.scalars().all()) == 1
+
+    @pytest.mark.asyncio
+    async def test_sync_existing_mapping_updates_project_name_when_drifted(
+        self, configured_basecamp, db_session, company, team
+    ):
+        creds = _make_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        existing_project = Project(
+            team_id=team.id,
+            name="Stale Name",
+            description="Stale Desc",
+        )
+        db_session.add(existing_project)
+        await db_session.flush()
+
+        existing_mapping = BasecampProjectMapping(
+            company_id=company.id,
+            basecamp_account_id=creds.account_id,
+            basecamp_project_id="47451916",
+            internal_project_id=existing_project.id,
+            last_synced_at=datetime(2026, 5, 26, 20, 0, tzinfo=timezone.utc),
+        )
+        db_session.add(existing_mapping)
+        await db_session.flush()
+
+        async def fake_list(_creds, _db):
+            return [
+                {
+                    "id": "47451916",
+                    "name": "BC Updated Name",
+                    "description": "BC Updated Desc",
+                    "status": "active",
+                    "created_at": "2026-05-27T00:00:00Z",
+                }
+            ]
+
+        with patch.object(BasecampService, "list_projects", side_effect=fake_list):
+            report = await BasecampService.sync_projects_to_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        assert report["created"] == 0
+        assert report["updated"] == 1
+        assert report["errors"] == []
+
+        await db_session.refresh(existing_project)
+        assert existing_project.name == "BC Updated Name"
+        assert existing_project.description == "BC Updated Desc"
+
+        map_rows = await db_session.execute(
+            select(BasecampProjectMapping).where(
+                BasecampProjectMapping.company_id == company.id
+            )
+        )
+        assert len(map_rows.scalars().all()) == 1
+
+    @pytest.mark.asyncio
+    async def test_sync_project_error_does_not_poison_following_iterations(
+        self, configured_basecamp, db_session, company, team
+    ):
+        creds = _make_creds(company.id)
+        db_session.add(creds)
+        await db_session.flush()
+
+        bc_payload = [
+            {
+                "id": "p1",
+                "name": "Project One",
+                "description": "Desc 1",
+                "status": "active",
+                "created_at": "2026-05-27T00:00:00Z",
+            },
+            {
+                "id": "p2",
+                "name": "Project Two",
+                "description": "Desc 2",
+                "status": "active",
+                "created_at": "2026-05-27T00:00:00Z",
+            },
+            {
+                "id": "p3",
+                "name": "Project Three",
+                "description": "Desc 3",
+                "status": "active",
+                "created_at": "2026-05-27T00:00:00Z",
+            },
+        ]
+
+        async def fake_list(_creds, _db):
+            return bc_payload
+
+        real_audit_log = AuditLogger.log
+
+        async def flaky_audit_log(*args, **kwargs):
+            details = kwargs.get("details") or ""
+            if (
+                kwargs.get("resource_type") == "basecamp_project_mapping"
+                and "project p2" in details
+            ):
+                raise IntegrityError("INSERT", {}, Exception("duplicate"))
+            return await real_audit_log(*args, **kwargs)
+
+        with patch.object(BasecampService, "list_projects", side_effect=fake_list), patch.object(
+            AuditLogger, "log", side_effect=flaky_audit_log
+        ):
+            report = await BasecampService.sync_projects_to_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        assert report["created"] == 2
+        assert report["updated"] == 0
+        assert report["unchanged"] == 0
+        assert len(report["errors"]) == 1
+        assert "Project p2" in report["errors"][0]
+
+        map_rows = await db_session.execute(
+            select(BasecampProjectMapping).where(
+                BasecampProjectMapping.company_id == company.id
+            )
+        )
+        mappings = map_rows.scalars().all()
+        assert sorted(m.basecamp_project_id for m in mappings) == ["p1", "p3"]
+
+        proj_rows = await db_session.execute(
+            select(Project).where(Project.team_id == team.id)
+        )
+        projects = proj_rows.scalars().all()
+        assert sorted(p.name for p in projects) == ["Project One", "Project Three"]
 
     def test_parse_next_link(self):
         h = '<https://3.basecampapi.com/1/projects.json?page=2>; rel="next"'

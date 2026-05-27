@@ -24,6 +24,7 @@ from urllib.parse import urlencode
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -514,9 +515,12 @@ class BasecampService:
             return report
 
         for bc in bc_projects:
+            project_tx = await db.begin_nested()
             try:
-                bc_id = bc["id"]
-                bc_name = bc["name"]
+                bc_id = str(bc.get("id") or "").strip()
+                if not bc_id:
+                    raise ValueError("Basecamp project payload is missing id")
+                bc_name = (bc.get("name") or "").strip()
                 bc_desc = bc.get("description") or None
                 actor_user_id, actor_user_email, sync_mode = (
                     BasecampService._resolve_sync_actor(
@@ -538,61 +542,74 @@ class BasecampService:
                 if mapping is None:
                     if dry_run:
                         report["created"] += 1
+                        await project_tx.commit()
                         continue
-                    project = Project(
-                        team_id=team_id,
-                        name=bc_name,
-                        description=bc_desc,
+                    # Defensive second exists-check before insert keeps intent explicit.
+                    existing_row = await db.execute(
+                        select(BasecampProjectMapping).where(
+                            BasecampProjectMapping.company_id == company_id,
+                            BasecampProjectMapping.basecamp_account_id
+                            == credentials.account_id,
+                            BasecampProjectMapping.basecamp_project_id == bc_id,
+                        )
                     )
-                    db.add(project)
-                    await db.flush()
-                    await AuditLogger.log(
-                        db=db,
-                        action=AuditAction.CREATE,
-                        resource_type="project",
-                        resource_id=project.id,
-                        user_id=actor_user_id,
-                        user_email=actor_user_email,
-                        new_values={
-                            "name": project.name,
-                            "description": project.description,
-                            "team_id": project.team_id,
-                            "basecamp_project_id": bc_id,
-                        },
-                        details=(
-                            f"Created from Basecamp project {bc_id} "
-                            f"via {sync_mode}"
-                        ),
-                    )
-
-                    mapping = BasecampProjectMapping(
-                        company_id=company_id,
-                        basecamp_account_id=credentials.account_id,
-                        basecamp_project_id=bc_id,
-                        internal_project_id=project.id,
-                        last_synced_at=datetime.now(timezone.utc),
-                    )
-                    db.add(mapping)
-                    await db.flush()
-                    await AuditLogger.log(
-                        db=db,
-                        action=AuditAction.CREATE,
-                        resource_type="basecamp_project_mapping",
-                        resource_id=mapping.id,
-                        user_id=actor_user_id,
-                        user_email=actor_user_email,
-                        new_values={
-                            "company_id": company_id,
-                            "basecamp_account_id": credentials.account_id,
-                            "basecamp_project_id": bc_id,
-                            "internal_project_id": project.id,
-                        },
-                        details=(
-                            f"Created Basecamp project mapping for project {bc_id} "
-                            f"via {sync_mode}"
-                        ),
-                    )
-                    report["created"] += 1
+                    mapping = existing_row.scalar_one_or_none()
+                    if mapping is None:
+                        project = Project(
+                            team_id=team_id,
+                            name=bc_name,
+                            description=bc_desc,
+                        )
+                        db.add(project)
+                        await db.flush()
+                        mapping = BasecampProjectMapping(
+                            company_id=company_id,
+                            basecamp_account_id=credentials.account_id,
+                            basecamp_project_id=bc_id,
+                            internal_project_id=project.id,
+                            last_synced_at=datetime.now(timezone.utc),
+                        )
+                        db.add(mapping)
+                        await db.flush()
+                        await AuditLogger.log(
+                            db=db,
+                            action=AuditAction.CREATE,
+                            resource_type="project",
+                            resource_id=project.id,
+                            user_id=actor_user_id,
+                            user_email=actor_user_email,
+                            new_values={
+                                "name": project.name,
+                                "description": project.description,
+                                "team_id": project.team_id,
+                                "basecamp_project_id": bc_id,
+                            },
+                            details=(
+                                f"Created from Basecamp project {bc_id} "
+                                f"via {sync_mode}"
+                            ),
+                        )
+                        await AuditLogger.log(
+                            db=db,
+                            action=AuditAction.CREATE,
+                            resource_type="basecamp_project_mapping",
+                            resource_id=mapping.id,
+                            user_id=actor_user_id,
+                            user_email=actor_user_email,
+                            new_values={
+                                "company_id": company_id,
+                                "basecamp_account_id": credentials.account_id,
+                                "basecamp_project_id": bc_id,
+                                "internal_project_id": project.id,
+                            },
+                            details=(
+                                f"Created Basecamp project mapping for project {bc_id} "
+                                f"via {sync_mode}"
+                            ),
+                        )
+                        report["created"] += 1
+                        await project_tx.commit()
+                        continue
                 else:
                     proj_row = await db.execute(
                         select(Project).where(Project.id == mapping.internal_project_id)
@@ -630,6 +647,7 @@ class BasecampService:
                         mapping.internal_project_id = project.id
                         mapping.last_synced_at = datetime.now(timezone.utc)
                         report["created"] += 1
+                        await project_tx.commit()
                         continue
 
                     changed = (project.name != bc_name) or (
@@ -673,7 +691,15 @@ class BasecampService:
                         if not dry_run:
                             mapping.last_synced_at = datetime.now(timezone.utc)
                         report["unchanged"] += 1
+                await project_tx.commit()
+            except IntegrityError as exc:
+                await project_tx.rollback()
+                logger.exception("basecamp.sync.project_failed")
+                report["errors"].append(
+                    f"Project {bc.get('id')}: {exc}"
+                )
             except Exception as exc:  # noqa: BLE001 — record + continue
+                await project_tx.rollback()
                 logger.exception("basecamp.sync.project_failed")
                 report["errors"].append(
                     f"Project {bc.get('id')}: {exc}"
@@ -1016,6 +1042,7 @@ class BasecampService:
                     continue
 
                 for td in todos:
+                    todo_tx = await db.begin_nested()
                     try:
                         todo_id = str(td.get("id"))
                         mapping = await BasecampService._find_task_mapping(
@@ -1034,6 +1061,7 @@ class BasecampService:
                             and list_updated_at <= mapping.basecamp_updated_at
                         ):
                             report["todos_unchanged"] += 1
+                            await todo_tx.commit()
                             continue
 
                         detail = await BasecampService._get_todo_detail(
@@ -1059,6 +1087,12 @@ class BasecampService:
                             basecamp_type="Todo",
                             parent_task_id=None,
                         )
+                        parent_todo_title = (
+                            detail.get("content")
+                            or detail.get("title")
+                            or detail.get("name")
+                            or f"Basecamp item {todo_id}"
+                        )
 
                         detail_steps = detail.get("steps") or []
                         for step in detail_steps:
@@ -1068,9 +1102,11 @@ class BasecampService:
                                 account_id=credentials.account_id,
                                 basecamp_project_id=bc_project_id,
                                 todolist_id=lst_id,
+                                list_title=lst_title,
                                 internal_project_id=internal_project_id,
                                 parent_task=parent_task,
                                 parent_basecamp_todo_id=todo_id,
+                                parent_todo_title=parent_todo_title,
                                 step=step,
                                 dry_run=dry_run,
                                 report=report,
@@ -1105,7 +1141,9 @@ class BasecampService:
                             )
                             parent_mapping.basecamp_updated_at = detail_updated_at
                             parent_mapping.last_synced_at = datetime.now(timezone.utc)
+                        await todo_tx.commit()
                     except BasecampError as exc:
+                        await todo_tx.rollback()
                         logger.exception("basecamp.todos.todo_detail_failed")
                         report["todo_errors"].append(
                             f"todo {td.get('id')}: {exc}"
@@ -1123,6 +1161,7 @@ class BasecampService:
                                 ),
                             )
                     except Exception as exc:  # noqa: BLE001
+                        await todo_tx.rollback()
                         logger.exception("basecamp.todos.todo_failed")
                         report["todo_errors"].append(
                             f"todo {td.get('id')}: {exc}"
@@ -1383,9 +1422,11 @@ class BasecampService:
         account_id: str,
         basecamp_project_id: str,
         todolist_id: str,
+        list_title: str,
         internal_project_id: int,
         parent_task: Task,
         parent_basecamp_todo_id: str,
+        parent_todo_title: str,
         step: dict,
         dry_run: bool,
         report: dict,
@@ -1426,9 +1467,15 @@ class BasecampService:
                 )
             return
 
+        step_title = (
+            step.get("content")
+            or step.get("title")
+            or step.get("name")
+            or step_id
+        )
         step_payload = {
             "id": step_id,
-            "content": step.get("content") or step.get("title") or step.get("name") or step_id,
+            "content": f"{parent_todo_title} / {step_title}",
             "description": step.get("description"),
             "completed": bool(step.get("completed", False)),
             "due_on": step.get("due_on"),
@@ -1442,7 +1489,7 @@ class BasecampService:
             account_id=account_id,
             basecamp_project_id=basecamp_project_id,
             todolist_id=todolist_id,
-            list_title="",
+            list_title=list_title,
             internal_project_id=internal_project_id,
             todo=step_payload,
             dry_run=dry_run,
