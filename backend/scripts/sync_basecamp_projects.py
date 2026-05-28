@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-4-hourly Basecamp auto-sync job.
+Daily Basecamp backstop sync job.
 
 Iterates every ``basecamp_credentials`` row with ``auto_sync_enabled=True``
 and runs the same one-way project mirror that the manual
 ``POST /api/integrations/basecamp/sync`` endpoint runs.
 
-Driven by the ``scheduler-4hourly`` container in
-``docker-compose.prod.yml`` (sleep loop, 14400 seconds).
+Driven by the ``scheduler-4hourly`` service in
+``docker-compose.prod.yml`` (sleep loop, 86400 seconds).
 
 Behavior contract (also covered by tests):
 
@@ -18,8 +18,8 @@ Behavior contract (also covered by tests):
 * ``main()`` swallows any top-level exception so the scheduler
   container's ``while true`` loop keeps running across crashes.
 * The sync code itself is idempotent (re-running a clean sync produces
-  ``unchanged`` results), so no separate idempotency stamp is needed
-  for the 4-hourly cadence.
+    ``unchanged`` results), so no separate idempotency stamp is needed
+    for the daily cadence.
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ from sqlalchemy.ext.asyncio import (
 
 from app.models import BasecampCredentials
 from app.services.basecamp_service import BasecampError, BasecampService
+from app.services.basecamp_webhook_service import BasecampWebhookService
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,10 @@ async def sync_all_enabled_companies(db: AsyncSession) -> dict:
             # Row was deleted between snapshot and processing.
             continue
         try:
+            reconcile_report = await BasecampWebhookService.reconcile_subscriptions(
+                creds=creds,
+                db=db,
+            )
             report = await BasecampService.sync_projects_to_company(
                 creds, company_id, db, dry_run=False
             )
@@ -123,7 +128,8 @@ async def sync_all_enabled_companies(db: AsyncSession) -> dict:
                 "basecamp.autosync.company_done company_id=%s "
                 "created=%s updated=%s unchanged=%s "
                 "todos_created=%s todos_updated=%s todos_unchanged=%s "
-                "errors=%s",
+                "errors=%s webhook_registered=%s webhook_re_registered=%s "
+                "webhook_failed=%s",
                 company_id,
                 report.get("created", 0),
                 report.get("updated", 0),
@@ -132,6 +138,9 @@ async def sync_all_enabled_companies(db: AsyncSession) -> dict:
                 todo_report.get("todos_updated", 0),
                 todo_report.get("todos_unchanged", 0),
                 proj_errs + todo_errs,
+                reconcile_report.get("registered", 0),
+                reconcile_report.get("re_registered", 0),
+                reconcile_report.get("failed", 0),
             )
         except BasecampError as exc:
             await db.rollback()

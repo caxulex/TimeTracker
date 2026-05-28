@@ -182,6 +182,7 @@ class Settings(BaseSettings):
     BASECAMP_REDIRECT_URI: str = (
         "https://timetracker.shaemarcus.com/api/integrations/basecamp/callback"
     )
+    WEBHOOK_BASE_URL: str = "https://timetracker.shaemarcus.com"
 
     # AI Provider Settings
     GEMINI_API_KEY: Optional[str] = None  # Legacy env-based (prefer database storage)

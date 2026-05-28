@@ -204,6 +204,7 @@ class TestSchema:
             "last_sync_at",
             "target_team_id",
             "auto_sync_enabled",
+            "webhook_secret_hash",
             "created_at",
             "updated_at",
         }

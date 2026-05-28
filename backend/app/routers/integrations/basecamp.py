@@ -18,19 +18,30 @@ from __future__ import annotations
 import json
 import logging
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
+import hashlib
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_db
+from app.database import async_session, get_db
 from app.dependencies import get_current_active_user
-from app.models import BasecampCredentials, Team, User
+from app.middleware.rate_limit import rate_limiter
+from app.models import (
+    BasecampCredentials,
+    BasecampProcessedEvent,
+    BasecampProjectMapping,
+    BasecampWebhookSubscription,
+    Team,
+    User,
+)
+from app.services.audit_logger import AuditAction, AuditLogger
 from app.services.basecamp_service import (
     BasecampAPIError,
     BasecampAuthError,
@@ -38,6 +49,7 @@ from app.services.basecamp_service import (
     BasecampNotConfiguredError,
     BasecampService,
 )
+from app.services.basecamp_webhook_handlers import BasecampWebhookHandlers
 from app.services.encryption_service import EncryptionService
 from app.services.token_blacklist import token_blacklist
 
@@ -141,6 +153,10 @@ class SyncResponse(BaseModel):
     dry_run: bool
 
 
+class WebhookAckResponse(BaseModel):
+    accepted: bool = True
+
+
 # ----------------------------------------------------------------------
 # State token helpers (Redis-backed CSRF)
 # ----------------------------------------------------------------------
@@ -167,6 +183,106 @@ async def _consume_state_token(state: str) -> Optional[dict]:
         return json.loads(raw)
     except (TypeError, ValueError):
         return None
+
+
+def _hash_webhook_token(secret_token: str) -> str:
+    return hashlib.sha256(secret_token.encode("utf-8")).hexdigest()
+
+
+def _safe_str(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _extract_bucket_id_from_recording(recording: dict) -> str:
+    bucket = recording.get("bucket")
+    if isinstance(bucket, dict):
+        return _safe_str(bucket.get("id"))
+    if recording.get("bucket_id") is not None:
+        return _safe_str(recording.get("bucket_id"))
+    parent = recording.get("parent")
+    if isinstance(parent, dict):
+        parent_bucket = parent.get("bucket")
+        if isinstance(parent_bucket, dict):
+            return _safe_str(parent_bucket.get("id"))
+    return ""
+
+
+async def _process_basecamp_event_background(
+    *,
+    creds_id: int,
+    event_payload: dict,
+) -> None:
+    event_kind = _safe_str(event_payload.get("kind")).lower()
+    event_id = _safe_str(event_payload.get("id"))
+    recording = event_payload.get("recording") if isinstance(event_payload, dict) else {}
+    if not isinstance(recording, dict):
+        recording = {}
+    bucket_id = _extract_bucket_id_from_recording(recording)
+
+    async with async_session() as db:
+        try:
+            creds = await db.get(BasecampCredentials, creds_id)
+            if creds is None:
+                return
+
+            await BasecampWebhookHandlers.handle_event(
+                event=event_payload,
+                credentials=creds,
+                db=db,
+            )
+
+            if bucket_id:
+                sub_result = await db.execute(
+                    select(BasecampWebhookSubscription).where(
+                        BasecampWebhookSubscription.credentials_id == creds.id,
+                        BasecampWebhookSubscription.basecamp_project_id == bucket_id,
+                    )
+                )
+                sub = sub_result.scalar_one_or_none()
+                if sub is not None:
+                    sub.last_error = None
+                    sub.last_error_at = None
+                    sub.last_event_at = datetime.now(timezone.utc)
+
+            await AuditLogger.log(
+                db=db,
+                action=AuditAction.UPDATE,
+                resource_type="basecamp.webhook.received",
+                user_id=None,
+                user_email="basecamp-webhook@system",
+                details=f"Processed Basecamp webhook kind={event_kind} event_id={event_id}",
+                new_values={
+                    "kind": event_kind,
+                    "event_id": event_id,
+                    "bucket_id": bucket_id,
+                },
+            )
+            await db.commit()
+        except Exception as exc:  # noqa: BLE001
+            await db.rollback()
+            try:
+                creds = await db.get(BasecampCredentials, creds_id)
+                if creds is not None and bucket_id:
+                    sub_result = await db.execute(
+                        select(BasecampWebhookSubscription).where(
+                            BasecampWebhookSubscription.credentials_id == creds.id,
+                            BasecampWebhookSubscription.basecamp_project_id == bucket_id,
+                        )
+                    )
+                    sub = sub_result.scalar_one_or_none()
+                    if sub is not None:
+                        sub.last_error = str(exc)
+                        sub.last_error_at = datetime.now(timezone.utc)
+                    await db.commit()
+            except Exception:
+                await db.rollback()
+            logger.exception(
+                "basecamp.webhook.background_failed kind=%s event_id=%s",
+                event_kind,
+                event_id,
+            )
 
 
 # ----------------------------------------------------------------------
@@ -454,6 +570,116 @@ async def sync_projects(
         "todo_errors": todo_report.get("todo_errors", []),
     }
     return SyncResponse(**merged)
+
+
+@router.post("/webhook/{secret_token}", response_model=WebhookAckResponse)
+async def receive_webhook(
+    secret_token: str,
+    body: dict,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    """Receive Basecamp webhook payloads (public endpoint, URL-secret auth)."""
+    token_hash = _hash_webhook_token(secret_token)
+
+    allowed, *_ = await rate_limiter.check_rate_limit(
+        identifier=f"basecamp-webhook:{token_hash[:24]}",
+        path="/api/integrations/basecamp/webhook",
+    )
+    if not allowed:
+        logger.warning("basecamp.webhook.rate_limited token_hash_prefix=%s", token_hash[:12])
+        return WebhookAckResponse(accepted=True)
+
+    row = await db.execute(
+        select(BasecampCredentials).where(
+            BasecampCredentials.webhook_secret_hash == token_hash
+        )
+    )
+    creds = row.scalar_one_or_none()
+    if creds is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    event_id = _safe_str(body.get("id"))
+    kind = _safe_str(body.get("kind"))
+    recording = body.get("recording")
+    if not event_id or not kind or not isinstance(recording, dict):
+        await AuditLogger.log(
+            db=db,
+            action=AuditAction.UPDATE,
+            resource_type="basecamp.webhook.invalid_payload",
+            user_id=None,
+            user_email="basecamp-webhook@system",
+            details="Ignored malformed Basecamp webhook payload",
+            new_values={"event_id": event_id, "kind": kind},
+        )
+        await db.commit()
+        return WebhookAckResponse(accepted=True)
+
+    bucket_id = _extract_bucket_id_from_recording(recording)
+    if not bucket_id:
+        await AuditLogger.log(
+            db=db,
+            action=AuditAction.UPDATE,
+            resource_type="basecamp.webhook.invalid_payload",
+            user_id=None,
+            user_email="basecamp-webhook@system",
+            details="Ignored Basecamp webhook payload missing recording.bucket.id",
+            new_values={"event_id": event_id, "kind": kind},
+        )
+        await db.commit()
+        return WebhookAckResponse(accepted=True)
+
+    mapping_row = await db.execute(
+        select(BasecampProjectMapping).where(
+            BasecampProjectMapping.company_id == creds.company_id,
+            BasecampProjectMapping.basecamp_account_id == creds.account_id,
+            BasecampProjectMapping.basecamp_project_id == bucket_id,
+        )
+    )
+    mapping = mapping_row.scalar_one_or_none()
+    if mapping is None:
+        await AuditLogger.log(
+            db=db,
+            action=AuditAction.UPDATE,
+            resource_type="basecamp.webhook.cross_tenant_rejected",
+            user_id=None,
+            user_email="basecamp-webhook@system",
+            details=(
+                f"Webhook bucket {bucket_id} not mapped for credentials company_id={creds.company_id}"
+            ),
+            new_values={"event_id": event_id, "kind": kind, "bucket_id": bucket_id},
+        )
+        await db.commit()
+        return WebhookAckResponse(accepted=True)
+
+    stmt = (
+        insert(BasecampProcessedEvent)
+        .values(event_id=event_id, kind=kind)
+        .on_conflict_do_nothing(index_elements=["event_id"])
+    )
+    result = await db.execute(stmt)
+    if result.rowcount == 0:
+        await db.commit()
+        return WebhookAckResponse(accepted=True)
+
+    sub_row = await db.execute(
+        select(BasecampWebhookSubscription).where(
+            BasecampWebhookSubscription.credentials_id == creds.id,
+            BasecampWebhookSubscription.basecamp_project_id == bucket_id,
+        )
+    )
+    sub = sub_row.scalar_one_or_none()
+    if sub is not None:
+        sub.last_event_at = datetime.now(timezone.utc)
+
+    await db.commit()
+
+    background_tasks.add_task(
+        _process_basecamp_event_background,
+        creds_id=creds.id,
+        event_payload=body,
+    )
+    return WebhookAckResponse(accepted=True)
 
 
 @router.delete("/disconnect")

@@ -1075,6 +1075,9 @@ class BasecampCredentials(Base):
     auto_sync_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false", default=False
     )
+    webhook_secret_hash: Mapped[Optional[str]] = mapped_column(
+        String(128), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -1204,4 +1207,63 @@ class BasecampTaskMapping(Base):
             f"basecamp_todo_id={self.basecamp_todo_id}, "
             f"task_id={self.task_id})>"
         )
+
+
+class BasecampWebhookSubscription(Base):
+    """Tracks per-project Basecamp webhook registrations for a credential."""
+
+    __tablename__ = "basecamp_webhook_subscriptions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, index=True)
+    credentials_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("basecamp_credentials.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    basecamp_project_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    basecamp_webhook_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="true",
+        default=True,
+        index=True,
+    )
+    last_event_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_error_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "credentials_id",
+            "basecamp_project_id",
+            name="uq_basecamp_webhook_subscription_project",
+        ),
+    )
+
+
+class BasecampProcessedEvent(Base):
+    """Idempotency stamp for Basecamp webhook events."""
+
+    __tablename__ = "basecamp_processed_events"
+
+    event_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    processed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
 

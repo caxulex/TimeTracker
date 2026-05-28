@@ -280,7 +280,7 @@ class TestBasecampSyncAudit:
         assert project_log is not None
         assert project_log.user_id is None
         assert project_log.user_email == BASECAMP_SYNC_SYSTEM_EMAIL
-        assert "4hourly scheduler" in (project_log.details or "")
+        assert "daily scheduler" in (project_log.details or "")
 
         mapping_row = await db_session.execute(
             select(AuditLog).where(
@@ -394,7 +394,7 @@ class TestBasecampSyncAudit:
         assert log is not None
         assert log.user_id is None
         assert log.user_email == BASECAMP_SYNC_SYSTEM_EMAIL
-        assert "4hourly scheduler" in (log.details or "")
+        assert "daily scheduler" in (log.details or "")
 
         task_values = json.loads(log.new_values or "{}")
         assert task_values["project_id"] == mapping.internal_project_id
