@@ -910,6 +910,54 @@ class BasecampService:
         return payload
 
     @staticmethod
+    async def _get_todolist_detail(
+        token: str,
+        account_id: str,
+        bucket_id: str,
+        todolist_id: str,
+    ) -> dict:
+        """Fetch a single Basecamp to-do list detail payload."""
+        url = (
+            f"https://3.basecampapi.com/{account_id}/buckets/"
+            f"{bucket_id}/todolists/{todolist_id}.json"
+        )
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "User-Agent": USER_AGENT,
+            },
+        ) as client:
+            resp = await _http_request_with_retry(client, "GET", url)
+        if resp.status_code != 200:
+            raise BasecampAPIError(
+                f"todolists/{todolist_id}.json returned HTTP {resp.status_code}"
+            )
+        payload = resp.json()
+        if not isinstance(payload, dict):
+            raise BasecampAPIError(
+                f"todolists/{todolist_id}.json returned non-object body"
+            )
+        return payload
+
+    @staticmethod
+    async def _find_project_mapping(
+        *,
+        db: AsyncSession,
+        company_id: int,
+        account_id: str,
+        basecamp_project_id: str,
+    ) -> Optional[BasecampProjectMapping]:
+        row = await db.execute(
+            select(BasecampProjectMapping).where(
+                BasecampProjectMapping.company_id == company_id,
+                BasecampProjectMapping.basecamp_account_id == account_id,
+                BasecampProjectMapping.basecamp_project_id == basecamp_project_id,
+            )
+        )
+        return row.scalar_one_or_none()
+
+    @staticmethod
     async def _find_task_mapping(
         *,
         db: AsyncSession,
@@ -927,6 +975,220 @@ class BasecampService:
             )
         )
         return row.scalar_one_or_none()
+
+    @staticmethod
+    async def sync_single_todo_for_company(
+        *,
+        credentials: BasecampCredentials,
+        company_id: int,
+        db: AsyncSession,
+        bucket_id: str,
+        todo_id: str,
+        todolist_id: Optional[str] = None,
+    ) -> dict:
+        """Refetch + upsert a single Basecamp to-do and its inline steps."""
+        report: dict[str, Any] = {
+            "todos_created": 0,
+            "todos_updated": 0,
+            "todos_unchanged": 0,
+            "todo_errors": [],
+            "dry_run": False,
+        }
+
+        proj_mapping = await BasecampService._find_project_mapping(
+            db=db,
+            company_id=company_id,
+            account_id=credentials.account_id,
+            basecamp_project_id=bucket_id,
+        )
+        if proj_mapping is None:
+            report["todo_errors"].append(
+                f"project {bucket_id}: no local basecamp_project_mapping"
+            )
+            return report
+
+        token = await BasecampService._get_valid_access_token(credentials, db)
+        detail = await BasecampService._get_todo_detail(
+            token,
+            credentials.account_id,
+            bucket_id,
+            todo_id,
+        )
+        effective_todolist_id = (
+            todolist_id
+            or str(
+                (detail.get("parent") or {}).get("id")
+                if isinstance(detail.get("parent"), dict)
+                else ""
+            )
+        )
+
+        list_title = ""
+        if effective_todolist_id:
+            try:
+                todolist = await BasecampService._get_todolist_detail(
+                    token,
+                    credentials.account_id,
+                    bucket_id,
+                    effective_todolist_id,
+                )
+                list_title = (
+                    todolist.get("title")
+                    or todolist.get("name")
+                    or ""
+                )
+            except BasecampError:
+                list_title = ""
+
+        todo_tx = await db.begin_nested()
+        try:
+            parent_task, parent_mapping = await BasecampService._upsert_todo(
+                db=db,
+                company_id=company_id,
+                account_id=credentials.account_id,
+                basecamp_project_id=bucket_id,
+                todolist_id=effective_todolist_id or "0",
+                list_title=list_title,
+                internal_project_id=proj_mapping.internal_project_id,
+                todo=detail,
+                dry_run=False,
+                report=report,
+                triggered_by_user_id=None,
+                triggered_by_user_email=None,
+                basecamp_type="Todo",
+                parent_task_id=None,
+            )
+
+            parent_todo_title = (
+                detail.get("content")
+                or detail.get("title")
+                or detail.get("name")
+                or f"Basecamp item {todo_id}"
+            )
+
+            detail_steps = detail.get("steps") or []
+            for step in detail_steps:
+                await BasecampService._upsert_step(
+                    db=db,
+                    company_id=company_id,
+                    account_id=credentials.account_id,
+                    basecamp_project_id=bucket_id,
+                    todolist_id=effective_todolist_id or "0",
+                    list_title=list_title,
+                    internal_project_id=proj_mapping.internal_project_id,
+                    parent_task=parent_task,
+                    parent_basecamp_todo_id=todo_id,
+                    parent_todo_title=parent_todo_title,
+                    step=step,
+                    dry_run=False,
+                    report=report,
+                    triggered_by_user_id=None,
+                    triggered_by_user_email=None,
+                )
+
+            await BasecampService._reconcile_missing_steps(
+                db=db,
+                company_id=company_id,
+                account_id=credentials.account_id,
+                parent_task=parent_task,
+                current_steps=detail_steps,
+                dry_run=False,
+                report=report,
+            )
+
+            parent_status = str(detail.get("status") or "").lower()
+            if parent_status in {"archived", "trashed"}:
+                await BasecampService._archive_child_steps_for_parent(
+                    db=db,
+                    company_id=company_id,
+                    account_id=credentials.account_id,
+                    parent_task=parent_task,
+                    dry_run=False,
+                    report=report,
+                )
+
+            parent_mapping.basecamp_updated_at = _parse_basecamp_datetime(
+                detail.get("updated_at")
+            )
+            parent_mapping.last_synced_at = datetime.now(timezone.utc)
+            await todo_tx.commit()
+        except Exception:
+            await todo_tx.rollback()
+            raise
+
+        await db.flush()
+        return report
+
+    @staticmethod
+    async def resync_todolist_for_company(
+        *,
+        credentials: BasecampCredentials,
+        company_id: int,
+        db: AsyncSession,
+        bucket_id: str,
+        todolist_id: str,
+    ) -> dict:
+        """Refetch a Basecamp to-do list and upsert each child to-do."""
+        report: dict[str, Any] = {
+            "todos_created": 0,
+            "todos_updated": 0,
+            "todos_unchanged": 0,
+            "todo_errors": [],
+            "dry_run": False,
+        }
+
+        proj_mapping = await BasecampService._find_project_mapping(
+            db=db,
+            company_id=company_id,
+            account_id=credentials.account_id,
+            basecamp_project_id=bucket_id,
+        )
+        if proj_mapping is None:
+            report["todo_errors"].append(
+                f"project {bucket_id}: no local basecamp_project_mapping"
+            )
+            return report
+
+        token = await BasecampService._get_valid_access_token(credentials, db)
+        todolist = await BasecampService._get_todolist_detail(
+            token,
+            credentials.account_id,
+            bucket_id,
+            todolist_id,
+        )
+        list_title = todolist.get("title") or todolist.get("name") or ""
+        todos = await BasecampService._list_todos_in_list(
+            token,
+            credentials.account_id,
+            bucket_id,
+            todolist_id,
+        )
+
+        for td in todos:
+            single = await BasecampService.sync_single_todo_for_company(
+                credentials=credentials,
+                company_id=company_id,
+                db=db,
+                bucket_id=bucket_id,
+                todo_id=str(td.get("id")),
+                todolist_id=todolist_id,
+            )
+            report["todos_created"] += int(single.get("todos_created", 0))
+            report["todos_updated"] += int(single.get("todos_updated", 0))
+            report["todos_unchanged"] += int(single.get("todos_unchanged", 0))
+            report["todo_errors"].extend(single.get("todo_errors", []))
+
+        # Preserve list title fetch side-effect for observability and future
+        # debugging even when todos are empty.
+        if not list_title and not todos:
+            logger.debug(
+                "basecamp.webhook.todolist_empty bucket_id=%s todolist_id=%s",
+                bucket_id,
+                todolist_id,
+            )
+
+        await db.flush()
+        return report
 
     @staticmethod
     async def sync_todos_for_company(
@@ -1610,7 +1872,7 @@ class BasecampService:
                 triggered_by_user_email or BASECAMP_SYNC_SYSTEM_EMAIL,
                 "manual sync",
             )
-        return (None, BASECAMP_SYNC_SYSTEM_EMAIL, "4hourly scheduler")
+        return (None, BASECAMP_SYNC_SYSTEM_EMAIL, "daily scheduler")
 
 
 def _parse_next_link(link_header: Optional[str]) -> Optional[str]:

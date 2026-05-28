@@ -182,7 +182,7 @@ services:
     networks:
       - timetracker-network
 
-  # 4-hourly scheduler: Basecamp opt-in auto-sync (v2)
+  # Daily scheduler: Basecamp webhook backstop sync
   scheduler-4hourly:
     image: timetracker-backend:latest
     container_name: timetracker-scheduler-4hourly
@@ -198,11 +198,11 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        echo "4-hourly scheduler started. Will run Basecamp auto-sync every 4 hours."
+        echo "Daily scheduler started. Will run Basecamp backstop sync every 24 hours."
         while true; do
-          echo "[Scheduler-4Hourly] Running Basecamp auto-sync job..."
-          python scripts/sync_basecamp_projects.py || echo "[Scheduler-4Hourly] job exited non-zero (continuing)"
-          sleep 14400
+          echo "[Scheduler-Daily] Running Basecamp backstop sync job..."
+          python scripts/sync_basecamp_projects.py || echo "[Scheduler-Daily] job exited non-zero (continuing)"
+          sleep 86400
         done
     depends_on:
       postgres:
