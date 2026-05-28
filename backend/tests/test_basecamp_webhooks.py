@@ -357,3 +357,67 @@ class TestWebhookService:
         refreshed = await db_session.get(BasecampWebhookSubscription, sub.id)
         assert refreshed is not None
         assert refreshed.last_error is not None
+
+    @pytest.mark.asyncio
+    async def test_flag_stale_subscriptions_ignores_new_null_last_event(
+        self,
+        db_session: AsyncSession,
+        _enc_key,
+    ):
+        company = await _mk_company(db_session, "WS5")
+        await _mk_owner_and_team(db_session, company)
+        creds = await _mk_creds(db_session, company.id)
+        sub = BasecampWebhookSubscription(
+            credentials_id=creds.id,
+            basecamp_project_id="fresh-null-event",
+            basecamp_webhook_id="wh-fresh-null",
+            active=True,
+            last_event_at=None,
+            created_at=datetime.now(timezone.utc) - timedelta(days=1),
+        )
+        db_session.add(sub)
+        await db_session.commit()
+
+        count = await BasecampWebhookService.flag_stale_subscriptions(
+            creds,
+            db_session,
+            stale_days=7,
+        )
+        await db_session.commit()
+
+        assert count == 0
+        refreshed = await db_session.get(BasecampWebhookSubscription, sub.id)
+        assert refreshed is not None
+        assert refreshed.last_error is None
+
+    @pytest.mark.asyncio
+    async def test_flag_stale_subscriptions_marks_old_null_last_event(
+        self,
+        db_session: AsyncSession,
+        _enc_key,
+    ):
+        company = await _mk_company(db_session, "WS6")
+        await _mk_owner_and_team(db_session, company)
+        creds = await _mk_creds(db_session, company.id)
+        sub = BasecampWebhookSubscription(
+            credentials_id=creds.id,
+            basecamp_project_id="old-null-event",
+            basecamp_webhook_id="wh-old-null",
+            active=True,
+            last_event_at=None,
+            created_at=datetime.now(timezone.utc) - timedelta(days=10),
+        )
+        db_session.add(sub)
+        await db_session.commit()
+
+        count = await BasecampWebhookService.flag_stale_subscriptions(
+            creds,
+            db_session,
+            stale_days=7,
+        )
+        await db_session.commit()
+
+        assert count == 1
+        refreshed = await db_session.get(BasecampWebhookSubscription, sub.id)
+        assert refreshed is not None
+        assert refreshed.last_error is not None

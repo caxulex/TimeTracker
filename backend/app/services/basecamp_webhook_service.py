@@ -213,7 +213,13 @@ class BasecampWebhookService:
         )
         updated = 0
         for sub in rows.scalars().all():
-            if sub.last_event_at is None or sub.last_event_at < cutoff:
+            is_stale_with_events = (
+                sub.last_event_at is not None and sub.last_event_at < cutoff
+            )
+            is_stale_without_events = (
+                sub.last_event_at is None and sub.created_at is not None and sub.created_at < cutoff
+            )
+            if is_stale_with_events or is_stale_without_events:
                 sub.last_error = (
                     f"No webhook events observed in the last {stale_days} days"
                 )

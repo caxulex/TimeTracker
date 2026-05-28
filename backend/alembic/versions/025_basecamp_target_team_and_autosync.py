@@ -12,7 +12,7 @@ Adds two columns supporting Basecamp integration v2:
   company) so existing installs are byte-for-byte unchanged after
   migration.
 * ``auto_sync_enabled`` (boolean NOT NULL DEFAULT FALSE). When TRUE the
-  4-hourly ``scheduler-4hourly`` container runs the sync for this
+    daily ``scheduler-daily`` container runs the sync for this
   company. Opt-in; defaults to FALSE for every existing row.
 
 Round-trips cleanly (upgrade -> downgrade -> upgrade).

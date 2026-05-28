@@ -6,7 +6,7 @@ Iterates every ``basecamp_credentials`` row with ``auto_sync_enabled=True``
 and runs the same one-way project mirror that the manual
 ``POST /api/integrations/basecamp/sync`` endpoint runs.
 
-Driven by the ``scheduler-4hourly`` service in
+Driven by the ``scheduler-daily`` service in
 ``docker-compose.prod.yml`` (sleep loop, 86400 seconds).
 
 Behavior contract (also covered by tests):
