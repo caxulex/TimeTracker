@@ -95,7 +95,8 @@ async def main() -> int:
                 company_tx = await db.begin_nested()
                 try:
                     result = await _run_for_company(creds, db)
-                    await company_tx.commit()
+                    if company_tx.is_active:
+                        await company_tx.commit()
                     results.append(result)
                     print(
                         "[basecamp-webhooks] company_id="
@@ -109,7 +110,8 @@ async def main() -> int:
                             f"company_id={result.company_id} token={result.token}"
                         )
                 except Exception as exc:  # noqa: BLE001
-                    await company_tx.rollback()
+                    if company_tx.is_active:
+                        await company_tx.rollback()
                     logger.exception(
                         "basecamp.webhooks.bootstrap_company_failed company_id=%s",
                         creds.company_id,

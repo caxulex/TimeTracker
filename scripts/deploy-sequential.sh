@@ -6,7 +6,7 @@
 #     to prevent Out-Of-Memory crashes on 1GB RAM servers.
 #
 # 📝 NOTE: Scheduler containers (scheduler, scheduler-hourly,
-#     scheduler-4hourly) share the backend image
+#     scheduler-daily) share the backend image
 #     (image: timetracker-backend:latest in docker-compose.prod.yml)
 #     and therefore do NOT require separate build steps. The
 #     `docker compose up -d` step below will detect the updated
@@ -19,7 +19,7 @@
 #     would otherwise race the un-migrated schema (see incident
 #     2026-05-12 where a deferred `alembic upgrade head` caused
 #     6024 "current transaction is aborted" errors in the first
-#     scheduler-4hourly cron run).
+#     scheduler-daily cron run).
 #
 # ❌ NEVER USE: docker compose up -d --build
 # ❌ NEVER USE: docker compose build --no-cache
