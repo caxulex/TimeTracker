@@ -225,6 +225,47 @@ describe('Timer Store', () => {
       expect(error).toBe('No active timer');
       expect(isLoading).toBe(false);
     });
+
+    it('should reconcile local state and force refresh on 404 no-running timer', async () => {
+      const runningEntry = createMockEntry({ is_running: true });
+      useTimerStore.setState({
+        currentEntry: runningEntry,
+        isRunning: true,
+        isPaused: true,
+        elapsedSeconds: 120,
+      });
+
+      vi.mocked(timeEntriesApi.stopTimer).mockRejectedValue({
+        isAxiosError: true,
+        response: {
+          status: 404,
+          data: {
+            detail: 'No running timer found',
+          },
+        },
+      });
+      vi.mocked(timeEntriesApi.getTimer).mockResolvedValue({
+        is_running: false,
+        current_entry: undefined,
+      });
+
+      await act(async () => {
+        await expect(useTimerStore.getState().stopTimer()).rejects.toMatchObject({
+          response: {
+            status: 404,
+          },
+        });
+      });
+
+      expect(timeEntriesApi.getTimer).toHaveBeenCalledTimes(1);
+      const { currentEntry, isRunning, isPaused, elapsedSeconds, isLoading, error } = useTimerStore.getState();
+      expect(currentEntry).toBeNull();
+      expect(isRunning).toBe(false);
+      expect(isPaused).toBe(false);
+      expect(elapsedSeconds).toBe(0);
+      expect(isLoading).toBe(false);
+      expect(error).toBeNull();
+    });
   });
 
   describe('Fetch Timer', () => {

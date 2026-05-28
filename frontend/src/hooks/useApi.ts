@@ -9,6 +9,7 @@ import {
   teamsApi,
   reportsApi,
 } from '../api/client';
+import { isNoRunningTimerError } from '../utils/timerErrors';
 import type {
   ProjectCreate,
   ProjectUpdate,
@@ -190,6 +191,16 @@ export function useStopTimer() {
       queryClient.invalidateQueries({ queryKey: ['timer'] });
       queryClient.invalidateQueries({ queryKey: ['timeEntries'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: (error) => {
+      if (isNoRunningTimerError(error)) {
+        queryClient.setQueryData(['timer', 'status'], {
+          is_running: false,
+          current_entry: null,
+          elapsed_seconds: 0,
+        });
+        queryClient.invalidateQueries({ queryKey: ['timer'] });
+      }
     },
   });
 }

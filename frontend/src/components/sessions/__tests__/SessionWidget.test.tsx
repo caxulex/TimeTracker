@@ -101,6 +101,19 @@ const tasks: Task[] = [
   makeTask({ id: 12, project_id: 1, name: 'Write docs' }),
 ];
 
+const activeSession = {
+  id: 99,
+  user_id: 1,
+  company_id: 1,
+  start_time: new Date().toISOString(),
+  end_time: null,
+  status: 'active' as const,
+  total_break_seconds: 0,
+  total_meeting_seconds: 0,
+  created_at: new Date().toISOString(),
+  updated_at: null,
+};
+
 function makeClient() {
   return new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: 0 } },
@@ -264,5 +277,166 @@ describe('SessionWidget', () => {
         task_id: undefined,
       });
     });
+  });
+
+  it('clock out continues when stopTimer returns 404 no-running and still ends session', async () => {
+    const user = userEvent.setup();
+    const stop404 = {
+      isAxiosError: true,
+      response: {
+        status: 404,
+        data: {
+          detail: 'No running timer found',
+        },
+      },
+    };
+
+    vi.mocked(useSessionStore).mockReturnValue({
+      currentSession: activeSession,
+      activeBreak: null,
+      activeMeeting: null,
+      isLoading: false,
+      error: null,
+      lastSyncTime: null,
+      sessionElapsedSeconds: 3600,
+      breakElapsedSeconds: 0,
+      meetingElapsedSeconds: 0,
+      fetchCurrentSession: mockFetchCurrentSession,
+      startSession: mockStartSession,
+      endSession: mockEndSession,
+      startBreak: vi.fn(),
+      endBreak: vi.fn(),
+      startMeeting: vi.fn(),
+      endMeeting: vi.fn(),
+      updateElapsedTimes: mockUpdateElapsedTimes,
+      clearError: mockClearSessionError,
+      handleSessionStarted: vi.fn(),
+      handleSessionEnded: vi.fn(),
+      handleBreakStarted: vi.fn(),
+      handleBreakEnded: vi.fn(),
+      handleMeetingStarted: vi.fn(),
+      handleMeetingEnded: vi.fn(),
+    });
+
+    vi.mocked(useTimerStore).mockReturnValue({
+      currentEntry: null,
+      isRunning: true,
+      isPaused: false,
+      elapsedSeconds: 10,
+      isLoading: false,
+      error: null,
+      lastSyncTime: null,
+      fetchTimer: mockFetchTimer,
+      startTimer: mockStartTimer,
+      stopTimer: mockStopTimer,
+      switchTimer: vi.fn(),
+      updateElapsed: mockUpdateElapsed,
+      clearError: mockClearTimerError,
+      syncWithBackend: vi.fn(),
+    });
+
+    mockStopTimer.mockRejectedValueOnce(stop404);
+    mockEndSession.mockResolvedValueOnce(undefined);
+    mockFetchTimer.mockResolvedValue(undefined);
+
+    renderWidget();
+    mockFetchTimer.mockClear();
+    mockFetchCurrentSession.mockClear();
+
+    await user.click(screen.getByRole('button', { name: /clock out/i }));
+
+    await waitFor(() => {
+      expect(mockStopTimer).toHaveBeenCalledTimes(1);
+      expect(mockEndSession).toHaveBeenCalledTimes(1);
+      expect(mockFetchTimer).toHaveBeenCalledWith(true);
+    });
+
+    expect(mockAddNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'success',
+        title: 'Clocked Out!',
+      })
+    );
+    expect(mockAddNotification).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'error',
+        title: 'Failed to Clock Out',
+      })
+    );
+  });
+
+  it('clock out fails on non-404 stopTimer error and does not end session', async () => {
+    const user = userEvent.setup();
+
+    vi.mocked(useSessionStore).mockReturnValue({
+      currentSession: activeSession,
+      activeBreak: null,
+      activeMeeting: null,
+      isLoading: false,
+      error: null,
+      lastSyncTime: null,
+      sessionElapsedSeconds: 3600,
+      breakElapsedSeconds: 0,
+      meetingElapsedSeconds: 0,
+      fetchCurrentSession: mockFetchCurrentSession,
+      startSession: mockStartSession,
+      endSession: mockEndSession,
+      startBreak: vi.fn(),
+      endBreak: vi.fn(),
+      startMeeting: vi.fn(),
+      endMeeting: vi.fn(),
+      updateElapsedTimes: mockUpdateElapsedTimes,
+      clearError: mockClearSessionError,
+      handleSessionStarted: vi.fn(),
+      handleSessionEnded: vi.fn(),
+      handleBreakStarted: vi.fn(),
+      handleBreakEnded: vi.fn(),
+      handleMeetingStarted: vi.fn(),
+      handleMeetingEnded: vi.fn(),
+    });
+
+    vi.mocked(useTimerStore).mockReturnValue({
+      currentEntry: null,
+      isRunning: true,
+      isPaused: false,
+      elapsedSeconds: 10,
+      isLoading: false,
+      error: null,
+      lastSyncTime: null,
+      fetchTimer: mockFetchTimer,
+      startTimer: mockStartTimer,
+      stopTimer: mockStopTimer,
+      switchTimer: vi.fn(),
+      updateElapsed: mockUpdateElapsed,
+      clearError: mockClearTimerError,
+      syncWithBackend: vi.fn(),
+    });
+
+    mockStopTimer.mockRejectedValueOnce({
+      isAxiosError: true,
+      response: {
+        status: 500,
+        data: {
+          detail: 'Server error',
+        },
+      },
+    });
+
+    renderWidget();
+    mockFetchTimer.mockClear();
+
+    await user.click(screen.getByRole('button', { name: /clock out/i }));
+
+    await waitFor(() => {
+      expect(mockStopTimer).toHaveBeenCalledTimes(1);
+      expect(mockEndSession).not.toHaveBeenCalled();
+    });
+
+    expect(mockAddNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'error',
+        title: 'Failed to Clock Out',
+      })
+    );
   });
 });

@@ -10,6 +10,8 @@ import { Modal, Button, Input } from '../common';
 import { ProjectSelect } from '../projects/ProjectSelect';
 import { TaskSelect } from '../tasks/TaskSelect';
 import { projectsApi, timeEntriesApi } from '../../api/client';
+import { useNotifications } from '../../hooks/useNotifications';
+import { isNoRunningTimerError } from '../../utils/timerErrors';
 import { formatDuration } from '../../utils/helpers';
 import type { Project, TimeEntry, TimeEntryUpdate } from '../../types';
 
@@ -59,6 +61,7 @@ function entryToFormState(entry: TimeEntry): FormState {
 
 export function EditEntryModal({ entry, isOpen, onClose, onSaved }: EditEntryModalProps) {
   const { t } = useTranslation();
+  const { addNotification } = useNotifications();
   const [form, setForm] = useState<FormState | null>(null);
   const [original, setOriginal] = useState<FormState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -134,6 +137,25 @@ export function EditEntryModal({ entry, isOpen, onClose, onSaved }: EditEntryMod
       onSaved();
       onClose();
     } catch (err) {
+      if (entry && isNoRunningTimerError(err)) {
+        try {
+          const refreshedEntry = await timeEntriesApi.getById(entry.id);
+          if (refreshedEntry.end_time) {
+            addNotification({
+              type: 'success',
+              title: t('common.success'),
+              message: 'Entry already stopped',
+              duration: 2500,
+            });
+            onSaved();
+            onClose();
+            return;
+          }
+        } catch {
+          // If the refetch fails, fall through to the original server error message.
+        }
+      }
+
       setError(extractErrorMessage(err, t));
       setIsStopping(false);
     }
