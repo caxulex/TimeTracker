@@ -7,6 +7,7 @@ import { persist } from 'zustand/middleware';
 import type { TimeEntry, TimerStart } from '../types';
 import { timeEntriesApi } from '../api/client';
 import axios from 'axios';
+import { isNoRunningTimerError } from '../utils/timerErrors';
 
 interface TimerState {
   currentEntry: TimeEntry | null;
@@ -153,6 +154,26 @@ export const useTimerStore = create<TimerState>()(
           });
           return entry;
         } catch (error: unknown) {
+          if (isNoRunningTimerError(error)) {
+            set({
+              currentEntry: null,
+              isRunning: false,
+              isPaused: false,
+              elapsedSeconds: 0,
+              isLoading: false,
+              error: null,
+              lastSyncTime: Date.now(),
+            });
+
+            try {
+              await get().fetchTimer(true);
+            } catch {
+              // Keep local state reconciled even if a forced refresh fails.
+            }
+
+            throw error;
+          }
+
           let message = 'Failed to stop timer';
           if (axios.isAxiosError(error)) {
             message = error.response?.data?.detail || message;

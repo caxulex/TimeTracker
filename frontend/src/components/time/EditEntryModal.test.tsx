@@ -13,13 +13,22 @@ import type { TimeEntry } from '../../types';
 // ----- Mock API client -----
 const updateEntryMock = vi.fn();
 const stopTimerMock = vi.fn();
+const getByIdMock = vi.fn();
 const projectsGetAllMock = vi.fn();
 const tasksGetAllMock = vi.fn();
+const addNotificationMock = vi.fn();
+
+vi.mock('../../hooks/useNotifications', () => ({
+  useNotifications: () => ({
+    addNotification: addNotificationMock,
+  }),
+}));
 
 vi.mock('../../api/client', () => ({
   timeEntriesApi: {
     updateEntry: (...args: unknown[]) => updateEntryMock(...args),
     stopTimer: (...args: unknown[]) => stopTimerMock(...args),
+    getById: (...args: unknown[]) => getByIdMock(...args),
   },
   projectsApi: {
     getAll: (...args: unknown[]) => projectsGetAllMock(...args),
@@ -98,6 +107,7 @@ describe('EditEntryModal', () => {
       if (filters?.project_id === 2) return Promise.resolve({ items: [TASK_2], total: 1 });
       return Promise.resolve({ items: [], total: 0 });
     });
+    addNotificationMock.mockReset();
   });
 
   it('pre-populates form fields from the entry', async () => {
@@ -204,6 +214,38 @@ describe('EditEntryModal', () => {
 
     await waitFor(() => expect(stopTimerMock).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it('on stopTimer 404 no-running it refetches entry, notifies success, and closes', async () => {
+    stopTimerMock.mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 404,
+        data: {
+          detail: 'No running timer found',
+        },
+      },
+    });
+    getByIdMock.mockResolvedValue(buildCompletedEntry({ id: 200 }));
+
+    const { onClose, onSaved } = renderModal(buildRunningEntry());
+    const stopBtn = await screen.findByRole('button', { name: /stop timer now/i });
+    fireEvent.click(stopBtn);
+
+    await waitFor(() => {
+      expect(stopTimerMock).toHaveBeenCalledTimes(1);
+      expect(getByIdMock).toHaveBeenCalledWith(200);
+      expect(onSaved).toHaveBeenCalled();
+      expect(onClose).toHaveBeenCalled();
+    });
+
+    expect(addNotificationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'success',
+        message: 'Entry already stopped',
+      })
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('changes to project trigger a task list reload (and clear task)', async () => {

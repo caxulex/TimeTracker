@@ -35,6 +35,7 @@ from app.models import (
 )
 from app.routers.websocket import manager as ws_manager
 from app.schemas.auth import Message
+from app.services.audit_logger import AuditAction, AuditLogger
 from app.services.time_entry_description import resolve_description
 from app.utils.timer_elapsed import (
     compute_display_elapsed_seconds,
@@ -183,6 +184,27 @@ def calculate_duration_seconds(start: datetime, end: datetime, pause_seconds: in
         end = end.replace(tzinfo=timezone.utc)
     total_elapsed = int((end - start).total_seconds())
     return max(0, total_elapsed - (pause_seconds or 0))
+
+
+def _iso_or_none(value: Optional[datetime]) -> Optional[str]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
+
+
+def _entry_snapshot(entry: TimeEntry) -> dict:
+    return {
+        "project_id": entry.project_id,
+        "task_id": entry.task_id,
+        "description": entry.description,
+        "start_time": _iso_or_none(entry.start_time),
+        "end_time": _iso_or_none(entry.end_time),
+        "duration_seconds": entry.duration_seconds,
+        "is_running": entry.end_time is None,
+        "pause_seconds": entry.pause_seconds or 0,
+    }
 
 
 def make_entry_response(entry: TimeEntry, project_name: str = None, task_name: str = None, user_name: str = None, project_color: str = None) -> TimeEntryResponse:
@@ -589,6 +611,20 @@ async def start_timer(
     # 021_unique_running_timer) makes the DB the source of truth. The
     # second concurrent INSERT raises IntegrityError; convert to 409.
     try:
+        await db.flush()
+        await AuditLogger.log(
+            db=db,
+            action=AuditAction.CREATE,
+            resource_type="time_entry",
+            resource_id=entry.id,
+            user_id=current_user.id,
+            user_email=current_user.email,
+            new_values=_entry_snapshot(entry),
+            details=(
+                f"Started timer for project_id={entry.project_id}, "
+                f"task_id={entry.task_id}, description={entry.description!r}"
+            ),
+        )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -663,13 +699,38 @@ async def stop_timer(
     entry = result.scalar_one_or_none()
 
     if not entry:
+        await AuditLogger.log(
+            db=db,
+            action=AuditAction.UPDATE,
+            resource_type="time_entry.stop.no_running",
+            user_id=current_user.id,
+            user_email=current_user.email,
+            details="Stop timer requested but no running timer was found",
+        )
+        await db.commit()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No running timer found")
+
+    old_values = _entry_snapshot(entry)
 
     # Stop the timer
     end_time = datetime.now(timezone.utc)
     entry.end_time = end_time
     entry.duration_seconds = calculate_duration_seconds(entry.start_time, end_time, entry.pause_seconds or 0)
     entry.is_running = False
+
+    await AuditLogger.log(
+        db=db,
+        action=AuditAction.UPDATE,
+        resource_type="time_entry",
+        resource_id=entry.id,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        old_values=old_values,
+        new_values=_entry_snapshot(entry),
+        details=(
+            f"Stopped timer for entry_id={entry.id} with duration_seconds={entry.duration_seconds}"
+        ),
+    )
 
     await db.commit()
     await db.refresh(entry)
@@ -813,6 +874,7 @@ async def switch_task(
         new_task_name = task.name
 
     # 4. Stop the old entry
+    old_entry_before = _entry_snapshot(old_entry)
     old_entry.end_time = now
     old_entry.is_running = False
     old_entry.is_paused = False
@@ -840,6 +902,35 @@ async def switch_task(
         work_session_id=old_entry.work_session_id,  # Keep same session!
     )
     db.add(new_entry)
+
+    await db.flush()
+    await AuditLogger.log(
+        db=db,
+        action=AuditAction.UPDATE,
+        resource_type="time_entry",
+        resource_id=old_entry.id,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        old_values=old_entry_before,
+        new_values=_entry_snapshot(old_entry),
+        details=(
+            f"Switched timer away from entry_id={old_entry.id} to project_id={switch_data.project_id}, "
+            f"task_id={switch_data.task_id}"
+        ),
+    )
+    await AuditLogger.log(
+        db=db,
+        action=AuditAction.CREATE,
+        resource_type="time_entry",
+        resource_id=new_entry.id,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        new_values=_entry_snapshot(new_entry),
+        details=(
+            f"Switched timer started new entry_id={new_entry.id} for project_id={new_entry.project_id}, "
+            f"task_id={new_entry.task_id}"
+        ),
+    )
 
     await db.commit()
     await db.refresh(new_entry)
@@ -930,6 +1021,20 @@ async def create_manual_entry(
     )
 
     db.add(entry)
+    await db.flush()
+    await AuditLogger.log(
+        db=db,
+        action=AuditAction.CREATE,
+        resource_type="time_entry",
+        resource_id=entry.id,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        new_values=_entry_snapshot(entry),
+        details=(
+            f"Created manual time entry for project_id={entry.project_id}, task_id={entry.task_id}, "
+            f"duration_seconds={entry.duration_seconds}"
+        ),
+    )
     await db.commit()
     await db.refresh(entry)
 
@@ -1174,6 +1279,8 @@ async def update_time_entry(
     if entry.user_id != current_user.id and current_user.role not in ["super_admin", "admin", "company_admin"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Can only update your own entries")
 
+    old_values = _entry_snapshot(entry)
+
     if entry_data.description is not None:
         entry.description = entry_data.description
 
@@ -1238,6 +1345,20 @@ async def update_time_entry(
         description=entry.description,
         task_id=entry.task_id,
         db=db,
+    )
+
+    await AuditLogger.log(
+        db=db,
+        action=AuditAction.UPDATE,
+        resource_type="time_entry",
+        resource_id=entry.id,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        old_values=old_values,
+        new_values=_entry_snapshot(entry),
+        details=(
+            f"Updated time entry entry_id={entry.id} via PUT"
+        ),
     )
 
     await db.commit()
@@ -1307,6 +1428,8 @@ async def patch_time_entry(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Time entry not found",
         )
+
+    old_values = _entry_snapshot(entry)
 
     # 2. Ownership — admins are NOT exempt on this personal-scope endpoint.
     if entry.user_id != current_user.id:
@@ -1419,6 +1542,33 @@ async def patch_time_entry(
         db=db,
     )
 
+    changed_fields = []
+    if entry_data.description is not None:
+        changed_fields.append("description")
+    if entry_data.start_time is not None:
+        changed_fields.append("start_time")
+    if entry_data.end_time is not None:
+        changed_fields.append("end_time")
+    if entry_data.project_id is not None:
+        changed_fields.append("project_id")
+    if entry_data.task_id is not None:
+        changed_fields.append("task_id")
+
+    await AuditLogger.log(
+        db=db,
+        action=AuditAction.UPDATE,
+        resource_type="time_entry",
+        resource_id=entry.id,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        old_values=old_values,
+        new_values=_entry_snapshot(entry),
+        details=(
+            f"Updated time entry entry_id={entry.id} via PATCH; "
+            f"changed_fields={','.join(changed_fields) if changed_fields else 'none'}"
+        ),
+    )
+
     await db.commit()
     await db.refresh(entry)
 
@@ -1496,7 +1646,21 @@ async def delete_time_entry(
         "task_id": entry.task_id
     }
 
+    old_values = _entry_snapshot(entry)
+
     await db.delete(entry)
+    await AuditLogger.log(
+        db=db,
+        action=AuditAction.DELETE,
+        resource_type="time_entry",
+        resource_id=entry_data["entry_id"],
+        user_id=current_user.id,
+        user_email=current_user.email,
+        old_values=old_values,
+        details=(
+            f"Deleted time entry entry_id={entry_data['entry_id']}"
+        ),
+    )
     await db.commit()
 
     # Broadcast time entry deletion to SAME COMPANY for real-time reports update

@@ -12,6 +12,7 @@ import { cn } from '../../utils/helpers';
 import { useNotifications } from '../../hooks/useNotifications';
 import { BreakControls } from './BreakControls';
 import { MeetingControls } from './MeetingControls';
+import { isNoRunningTimerError } from '../../utils/timerErrors';
 
 export function SessionWidget() {
   const {
@@ -122,7 +123,16 @@ export function SessionWidget() {
     try {
       // Stop task timer first if running
       if (timerRunning) {
-        await stopTimer();
+        try {
+          await stopTimer();
+        } catch (error) {
+          if (isNoRunningTimerError(error)) {
+            // The backend already stopped the timer; reconcile local state and continue.
+            await fetchTimer(true);
+          } else {
+            throw error;
+          }
+        }
       }
       
       // Then end session
