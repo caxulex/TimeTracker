@@ -457,65 +457,18 @@ class AIReportingService:
         period_end: datetime,
         now: datetime
     ) -> int:
+        """Thin wrapper around the canonical helper.
+
+        The arithmetic was consolidated into
+        ``app.services.duration_service.calculate_entry_duration_for_period``;
+        this method is retained as an instance-bound delegate so existing
+        ``self._calculate_entry_duration_for_period(...)`` call sites keep
+        working without churn.
         """
-        Calculate duration of a time entry that overlaps with a specific period.
-        Handles entries that span multiple days by only counting time within the period.
-        Also handles running timers by using 'now' as the end time.
-
-        Pause-aware: closed entries fully within the period return the stored
-        ``duration_seconds`` (already pause-corrected on /stop, /switch);
-        partial overlaps subtract a prorated share of ``pause_seconds``.
-        Running entries use ``compute_display_elapsed_seconds`` and prorate by
-        the overlap fraction. Kept in sync with the duplicate in
-        ``app/routers/reports.py`` (refactor into one shared helper is out of
-        scope for this PR).
-        """
-        # Get entry start time with timezone
-        entry_start = entry.start_time
-        if entry_start.tzinfo is None:
-            entry_start = entry_start.replace(tzinfo=timezone.utc)
-
-        # Get entry end time (or now for running timers)
-        is_running = entry.end_time is None
-        if is_running:
-            entry_end = now
-        else:
-            entry_end = entry.end_time
-            if entry_end.tzinfo is None:
-                entry_end = entry_end.replace(tzinfo=timezone.utc)
-
-        # Calculate overlap between entry and period
-        overlap_start = max(entry_start, period_start)
-        overlap_end = min(entry_end, period_end)
-
-        # If no overlap, return 0
-        if overlap_start >= overlap_end:
-            return 0
-
-        overlap_seconds = int((overlap_end - overlap_start).total_seconds())
-
-        # Closed entry fully within period: stored duration is already pause-corrected.
-        if not is_running and entry_start >= period_start and entry_end <= period_end:
-            return int(getattr(entry, "duration_seconds", 0) or 0)
-
-        entry_wall_seconds = int((entry_end - entry_start).total_seconds())
-
-        if is_running:
-            from app.utils.timer_elapsed import compute_display_elapsed_seconds
-            live_elapsed = compute_display_elapsed_seconds(entry, now=now)
-            if entry_wall_seconds <= 0:
-                return 0
-            if entry_start >= period_start and entry_end <= period_end:
-                return live_elapsed
-            return max(0, int(live_elapsed * overlap_seconds / entry_wall_seconds))
-
-        # Closed entry, partial overlap: prorate pause_seconds by overlap fraction.
-        pause_seconds = int(getattr(entry, "pause_seconds", 0) or 0)
-        if entry_wall_seconds > 0 and pause_seconds > 0:
-            prorated_pause = int(pause_seconds * overlap_seconds / entry_wall_seconds)
-            return max(0, overlap_seconds - prorated_pause)
-
-        return overlap_seconds
+        from app.services.duration_service import (
+            calculate_entry_duration_for_period,
+        )
+        return calculate_entry_duration_for_period(entry, period_start, period_end, now)
 
     async def _gather_weekly_metrics(
         self,
