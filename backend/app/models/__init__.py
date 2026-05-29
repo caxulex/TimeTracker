@@ -880,6 +880,71 @@ class AIUsageLog(Base):
         return f"<AIUsageLog(id={self.id}, feature_id={self.feature_id}, user_id={self.user_id})>"
 
 
+class AnomalyDismissal(Base):
+    """
+    Persisted record of an anomaly dismissed by an admin.
+
+    Anomalies are computed on-the-fly from time_entries; without a
+    persisted dismissal state they reappear on every scan. Dismissals
+    are permanent (deleted out-of-band to "undo") and shared across
+    all admins of a company. Uniqueness is enforced on
+    (company_id, target_user_id, anomaly_type) so re-dismissing the
+    same anomaly is an UPSERT that refreshes ``dismissed_at`` and
+    ``reason``.
+    """
+    __tablename__ = "anomaly_dismissals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    company_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    target_user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    anomaly_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Nullable so a dismissal survives the dismissing admin being
+    # hard-deleted; we still know it was dismissed.
+    dismissed_by_user_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    dismissed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "target_user_id",
+            "anomaly_type",
+            name="uq_anomaly_dismissals_company_user_type",
+        ),
+        Index(
+            "ix_anomaly_dismissals_company_user_type",
+            "company_id",
+            "target_user_id",
+            "anomaly_type",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<AnomalyDismissal(company_id={self.company_id}, "
+            f"target_user_id={self.target_user_id}, "
+            f"anomaly_type={self.anomaly_type})>"
+        )
+
+
 # ============================================
 # PROJECT BUDGET HISTORY MODEL
 # ============================================

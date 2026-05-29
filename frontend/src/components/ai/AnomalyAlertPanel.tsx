@@ -32,6 +32,7 @@ export const AnomalyAlertPanel: React.FC<AnomalyAlertPanelProps> = ({
   const [expandedAnomaly, setExpandedAnomaly] = useState<string | null>(null);
   const [dismissReason, setDismissReason] = useState('');
   const [showDismissModal, setShowDismissModal] = useState<AnomalyDetails | null>(null);
+  const [dismissError, setDismissError] = useState<string | null>(null);
 
   const { data, isLoading, error, refetch } = useAllAnomalies(periodDays, teamId, {
     enabled: isAdmin,
@@ -49,6 +50,7 @@ export const AnomalyAlertPanel: React.FC<AnomalyAlertPanelProps> = ({
   };
 
   const handleDismiss = (anomaly: AnomalyDetails) => {
+    setDismissError(null);
     dismissAnomaly({
       user_id: anomaly.user_id,
       anomaly_type: anomaly.type,
@@ -57,7 +59,14 @@ export const AnomalyAlertPanel: React.FC<AnomalyAlertPanelProps> = ({
       onSuccess: () => {
         setShowDismissModal(null);
         setDismissReason('');
+        setDismissError(null);
         refetch();
+      },
+      onError: () => {
+        // Persistence failure (backend returns 500). Surface a
+        // user-visible message so the dismiss button no longer looks
+        // like a silent no-op.
+        setDismissError('Failed to dismiss anomaly. Please try again.');
       },
     });
   };
@@ -368,11 +377,23 @@ export const AnomalyAlertPanel: React.FC<AnomalyAlertPanelProps> = ({
                 rows={3}
               />
             </div>
+            {dismissError && (
+              <div
+                role="alert"
+                className="mb-4 px-3 py-2 rounded bg-red-50 border border-red-200
+                           text-sm text-red-700 dark:bg-red-900/30 dark:border-red-800
+                           dark:text-red-200"
+                data-testid="anomaly-dismiss-error"
+              >
+                {dismissError}
+              </div>
+            )}
             <div className="flex justify-end space-x-3">
               <button
                 onClick={() => {
                   setShowDismissModal(null);
                   setDismissReason('');
+                  setDismissError(null);
                 }}
                 className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 
                          rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700

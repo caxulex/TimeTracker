@@ -322,9 +322,21 @@ async def dismiss_anomaly(
             user_id=request.user_id,
             anomaly_type=request.anomaly_type,
             dismissed_by=current_user.id,
-            reason=request.reason
+            company_id=current_user.company_id,
+            dismissed_by_email=current_user.email,
+            reason=request.reason,
         )
-        return {"success": success}
+        if not success:
+            # Surface persistence failures as a real error instead of
+            # silently returning {"success": false}, which the frontend
+            # was treating as a successful 200.
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to persist anomaly dismissal",
+            )
+        return {"success": True}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error dismissing anomaly: {e}")
         raise HTTPException(
