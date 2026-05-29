@@ -12,11 +12,12 @@ vi.mock('../api/client', () => ({
     getTimer: vi.fn(),
     startTimer: vi.fn(),
     stopTimer: vi.fn(),
+    switchTimer: vi.fn(),
   },
 }));
 
 // Import after mocking
-import { useTimerStore } from './timerStore';
+import { initializeTimerVisibilitySync, useTimerStore } from './timerStore';
 import { timeEntriesApi } from '../api/client';
 
 // Helper to create a valid TimeEntry for tests
@@ -444,6 +445,95 @@ describe('Timer Store', () => {
       const { currentEntry, isRunning } = useTimerStore.getState();
       expect(currentEntry?.id).toBe(1);
       expect(isRunning).toBe(true);
+    });
+  });
+
+  describe('Server Reconciliation', () => {
+    it('applyServerState clears stale local running timer when backend has no active entry', () => {
+      useTimerStore.setState({
+        currentEntry: createMockEntry({ id: 777, is_running: true }),
+        isRunning: true,
+        isPaused: true,
+        elapsedSeconds: 12345,
+      });
+
+      act(() => {
+        useTimerStore.getState().applyServerState({
+          is_running: false,
+          current_entry: undefined,
+        });
+      });
+
+      const state = useTimerStore.getState();
+      expect(state.currentEntry).toBeNull();
+      expect(state.isRunning).toBe(false);
+      expect(state.isPaused).toBe(false);
+      expect(state.elapsedSeconds).toBe(0);
+    });
+
+    it('reconciles on visibilitychange to visible and clears stale state', async () => {
+      useTimerStore.setState({
+        currentEntry: createMockEntry({ id: 123, is_running: true }),
+        isRunning: true,
+        elapsedSeconds: 999,
+        lastSyncTime: Date.now(),
+      });
+
+      vi.mocked(timeEntriesApi.getTimer).mockResolvedValue({
+        is_running: false,
+        current_entry: undefined,
+      });
+
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        value: 'visible',
+      });
+
+      const cleanup = initializeTimerVisibilitySync();
+
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        await Promise.resolve();
+      });
+
+      cleanup();
+
+      expect(timeEntriesApi.getTimer).toHaveBeenCalledTimes(1);
+      const state = useTimerStore.getState();
+      expect(state.currentEntry).toBeNull();
+      expect(state.isRunning).toBe(false);
+      expect(state.elapsedSeconds).toBe(0);
+    });
+
+    it('visibility reconciliation does not create a refetch loop', async () => {
+      const entry = createMockEntry({ id: 42, is_running: true });
+      useTimerStore.setState({
+        currentEntry: entry,
+        isRunning: true,
+      });
+
+      vi.mocked(timeEntriesApi.getTimer).mockResolvedValue({
+        is_running: true,
+        current_entry: entry,
+      });
+
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        value: 'visible',
+      });
+
+      const cleanup = initializeTimerVisibilitySync();
+
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        await Promise.resolve();
+      });
+
+      cleanup();
+
+      expect(timeEntriesApi.getTimer).toHaveBeenCalledTimes(1);
+      expect(useTimerStore.getState().isRunning).toBe(true);
+      expect(useTimerStore.getState().currentEntry?.id).toBe(42);
     });
   });
 });

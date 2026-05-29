@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle } from 'lucide-react';
+import { timeEntriesApi } from '../../api/client';
 import { useTimerStore } from '../../stores/timerStore';
 import { useStopTimer } from '../../hooks/useApi';
 import { getCurrentBannerLevel } from '../../utils/longTimerThresholds';
@@ -120,20 +121,48 @@ export function LongTimerBanner() {
     if (!N) return;
     if (N.permission !== 'granted') return;
 
-    const taskName =
-      currentEntry?.description ||
-      (currentEntry?.task_id ? `Task #${currentEntry.task_id}` : '') ||
-      (currentEntry?.project_id ? `Project #${currentEntry.project_id}` : '') ||
-      t('time.noDescription');
+    let cancelled = false;
 
-    try {
-      new N(t('time.longTimerBanner.notificationTitle'), {
-        body: t('time.longTimerBanner.notificationBody', { taskName, hours: level }),
-      });
-      lastNotifiedLevelRef.current = level;
-    } catch {
-      /* ignore — some test environments construct-throw */
-    }
+    const verifyAndNotify = async () => {
+      try {
+        const fresh = await timeEntriesApi.getTimer();
+        if (cancelled) {
+          return;
+        }
+
+        const freshEntry = fresh.current_entry;
+        const mismatchedEntry = !!currentEntry && !!freshEntry && freshEntry.id !== currentEntry.id;
+        const noActiveTimer = !fresh.is_running || !freshEntry;
+
+        if (noActiveTimer || mismatchedEntry) {
+          useTimerStore.getState().applyServerState(fresh);
+          return;
+        }
+
+        const taskName =
+          currentEntry?.description ||
+          (currentEntry?.task_id ? `Task #${currentEntry.task_id}` : '') ||
+          (currentEntry?.project_id ? `Project #${currentEntry.project_id}` : '') ||
+          t('time.noDescription');
+
+        try {
+          new N(t('time.longTimerBanner.notificationTitle'), {
+            body: t('time.longTimerBanner.notificationBody', { taskName, hours: level }),
+          });
+          lastNotifiedLevelRef.current = level;
+        } catch {
+          /* ignore — some test environments construct-throw */
+        }
+      } catch {
+        // Conservative path: skip notification when the pre-flight verification fails.
+      }
+    };
+
+    void verifyAndNotify();
+
+    return () => {
+      cancelled = true;
+    };
   }, [level, currentEntry, t]);
 
   const handleKeepGoing = useCallback(() => {

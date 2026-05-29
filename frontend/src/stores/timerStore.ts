@@ -8,6 +8,7 @@ import type { TimeEntry, TimerStart } from '../types';
 import { timeEntriesApi } from '../api/client';
 import axios from 'axios';
 import { isNoRunningTimerError } from '../utils/timerErrors';
+import type { TimerStatus } from '../types';
 
 interface TimerState {
   currentEntry: TimeEntry | null;
@@ -26,6 +27,7 @@ interface TimerState {
   updateElapsed: () => void;
   clearError: () => void;
   syncWithBackend: () => Promise<void>;
+  applyServerState: (status: TimerStatus | null | undefined) => void;
 }
 
 // Helper to calculate elapsed seconds from start time
@@ -39,6 +41,35 @@ const calculateElapsed = (startTime: string): number => {
 const isAuthenticated = (): boolean => {
   return !!localStorage.getItem('access_token');
 };
+
+let visibilitySyncHandler: ((event: Event) => void) | null = null;
+
+export function initializeTimerVisibilitySync(): () => void {
+  if (typeof document === 'undefined') {
+    return () => undefined;
+  }
+
+  if (visibilitySyncHandler) {
+    return () => undefined;
+  }
+
+  visibilitySyncHandler = () => {
+    if (document.visibilityState !== 'visible') {
+      return;
+    }
+    void useTimerStore.getState().fetchTimer(true);
+  };
+
+  document.addEventListener('visibilitychange', visibilitySyncHandler);
+
+  return () => {
+    if (!visibilitySyncHandler) {
+      return;
+    }
+    document.removeEventListener('visibilitychange', visibilitySyncHandler);
+    visibilitySyncHandler = null;
+  };
+}
 
 export const useTimerStore = create<TimerState>()(
   persist(
@@ -70,37 +101,11 @@ export const useTimerStore = create<TimerState>()(
           const status = await timeEntriesApi.getTimer();
           console.log('[TimerStore] Fetched timer status:', status);
           if (status.is_running && status.current_entry) {
-            const entry = status.current_entry;
-            const isPaused = entry.is_paused || false;
-            // Calculate elapsed: total time minus pause time
-            let elapsed = calculateElapsed(entry.start_time);
-            // Subtract accumulated pause seconds
-            elapsed -= entry.pause_seconds || 0;
-            // If currently paused, don't include time since pause started
-            if (isPaused && entry.paused_at) {
-              const pauseElapsed = calculateElapsed(entry.paused_at);
-              elapsed -= pauseElapsed;
-            }
-            console.log('[TimerStore] Setting timer, elapsed:', elapsed, 'isPaused:', isPaused);
-            set({
-              currentEntry: entry,
-              isRunning: true,
-              isPaused: isPaused,
-              elapsedSeconds: Math.max(0, elapsed),
-              isLoading: false,
-              lastSyncTime: Date.now(),
-            });
+            console.log('[TimerStore] Applying running timer from server');
           } else {
             console.log('[TimerStore] No running timer, resetting state');
-            set({ 
-              currentEntry: null, 
-              isRunning: false, 
-              isPaused: false,
-              elapsedSeconds: 0, 
-              isLoading: false,
-              lastSyncTime: Date.now(),
-            });
           }
+          get().applyServerState(status);
         } catch (error: unknown) {
           // Handle 401/403 (auth errors) and 429 (rate limit) gracefully - just use local state
           const status = axios.isAxiosError(error) ? error.response?.status : undefined;
@@ -238,31 +243,54 @@ export const useTimerStore = create<TimerState>()(
         if (shouldSync) {
           try {
             const status = await timeEntriesApi.getTimer();
-            
-            // Backend has a running timer
-            if (status.is_running && status.current_entry) {
-              const elapsed = calculateElapsed(status.current_entry.start_time);
-              set({
-                currentEntry: status.current_entry,
-                isRunning: true,
-                elapsedSeconds: elapsed,
-                lastSyncTime: Date.now(),
-              });
-            } 
-            // Local shows running but backend doesn't - trust backend
-            else if (get().isRunning) {
-              set({
-                currentEntry: null,
-                isRunning: false,
-                elapsedSeconds: 0,
-                lastSyncTime: Date.now(),
-              });
-            }
+            get().applyServerState(status);
           } catch (error) {
             // If sync fails, continue with local state
             console.warn('Timer sync failed:', error);
           }
         }
+      },
+
+      applyServerState: (status: TimerStatus | null | undefined) => {
+        if (status?.is_running && status.current_entry) {
+          const entry = status.current_entry;
+          const isPaused = entry.is_paused || false;
+          const current = get();
+          const isSameEntry =
+            current.isRunning &&
+            current.currentEntry?.id === entry.id;
+
+          if (isSameEntry) {
+            return;
+          }
+
+          let elapsed = calculateElapsed(entry.start_time);
+          elapsed -= entry.pause_seconds || 0;
+          if (isPaused && entry.paused_at) {
+            elapsed -= calculateElapsed(entry.paused_at);
+          }
+
+          set({
+            currentEntry: entry,
+            isRunning: true,
+            isPaused,
+            elapsedSeconds: Math.max(0, elapsed),
+            isLoading: false,
+            error: null,
+            lastSyncTime: Date.now(),
+          });
+          return;
+        }
+
+        set({
+          currentEntry: null,
+          isRunning: false,
+          isPaused: false,
+          elapsedSeconds: 0,
+          isLoading: false,
+          error: null,
+          lastSyncTime: Date.now(),
+        });
       },
     }),
     {

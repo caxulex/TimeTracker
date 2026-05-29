@@ -8,8 +8,21 @@ import type { TimeEntry } from '../../types';
 // ---- Mock dependencies ----
 const stopTimerMutateMock = vi.fn();
 
+// Hoisted so the vi.mock factory below can safely close over these refs
+// (vi.mock is moved to the top of the file before any top-level consts run).
+const { applyServerStateMock, getStateMock } = vi.hoisted(() => ({
+  applyServerStateMock: vi.fn(),
+  getStateMock: vi.fn(),
+}));
+
 vi.mock('../../stores/timerStore', () => ({
-  useTimerStore: vi.fn(),
+  useTimerStore: Object.assign(vi.fn(), { getState: getStateMock }),
+}));
+
+vi.mock('../../api/client', () => ({
+  timeEntriesApi: {
+    getTimer: vi.fn(),
+  },
 }));
 
 vi.mock('../../hooks/useApi', () => ({
@@ -39,8 +52,10 @@ vi.mock('./EditEntryModal', () => ({
 
 import { LongTimerBanner } from './LongTimerBanner';
 import { useTimerStore } from '../../stores/timerStore';
+import { timeEntriesApi } from '../../api/client';
 
 const useTimerStoreMock = useTimerStore as unknown as ReturnType<typeof vi.fn>;
+const getTimerMock = timeEntriesApi.getTimer as unknown as ReturnType<typeof vi.fn>;
 
 function buildRunningEntry(overrides: Partial<TimeEntry> = {}): TimeEntry {
   return {
@@ -106,10 +121,18 @@ beforeEach(() => {
   ls.clear.mockImplementation(() => store.clear());
 
   notificationCalls.length = 0;
+  applyServerStateMock.mockReset();
   stopTimerMutateMock.mockReset();
   requestPermissionMock.mockReset();
   requestPermissionMock.mockResolvedValue('granted');
   mockedPermission = 'default';
+  getTimerMock.mockResolvedValue({
+    is_running: true,
+    current_entry: buildRunningEntry(),
+  });
+  getStateMock.mockReturnValue({
+    applyServerState: applyServerStateMock,
+  });
   // Install Notification on window
   (window as unknown as { Notification: typeof MockNotification }).Notification =
     MockNotification as unknown as typeof Notification;
@@ -255,17 +278,66 @@ describe('LongTimerBanner', () => {
 
   it('fires_system_notification_when_permission_granted', async () => {
     mockedPermission = 'granted';
+    const entry = buildRunningEntry();
+    getTimerMock.mockResolvedValue({
+      is_running: true,
+      current_entry: entry,
+    });
     setTimerState({
       isRunning: true,
-      currentEntry: buildRunningEntry(),
+      currentEntry: entry,
       elapsedSeconds: 6 * 3600 + 5,
     });
     await act(async () => {
       render(<LongTimerBanner />);
+      await Promise.resolve();
     });
     expect(notificationCalls.length).toBe(1);
     expect(notificationCalls[0].title).toMatch(/TimeTracker/i);
     expect(notificationCalls[0].options?.body).toMatch(/Deep work/);
     expect(notificationCalls[0].options?.body).toMatch(/6 hours/);
+  });
+
+  it('suppresses_notification_and_reconciles_when_server_has_no_active_timer', async () => {
+    mockedPermission = 'granted';
+    getTimerMock.mockResolvedValue({
+      is_running: false,
+      current_entry: undefined,
+    });
+    setTimerState({
+      isRunning: true,
+      currentEntry: buildRunningEntry({ id: 101 }),
+      elapsedSeconds: 14 * 3600 + 5,
+    });
+
+    await act(async () => {
+      render(<LongTimerBanner />);
+      await Promise.resolve();
+    });
+
+    expect(notificationCalls.length).toBe(0);
+    expect(applyServerStateMock).toHaveBeenCalledTimes(1);
+    expect(applyServerStateMock).toHaveBeenCalledWith({
+      is_running: false,
+      current_entry: undefined,
+    });
+  });
+
+  it('suppresses_notification_on_prefire_verification_error', async () => {
+    mockedPermission = 'granted';
+    getTimerMock.mockRejectedValue(new Error('network down'));
+    setTimerState({
+      isRunning: true,
+      currentEntry: buildRunningEntry({ id: 102 }),
+      elapsedSeconds: 14 * 3600 + 5,
+    });
+
+    await act(async () => {
+      render(<LongTimerBanner />);
+      await Promise.resolve();
+    });
+
+    expect(notificationCalls.length).toBe(0);
+    expect(applyServerStateMock).not.toHaveBeenCalled();
   });
 });

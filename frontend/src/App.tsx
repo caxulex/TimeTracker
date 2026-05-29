@@ -5,13 +5,14 @@
 // ============================================
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useEffect } from 'react';
 import { Layout } from './components/layout/Layout';
 import { NotificationProvider } from './components/Notifications';
 import { WebSocketProvider } from './contexts/WebSocketContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { BrandingProvider } from './contexts/BrandingContext';
 import { useAuthStore } from './stores/authStore';
+import { initializeTimerVisibilitySync } from './stores/timerStore';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './App.css';
 
@@ -168,6 +169,11 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
+  useEffect(() => {
+    const cleanup = initializeTimerVisibilitySync();
+    return cleanup;
+  }, []);
+
   return (
     <ThemeProvider>
       <BrandingProvider>
