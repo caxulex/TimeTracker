@@ -261,6 +261,7 @@ export const useTimerStore = create<TimerState>()(
             current.currentEntry?.id === entry.id;
 
           if (isSameEntry) {
+            set({ isLoading: false, error: null });
             return;
           }
 
@@ -295,10 +296,14 @@ export const useTimerStore = create<TimerState>()(
     }),
     {
       name: 'timer-storage',
+      // Only persist durable state. Transient fields (isLoading, error,
+      // lastSyncTime) must NOT be persisted, or a stuck isLoading=true
+      // could survive page reloads.
       partialize: (state) => ({
         currentEntry: state.currentEntry,
         isRunning: state.isRunning,
-        lastSyncTime: state.lastSyncTime,
+        isPaused: state.isPaused,
+        elapsedSeconds: state.elapsedSeconds,
       }),
       // On rehydrate, sync with backend to get fresh state (with debounce)
       onRehydrateStorage: () => (state) => {

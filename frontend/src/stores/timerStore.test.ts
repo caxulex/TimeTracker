@@ -535,5 +535,63 @@ describe('Timer Store', () => {
       expect(useTimerStore.getState().isRunning).toBe(true);
       expect(useTimerStore.getState().currentEntry?.id).toBe(42);
     });
+
+    it('applyServerState clears isLoading on same-entry early return', () => {
+      const entry = createMockEntry({ id: 555, is_running: true });
+      useTimerStore.setState({
+        currentEntry: entry,
+        isRunning: true,
+        isLoading: true,
+        error: 'previous error',
+      });
+
+      act(() => {
+        useTimerStore.getState().applyServerState({
+          is_running: true,
+          current_entry: entry,
+        });
+      });
+
+      const state = useTimerStore.getState();
+      expect(state.isLoading).toBe(false);
+      expect(state.error).toBeNull();
+      // Entry should remain unchanged (same-entry early-return path)
+      expect(state.currentEntry?.id).toBe(555);
+      expect(state.isRunning).toBe(true);
+    });
+
+    it('visibility-triggered fetchTimer cycle clears isLoading when entry unchanged', async () => {
+      const entry = createMockEntry({ id: 88, is_running: true });
+      useTimerStore.setState({
+        currentEntry: entry,
+        isRunning: true,
+      });
+
+      vi.mocked(timeEntriesApi.getTimer).mockResolvedValue({
+        is_running: true,
+        current_entry: entry,
+      });
+
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        value: 'visible',
+      });
+
+      const cleanup = initializeTimerVisibilitySync();
+
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        // Allow the fetchTimer promise chain to flush.
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      cleanup();
+
+      const state = useTimerStore.getState();
+      expect(state.isLoading).toBe(false);
+      expect(state.isRunning).toBe(true);
+      expect(state.currentEntry?.id).toBe(88);
+    });
   });
 });
