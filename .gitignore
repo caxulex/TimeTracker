@@ -286,3 +286,22 @@ frontend/playwright/.cache/
 # PR body drafts (belong in GitHub UI, not repo)
 PR_BODY*.md
 PR_BODY*.MD
+
+# Environment file backups (safety: prevent secret leakage)
+.env.backup*
+.env.*.backup*
+
+# Common backup / temporary file patterns
+*.bak
+*.orig
+*.rej
+# *~ already covered above
+
+# Editor swap / lock files
+# *.swp / *.swo already covered above
+.#*
+\#*\#
+
+# OS metadata files
+# .DS_Store / Thumbs.db already covered above
+desktop.ini

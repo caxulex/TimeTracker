@@ -38,7 +38,7 @@ echo ""
 
 # Step 1: Stop running containers first to free RAM
 echo "📦 Step 1/9: Stopping containers to free RAM..."
-docker compose -f docker-compose.prod.yml down || true
+docker compose -f docker-compose.prod.yml down --remove-orphans || true
 echo "✅ Containers stopped"
 
 # Step 2: Aggressive cleanup to maximize available RAM
@@ -82,7 +82,7 @@ echo "   containers' on-startup sync loop will race the un-migrated"
 echo "   schema and produce cascading 'transaction aborted' errors."
 # NOTE: 'postgres' here matches the service name defined in docker-compose.prod.yml.
 # If that service is ever renamed, update both references below.
-docker compose -f docker-compose.prod.yml up -d postgres
+docker compose -f docker-compose.prod.yml up -d --remove-orphans postgres
 echo "   Waiting for DB to be ready..."
 for i in {1..30}; do
   if docker compose -f docker-compose.prod.yml exec -T postgres pg_isready -U postgres > /dev/null 2>&1; then
@@ -97,7 +97,7 @@ echo "✅ Migrations applied"
 # Step 8: Start all services
 echo ""
 echo "🚀 Step 8/9: Starting all services..."
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d --remove-orphans
 echo "✅ Services started!"
 
 # Step 9: Final cleanup and status
