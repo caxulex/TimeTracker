@@ -13,9 +13,10 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import and_, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.config import ai_settings
@@ -23,6 +24,7 @@ from app.ai.models.feature_engineering import AnomalyFeatures
 from app.ai.services.ai_client import AIClient
 from app.ai.utils.cache_manager import AICacheManager, get_cache_manager
 from app.services.ai_feature_service import AIFeatureManager
+from app.services.audit_logger import AuditAction, AuditLogger
 from app.utils.timewindow import now_utc
 
 logger = logging.getLogger(__name__)
@@ -134,6 +136,14 @@ class AnomalyService:
             if self.cache:
                 cached = await self.cache.get_anomaly_cache(cache_date, user_id)
                 if cached:
+                    # Re-apply dismissal filter even on cache hit, since
+                    # admins may have dismissed entries between scans.
+                    dismissed = await self._get_dismissed_keys_for_user(user_id)
+                    if dismissed:
+                        cached = dict(cached)
+                        cached["anomalies"] = self._filter_dismissed(
+                            cached.get("anomalies", []), dismissed
+                        )
                     return cached
 
             # Build features
@@ -158,12 +168,20 @@ class AnomalyService:
                 "enabled": True
             }
 
-            # Cache result
+            # Cache result (pre-filter, so the cache stays canonical and
+            # filtering applies dynamically as dismissals change).
             if self.cache:
                 await self.cache.set_anomaly_cache(
                     cache_date,
                     result,
                     user_id
+                )
+
+            # Filter out dismissed anomalies for this user's company.
+            dismissed = await self._get_dismissed_keys_for_user(user_id)
+            if dismissed:
+                result["anomalies"] = self._filter_dismissed(
+                    result["anomalies"], dismissed
                 )
 
             # Log usage
@@ -247,6 +265,14 @@ class AnomalyService:
                 if user_result.get("anomalies"):
                     users_with_anomalies += 1
                     all_anomalies.extend(user_result["anomalies"])
+
+            # Filter out admin-dismissed anomalies (shared across the
+            # company's admins, permanent until DB row is deleted).
+            dismissed = await self._get_dismissed_keys(company_id)
+            all_anomalies = self._filter_dismissed(all_anomalies, dismissed)
+            users_with_anomalies = len(
+                {a["user_id"] for a in all_anomalies}
+            )
 
             # Sort by severity
             severity_order = {"critical": 0, "warning": 1, "info": 2}
@@ -546,31 +572,137 @@ class AnomalyService:
 
         return anomalies
 
+    async def _get_dismissed_keys(
+        self, company_id: Optional[int]
+    ) -> Set[Tuple[int, str]]:
+        """Load active (target_user_id, anomaly_type) dismissal tuples
+        for a company.
+
+        Returns an empty set when ``company_id`` is None (platform-level
+        callers with no tenant scope cannot have dismissals).
+        """
+        if company_id is None:
+            return set()
+        from app.models import AnomalyDismissal
+
+        result = await self.db.execute(
+            select(
+                AnomalyDismissal.target_user_id,
+                AnomalyDismissal.anomaly_type,
+            ).where(AnomalyDismissal.company_id == company_id)
+        )
+        return {(row[0], row[1]) for row in result.all()}
+
+    async def _get_dismissed_keys_for_user(
+        self, user_id: int
+    ) -> Set[Tuple[int, str]]:
+        """Load dismissal tuples scoped to the company that owns
+        ``user_id``. Used by the per-user ``scan_user`` path."""
+        from app.models import User
+
+        result = await self.db.execute(
+            select(User.company_id).where(User.id == user_id)
+        )
+        row = result.first()
+        if not row:
+            return set()
+        return await self._get_dismissed_keys(row[0])
+
+    @staticmethod
+    def _filter_dismissed(
+        anomalies: List[Dict[str, Any]],
+        dismissed: Set[Tuple[int, str]],
+    ) -> List[Dict[str, Any]]:
+        if not dismissed:
+            return anomalies
+        return [
+            a for a in anomalies
+            if (a.get("user_id"), a.get("type")) not in dismissed
+        ]
+
     async def dismiss_anomaly(
         self,
         user_id: int,
         anomaly_type: str,
         dismissed_by: int,
-        reason: Optional[str] = None
+        company_id: Optional[int],
+        dismissed_by_email: Optional[str] = None,
+        reason: Optional[str] = None,
     ) -> bool:
+        """Persist an anomaly dismissal.
+
+        Uses an INSERT ... ON CONFLICT DO UPDATE on the
+        ``(company_id, target_user_id, anomaly_type)`` unique constraint,
+        so re-dismissing the same anomaly refreshes ``dismissed_at``,
+        ``reason``, and ``dismissed_by_user_id``. Writes an audit log
+        entry and keeps the existing feature-manager usage tracking
+        (analytics, not persistence).
         """
-        Dismiss/acknowledge an anomaly.
-        Records in audit log.
-        """
-        try:
-            fm = await self._get_feature_manager()
-            await fm.log_usage(
-                user_id=dismissed_by,
-                feature_id="ai_anomaly_alerts",
-                metadata={
-                    "target_user_id": user_id,
-                    "anomaly_type": anomaly_type,
-                    "reason": reason
-                }
+        from app.models import AnomalyDismissal
+
+        if company_id is None:
+            logger.error(
+                "Refusing to persist anomaly dismissal without company_id "
+                "(dismissed_by=%s, target_user_id=%s, type=%s)",
+                dismissed_by, user_id, anomaly_type,
             )
+            return False
+
+        try:
+            stmt = pg_insert(AnomalyDismissal).values(
+                company_id=company_id,
+                target_user_id=user_id,
+                anomaly_type=anomaly_type,
+                dismissed_by_user_id=dismissed_by,
+                reason=reason,
+                dismissed_at=now_utc(),
+            )
+            stmt = stmt.on_conflict_do_update(
+                constraint="uq_anomaly_dismissals_company_user_type",
+                set_={
+                    "dismissed_by_user_id": stmt.excluded.dismissed_by_user_id,
+                    "reason": stmt.excluded.reason,
+                    "dismissed_at": stmt.excluded.dismissed_at,
+                },
+            )
+            await self.db.execute(stmt)
+
+            await AuditLogger.log(
+                db=self.db,
+                action=AuditAction.CREATE,
+                resource_type="anomaly_dismissal",
+                user_id=dismissed_by,
+                user_email=dismissed_by_email,
+                details=(
+                    f"Dismissed anomaly type={anomaly_type} "
+                    f"target_user_id={user_id} company_id={company_id}"
+                    + (f" reason={reason}" if reason else "")
+                ),
+            )
+
+            # Analytics (best-effort, do not let it break the commit).
+            try:
+                fm = await self._get_feature_manager()
+                await fm.log_usage(
+                    user_id=dismissed_by,
+                    feature_id="ai_anomaly_alerts",
+                    metadata={
+                        "target_user_id": user_id,
+                        "anomaly_type": anomaly_type,
+                        "reason": reason,
+                    },
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to log anomaly dismissal usage")
+
+            await self.db.commit()
             return True
         except Exception as e:
             logger.error(f"Failed to dismiss anomaly: {e}")
+            try:
+                await self.db.rollback()
+            except Exception:  # noqa: BLE001
+                logger.exception("Rollback failed after dismiss_anomaly error")
             return False
 
 
