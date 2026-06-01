@@ -662,10 +662,11 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
         )}
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="manual-entry-description" className="block text-sm font-medium text-gray-700 mb-1">
             {t('time.descriptionLabel')}
           </label>
           <input
+            id="manual-entry-description"
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -676,10 +677,11 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="manual-entry-project" className="block text-sm font-medium text-gray-700 mb-1">
             {t('time.projectLabel')} <span className="text-red-500">*</span>
           </label>
           <ProjectSelect
+            id="manual-entry-project"
             value={projectId === '' ? null : projectId}
             onChange={(id) => {
               setProjectId(id ?? '');
@@ -694,23 +696,30 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
 
         {projectId && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="manual-entry-task" className="block text-sm font-medium text-gray-700 mb-1">
               {t('time.taskLabel')}
             </label>
             <TaskSelect
+              id="manual-entry-task"
               projectId={projectId}
               value={taskId === '' ? null : taskId}
-              onChange={(id) => setTaskId(id ?? '')}
+              onChange={(id, task) => {
+                setTaskId(id ?? '');
+                if (task && description.trim() === '') {
+                  setDescription(task.name);
+                }
+              }}
               placeholder={t('time.noTask')}
             />
           </div>
         )}
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="manual-entry-date" className="block text-sm font-medium text-gray-700 mb-1">
             {t('time.dateLabel')} <span className="text-red-500">*</span>
           </label>
           <input
+            id="manual-entry-date"
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
@@ -721,10 +730,11 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="manual-entry-start-time" className="block text-sm font-medium text-gray-700 mb-1">
               {t('time.startTimeLabel')} <span className="text-red-500">*</span>
             </label>
             <input
+              id="manual-entry-start-time"
               type="time"
               value={startTime}
               onChange={(e) => setStartTime(e.target.value)}
@@ -733,10 +743,11 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="manual-entry-end-time" className="block text-sm font-medium text-gray-700 mb-1">
               {t('time.endTimeLabel')} <span className="text-red-500">*</span>
             </label>
             <input
+              id="manual-entry-end-time"
               type="time"
               value={endTime}
               onChange={(e) => setEndTime(e.target.value)}

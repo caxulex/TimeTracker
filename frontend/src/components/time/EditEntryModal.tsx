@@ -333,9 +333,17 @@ export function EditEntryModal({ entry, isOpen, onClose, onSaved }: EditEntryMod
               id="edit-entry-task"
               projectId={form.projectId}
               value={form.taskId === '' ? null : form.taskId}
-              onChange={(id) =>
-                setForm({ ...form, taskId: id ?? '' })
-              }
+              onChange={(id, task) => {
+                const nextDescription =
+                  task && form.description.trim() === ''
+                    ? task.name
+                    : form.description;
+                setForm({
+                  ...form,
+                  taskId: id ?? '',
+                  description: nextDescription,
+                });
+              }}
               placeholder={t('time.noTask')}
             />
           </div>

@@ -57,7 +57,7 @@ export interface TaskSelectProps {
    * Called with the new task id (or null when the selection is
    * cleared — including the automatic clear when projectId changes).
    */
-  onChange: (taskId: number | null) => void;
+  onChange: (taskId: number | null, task?: Task | null) => void;
   placeholder?: string;
   required?: boolean;
   /**
@@ -234,7 +234,7 @@ export function TaskSelect({
       // Only clear when there was a previous (non-undefined-on-mount)
       // project and a task was actually selected.
       if (value != null) {
-        onChange(null);
+        onChange(null, null);
       }
       prevProjectIdRef.current = projectId;
     }
@@ -298,7 +298,7 @@ export function TaskSelect({
 
   const commitSelection = useCallback(
     (task: Task) => {
-      onChange(task.id);
+      onChange(task.id, task);
       closePanel();
       inputRef.current?.blur();
     },

@@ -166,7 +166,7 @@ describe('TaskSelect', () => {
     fireEvent.focus(input);
     const option = await screen.findByTestId('task-select-option-12');
     fireEvent.mouseDown(option);
-    expect(onChange).toHaveBeenCalledWith(12);
+    expect(onChange).toHaveBeenCalledWith(12, expect.objectContaining({ id: 12, name: 'Write docs' }));
   });
 
   it('keyboard: ArrowDown + Enter selects an option', async () => {
@@ -177,7 +177,7 @@ describe('TaskSelect', () => {
     await user.click(input);
     // Highlight starts at index 0. ArrowDown twice -> index 2 (Write docs).
     await user.keyboard('{ArrowDown}{ArrowDown}{Enter}');
-    expect(onChange).toHaveBeenCalledWith(12);
+    expect(onChange).toHaveBeenCalledWith(12, expect.objectContaining({ id: 12, name: 'Write docs' }));
   });
 
   it('keyboard: Escape closes the panel', async () => {
@@ -262,7 +262,7 @@ describe('TaskSelect', () => {
         <TaskSelect projectId={2} value={12} onChange={onChange} />
       </QueryClientProvider>
     );
-    await waitFor(() => expect(onChange).toHaveBeenCalledWith(null));
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(null, null));
   });
 
   it('does NOT fire onChange(null) on initial mount even when value is set', async () => {
