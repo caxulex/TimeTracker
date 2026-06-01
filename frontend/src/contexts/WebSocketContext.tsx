@@ -2,8 +2,10 @@
 // TIME TRACKER - WEBSOCKET CONTEXT
 // App-wide real-time state management
 // ============================================
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useWebSocket, type WebSocketMessage, type ActiveTimer, type ConnectionState } from '../hooks/useWebSocket';
+import { useTimerStore } from '../stores/timerStore';
 
 interface WebSocketContextValue {
   isConnected: boolean;
@@ -15,6 +17,7 @@ interface WebSocketContextValue {
   activeTimers: ActiveTimer[];
   onlineUsers: number[];
   lastMessage: WebSocketMessage | null;
+  serverTime: string | null;
   showReconnectNotification: boolean;
   notifyTimerStart: (timer: {
     project_id?: number;
@@ -43,15 +46,41 @@ interface WebSocketProviderProps {
   onDisconnect?: () => void;
 }
 
-export function WebSocketProvider({ 
-  children, 
+export function WebSocketProvider({
+  children,
   onMessage,
   onConnect,
-  onDisconnect 
+  onDisconnect
 }: WebSocketProviderProps) {
+  const queryClient = useQueryClient();
+
+  // ============================================
+  // RECONNECT STATE-SYNC
+  // After a successful reconnect (NOT the first connect) we have
+  // potentially missed broadcasts during the gap. Hydrate by:
+  //   1. Refetching the running-timer state via the timer store
+  //      (applyServerState reconciliation we shipped in the divergence fix).
+  //   2. Invalidating server-data queries so the dashboard's
+  //      "Who's Working Now" / active-session strip / etc. refetch.
+  // The WS snapshot message is also applied in useWebSocket itself, so
+  // active_timers / online_users are already up to date by the time this
+  // runs; the refetches below cover REST-backed UI that the snapshot
+  // doesn't speak to.
+  // ============================================
+  const handleReconnect = useCallback(() => {
+    console.info('[WS] Reconnected — refetching state');
+    void useTimerStore.getState().fetchTimer(true);
+    queryClient.invalidateQueries({ queryKey: ['active-timers'] });
+    queryClient.invalidateQueries({ queryKey: ['active-session'] });
+    queryClient.invalidateQueries({ queryKey: ['online-users'] });
+    queryClient.invalidateQueries({ queryKey: ['session-current'] });
+    queryClient.invalidateQueries({ queryKey: ['admin-alerts'] });
+  }, [queryClient]);
+
   const ws = useWebSocket({
     onMessage,
     onConnect,
+    onReconnect: handleReconnect,
     onDisconnect,
     autoReconnect: true,
     reconnectInterval: 3000,

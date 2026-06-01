@@ -14,6 +14,13 @@ interface WebSocketMessage {
 interface UseWebSocketOptions {
   onMessage?: (message: WebSocketMessage) => void;
   onConnect?: () => void;
+  /**
+   * Fires after a successful reconnect ONLY — NOT on the very first
+   * connect of the hook's lifetime. App-level state-sync (e.g. timer
+   * refetch, React Query invalidation) belongs here so the dashboard
+   * hydrates from the server immediately after the transport recovers.
+   */
+  onReconnect?: () => void;
   onDisconnect?: () => void;
   onError?: (error: Event) => void;
   autoReconnect?: boolean;
@@ -56,6 +63,18 @@ interface ActiveTimer {
 const BASE_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30_000;
 
+// ============================================
+// LIVENESS WATCHDOG
+// Server pings every WS_HEARTBEAT_INTERVAL_SEC (default 30s). The client
+// gives 15s of slack for network jitter; if no message of any kind has
+// arrived in 45s we force-close with code 4002 “client_liveness_timeout”
+// so the existing reconnect machinery picks the link back up.
+// ============================================
+const LIVENESS_THRESHOLD_MS = 45_000;
+const LIVENESS_CHECK_INTERVAL_MS = 5_000;
+const LIVENESS_CLOSE_CODE = 4002;
+const LIVENESS_CLOSE_REASON = 'client_liveness_timeout';
+
 function calculateBackoff(attempt: number): number {
   const backoff = Math.min(BASE_BACKOFF_MS * Math.pow(2, attempt), MAX_BACKOFF_MS);
   // +/-20% jitter to prevent thundering herd
@@ -77,6 +96,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   const {
     onMessage,
     onConnect,
+    onReconnect,
     onDisconnect,
     onError,
     autoReconnect = true,
@@ -91,12 +111,21 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   const manualDisconnectRef = useRef(false);
   const connectionIdRef = useRef(0);
   const stabilityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks whether the hook has ever observed a successful onopen. Used
+  // to gate the onReconnect callback so it fires on reconnects only.
+  const hasConnectedBeforeRef = useRef(false);
+  // Liveness watchdog refs.
+  const lastMessageAtRef = useRef<number>(Date.now());
+  const livenessIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Used for [WS] log correlation + the "reconnect after Xms" timing.
+  const lastDisconnectAtRef = useRef<number | null>(null);
 
   const [isConnected, setIsConnected] = useState(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
   const [activeTimers, setActiveTimers] = useState<ActiveTimer[]>([]);
   const [onlineUsers, setOnlineUsers] = useState<number[]>([]);
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
+  const [serverTime, setServerTime] = useState<string | null>(null);
   const [showReconnectNotification, setShowReconnectNotification] = useState(false);
 
   const getToken = useCallback(() => {
@@ -171,7 +200,37 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
           reconnectAttempts.current = 0;
           stabilityTimerRef.current = null;
         }, 5000);
+
+        const isReconnect = hasConnectedBeforeRef.current;
+        const attemptNumber = reconnectAttempts.current;
+        if (isReconnect) {
+          const ms = lastDisconnectAtRef.current
+            ? Date.now() - lastDisconnectAtRef.current
+            : 0;
+          console.info(`[WS] Reconnected after ${ms}ms (attempt ${attemptNumber})`);
+        } else {
+          console.info(`[WS] Connected (attempt: ${attemptNumber})`);
+        }
+
+        // Reset liveness clock on every successful open.
+        lastMessageAtRef.current = Date.now();
+        // (Re)start liveness watchdog so a silent dead link triggers a
+        // reconnect via close-code 4002.
+        if (livenessIntervalRef.current) clearInterval(livenessIntervalRef.current);
+        livenessIntervalRef.current = setInterval(() => {
+          if (!isMountedRef.current) return;
+          const idle = Date.now() - lastMessageAtRef.current;
+          if (idle > LIVENESS_THRESHOLD_MS && wsRef.current?.readyState === WebSocket.OPEN) {
+            console.info('[WS] Liveness timeout — forcing reconnect');
+            try { wsRef.current.close(LIVENESS_CLOSE_CODE, LIVENESS_CLOSE_REASON); } catch { /* ignore */ }
+          }
+        }, LIVENESS_CHECK_INTERVAL_MS);
+
         onConnect?.();
+        if (isReconnect) {
+          onReconnect?.();
+        }
+        hasConnectedBeforeRef.current = true;
 
         // Re-subscribe to channels on (re)connection
         ws.send(JSON.stringify({ type: 'get_active_timers' }));
@@ -180,14 +239,41 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
 
       ws.onmessage = (event) => {
         if (!isMountedRef.current || connectionIdRef.current !== thisConnectionId) return;
+        // Liveness: ANY message proves the link is alive.
+        lastMessageAtRef.current = Date.now();
         try {
           const message: WebSocketMessage = JSON.parse(event.data);
+
+          // Infrastructure messages (ping/pong) are NOT propagated to the
+          // consumer's onMessage callback or to lastMessage.
+          if (message.type === 'ping') {
+            console.debug('[WS] Heartbeat OK');
+            try {
+              ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
+            } catch { /* ignore — onclose will handle */ }
+            return;
+          }
+          if (message.type === 'pong') {
+            console.debug('[WS] Heartbeat OK');
+            return;
+          }
+
           setLastMessage(message);
 
           switch (message.type) {
-            case 'ping':
-              ws.send(JSON.stringify({ type: 'pong' }));
+            case 'snapshot': {
+              // Hydration payload sent immediately after (re)connect. Replace
+              // local state wholesale so the UI matches the server's view
+              // even if individual broadcasts were missed during the gap.
+              const snapshotTimers = (message.active_timers as ActiveTimer[] | undefined) ?? [];
+              const snapshotUsers = (message.online_users as number[] | undefined) ?? [];
+              setActiveTimers(snapshotTimers);
+              setOnlineUsers(snapshotUsers);
+              if (typeof message.server_time === 'string') {
+                setServerTime(message.server_time);
+              }
               break;
+            }
             case 'active_timers':
               setActiveTimers((message.timers as typeof activeTimers) || []);
               break;
@@ -255,11 +341,19 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
         if (!isMountedRef.current || connectionIdRef.current !== thisConnectionId) return;
         setIsConnected(false);
         wsRef.current = null;
+        lastDisconnectAtRef.current = Date.now();
+        console.info(`[WS] Disconnected: code=${_event?.code} reason=${_event?.reason || ''}`);
 
         // Cancel stability timer — short-lived connections keep increasing attempts
         if (stabilityTimerRef.current) {
           clearTimeout(stabilityTimerRef.current);
           stabilityTimerRef.current = null;
+        }
+        // Stop the liveness watchdog while disconnected; it will be
+        // restarted on the next successful onopen.
+        if (livenessIntervalRef.current) {
+          clearInterval(livenessIntervalRef.current);
+          livenessIntervalRef.current = null;
         }
 
         onDisconnect?.();
@@ -295,7 +389,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       console.error('Failed to create WebSocket:', error);
       setConnectionState('disconnected');
     }
-  }, [isAuthenticated, getToken, getWebSocketUrl, onConnect, onDisconnect, onMessage, onError, autoReconnect, maxReconnectAttempts]);
+  }, [isAuthenticated, getToken, getWebSocketUrl, onConnect, onReconnect, onDisconnect, onMessage, onError, autoReconnect, maxReconnectAttempts]);
 
   // ============================================
   // DISCONNECT
@@ -312,6 +406,11 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     if (stabilityTimerRef.current) {
       clearTimeout(stabilityTimerRef.current);
       stabilityTimerRef.current = null;
+    }
+
+    if (livenessIntervalRef.current) {
+      clearInterval(livenessIntervalRef.current);
+      livenessIntervalRef.current = null;
     }
 
     if (wsRef.current) {
@@ -458,6 +557,11 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
         stabilityTimerRef.current = null;
       }
 
+      if (livenessIntervalRef.current) {
+        clearInterval(livenessIntervalRef.current);
+        livenessIntervalRef.current = null;
+      }
+
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
@@ -475,6 +579,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     activeTimers,
     onlineUsers,
     lastMessage,
+    serverTime,
     showReconnectNotification,
     notifyTimerStart,
     notifyTimerStop,

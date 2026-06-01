@@ -9,14 +9,28 @@ WebSocket lifecycle (per connection):
   4. Tenant-scoped warm of ``manager.active_timers`` for the user's company
      (does NOT overwrite entries belonging to other tenants).
   5. Subscribe: register the socket in the connection manager.
-  6. Loop: receive_json with timeout; on timeout send ping. Targeted
-     exception handling — ``CancelledError`` is re-raised, disconnects break.
-  7. Disconnect: cleanup connection + team membership entries.
+  6. Initial snapshot: send ``{type: "snapshot", active_timers, online_users,
+     server_time}`` so the client can hydrate immediately on (re)connect.
+  7. Bidirectional heartbeat: a background task sends ``{type: "ping"}``
+     every ``WS_HEARTBEAT_INTERVAL_SEC`` (default 30s). The client replies
+     with ``{type: "pong"}``; connections silent for more than
+     ``WS_HEARTBEAT_TIMEOUT_SEC`` (default 60s) are force-closed with
+     code 4001 “heartbeat_timeout” so the frontend's reconnect machinery
+     fires.
+  8. Loop: receive_json; ``pong`` updates ``last_pong_at``, other types
+     are dispatched to ``handle_message``. Targeted exception handling
+     — ``CancelledError`` is re-raised, disconnects break.
+  9. Disconnect: cleanup connection + team membership entries; structured
+     log line emits user_id, connection_id, reason, duration_ms.
 """
 
 import asyncio
 import logging
-from typing import Dict, Optional, Set
+import os
+import uuid
+from collections import deque
+from datetime import datetime, timedelta
+from typing import Deque, Dict, Optional, Set
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
@@ -44,6 +58,29 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# ============================================================
+# Heartbeat configuration (env-overridable)
+# ============================================================
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+        return value if value > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+HEARTBEAT_INTERVAL_SEC = _env_int("WS_HEARTBEAT_INTERVAL_SEC", 30)
+HEARTBEAT_TIMEOUT_SEC = _env_int("WS_HEARTBEAT_TIMEOUT_SEC", 60)
+
+# Distinct close code/reason for heartbeat timeouts so the frontend can
+# log them and ops can correlate disconnects with silent dead links.
+HEARTBEAT_TIMEOUT_CLOSE_CODE = 4001
+HEARTBEAT_TIMEOUT_CLOSE_REASON = "heartbeat_timeout"
+
+
 class ConnectionManager:
     """Manages WebSocket connections for real-time updates"""
 
@@ -56,9 +93,24 @@ class ConnectionManager:
         self.active_timers: Dict[int, dict] = {}
         # user_id -> company_id (for multi-tenant filtering)
         self.user_companies: Dict[int, Optional[int]] = {}
+        # WebSocket -> last pong receipt time (for liveness detection)
+        self.last_pong_at: Dict[WebSocket, datetime] = {}
+        # WebSocket -> opaque connection id (for log correlation)
+        self.connection_ids: Dict[WebSocket, str] = {}
+        # WebSocket -> connect time (for duration_ms log field)
+        self.connection_started_at: Dict[WebSocket, datetime] = {}
+        # WebSocket -> user_id (reverse lookup for the heartbeat task)
+        self.connection_users: Dict[WebSocket, int] = {}
+        # In-memory observability counters (reset on app restart).
+        # Stores timestamps of recent heartbeat-timeout disconnects so we
+        # can derive a sliding 1-hour count without a Redis dep.
+        self.heartbeat_timeout_events: Deque[datetime] = deque()
 
-    async def connect(self, websocket: WebSocket, user_id: int, team_ids: list[int] = None, company_id: int = None):
-        """Accept a new WebSocket connection"""
+    async def connect(self, websocket: WebSocket, user_id: int, team_ids: list[int] = None, company_id: int = None) -> str:
+        """Accept a new WebSocket connection.
+
+        Returns the assigned ``connection_id`` for log correlation.
+        """
         await websocket.accept()
 
         if user_id not in self.active_connections:
@@ -68,6 +120,16 @@ class ConnectionManager:
         # Track user's company for multi-tenant broadcasts
         self.user_companies[user_id] = company_id
 
+        # Per-connection bookkeeping for heartbeat + observability
+        connection_id = uuid.uuid4().hex[:12]
+        now = now_utc()
+        self.connection_ids[websocket] = connection_id
+        self.connection_started_at[websocket] = now
+        self.connection_users[websocket] = user_id
+        # Seed last_pong_at to "now" so a fresh socket doesn't immediately
+        # trip the heartbeat-timeout watchdog before the first ping cycle.
+        self.last_pong_at[websocket] = now
+
         # Register user in teams
         if team_ids:
             for team_id in team_ids:
@@ -75,10 +137,34 @@ class ConnectionManager:
                     self.team_members[team_id] = set()
                 self.team_members[team_id].add(user_id)
 
-        logger.info(f"User {user_id} (company={company_id}) connected via WebSocket")
+        logger.info(
+            "ws.connected user_id=%s company_id=%s connection_id=%s team_ids_count=%d",
+            user_id,
+            company_id,
+            connection_id,
+            len(team_ids) if team_ids else 0,
+        )
+        return connection_id
 
-    def disconnect(self, websocket: WebSocket, user_id: int):
-        """Remove a WebSocket connection"""
+    def disconnect(self, websocket: WebSocket, user_id: int, reason: str = "client_close"):
+        """Remove a WebSocket connection.
+
+        ``reason`` is logged for observability. Common values:
+          - ``client_close`` (default): peer closed normally.
+          - ``heartbeat_timeout``: server force-closed for missing pongs.
+          - ``send_failure``: server-side send raised.
+          - ``protocol_error``: transport-level exception.
+        """
+        connection_id = self.connection_ids.pop(websocket, None)
+        started_at = self.connection_started_at.pop(websocket, None)
+        self.last_pong_at.pop(websocket, None)
+        self.connection_users.pop(websocket, None)
+        duration_ms = (
+            int((now_utc() - started_at).total_seconds() * 1000)
+            if started_at is not None
+            else 0
+        )
+
         if user_id in self.active_connections:
             self.active_connections[user_id].discard(websocket)
             if not self.active_connections[user_id]:
@@ -87,10 +173,36 @@ class ConnectionManager:
                 if user_id in self.user_companies:
                     del self.user_companies[user_id]
                 # Remove from teams
-                for team_id, members in self.team_members.items():
+                for _team_id, members in self.team_members.items():
                     members.discard(user_id)
 
-        logger.info(f"User {user_id} disconnected from WebSocket")
+        logger.info(
+            "ws.disconnected user_id=%s connection_id=%s disconnect_reason=%s duration_ms=%d",
+            user_id,
+            connection_id,
+            reason,
+            duration_ms,
+        )
+
+    def record_pong(self, websocket: WebSocket) -> None:
+        """Update the per-connection last-pong timestamp."""
+        if websocket in self.connection_ids:
+            self.last_pong_at[websocket] = now_utc()
+
+    def record_heartbeat_timeout(self) -> None:
+        """Record a heartbeat-timeout disconnect for the metrics endpoint.
+
+        Old events (>1h) are pruned lazily on read.
+        """
+        self.heartbeat_timeout_events.append(now_utc())
+
+    def heartbeat_timeouts_last_hour(self) -> int:
+        """Count heartbeat-timeout disconnects in the last 60 minutes."""
+        cutoff = now_utc() - timedelta(hours=1)
+        events = self.heartbeat_timeout_events
+        while events and events[0] < cutoff:
+            events.popleft()
+        return len(events)
 
     async def send_personal_message(self, message: dict, user_id: int):
         """Send a message to a specific user"""
@@ -100,7 +212,14 @@ class ConnectionManager:
                 try:
                     await connection.send_json(message)
                 except Exception as e:
-                    logger.error(f"Error sending message to user {user_id}: {e}")
+                    connection_id = self.connection_ids.get(connection)
+                    logger.error(
+                        "ws.send_failed user_id=%s connection_id=%s error=%s: %s",
+                        user_id,
+                        connection_id,
+                        e.__class__.__name__,
+                        e,
+                    )
                     disconnected.append(connection)
 
             # Clean up disconnected sockets
@@ -281,8 +400,6 @@ async def load_active_timers_from_db(company_id: Optional[int] = None) -> int:
     the FastAPI startup hook.
     Returns the number of rows loaded (0 on failure).
     """
-    from datetime import timezone
-
     from sqlalchemy import select
 
     from app.database import async_session
@@ -426,6 +543,70 @@ async def load_active_timers_from_db(company_id: Optional[int] = None) -> int:
         return 0
 
 
+async def _heartbeat_task(websocket: WebSocket, user_id: int) -> None:
+    """Background task: proactive ping loop + liveness watchdog.
+
+    Every ``HEARTBEAT_INTERVAL_SEC`` we:
+      * Send ``{type: "ping", timestamp: <iso>}`` to the client.
+      * Check ``last_pong_at`` — if it's older than ``HEARTBEAT_TIMEOUT_SEC``
+        we close the socket with ``4001 heartbeat_timeout`` so the
+        frontend's existing reconnect machinery fires.
+
+    The task exits silently on ``CancelledError`` (cooperative cancel from
+    the endpoint's ``finally`` block) and on transport-level closures.
+    """
+    try:
+        while True:
+            await asyncio.sleep(HEARTBEAT_INTERVAL_SEC)
+
+            # Liveness check first: if the previous ping never got a pong,
+            # close the socket so the client can reconnect on a fresh link.
+            last_pong = manager.last_pong_at.get(websocket)
+            if last_pong is not None:
+                idle = (now_utc() - last_pong).total_seconds()
+                if idle > HEARTBEAT_TIMEOUT_SEC:
+                    connection_id = manager.connection_ids.get(websocket)
+                    logger.warning(
+                        "ws.heartbeat_timeout user_id=%s connection_id=%s last_pong_ago_sec=%.1f",
+                        user_id,
+                        connection_id,
+                        idle,
+                    )
+                    manager.record_heartbeat_timeout()
+                    try:
+                        await websocket.close(
+                            code=HEARTBEAT_TIMEOUT_CLOSE_CODE,
+                            reason=HEARTBEAT_TIMEOUT_CLOSE_REASON,
+                        )
+                    except Exception:
+                        pass
+                    return
+
+            # Send the next ping. Send failures simply end the task; the
+            # main loop will observe the disconnect and clean up.
+            try:
+                await websocket.send_json(
+                    {"type": "ping", "timestamp": now_utc().isoformat()}
+                )
+            except asyncio.CancelledError:
+                raise
+            except (WebSocketDisconnect, ConnectionClosedError, ConnectionClosedOK):
+                return
+            except Exception as e:
+                connection_id = manager.connection_ids.get(websocket)
+                logger.error(
+                    "ws.send_failed user_id=%s connection_id=%s error=%s: %s",
+                    user_id,
+                    connection_id,
+                    e.__class__.__name__,
+                    e,
+                )
+                return
+    except asyncio.CancelledError:
+        # Cooperative shutdown from the endpoint's finally block.
+        raise
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
@@ -436,15 +617,20 @@ async def websocket_endpoint(
 
     Connect with: ws://localhost:8080/api/ws/ws?token=<jwt_token>
 
-    Message types:
-    - ping: Keep-alive ping
-    - timer_start: User started a timer
-    - timer_stop: User stopped a timer
-    - timer_update: Timer duration update
-    - get_active_timers: Request list of active timers
-    - get_online_users: Request list of online users
+    Message types (client -> server):
+    - pong: Reply to a server ping (updates last_pong_at)
+    - ping: Keep-alive (server replies with pong)
+    - timer_start, timer_stop, timer_update
+    - get_active_timers, get_online_users
+
+    Server -> client infrastructure types:
+    - ping: heartbeat (client replies with pong)
+    - snapshot: hydration payload sent immediately after connect
+    - connected: legacy ack (kept for backwards compat)
     """
     user = None
+    heartbeat = None
+    disconnect_reason = "client_close"
     try:
         # Authenticate user from token
         try:
@@ -477,39 +663,47 @@ async def websocket_endpoint(
         # once at startup from ``main.py`` lifespan.
         await load_active_timers_from_db(company_id=user.company_id)
 
-        # Send initial state
+        # Initial hydration snapshot. Clients that just reconnected after
+        # missing events can rebuild local state from this payload without
+        # waiting for the next broadcast.
+        company_filter = get_company_filter(user)
+        await websocket.send_json({
+            "type": "snapshot",
+            "active_timers": manager.get_active_timers(company_filter=company_filter),
+            "online_users": manager.get_online_users(),
+            "server_time": now_utc().isoformat(),
+        })
+
+        # Legacy ack — kept so older clients that key off "connected" don't
+        # regress. New clients should rely on the snapshot above.
         await websocket.send_json({
             "type": "connected",
             "user_id": user.id,
             "message": "Connected to Time Tracker real-time service"
         })
 
+        # Start the proactive heartbeat / liveness watchdog.
+        heartbeat = asyncio.create_task(_heartbeat_task(websocket, user.id))
+
         # Main message loop
         while True:
             try:
-                data = await asyncio.wait_for(websocket.receive_json(), timeout=60)
+                data = await websocket.receive_json()
+            except asyncio.CancelledError:
+                raise
+            except WebSocketDisconnect:
+                break
+            except (ConnectionClosedError, ConnectionClosedOK):
+                break
+
+            # Pongs are infrastructure — update liveness state, do not
+            # propagate to the broadcast surface.
+            if isinstance(data, dict) and data.get("type") == "pong":
+                manager.record_pong(websocket)
+                continue
+
+            try:
                 await handle_message(websocket, user, data)
-            except asyncio.TimeoutError:
-                # Send ping to keep connection alive. B8/B21: targeted
-                # exception handling — never swallow CancelledError, treat
-                # protocol close as a clean exit, log everything else.
-                try:
-                    await websocket.send_json({"type": "ping"})
-                except asyncio.CancelledError:
-                    raise
-                except WebSocketDisconnect:
-                    break
-                except (ConnectionClosedError, ConnectionClosedOK):
-                    break
-                except Exception as e:
-                    logger.error(
-                        "ws.ping_send_failed user_id=%s company_id=%s: %s",
-                        user.id,
-                        user.company_id,
-                        e,
-                        exc_info=True,
-                    )
-                    break
             except asyncio.CancelledError:
                 raise
             except WebSocketDisconnect:
@@ -518,14 +712,24 @@ async def websocket_endpoint(
                 break
 
     except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected for user {user.id if user else 'unknown'}")
+        logger.info(
+            "ws.disconnect_event user_id=%s",
+            user.id if user else "unknown",
+        )
     except asyncio.CancelledError:
         raise
     except Exception as e:
+        disconnect_reason = "protocol_error"
         logger.error(f"WebSocket error: {e}", exc_info=True)
     finally:
+        if heartbeat is not None:
+            heartbeat.cancel()
+            try:
+                await heartbeat
+            except (asyncio.CancelledError, Exception):
+                pass
         if user:
-            manager.disconnect(websocket, user.id)
+            manager.disconnect(websocket, user.id, reason=disconnect_reason)
 
 
 async def _load_user_team_ids(user_id: int) -> list[int]:
