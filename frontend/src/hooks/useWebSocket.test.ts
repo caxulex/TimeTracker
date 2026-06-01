@@ -426,4 +426,131 @@ describe('useWebSocket', () => {
       expect(result.current.isConnected).toBe(true);
     });
   });
+
+  // ============================================
+  // HEARTBEAT + LIVENESS + RECONNECT-SYNC
+  // ============================================
+  describe('Heartbeat (bidirectional)', () => {
+    it('should reply to a server ping with a pong', () => {
+      renderHook(() => useWebSocket());
+      const ws = mockWebSocketInstances[mockWebSocketInstances.length - 1];
+      act(() => { ws.simulateOpen(); });
+      ws.send.mockClear();
+
+      act(() => { ws.simulateMessage({ type: 'ping', timestamp: '2026-01-01T00:00:00Z' }); });
+
+      const sentTypes = ws.send.mock.calls.map((c: [string]) => JSON.parse(c[0]).type);
+      expect(sentTypes).toContain('pong');
+    });
+
+    it('should not propagate ping or pong to the consumer onMessage callback', () => {
+      const onMessage = vi.fn();
+      renderHook(() => useWebSocket({ onMessage }));
+      const ws = mockWebSocketInstances[mockWebSocketInstances.length - 1];
+      act(() => { ws.simulateOpen(); });
+      onMessage.mockClear();
+
+      act(() => { ws.simulateMessage({ type: 'ping' }); });
+      act(() => { ws.simulateMessage({ type: 'pong' }); });
+
+      expect(onMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Client liveness watchdog', () => {
+    it('should force-close the socket with code 4002 when no message arrives within the threshold', () => {
+      renderHook(() => useWebSocket());
+      const ws = mockWebSocketInstances[mockWebSocketInstances.length - 1];
+      act(() => { ws.simulateOpen(); });
+      ws.close.mockClear();
+
+      // No messages for >45s → liveness check at 5s intervals trips.
+      act(() => { vi.advanceTimersByTime(50_000); });
+
+      expect(ws.close).toHaveBeenCalled();
+      const lastCall = (ws.close.mock.calls as unknown[][])[ws.close.mock.calls.length - 1];
+      expect(lastCall[0]).toBe(4002);
+      expect(lastCall[1]).toBe('client_liveness_timeout');
+    });
+
+    it('should NOT force-close while messages keep arriving', () => {
+      renderHook(() => useWebSocket());
+      const ws = mockWebSocketInstances[mockWebSocketInstances.length - 1];
+      act(() => { ws.simulateOpen(); });
+      ws.close.mockClear();
+
+      // Pump a server ping every 30s — well under the 45s threshold.
+      for (let i = 0; i < 4; i++) {
+        act(() => { vi.advanceTimersByTime(30_000); });
+        act(() => { ws.simulateMessage({ type: 'ping' }); });
+      }
+
+      expect(ws.close).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('onReconnect callback', () => {
+    it('should fire onReconnect ONLY after a reconnect, not on the initial connect', () => {
+      const onConnect = vi.fn();
+      const onReconnect = vi.fn();
+      const { result } = renderHook(() =>
+        useWebSocket({ onConnect, onReconnect, autoReconnect: true, maxReconnectAttempts: 5 })
+      );
+
+      // Initial open: onConnect fires, onReconnect does NOT.
+      act(() => {
+        mockWebSocketInstances[mockWebSocketInstances.length - 1].simulateOpen();
+      });
+      expect(onConnect).toHaveBeenCalledTimes(1);
+      expect(onReconnect).not.toHaveBeenCalled();
+
+      // Drop the link and let the backoff timer create a fresh socket.
+      act(() => {
+        mockWebSocketInstances[mockWebSocketInstances.length - 1].simulateClose();
+      });
+      act(() => { vi.advanceTimersByTime(2000); });
+
+      // Second open: onConnect AND onReconnect fire.
+      act(() => {
+        mockWebSocketInstances[mockWebSocketInstances.length - 1].simulateOpen();
+      });
+      expect(onConnect).toHaveBeenCalledTimes(2);
+      expect(onReconnect).toHaveBeenCalledTimes(1);
+      expect(result.current.connectionState).toBe('connected');
+    });
+  });
+
+  describe('Snapshot hydration', () => {
+    it('should replace activeTimers and onlineUsers when a snapshot arrives', () => {
+      const { result } = renderHook(() => useWebSocket());
+      const ws = mockWebSocketInstances[mockWebSocketInstances.length - 1];
+      act(() => { ws.simulateOpen(); });
+
+      // Seed pre-snapshot state.
+      act(() => {
+        ws.simulateMessage({
+          type: 'active_timers',
+          timers: [{ user_id: 1, user_name: 'A', start_time: '2026-01-01T00:00:00Z' }],
+        });
+      });
+      act(() => { ws.simulateMessage({ type: 'online_users', users: [1] }); });
+
+      // Snapshot arrives — should overwrite both.
+      act(() => {
+        ws.simulateMessage({
+          type: 'snapshot',
+          active_timers: [
+            { user_id: 7, user_name: 'Snap', start_time: '2026-01-01T00:00:00Z' },
+          ],
+          online_users: [7, 8],
+          server_time: '2026-01-01T00:00:00Z',
+        });
+      });
+
+      expect(result.current.activeTimers).toHaveLength(1);
+      expect(result.current.activeTimers[0].user_id).toBe(7);
+      expect(result.current.onlineUsers).toEqual([7, 8]);
+      expect(result.current.serverTime).toBe('2026-01-01T00:00:00Z');
+    });
+  });
 });

@@ -24,6 +24,40 @@ from app.utils.timewindow import day_bounds, local_today, now_utc, range_bounds
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+@router.get("/ws/metrics")
+async def get_websocket_metrics(
+    current_user: User = Depends(require_admin),
+):
+    """Operational visibility for the WebSocket connection manager.
+
+    Counters are in-memory only (no Redis); the snapshot resets on app
+    restart. ``heartbeat_timeouts_last_hour`` is a sliding 60-minute
+    count derived from per-event timestamps recorded by the heartbeat
+    watchdog. Admin-only.
+    """
+    from app.routers.websocket import manager
+
+    by_company: dict[str, int] = {}
+    unique_users: set[int] = set()
+    total_connections = 0
+    for user_id, sockets in manager.active_connections.items():
+        count = len(sockets)
+        if count == 0:
+            continue
+        unique_users.add(user_id)
+        total_connections += count
+        company_id = manager.user_companies.get(user_id)
+        key = "null" if company_id is None else str(company_id)
+        by_company[key] = by_company.get(key, 0) + count
+
+    return {
+        "active_connections": total_connections,
+        "unique_users": len(unique_users),
+        "by_company": by_company,
+        "heartbeat_timeouts_last_hour": manager.heartbeat_timeouts_last_hour(),
+    }
+
+
 class TimeEntryWithUser(BaseModel):
     id: int
     user_id: int
