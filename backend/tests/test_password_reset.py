@@ -4,8 +4,6 @@
 # ============================================
 """
 Tests for password reset functionality.
-Note: Some tests require Redis to be running.
-Tests that depend on Redis are marked accordingly.
 """
 
 import pytest
@@ -19,35 +17,18 @@ from app.models import User
 from app.services.auth_service import AuthService
 
 
-# Check if Redis is available
-def redis_available():
-    try:
-        import redis
-        r = redis.Redis(host='localhost', port=6379, socket_connect_timeout=1)
-        r.ping()
-        return True
-    except:
-        return False
-
-
-# Skip tests if Redis is not available
-skip_without_redis = pytest.mark.skipif(
-    not redis_available(),
-    reason="Redis not available"
-)
-
-
 class TestForgotPassword:
     """Test forgot password endpoint."""
 
     @pytest.mark.asyncio
-    @skip_without_redis
     async def test_forgot_password_with_valid_email(
         self, client: AsyncClient, test_user: User
     ):
         """Test forgot password with existing email."""
-        with patch('app.services.email_service.EmailService.send_password_reset_email', new_callable=AsyncMock) as mock_email:
+        with patch('app.services.email_service.EmailService.send_password_reset_email', new_callable=AsyncMock) as mock_email, \
+             patch('app.services.invitation_service.InvitationService.create_reset_token', new_callable=AsyncMock) as mock_token:
             mock_email.return_value = True
+            mock_token.return_value = "mock-reset-token-12345"
             
             response = await client.post(
                 "/api/auth/forgot-password",
@@ -59,7 +40,6 @@ class TestForgotPassword:
             assert response.status_code in [200, 202]
 
     @pytest.mark.asyncio
-    @skip_without_redis
     async def test_forgot_password_with_nonexistent_email(self, client: AsyncClient):
         """Test forgot password with non-existent email."""
         response = await client.post(

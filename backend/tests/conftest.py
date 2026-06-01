@@ -6,6 +6,7 @@
 import logging
 import os
 from typing import AsyncGenerator
+import fakeredis
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import text
@@ -57,25 +58,26 @@ async def async_engine():
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def _reset_token_blacklist_redis_cache() -> AsyncGenerator[None, None]:
-    """Drop the ``token_blacklist`` module's cached Redis client before
-    each test.
-
-    The ``redis.asyncio`` client binds itself to the event loop on which
-    it was first created. ``pytest-asyncio`` (mode=auto, function-scope)
-    creates a fresh event loop per test, so a client cached on a
-    previous test's loop raises ``RuntimeError: Event loop is closed``
-    on subsequent calls. Pre-B4 this was silently swallowed by the
-    fail-open ``is_blacklisted`` and ignored; post-B4 (fail-closed) the
-    same situation correctly returns 401, which would mass-break the
-    suite. Reseting the singleton between tests forces each test to
-    instantiate a fresh client on its own event loop.
-    """
+async def _patch_token_blacklist_redis_cache() -> AsyncGenerator[None, None]:
+    """Patch token blacklist Redis client with a fresh async fakeredis per test."""
     from app.services import token_blacklist as _tb_module
 
-    _tb_module.token_blacklist._redis = None
+    fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    _tb_module.token_blacklist._redis = fake_redis
     yield
     _tb_module.token_blacklist._redis = None
+    await fake_redis.aclose()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _patch_ip_security_redis_client(monkeypatch) -> AsyncGenerator[None, None]:
+    """Patch module-level sync Redis clients with fresh fakeredis instances."""
+    fake_ip_security_redis = fakeredis.FakeStrictRedis(decode_responses=True)
+    fake_scheduled_reports_redis = fakeredis.FakeStrictRedis(decode_responses=True)
+
+    monkeypatch.setattr("app.services.ip_security.redis_client", fake_ip_security_redis)
+    monkeypatch.setattr("app.services.scheduled_reports.redis_client", fake_scheduled_reports_redis)
+    yield
 
 
 @pytest_asyncio.fixture(autouse=True)
