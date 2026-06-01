@@ -222,6 +222,128 @@ describe('TimePage', () => {
         expect(addButton).toBeDefined();
       });
     });
+
+    it('prefills manual description from selected task when description is empty', async () => {
+      const { tasksApi } = await import('../api/client');
+      vi.mocked(tasksApi.getAll).mockImplementation(async (filters?: { project_id?: number }) => {
+        if (filters?.project_id === 1) {
+          return {
+            items: [
+              {
+                id: 101,
+                project_id: 1,
+                name: 'Task Alpha',
+                description: null,
+                status: 'TODO',
+                created_at: '2026-01-08T09:00:00Z',
+                basecamp_due_on: null,
+                basecamp_todo_created_at: null,
+                basecamp_todo_position: null,
+              },
+            ],
+            total: 1,
+            page: 1,
+            size: 100,
+            pages: 1,
+          };
+        }
+        return { items: [], total: 0, page: 1, size: 100, pages: 1 };
+      });
+
+      render(
+        <TestWrapper>
+          <TimePage />
+        </TestWrapper>
+      );
+
+      const user = userEvent.setup();
+      await waitFor(() => {
+        expect(screen.getByText('Working on feature')).toBeInTheDocument();
+      });
+
+      const addButton = screen.getAllByRole('button', { name: /manual|add/i })[0];
+      await user.click(addButton);
+
+      const descriptionInput = await screen.findByLabelText(/description/i) as HTMLInputElement;
+      expect(descriptionInput.value).toBe('');
+
+      const projectInput = document.getElementById('manual-entry-project') as HTMLInputElement;
+      expect(projectInput).toBeTruthy();
+      await user.click(projectInput);
+      await user.type(projectInput, 'Project A');
+      const projectOption = await screen.findByTestId('project-select-option-1');
+      fireEvent.mouseDown(projectOption);
+
+      const taskInput = document.getElementById('manual-entry-task') as HTMLInputElement;
+      expect(taskInput).toBeTruthy();
+      await user.click(taskInput);
+      const taskOption = await screen.findByTestId('task-select-option-101');
+      fireEvent.mouseDown(taskOption);
+
+      await waitFor(() => {
+        expect((screen.getByLabelText(/description/i) as HTMLInputElement).value).toBe('Task Alpha');
+      });
+    });
+
+    it('does not overwrite manual description when user already typed text', async () => {
+      const { tasksApi } = await import('../api/client');
+      vi.mocked(tasksApi.getAll).mockImplementation(async (filters?: { project_id?: number }) => {
+        if (filters?.project_id === 1) {
+          return {
+            items: [
+              {
+                id: 102,
+                project_id: 1,
+                name: 'Task Beta',
+                description: null,
+                status: 'TODO',
+                created_at: '2026-01-08T09:00:00Z',
+                basecamp_due_on: null,
+                basecamp_todo_created_at: null,
+                basecamp_todo_position: null,
+              },
+            ],
+            total: 1,
+            page: 1,
+            size: 100,
+            pages: 1,
+          };
+        }
+        return { items: [], total: 0, page: 1, size: 100, pages: 1 };
+      });
+
+      render(
+        <TestWrapper>
+          <TimePage />
+        </TestWrapper>
+      );
+
+      const user = userEvent.setup();
+      await waitFor(() => {
+        expect(screen.getByText('Working on feature')).toBeInTheDocument();
+      });
+
+      const addButton = screen.getAllByRole('button', { name: /manual|add/i })[0];
+      await user.click(addButton);
+
+      const descriptionInput = await screen.findByLabelText(/description/i) as HTMLInputElement;
+      await user.type(descriptionInput, 'My custom text');
+
+      const projectInput = document.getElementById('manual-entry-project') as HTMLInputElement;
+      expect(projectInput).toBeTruthy();
+      await user.click(projectInput);
+      await user.type(projectInput, 'Project A');
+      const projectOption = await screen.findByTestId('project-select-option-1');
+      fireEvent.mouseDown(projectOption);
+
+      const taskInput = document.getElementById('manual-entry-task') as HTMLInputElement;
+      expect(taskInput).toBeTruthy();
+      await user.click(taskInput);
+      const taskOption = await screen.findByTestId('task-select-option-102');
+      fireEvent.mouseDown(taskOption);
+
+      expect(descriptionInput.value).toBe('My custom text');
+    });
   });
 
   describe('Project Filter', () => {

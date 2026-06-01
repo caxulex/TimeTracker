@@ -1009,11 +1009,17 @@ async def create_manual_entry(
             detail="Provide either duration_seconds or both start_time and end_time"
         )
 
+    resolved_description = await resolve_description(
+        description=entry_data.description,
+        task_id=entry_data.task_id,
+        db=db,
+    )
+
     entry = TimeEntry(
         user_id=current_user.id,
         task_id=entry_data.task_id,
         project_id=entry_data.project_id,
-        description=entry_data.description,
+        description=resolved_description,
         start_time=start_time,
         end_time=end_time,
         duration_seconds=duration,
@@ -1536,11 +1542,15 @@ async def patch_time_entry(
         )
         entry.is_running = False
 
-    entry.description = await resolve_description(
-        description=entry.description,
-        task_id=entry.task_id,
-        db=db,
-    )
+    update_payload = entry_data.model_dump(exclude_unset=True)
+    description_updated = "description" in update_payload
+    description_is_empty = entry.description is None or entry.description.strip() == ""
+    if description_updated and description_is_empty and entry.task_id is not None:
+        entry.description = await resolve_description(
+            description=entry.description,
+            task_id=entry.task_id,
+            db=db,
+        )
 
     changed_fields = []
     if entry_data.description is not None:

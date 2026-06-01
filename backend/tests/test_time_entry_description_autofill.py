@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.dependencies as dependencies
 from app.models import Project, Task, Team, TeamMember, TimeEntry, User
+from app.services.time_entry_description import resolve_description
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -209,6 +210,142 @@ class TestSessionUpdateAutofill:
         )
         assert response.status_code == 200
         assert response.json()["description"] == task_two.name
+
+    @pytest.mark.asyncio
+    async def test_put_task_change_with_non_empty_description_keeps_user_text(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        closed_entry: TimeEntry,
+        task_two: Task,
+    ):
+        response = await client.put(
+            f"/api/time/{closed_entry.id}",
+            json={"task_id": task_two.id, "description": "typed by user"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["description"] == "typed by user"
+
+    @pytest.mark.asyncio
+    async def test_patch_task_change_without_description_does_not_autofill_existing_empty(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        db_session: AsyncSession,
+        test_user: User,
+        session_project: Project,
+        task_one: Task,
+        task_two: Task,
+    ):
+        now = datetime.now(timezone.utc)
+        entry = TimeEntry(
+            user_id=test_user.id,
+            project_id=session_project.id,
+            task_id=task_one.id,
+            description="   ",
+            start_time=now - timedelta(hours=2),
+            end_time=now - timedelta(hours=1),
+            duration_seconds=3600,
+            is_running=False,
+        )
+        db_session.add(entry)
+        await db_session.commit()
+        await db_session.refresh(entry)
+
+        response = await client.patch(
+            f"/api/time/entries/{entry.id}",
+            json={"task_id": task_two.id},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["description"] == "   "
+
+
+class TestManualCreateAutofill:
+    @pytest.mark.asyncio
+    async def test_create_manual_entry_autofills_description_when_empty(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        session_project: Project,
+        task_one: Task,
+    ):
+        now = datetime.now(timezone.utc)
+        response = await client.post(
+            "/api/time",
+            json={
+                "project_id": session_project.id,
+                "task_id": task_one.id,
+                "description": "",
+                "start_time": (now - timedelta(hours=1)).isoformat(),
+                "end_time": now.isoformat(),
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 201
+        assert response.json()["description"] == task_one.name
+
+    @pytest.mark.asyncio
+    async def test_create_manual_entry_preserves_explicit_description(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        session_project: Project,
+        task_one: Task,
+    ):
+        now = datetime.now(timezone.utc)
+        response = await client.post(
+            "/api/time",
+            json={
+                "project_id": session_project.id,
+                "task_id": task_one.id,
+                "description": "typed by user",
+                "start_time": (now - timedelta(hours=1)).isoformat(),
+                "end_time": now.isoformat(),
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 201
+        assert response.json()["description"] == "typed by user"
+
+    @pytest.mark.asyncio
+    async def test_create_manual_entry_no_autofill_without_task(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        session_project: Project,
+    ):
+        now = datetime.now(timezone.utc)
+        response = await client.post(
+            "/api/time",
+            json={
+                "project_id": session_project.id,
+                "description": "",
+                "start_time": (now - timedelta(hours=1)).isoformat(),
+                "end_time": now.isoformat(),
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 201
+        assert response.json()["description"] == ""
+
+
+class TestResolveDescriptionHelper:
+    @pytest.mark.asyncio
+    async def test_resolve_description_keeps_empty_when_task_id_invalid(
+        self,
+        db_session: AsyncSession,
+    ):
+        resolved = await resolve_description(
+            description="",
+            task_id=999_999,
+            db=db_session,
+        )
+        assert resolved == ""
 
 
 class TestSessionFinalizationAutofill:

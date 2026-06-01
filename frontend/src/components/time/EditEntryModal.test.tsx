@@ -274,6 +274,38 @@ describe('EditEntryModal', () => {
     expect(taskInput.value).toBe('');
   });
 
+  it('prefills description from selected task when description is empty', async () => {
+    renderModal(buildCompletedEntry({ description: '' }));
+
+    await waitFor(() =>
+      expect(tasksGetAllMock).toHaveBeenCalledWith({ project_id: 1, page_size: 100 })
+    );
+
+    const taskInput = screen.getByLabelText(/task/i) as HTMLInputElement;
+    fireEvent.focus(taskInput);
+    const option = await screen.findByTestId('task-select-option-11');
+    fireEvent.mouseDown(option);
+
+    const desc = screen.getByLabelText(/description/i) as HTMLTextAreaElement;
+    expect(desc.value).toBe('Task 1');
+  });
+
+  it('does not overwrite typed description when selecting a task', async () => {
+    renderModal(buildCompletedEntry({ description: 'User typed text' }));
+
+    await waitFor(() =>
+      expect(tasksGetAllMock).toHaveBeenCalledWith({ project_id: 1, page_size: 100 })
+    );
+
+    const taskInput = screen.getByLabelText(/task/i) as HTMLInputElement;
+    fireEvent.focus(taskInput);
+    const option = await screen.findByTestId('task-select-option-11');
+    fireEvent.mouseDown(option);
+
+    const desc = screen.getByLabelText(/description/i) as HTMLTextAreaElement;
+    expect(desc.value).toBe('User typed text');
+  });
+
   it('updates the live duration when start/end change', async () => {
     renderModal(buildCompletedEntry());
 
