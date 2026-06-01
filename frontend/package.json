@@ -18,7 +18,7 @@
   "dependencies": {
     "@sentry/react": "^10.38.0",
     "@tanstack/react-query": "^5.14.0",
-    "axios": "^1.6.2",
+    "axios": "^1.16.1",
     "date-fns": "^3.0.6",
     "i18next": "^25.8.6",
     "lucide-react": "^0.555.0",
