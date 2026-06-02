@@ -38,6 +38,7 @@ import {
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { usersApi } from '../../api/client';
+import { useDebounce } from '../../hooks/useDebounce';
 import { cn, getInitials } from '../../utils/helpers';
 import type { User } from '../../types';
 
@@ -117,11 +118,30 @@ export function UserSelect({
   const inputId = id ?? `user-select-${reactId}`;
   const listboxId = `${inputId}-listbox`;
 
-  const { data: usersData, isLoading } = useQuery({
-    queryKey: USERS_QUERY_KEY,
-    // page=1, size=100 — backend's `le=100` ceiling.
-    queryFn: () => usersApi.getAll(1, 100),
-    enabled: !usersProp,
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [highlight, setHighlight] = useState<number>(-1);
+
+  const debouncedSearch = useDebounce(query, 250);
+  const search = debouncedSearch.trim() || undefined;
+
+  const { data: usersData, isFetching: isFetchingUsers } = useQuery({
+    queryKey: ['users', 'search', search ?? ''],
+    queryFn: () =>
+      usersApi.getAll({
+        page: 1,
+        page_size: 20,
+        search,
+      }),
+    enabled: open && !usersProp,
+    staleTime: 30_000,
+  });
+
+  const { data: selectedUserData } = useQuery({
+    queryKey: ['users', value],
+    queryFn: () => usersApi.getById(value as number),
+    enabled: value !== null && value !== undefined,
+    staleTime: 60_000,
   });
 
   const users: UserSelectOption[] = useMemo(
@@ -129,23 +149,24 @@ export function UserSelect({
     [usersProp, usersData]
   );
 
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [highlight, setHighlight] = useState<number>(-1);
-
   const wrapperRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const selected = useMemo(
-    () => users.find((u) => u.id === value) ?? null,
-    [users, value]
-  );
+  const selected = useMemo(() => {
+    const fromList = users.find((u) => u.id === value) ?? null;
+    if (fromList) return fromList;
+    if (selectedUserData && selectedUserData.id === value) {
+      return selectedUserData;
+    }
+    return null;
+  }, [users, value, selectedUserData]);
 
   const displayValue = open ? query : selected?.name ?? '';
 
-  // Filter against both name and email — admins commonly know a
-  // user by email-prefix when there are name collisions.
+  // In pre-fed mode we still filter locally. In API mode the list is
+  // already server-filtered.
   const filtered = useMemo(() => {
+    if (!usersProp) return users;
     const q = query.trim().toLowerCase();
     if (!q) return users;
     return users.filter(
@@ -153,7 +174,7 @@ export function UserSelect({
         u.name.toLowerCase().includes(q) ||
         u.email.toLowerCase().includes(q)
     );
-  }, [users, query]);
+  }, [users, usersProp, query]);
 
   const clearOffset = clearable ? 1 : 0;
   const totalOptions = clearOffset + filtered.length;
@@ -259,7 +280,7 @@ export function UserSelect({
     }
   };
 
-  const showLoading = isLoading && users.length === 0 && !usersProp;
+  const showLoading = isFetchingUsers && users.length === 0 && !usersProp;
 
   return (
     <div
@@ -347,7 +368,9 @@ export function UserSelect({
                   className="px-3 py-2 text-gray-500"
                   data-testid="user-select-empty"
                 >
-                  No users match &lsquo;{query.trim()}&rsquo;
+                  {query.trim()
+                    ? `No users match '${query.trim()}'`
+                    : 'No users found'}
                 </li>
               ) : (
                 filtered.map((user, idx) => {

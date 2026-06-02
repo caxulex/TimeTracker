@@ -288,11 +288,22 @@ export const authApi = {
 // USERS API (Admin)
 // ============================================
 export const usersApi = {
-  getAll: async (page = 1, size = 20): Promise<PaginatedResponse<User>> => {
-    // Backend's actual query-param name is `page_size` (see app/routers/users.py).
-    // Sending `size` was silently ignored and capped at the default 20.
+  getAll: async (
+    pageOrParams: number | { page?: number; page_size?: number; search?: string } = 1,
+    size = 20
+  ): Promise<PaginatedResponse<User>> => {
+    // Backend's actual query-param names are `page_size` and `search`
+    // (see app/routers/users.py). Keep `(page, size)` for back-compat.
+    const params =
+      typeof pageOrParams === 'number'
+        ? { page: pageOrParams, page_size: size }
+        : {
+            page: pageOrParams.page ?? 1,
+            page_size: pageOrParams.page_size ?? 20,
+            search: pageOrParams.search,
+          };
     const response = await api.get<PaginatedResponse<User>>('/api/users', {
-      params: { page, page_size: size },
+      params,
     });
     return response.data;
   },
@@ -331,11 +342,22 @@ export const usersApi = {
 // TEAMS API
 // ============================================
 export const teamsApi = {
-  getAll: async (page = 1, size = 20): Promise<PaginatedResponse<Team>> => {
-    // Backend's actual query-param name is `page_size` (see app/routers/teams.py).
-    // Sending `size` was silently ignored and capped at the default 20.
+  getAll: async (
+    pageOrParams: number | { page?: number; page_size?: number; search?: string } = 1,
+    size = 20
+  ): Promise<PaginatedResponse<Team>> => {
+    // Backend's actual query-param names are `page_size` and `search`
+    // (see app/routers/teams.py). Keep `(page, size)` for back-compat.
+    const params =
+      typeof pageOrParams === 'number'
+        ? { page: pageOrParams, page_size: size }
+        : {
+            page: pageOrParams.page ?? 1,
+            page_size: pageOrParams.page_size ?? 20,
+            search: pageOrParams.search,
+          };
     const response = await api.get<PaginatedResponse<Team>>('/api/teams', {
-      params: { page, page_size: size },
+      params,
     });
     return response.data;
   },

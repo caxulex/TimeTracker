@@ -39,6 +39,7 @@ import {
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { tasksApi } from '../../api/client';
+import { useDebounce } from '../../hooks/useDebounce';
 import { cn } from '../../utils/helpers';
 import type { Task } from '../../types';
 
@@ -207,12 +208,31 @@ export function TaskSelect({
   const hasProject = projectId != null;
   const effectiveDisabled = disabled || !hasProject;
 
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [highlight, setHighlight] = useState<number>(-1);
+
+  const debouncedSearch = useDebounce(query, 250);
+  const search = debouncedSearch.trim() || undefined;
+
   // ------------ Data fetch ------------
-  const { data: tasksData, isLoading } = useQuery({
-    queryKey: TASKS_QUERY_KEY(projectId ?? null),
+  const { data: tasksData, isFetching: isFetchingTasks } = useQuery({
+    queryKey: ['tasks', 'search', projectId ?? null, search ?? ''],
     queryFn: () =>
-      tasksApi.getAll({ project_id: projectId as number, page_size: 100 }),
-    enabled: hasProject,
+      tasksApi.getAll({
+        project_id: projectId as number,
+        page_size: 20,
+        search,
+      }),
+    enabled: hasProject && open,
+    staleTime: 30_000,
+  });
+
+  const { data: selectedTaskData } = useQuery({
+    queryKey: ['tasks', value],
+    queryFn: () => tasksApi.getById(value as number),
+    enabled: value !== null && value !== undefined,
+    staleTime: 60_000,
   });
 
   const tasks: Task[] = useMemo(
@@ -244,28 +264,23 @@ export function TaskSelect({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  // ------------ Open/close + query state ------------
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [highlight, setHighlight] = useState<number>(-1);
-
   const wrapperRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const selected = useMemo(
-    () => tasks.find((t) => t.id === value) ?? null,
-    [tasks, value]
-  );
+  const selected = useMemo(() => {
+    const fromList = tasks.find((t) => t.id === value) ?? null;
+    if (fromList) return fromList;
+    if (selectedTaskData && selectedTaskData.id === value) {
+      return selectedTaskData;
+    }
+    return null;
+  }, [tasks, value, selectedTaskData]);
 
   const selectedLabel = selected ? formatTaskLabel(selected, labelCtx) : '';
 
   const displayValue = open ? query : selectedLabel;
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return sortedTasks;
-    return sortedTasks.filter((t) => t.name.toLowerCase().includes(q));
-  }, [sortedTasks, query]);
+  const filtered = sortedTasks;
 
   useEffect(() => {
     if (!open) {
@@ -358,8 +373,8 @@ export function TaskSelect({
     ? 'Select project first'
     : placeholder;
 
-  const showLoading = hasProject && isLoading && tasks.length === 0;
-  const noTasksInProject = hasProject && !isLoading && tasks.length === 0;
+  const showLoading = hasProject && isFetchingTasks && tasks.length === 0;
+  const noTasksInProject = hasProject && !isFetchingTasks && tasks.length === 0 && !query.trim();
 
   return (
     <div
@@ -430,7 +445,9 @@ export function TaskSelect({
               className="px-3 py-2 text-gray-500"
               data-testid="task-select-empty"
             >
-              No tasks match &lsquo;{query.trim()}&rsquo;
+              {query.trim()
+                ? `No tasks match '${query.trim()}'`
+                : 'No tasks found'}
             </li>
           ) : (
             filtered.map((task, idx) => {

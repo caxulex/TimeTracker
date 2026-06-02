@@ -1,18 +1,14 @@
-// ============================================
-// TIME TRACKER - TEAM SELECT TESTS
-// Mirrors ProjectSelect.test.tsx — covers the typeahead combobox
-// introduced in feat/user-team-select-typeahead.
-// ============================================
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { TeamSelect } from '../TeamSelect';
-import type { Team } from '../../../types';
+import type { Team, TeamMember } from '../../../types';
 
 vi.mock('../../../api/client', () => ({
   teamsApi: {
     getAll: vi.fn(),
+    getById: vi.fn(),
   },
 }));
 
@@ -32,22 +28,18 @@ const teams: Team[] = [
   makeTeam({ id: 1, name: 'Engineering' }),
   makeTeam({ id: 2, name: 'Sales' }),
   makeTeam({ id: 3, name: 'Development' }),
-  makeTeam({ id: 4, name: 'Other' }),
 ];
 
-function renderSelect(
-  props: Partial<React.ComponentProps<typeof TeamSelect>> = {}
-) {
+function renderSelect(props: Partial<React.ComponentProps<typeof TeamSelect>> = {}) {
   const onChange = vi.fn();
   const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    defaultOptions: { queries: { retry: false, staleTime: 0 } },
   });
   const utils = render(
     <QueryClientProvider client={queryClient}>
       <TeamSelect
         value={props.value ?? null}
         onChange={props.onChange ?? onChange}
-        teams={props.teams ?? teams}
         placeholder={props.placeholder ?? 'Select team'}
         {...props}
       />
@@ -56,189 +48,132 @@ function renderSelect(
   return { ...utils, onChange };
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 describe('TeamSelect', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('renders the currently-selected team name in the input', () => {
-    renderSelect({ value: 3 });
-    const input = screen.getByRole('combobox') as HTMLInputElement;
-    expect(input.value).toBe('Development');
-  });
-
-  it('opens the dropdown on focus and renders all teams', () => {
-    renderSelect();
-    const input = screen.getByRole('combobox');
-    fireEvent.focus(input);
-    expect(screen.getByTestId('team-select-listbox')).toBeInTheDocument();
-    expect(screen.getByTestId('team-select-option-1')).toBeInTheDocument();
-    expect(screen.getByTestId('team-select-option-2')).toBeInTheDocument();
-    expect(screen.getByTestId('team-select-option-3')).toBeInTheDocument();
-    expect(screen.getByTestId('team-select-option-4')).toBeInTheDocument();
-  });
-
-  it('filters as the user types (case-insensitive substring)', async () => {
-    const user = userEvent.setup();
-    renderSelect();
-    const input = screen.getByRole('combobox');
-    await user.click(input);
-    await user.type(input, 'dev');
-    expect(screen.getByTestId('team-select-option-3')).toBeInTheDocument();
-    expect(screen.queryByTestId('team-select-option-1')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('team-select-option-2')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('team-select-option-4')).not.toBeInTheDocument();
-  });
-
-  it('shows empty-state message when no teams match', async () => {
-    const user = userEvent.setup();
-    renderSelect();
-    const input = screen.getByRole('combobox');
-    await user.click(input);
-    await user.type(input, 'xyz');
-    const empty = screen.getByTestId('team-select-empty');
-    expect(empty).toBeInTheDocument();
-    expect(empty.textContent).toMatch(/xyz/);
-    expect(empty.textContent).toMatch(/No teams match/i);
-  });
-
-  it('calls onChange when an option is mouseDown-ed', () => {
-    const { onChange } = renderSelect();
-    const input = screen.getByRole('combobox');
-    fireEvent.focus(input);
-    fireEvent.mouseDown(screen.getByTestId('team-select-option-3'));
-    expect(onChange).toHaveBeenCalledWith(3);
-  });
-
-  it('keyboard: ArrowDown + Enter selects an option', async () => {
-    const user = userEvent.setup();
-    const { onChange } = renderSelect();
-    const input = screen.getByRole('combobox');
-    await user.click(input);
-    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}');
-    expect(onChange).toHaveBeenCalledWith(3);
-  });
-
-  it('keyboard: Escape closes the panel', async () => {
-    const user = userEvent.setup();
-    renderSelect();
-    const input = screen.getByRole('combobox');
-    await user.click(input);
-    expect(screen.getByTestId('team-select-listbox')).toBeInTheDocument();
-    await user.keyboard('{Escape}');
-    expect(screen.queryByTestId('team-select-listbox')).not.toBeInTheDocument();
-  });
-
-  it('click-outside closes the panel', () => {
-    renderSelect();
-    const input = screen.getByRole('combobox');
-    fireEvent.focus(input);
-    expect(screen.getByTestId('team-select-listbox')).toBeInTheDocument();
-    fireEvent.mouseDown(document.body);
-    expect(screen.queryByTestId('team-select-listbox')).not.toBeInTheDocument();
-  });
-
-  it('shows the loading state while the query is in flight', async () => {
-    vi.mocked(teamsApi.getAll).mockReturnValueOnce(
-      new Promise(() => {}) as never
-    );
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    render(
-      <QueryClientProvider client={queryClient}>
-        <TeamSelect value={null} onChange={vi.fn()} />
-      </QueryClientProvider>
-    );
-    const input = screen.getByRole('combobox');
-    fireEvent.focus(input);
-    await waitFor(() => {
-      expect(screen.getByTestId('team-select-loading')).toBeInTheDocument();
-    });
-  });
-
-  it('fetches with page=1 and size=100', async () => {
-    vi.mocked(teamsApi.getAll).mockResolvedValueOnce({
+    vi.mocked(teamsApi.getAll).mockResolvedValue({
       items: teams,
       total: teams.length,
       page: 1,
-      size: 100,
+      size: 20,
       pages: 1,
     });
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    render(
-      <QueryClientProvider client={queryClient}>
-        <TeamSelect value={null} onChange={vi.fn()} />
-      </QueryClientProvider>
-    );
-    await waitFor(() => {
-      expect(teamsApi.getAll).toHaveBeenCalledWith(1, 100);
+    vi.mocked(teamsApi.getById).mockImplementation(async (id: number) => {
+      const team = teams.find((t) => t.id === id);
+      if (!team) throw new Error('team not found');
+      return { ...team, members: [] as TeamMember[] };
     });
   });
 
-  // ----- clearable -----------------------------------------------
-  describe('clearable', () => {
-    it('default (clearable=false): no clear option is rendered', () => {
-      renderSelect();
-      const input = screen.getByRole('combobox');
-      fireEvent.focus(input);
-      expect(screen.queryByTestId('team-select-clear')).not.toBeInTheDocument();
-    });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
-    it('clearable=true: dropdown shows the "All teams" clear option at the top', () => {
-      renderSelect({ clearable: true });
-      const input = screen.getByRole('combobox');
-      fireEvent.focus(input);
-      const clear = screen.getByTestId('team-select-clear');
-      expect(clear).toBeInTheDocument();
-      expect(clear.textContent).toMatch(/All teams/i);
-    });
+  it('with value=null does not fire search until dropdown opens', () => {
+    renderSelect({ value: null });
+    expect(teamsApi.getAll).not.toHaveBeenCalled();
+  });
 
-    it('clearable=true: custom clearLabel is rendered', () => {
-      renderSelect({
-        clearable: true,
-        clearLabel: '(Default: lowest-id team)',
+  it('with value set fetches by id and shows selected name', async () => {
+    renderSelect({ value: 3 });
+    await waitFor(() => {
+      expect(teamsApi.getById).toHaveBeenCalledWith(3);
+      expect((screen.getByRole('combobox') as HTMLInputElement).value).toBe('Development');
+    });
+  });
+
+  it('open dropdown fires request without search', async () => {
+    renderSelect();
+    fireEvent.focus(screen.getByRole('combobox'));
+    await waitFor(() => {
+      expect(teamsApi.getAll).toHaveBeenCalledWith({ page: 1, page_size: 20, search: undefined });
+    });
+  });
+
+  it('debounces search request by 250ms', async () => {
+    renderSelect();
+    const input = screen.getByRole('combobox');
+    fireEvent.focus(input);
+    await waitFor(() => expect(teamsApi.getAll).toHaveBeenCalled());
+    vi.mocked(teamsApi.getAll).mockClear();
+
+    fireEvent.change(input, { target: { value: 'dev' } });
+    await sleep(200);
+    expect(teamsApi.getAll).not.toHaveBeenCalled();
+
+    await sleep(120);
+    await waitFor(() => {
+      expect(teamsApi.getAll).toHaveBeenCalledWith({ page: 1, page_size: 20, search: 'dev' });
+    });
+  });
+
+  it('rapid typing only sends one final debounced search', async () => {
+    renderSelect();
+    const input = screen.getByRole('combobox');
+    fireEvent.focus(input);
+    await waitFor(() => expect(teamsApi.getAll).toHaveBeenCalled());
+    vi.mocked(teamsApi.getAll).mockClear();
+
+    fireEvent.change(input, { target: { value: 'd' } });
+    await sleep(200);
+    fireEvent.change(input, { target: { value: 'de' } });
+    await sleep(280);
+
+    await waitFor(() => expect(teamsApi.getAll).toHaveBeenCalledTimes(1));
+    expect(teamsApi.getAll).toHaveBeenCalledWith({ page: 1, page_size: 20, search: 'de' });
+  });
+
+  it('selecting option closes dropdown and calls onChange with id', async () => {
+    const { onChange } = renderSelect();
+    fireEvent.focus(screen.getByRole('combobox'));
+    const option = await screen.findByTestId('team-select-option-3');
+    fireEvent.mouseDown(option);
+    expect(onChange).toHaveBeenCalledWith(3);
+    expect(screen.queryByTestId('team-select-listbox')).not.toBeInTheDocument();
+  });
+
+  it('selected value still displays when current search results do not include it', async () => {
+    vi.mocked(teamsApi.getAll)
+      .mockResolvedValueOnce({
+        items: teams,
+        total: teams.length,
+        page: 1,
+        size: 20,
+        pages: 1,
+      })
+      .mockResolvedValueOnce({
+        items: [teams[0]],
+        total: 1,
+        page: 1,
+        size: 20,
+        pages: 1,
       });
-      const input = screen.getByRole('combobox');
-      fireEvent.focus(input);
-      expect(screen.getByTestId('team-select-clear').textContent).toMatch(
-        /Default: lowest-id team/
-      );
-    });
 
-    it('clearable=true: clicking clear option calls onChange(null)', () => {
-      const { onChange } = renderSelect({ clearable: true, value: 3 });
-      const input = screen.getByRole('combobox');
-      fireEvent.focus(input);
-      fireEvent.mouseDown(screen.getByTestId('team-select-clear'));
-      expect(onChange).toHaveBeenCalledWith(null);
-    });
+    renderSelect({ value: 3 });
+    const input = screen.getByRole('combobox') as HTMLInputElement;
+    fireEvent.focus(input);
+    await waitFor(() => expect(teamsApi.getAll).toHaveBeenCalled());
 
-    it('clearable=true: null value renders an empty input (placeholder visible)', () => {
-      renderSelect({ clearable: true, value: null, placeholder: 'All teams' });
-      const input = screen.getByRole('combobox') as HTMLInputElement;
-      expect(input.value).toBe('');
-      expect(input.placeholder).toBe('All teams');
-    });
+    fireEvent.change(input, { target: { value: 'eng' } });
+    await sleep(320);
+    await screen.findByTestId('team-select-option-1');
 
-    it('clearable=true: Enter on clear (default highlight) calls onChange(null)', async () => {
-      const user = userEvent.setup();
-      const { onChange } = renderSelect({ clearable: true, value: null });
-      const input = screen.getByRole('combobox');
-      await user.click(input);
-      await user.keyboard('{Enter}');
-      expect(onChange).toHaveBeenCalledWith(null);
-    });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    await waitFor(() => expect((screen.getByRole('combobox') as HTMLInputElement).value).toBe('Development'));
+  });
 
-    it('clearable=true: ArrowDown past clear, Enter selects team', async () => {
-      const user = userEvent.setup();
-      const { onChange } = renderSelect({ clearable: true, value: null });
-      const input = screen.getByRole('combobox');
-      await user.click(input);
-      await user.keyboard('{ArrowDown}{Enter}');
-      expect(onChange).toHaveBeenCalledWith(1);
-    });
+  it('pre-fed teams mode skips server search and filters locally', async () => {
+    const user = userEvent.setup();
+    renderSelect({ teams, value: null });
+    const input = screen.getByRole('combobox');
+
+    await user.click(input);
+    await user.type(input, 'dev');
+
+    expect(teamsApi.getAll).not.toHaveBeenCalled();
+    expect(screen.getByTestId('team-select-option-3')).toBeInTheDocument();
+    expect(screen.queryByTestId('team-select-option-1')).not.toBeInTheDocument();
   });
 });

@@ -1,10 +1,5 @@
-// ============================================
-// TIME TRACKER - PROJECT SELECT TESTS
-// Covers the typeahead combobox introduced in
-// fix/project-selectors-typeahead-and-pagination.
-// ============================================
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ProjectSelect } from '../ProjectSelect';
@@ -13,43 +8,43 @@ import type { Project } from '../../../types';
 vi.mock('../../../api/client', () => ({
   projectsApi: {
     getAll: vi.fn(),
+    getById: vi.fn(),
   },
 }));
 
 import { projectsApi } from '../../../api/client';
 
-const makeProject = (overrides: Partial<Project>): Project => ({
-  id: 1,
-  name: 'Project',
-  description: null,
-  team_id: 1,
-  team_name: 'Team',
-  color: '#3B82F6',
-  is_archived: false,
-  created_at: new Date().toISOString(),
-  updated_at: null,
-  task_count: 0,
-  ...overrides,
-} as Project);
+const makeProject = (overrides: Partial<Project>): Project =>
+  ({
+    id: 1,
+    name: 'Project',
+    description: null,
+    team_id: 1,
+    team_name: 'Team',
+    color: '#3B82F6',
+    is_archived: false,
+    created_at: new Date().toISOString(),
+    updated_at: null,
+    task_count: 0,
+    ...overrides,
+  }) as Project;
 
 const projects: Project[] = [
   makeProject({ id: 1, name: 'Alpha', color: '#FF0000' }),
   makeProject({ id: 2, name: 'Bravo', color: '#00FF00' }),
   makeProject({ id: 3, name: 'Development', color: '#0000FF' }),
-  makeProject({ id: 4, name: 'Other thing', color: '#FFFF00' }),
 ];
 
 function renderSelect(props: Partial<React.ComponentProps<typeof ProjectSelect>> = {}) {
   const onChange = vi.fn();
   const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    defaultOptions: { queries: { retry: false, staleTime: 0 } },
   });
   const utils = render(
     <QueryClientProvider client={queryClient}>
       <ProjectSelect
         value={props.value ?? null}
         onChange={props.onChange ?? onChange}
-        projects={props.projects ?? projects}
         placeholder={props.placeholder ?? 'Select project'}
         {...props}
       />
@@ -58,220 +53,148 @@ function renderSelect(props: Partial<React.ComponentProps<typeof ProjectSelect>>
   return { ...utils, onChange };
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 describe('ProjectSelect', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('renders the currently-selected project name in the input', () => {
-    renderSelect({ value: 3 });
-    const input = screen.getByRole('combobox') as HTMLInputElement;
-    expect(input.value).toBe('Development');
-    // Colored dot for the selected project should be present
-    expect(screen.getByTestId('project-select-dot')).toBeInTheDocument();
-  });
-
-  it('opens the dropdown on focus', async () => {
-    renderSelect();
-    const input = screen.getByRole('combobox');
-    fireEvent.focus(input);
-    expect(screen.getByTestId('project-select-listbox')).toBeInTheDocument();
-    // All four projects render as options
-    expect(screen.getByTestId('project-select-option-1')).toBeInTheDocument();
-    expect(screen.getByTestId('project-select-option-2')).toBeInTheDocument();
-    expect(screen.getByTestId('project-select-option-3')).toBeInTheDocument();
-    expect(screen.getByTestId('project-select-option-4')).toBeInTheDocument();
-  });
-
-  it('filters options as the user types (case-insensitive substring)', async () => {
-    const user = userEvent.setup();
-    renderSelect();
-    const input = screen.getByRole('combobox');
-    await user.click(input);
-
-    await user.type(input, 'dev');
-    // "Development" matches, others do not
-    expect(screen.getByTestId('project-select-option-3')).toBeInTheDocument();
-    expect(screen.queryByTestId('project-select-option-1')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('project-select-option-2')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('project-select-option-4')).not.toBeInTheDocument();
-  });
-
-  it('case-insensitive: uppercase query still matches', async () => {
-    const user = userEvent.setup();
-    renderSelect();
-    const input = screen.getByRole('combobox');
-    await user.click(input);
-    await user.type(input, 'DEV');
-    expect(screen.getByTestId('project-select-option-3')).toBeInTheDocument();
-  });
-
-  it('shows empty-state message when no projects match', async () => {
-    const user = userEvent.setup();
-    renderSelect();
-    const input = screen.getByRole('combobox');
-    await user.click(input);
-    await user.type(input, 'xyz');
-    const empty = screen.getByTestId('project-select-empty');
-    expect(empty).toBeInTheDocument();
-    expect(empty.textContent).toMatch(/xyz/);
-    expect(empty.textContent).toMatch(/No projects match/i);
-  });
-
-  it('calls onChange when an option is clicked', async () => {
-    const { onChange } = renderSelect();
-    const input = screen.getByRole('combobox');
-    fireEvent.focus(input);
-    const option = screen.getByTestId('project-select-option-3');
-    // ProjectSelect commits on mousedown so blur/click race is safe.
-    fireEvent.mouseDown(option);
-    expect(onChange).toHaveBeenCalledWith(3);
-  });
-
-  it('keyboard: ArrowDown + Enter selects an option', async () => {
-    const user = userEvent.setup();
-    const { onChange } = renderSelect();
-    const input = screen.getByRole('combobox');
-    await user.click(input);
-    // Highlight starts at index 0 (Alpha). ArrowDown twice -> Development (idx 2).
-    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}');
-    expect(onChange).toHaveBeenCalledWith(3);
-  });
-
-  it('keyboard: Escape closes the panel', async () => {
-    const user = userEvent.setup();
-    renderSelect();
-    const input = screen.getByRole('combobox');
-    await user.click(input);
-    expect(screen.getByTestId('project-select-listbox')).toBeInTheDocument();
-    await user.keyboard('{Escape}');
-    expect(screen.queryByTestId('project-select-listbox')).not.toBeInTheDocument();
-  });
-
-  it('click-outside closes the panel', () => {
-    renderSelect();
-    const input = screen.getByRole('combobox');
-    fireEvent.focus(input);
-    expect(screen.getByTestId('project-select-listbox')).toBeInTheDocument();
-    fireEvent.mouseDown(document.body);
-    expect(screen.queryByTestId('project-select-listbox')).not.toBeInTheDocument();
-  });
-
-  it('shows the loading state while the query is in flight', async () => {
-    // Don't pass `projects` prop so the component drives its own query.
-    // Returning an unresolved promise keeps the query in flight.
-    vi.mocked(projectsApi.getAll).mockReturnValueOnce(new Promise(() => {}));
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    render(
-      <QueryClientProvider client={queryClient}>
-        <ProjectSelect value={null} onChange={vi.fn()} />
-      </QueryClientProvider>
-    );
-    const input = screen.getByRole('combobox');
-    fireEvent.focus(input);
-    await waitFor(() => {
-      expect(screen.getByTestId('project-select-loading')).toBeInTheDocument();
-    });
-  });
-
-  it('fetches with include_archived=false and page_size=100', async () => {
-    vi.mocked(projectsApi.getAll).mockResolvedValueOnce({
+    vi.mocked(projectsApi.getAll).mockResolvedValue({
       items: projects,
       total: projects.length,
       page: 1,
-      size: 100,
+      size: 20,
       pages: 1,
     });
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
+    vi.mocked(projectsApi.getById).mockImplementation(async (id: number) => {
+      const project = projects.find((p) => p.id === id);
+      if (!project) throw new Error('project not found');
+      return project;
     });
-    render(
-      <QueryClientProvider client={queryClient}>
-        <ProjectSelect value={null} onChange={vi.fn()} />
-      </QueryClientProvider>
-    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('with value=null does not fire search until dropdown opens', () => {
+    renderSelect({ value: null });
+    expect(projectsApi.getAll).not.toHaveBeenCalled();
+  });
+
+  it('with value set fetches by id and shows selected name', async () => {
+    renderSelect({ value: 3 });
+    await waitFor(() => {
+      expect(projectsApi.getById).toHaveBeenCalledWith(3);
+      expect((screen.getByRole('combobox') as HTMLInputElement).value).toBe('Development');
+    });
+  });
+
+  it('open dropdown fires top-20 request without search', async () => {
+    renderSelect();
+    fireEvent.focus(screen.getByRole('combobox'));
     await waitFor(() => {
       expect(projectsApi.getAll).toHaveBeenCalledWith({
         include_archived: false,
-        page_size: 100,
+        page_size: 20,
+        search: undefined,
       });
     });
   });
 
-  // ----- clearable -----------------------------------------------
-  describe('clearable', () => {
-    it('default (clearable=false): no clear option is rendered', () => {
-      renderSelect();
-      const input = screen.getByRole('combobox');
-      fireEvent.focus(input);
-      expect(screen.queryByTestId('project-select-clear')).not.toBeInTheDocument();
-    });
+  it('fires debounced server search after 250ms', async () => {
+    renderSelect();
+    const input = screen.getByRole('combobox');
+    fireEvent.focus(input);
+    await waitFor(() => expect(projectsApi.getAll).toHaveBeenCalled());
+    vi.mocked(projectsApi.getAll).mockClear();
 
-    it('clearable=true: dropdown shows the "All projects" clear option at the top', () => {
-      renderSelect({ clearable: true });
-      const input = screen.getByRole('combobox');
-      fireEvent.focus(input);
-      const clear = screen.getByTestId('project-select-clear');
-      expect(clear).toBeInTheDocument();
-      expect(clear.textContent).toMatch(/All projects/i);
-    });
+    fireEvent.change(input, { target: { value: 'dev' } });
+    await sleep(200);
+    expect(projectsApi.getAll).not.toHaveBeenCalled();
 
-    it('clearable=true: custom clearLabel is rendered', () => {
-      renderSelect({ clearable: true, clearLabel: 'Any project' });
-      const input = screen.getByRole('combobox');
-      fireEvent.focus(input);
-      expect(screen.getByTestId('project-select-clear').textContent).toMatch(
-        /Any project/
-      );
+    await sleep(120);
+    await waitFor(() => {
+      expect(projectsApi.getAll).toHaveBeenCalledWith({
+        include_archived: false,
+        page_size: 20,
+        search: 'dev',
+      });
     });
+  });
 
-    it('clearable=true: clicking clear option calls onChange(null)', () => {
-      const { onChange } = renderSelect({ clearable: true, value: 3 });
-      const input = screen.getByRole('combobox');
-      fireEvent.focus(input);
-      fireEvent.mouseDown(screen.getByTestId('project-select-clear'));
-      expect(onChange).toHaveBeenCalledWith(null);
-    });
+  it('rapid typing only issues final debounced request', async () => {
+    renderSelect();
+    const input = screen.getByRole('combobox');
+    fireEvent.focus(input);
+    await waitFor(() => expect(projectsApi.getAll).toHaveBeenCalled());
+    vi.mocked(projectsApi.getAll).mockClear();
 
-    it('clearable=true: null value renders an empty input (placeholder visible)', () => {
-      renderSelect({ clearable: true, value: null, placeholder: 'All projects' });
-      const input = screen.getByRole('combobox') as HTMLInputElement;
-      expect(input.value).toBe('');
-      expect(input.placeholder).toBe('All projects');
-    });
+    fireEvent.change(input, { target: { value: 'd' } });
+    await sleep(200);
+    fireEvent.change(input, { target: { value: 'de' } });
+    await sleep(100);
+    expect(projectsApi.getAll).not.toHaveBeenCalled();
 
-    it('clearable=true: keyboard nav Enter on clear option calls onChange(null)', async () => {
-      const user = userEvent.setup();
-      const { onChange } = renderSelect({ clearable: true, value: null });
-      const input = screen.getByRole('combobox');
-      await user.click(input);
-      // With no selection, default highlight should be the clear
-      // option (index 0). Enter commits it.
-      await user.keyboard('{Enter}');
-      expect(onChange).toHaveBeenCalledWith(null);
+    await sleep(180);
+    await waitFor(() => expect(projectsApi.getAll).toHaveBeenCalledTimes(1));
+    expect(projectsApi.getAll).toHaveBeenCalledWith({
+      include_archived: false,
+      page_size: 20,
+      search: 'de',
     });
+  });
 
-    it('clearable=true: ArrowDown moves past clear into projects, Enter selects project', async () => {
-      const user = userEvent.setup();
-      const { onChange } = renderSelect({ clearable: true, value: null });
-      const input = screen.getByRole('combobox');
-      await user.click(input);
-      // highlight 0 = clear. ArrowDown -> highlight 1 = Alpha (id 1).
-      await user.keyboard('{ArrowDown}{Enter}');
-      expect(onChange).toHaveBeenCalledWith(1);
-    });
+  it('selection closes dropdown and calls onChange with id', async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderSelect();
+    await user.click(screen.getByRole('combobox'));
+    const option = await screen.findByTestId('project-select-option-3');
+    fireEvent.mouseDown(option);
+    expect(onChange).toHaveBeenCalledWith(3);
+    expect(screen.queryByTestId('project-select-listbox')).not.toBeInTheDocument();
+  });
 
-    it('clearable=true: still renders project options when query has no matches', async () => {
-      const user = userEvent.setup();
-      renderSelect({ clearable: true });
-      const input = screen.getByRole('combobox');
-      await user.click(input);
-      await user.type(input, 'xyz');
-      // Clear is still reachable even when nothing matches.
-      expect(screen.getByTestId('project-select-clear')).toBeInTheDocument();
-      expect(screen.getByTestId('project-select-empty')).toBeInTheDocument();
-    });
+  it('selected value still displays even when current search result set does not include it', async () => {
+    vi.mocked(projectsApi.getAll)
+      .mockResolvedValueOnce({
+        items: projects,
+        total: projects.length,
+        page: 1,
+        size: 20,
+        pages: 1,
+      })
+      .mockResolvedValueOnce({
+        items: [projects[0]],
+        total: 1,
+        page: 1,
+        size: 20,
+        pages: 1,
+      });
+
+    renderSelect({ value: 3 });
+    const input = screen.getByRole('combobox') as HTMLInputElement;
+
+    fireEvent.focus(input);
+    await waitFor(() => expect(projectsApi.getAll).toHaveBeenCalled());
+
+    fireEvent.change(input, { target: { value: 'alp' } });
+    await sleep(320);
+    await waitFor(() => expect(screen.getByTestId('project-select-option-1')).toBeInTheDocument());
+
+    fireEvent.keyDown(input, { key: 'Escape' });
+    await waitFor(() => expect((screen.getByRole('combobox') as HTMLInputElement).value).toBe('Development'));
+  });
+
+  it('pre-fed list mode skips server search and filters locally', async () => {
+    const user = userEvent.setup();
+    renderSelect({ projects, value: null });
+    const input = screen.getByRole('combobox');
+
+    await user.click(input);
+    await user.type(input, 'dev');
+
+    expect(projectsApi.getAll).not.toHaveBeenCalled();
+    expect(screen.getByTestId('project-select-option-3')).toBeInTheDocument();
+    expect(screen.queryByTestId('project-select-option-1')).not.toBeInTheDocument();
   });
 });

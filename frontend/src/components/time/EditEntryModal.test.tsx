@@ -251,10 +251,14 @@ describe('EditEntryModal', () => {
   it('changes to project trigger a task list reload (and clear task)', async () => {
     renderModal(buildCompletedEntry());
 
-    // Wait for the initial task fetch for project 1 (TaskSelect uses
-    // page_size=100 to avoid the silent 20-cap).
+    // TaskSelect now fetches on dropdown open. Open once to trigger
+    // the initial task fetch for project 1.
+    const taskInput = screen.getByLabelText(/task/i) as HTMLInputElement;
+    fireEvent.focus(taskInput);
     await waitFor(() =>
-      expect(tasksGetAllMock).toHaveBeenCalledWith({ project_id: 1, page_size: 100 })
+      expect(tasksGetAllMock).toHaveBeenCalledWith(
+        expect.objectContaining({ project_id: 1, page_size: 20 })
+      )
     );
 
     const projectSelect = await screen.findByLabelText(/project/i) as HTMLInputElement;
@@ -263,26 +267,32 @@ describe('EditEntryModal', () => {
     const option = await screen.findByTestId('project-select-option-2');
     fireEvent.mouseDown(option);
 
+    // Open task dropdown again to fetch tasks for the new project.
+    fireEvent.focus(taskInput);
+
     await waitFor(() =>
-      expect(tasksGetAllMock).toHaveBeenCalledWith({ project_id: 2, page_size: 100 })
+      expect(tasksGetAllMock).toHaveBeenCalledWith(
+        expect.objectContaining({ project_id: 2, page_size: 20 })
+      )
     );
 
     // TaskSelect renders the task name in its input. After the project
     // change, the previous task selection is cleared so the input is
     // empty.
-    const taskInput = screen.getByLabelText(/task/i) as HTMLInputElement;
     expect(taskInput.value).toBe('');
   });
 
   it('prefills description from selected task when description is empty', async () => {
     renderModal(buildCompletedEntry({ description: '' }));
 
-    await waitFor(() =>
-      expect(tasksGetAllMock).toHaveBeenCalledWith({ project_id: 1, page_size: 100 })
-    );
-
     const taskInput = screen.getByLabelText(/task/i) as HTMLInputElement;
     fireEvent.focus(taskInput);
+    await waitFor(() =>
+      expect(tasksGetAllMock).toHaveBeenCalledWith(
+        expect.objectContaining({ project_id: 1, page_size: 20 })
+      )
+    );
+
     const option = await screen.findByTestId('task-select-option-11');
     fireEvent.mouseDown(option);
 
@@ -293,12 +303,14 @@ describe('EditEntryModal', () => {
   it('does not overwrite typed description when selecting a task', async () => {
     renderModal(buildCompletedEntry({ description: 'User typed text' }));
 
-    await waitFor(() =>
-      expect(tasksGetAllMock).toHaveBeenCalledWith({ project_id: 1, page_size: 100 })
-    );
-
     const taskInput = screen.getByLabelText(/task/i) as HTMLInputElement;
     fireEvent.focus(taskInput);
+    await waitFor(() =>
+      expect(tasksGetAllMock).toHaveBeenCalledWith(
+        expect.objectContaining({ project_id: 1, page_size: 20 })
+      )
+    );
+
     const option = await screen.findByTestId('task-select-option-11');
     fireEvent.mouseDown(option);
 
