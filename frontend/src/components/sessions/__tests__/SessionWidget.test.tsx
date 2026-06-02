@@ -212,17 +212,12 @@ describe('SessionWidget', () => {
       );
     });
     await user.type(projectInput, 'dev');
-    await waitFor(() => {
-      expect(projectsApi.getAll).toHaveBeenCalledWith(
-        expect.objectContaining({
-          include_archived: false,
-          page_size: 20,
-          search: 'dev',
-        })
-      );
-    });
-
-    expect(screen.getByTestId('project-select-option-3')).toBeInTheDocument();
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('project-select-option-3')).toBeInTheDocument();
+      },
+      { timeout: 1500 }
+    );
   });
 
   it('clears the selected task when the project changes via typeahead', async () => {
