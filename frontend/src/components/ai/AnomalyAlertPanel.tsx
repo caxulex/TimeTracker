@@ -6,8 +6,14 @@
  */
 
 import React, { useState } from 'react';
-import { useAllAnomalies, useAnomalyScan, useDismissAnomaly } from '../../hooks/useAIServices';
-import { AnomalyDetails } from '../../api/aiServices';
+import {
+  useAllAnomalies,
+  useAnomalyScan,
+  useDismissAnomaly,
+  useDismissedAnomalies,
+  useRestoreAnomalyDismissal,
+} from '../../hooks/useAIServices';
+import { AnomalyDetails, DismissedAnomaly } from '../../api/aiServices';
 
 interface AnomalyAlertPanelProps {
   // Period in days to analyze
@@ -33,13 +39,26 @@ export const AnomalyAlertPanel: React.FC<AnomalyAlertPanelProps> = ({
   const [dismissReason, setDismissReason] = useState('');
   const [showDismissModal, setShowDismissModal] = useState<AnomalyDetails | null>(null);
   const [dismissError, setDismissError] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'active' | 'dismissed'>('active');
 
   const { data, isLoading, error, refetch } = useAllAnomalies(periodDays, teamId, {
     enabled: isAdmin,
   });
 
+  const {
+    data: dismissedData,
+    isLoading: isDismissedLoading,
+    error: dismissedError,
+    refetch: refetchDismissed,
+  } = useDismissedAnomalies(
+    { limit: maxItems, offset: 0 },
+    { enabled: isAdmin && activeTab === 'dismissed' }
+  );
+
   const { mutate: scanAnomalies, isPending: isScanning } = useAnomalyScan();
   const { mutate: dismissAnomaly, isPending: isDismissing } = useDismissAnomaly();
+  const { mutate: restoreAnomalyDismissal, isPending: isRestoring } = useRestoreAnomalyDismissal();
 
   const handleScan = () => {
     scanAnomalies({
@@ -67,6 +86,20 @@ export const AnomalyAlertPanel: React.FC<AnomalyAlertPanelProps> = ({
         // user-visible message so the dismiss button no longer looks
         // like a silent no-op.
         setDismissError('Failed to dismiss anomaly. Please try again.');
+      },
+    });
+  };
+
+  const handleRestore = (dismissal: DismissedAnomaly) => {
+    setRestoreError(null);
+    restoreAnomalyDismissal(dismissal.id, {
+      onSuccess: () => {
+        setRestoreError(null);
+        refetchDismissed();
+        refetch();
+      },
+      onError: () => {
+        setRestoreError('Failed to restore dismissal. Please try again.');
       },
     });
   };
@@ -116,6 +149,7 @@ export const AnomalyAlertPanel: React.FC<AnomalyAlertPanelProps> = ({
   const statistics = data?.statistics;
   const displayedAnomalies = anomalies.slice(0, maxItems);
   const hasMore = anomalies.length > maxItems;
+  const dismissedAnomalies = dismissedData || [];
 
   if (compact) {
     // Compact sidebar view
@@ -192,23 +226,52 @@ export const AnomalyAlertPanel: React.FC<AnomalyAlertPanelProps> = ({
             Unusual patterns in time tracking data (last {periodDays} days)
           </p>
         </div>
-        <button
-          onClick={handleScan}
-          disabled={isScanning}
-          className={`
-            px-4 py-2 rounded-lg text-sm font-medium
-            ${isScanning
-              ? 'bg-gray-100 text-gray-400 cursor-not-allowed dark:bg-gray-700'
-              : 'bg-blue-600 text-white hover:bg-blue-700'
-            }
-          `}
-        >
-          {isScanning ? 'Scanning...' : '🔄 Scan Now'}
-        </button>
+        {activeTab === 'active' && (
+          <button
+            onClick={handleScan}
+            disabled={isScanning}
+            className={`
+              px-4 py-2 rounded-lg text-sm font-medium
+              ${isScanning
+                ? 'bg-gray-100 text-gray-400 cursor-not-allowed dark:bg-gray-700'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+              }
+            `}
+          >
+            {isScanning ? 'Scanning...' : '🔄 Scan Now'}
+          </button>
+        )}
+      </div>
+
+      <div className="px-6 pt-4">
+        <div role="tablist" aria-label="Anomaly views" className="inline-flex rounded-lg bg-gray-100 p-1 dark:bg-gray-700">
+          <button
+            role="tab"
+            aria-selected={activeTab === 'active'}
+            onClick={() => setActiveTab('active')}
+            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === 'active'
+              ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-800 dark:text-white'
+              : 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white'
+            }`}
+          >
+            Active
+          </button>
+          <button
+            role="tab"
+            aria-selected={activeTab === 'dismissed'}
+            onClick={() => setActiveTab('dismissed')}
+            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === 'dismissed'
+              ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-800 dark:text-white'
+              : 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white'
+            }`}
+          >
+            Dismissed
+          </button>
+        </div>
       </div>
 
       {/* Statistics */}
-      {statistics && (
+      {activeTab === 'active' && statistics && (
         <div className="px-6 py-3 bg-gray-50 dark:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700 grid grid-cols-4 gap-4">
           <div className="text-center">
             <p className="text-2xl font-bold text-gray-900 dark:text-white">
@@ -239,11 +302,11 @@ export const AnomalyAlertPanel: React.FC<AnomalyAlertPanelProps> = ({
 
       {/* Content */}
       <div className="divide-y divide-gray-200 dark:divide-gray-700">
-        {isLoading ? (
+        {activeTab === 'active' && isLoading ? (
           <div className="flex justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
           </div>
-        ) : error ? (
+        ) : activeTab === 'active' && error ? (
           <div className="px-6 py-8 text-center">
             <p className="text-red-500">Failed to load anomaly data</p>
             <button
@@ -253,7 +316,7 @@ export const AnomalyAlertPanel: React.FC<AnomalyAlertPanelProps> = ({
               Retry
             </button>
           </div>
-        ) : anomalies.length === 0 ? (
+        ) : activeTab === 'active' && anomalies.length === 0 ? (
           <div className="px-6 py-12 text-center">
             <span className="text-4xl">✓</span>
             <p className="mt-2 text-gray-600 dark:text-gray-300 font-medium">
@@ -263,7 +326,7 @@ export const AnomalyAlertPanel: React.FC<AnomalyAlertPanelProps> = ({
               All time tracking patterns appear normal
             </p>
           </div>
-        ) : (
+        ) : activeTab === 'active' ? (
           displayedAnomalies.map((anomaly, index) => (
             <div
               key={`${anomaly.user_id}-${anomaly.type}-${index}`}
@@ -341,9 +404,82 @@ export const AnomalyAlertPanel: React.FC<AnomalyAlertPanelProps> = ({
               </div>
             </div>
           ))
+        ) : isDismissedLoading ? (
+          <div className="flex justify-center py-12">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+          </div>
+        ) : dismissedError ? (
+          <div className="px-6 py-8 text-center">
+            <p className="text-red-500">Failed to load dismissed anomalies</p>
+            <button
+              onClick={() => refetchDismissed()}
+              className="mt-2 text-sm text-blue-500 hover:underline"
+            >
+              Retry
+            </button>
+          </div>
+        ) : dismissedAnomalies.length === 0 ? (
+          <div className="px-6 py-12 text-center">
+            <p className="text-gray-600 dark:text-gray-300 font-medium">
+              No anomalies have been dismissed for your company.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3 px-6 py-4">
+            {restoreError && (
+              <div role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-200">
+                {restoreError}
+              </div>
+            )}
+            {dismissedAnomalies.map((dismissal) => (
+              <div
+                key={dismissal.id}
+                className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-700/40"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="truncate font-medium text-gray-900 dark:text-white">
+                        {dismissal.target_user_name}
+                      </h3>
+                      <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs uppercase tracking-wide text-gray-700 dark:bg-gray-600 dark:text-gray-200">
+                        {getTypeLabel(dismissal.anomaly_type)}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                      {dismissal.target_user_email}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Dismissed {new Date(dismissal.dismissed_at).toLocaleString()} by {dismissal.dismissed_by_name || 'unknown'}
+                    </p>
+                    {dismissal.reason && (
+                      <div className="group mt-2 max-w-3xl">
+                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          Reason
+                        </p>
+                        <p
+                          className="mt-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm text-gray-700 dark:text-gray-200 group-hover:whitespace-normal group-hover:overflow-visible"
+                          title={dismissal.reason}
+                        >
+                          {dismissal.reason}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => handleRestore(dismissal)}
+                    disabled={isRestoring}
+                    className="shrink-0 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    {isRestoring ? 'Restoring...' : 'Restore'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
 
-        {hasMore && (
+        {activeTab === 'active' && hasMore && (
           <div className="px-6 py-3 text-center bg-gray-50 dark:bg-gray-700/50">
             <p className="text-sm text-gray-500 dark:text-gray-400">
               Showing {maxItems} of {anomalies.length} anomalies

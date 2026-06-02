@@ -5,7 +5,7 @@ Audit logging service for tracking all system changes
 import json
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -58,7 +58,7 @@ class AuditLogger:
     @staticmethod
     async def log(
         db: AsyncSession,
-        action: AuditAction,
+        action: Union[AuditAction, str],
         resource_type: str,
         resource_id: Optional[int] = None,
         user_id: Optional[int] = None,
@@ -70,10 +70,12 @@ class AuditLogger:
         details: Optional[str] = None
     ):
         """Create an audit log entry"""
+        action_value = action.value if isinstance(action, AuditAction) else action
+
         log_entry = AuditLog(
             user_id=user_id,
             user_email=user_email,
-            action=action.value,
+            action=action_value,
             resource_type=resource_type,
             resource_id=resource_id,
             ip_address=ip_address,

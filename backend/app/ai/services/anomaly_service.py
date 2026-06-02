@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.ai.config import ai_settings
 from app.ai.models.feature_engineering import AnomalyFeatures
@@ -607,6 +608,118 @@ class AnomalyService:
         if not row:
             return set()
         return await self._get_dismissed_keys(row[0])
+
+    async def list_dismissed(
+        self,
+        company_id: int,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Return persisted anomaly dismissals for a company."""
+        from app.models import AnomalyDismissal, User
+
+        target_user = aliased(User)
+        dismissed_by_user = aliased(User)
+
+        stmt = (
+            select(
+                AnomalyDismissal.id,
+                AnomalyDismissal.target_user_id,
+                target_user.name.label("target_user_name"),
+                target_user.email.label("target_user_email"),
+                AnomalyDismissal.anomaly_type,
+                AnomalyDismissal.reason,
+                AnomalyDismissal.dismissed_at,
+                AnomalyDismissal.dismissed_by_user_id,
+                dismissed_by_user.name.label("dismissed_by_name"),
+                dismissed_by_user.email.label("dismissed_by_email"),
+            )
+            .join(target_user, AnomalyDismissal.target_user_id == target_user.id)
+            .outerjoin(
+                dismissed_by_user,
+                AnomalyDismissal.dismissed_by_user_id == dismissed_by_user.id,
+            )
+            .where(AnomalyDismissal.company_id == company_id)
+            .order_by(AnomalyDismissal.dismissed_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+
+        result = await self.db.execute(stmt)
+        dismissals = []
+        for row in result.all():
+            dismissals.append(
+                {
+                    "id": row.id,
+                    "target_user_id": row.target_user_id,
+                    "target_user_name": row.target_user_name,
+                    "target_user_email": row.target_user_email,
+                    "anomaly_type": row.anomaly_type,
+                    "reason": row.reason,
+                    "dismissed_at": row.dismissed_at,
+                    "dismissed_by_user_id": row.dismissed_by_user_id,
+                    "dismissed_by_name": row.dismissed_by_name,
+                    "dismissed_by_email": row.dismissed_by_email,
+                }
+            )
+        return dismissals
+
+    async def restore_dismissal(
+        self,
+        dismissal_id: int,
+        company_id: int,
+        acting_user_id: int,
+    ) -> bool:
+        """Delete an anomaly dismissal row scoped to the company."""
+        from app.models import AnomalyDismissal, User
+
+        try:
+            stmt = (
+                select(AnomalyDismissal)
+                .where(
+                    AnomalyDismissal.id == dismissal_id,
+                    AnomalyDismissal.company_id == company_id,
+                )
+                .with_for_update()
+            )
+            result = await self.db.execute(stmt)
+            dismissal = result.scalar_one_or_none()
+            if dismissal is None:
+                return False
+
+            details = {
+                "target_user_id": dismissal.target_user_id,
+                "anomaly_type": dismissal.anomaly_type,
+                "company_id": company_id,
+            }
+
+            await self.db.delete(dismissal)
+
+            acting_user = await self.db.get(User, acting_user_id)
+            await AuditLogger.log(
+                db=self.db,
+                action="anomaly_dismissal.restored",
+                resource_type="anomaly_dismissal",
+                resource_id=dismissal_id,
+                user_id=acting_user_id,
+                user_email=acting_user.email if acting_user else None,
+                details=(
+                    "Restored anomaly dismissal "
+                    f"target_user_id={details['target_user_id']} "
+                    f"anomaly_type={details['anomaly_type']} "
+                    f"company_id={company_id}"
+                ),
+            )
+
+            await self.db.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to restore anomaly dismissal {dismissal_id}: {e}")
+            try:
+                await self.db.rollback()
+            except Exception:  # noqa: BLE001
+                logger.exception("Rollback failed after restore_dismissal error")
+            return False
 
     @staticmethod
     def _filter_dismissed(

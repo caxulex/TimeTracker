@@ -92,6 +92,19 @@ export interface AnomalyDismissRequest {
   reason?: string;
 }
 
+export interface DismissedAnomaly {
+  id: number;
+  target_user_id: number;
+  target_user_name: string;
+  target_user_email: string;
+  anomaly_type: string;
+  reason: string | null;
+  dismissed_at: string;
+  dismissed_by_user_id: number | null;
+  dismissed_by_name: string | null;
+  dismissed_by_email: string | null;
+}
+
 export interface AIProviderStatus {
   gemini: boolean;
   openai: boolean;
@@ -183,6 +196,33 @@ export async function dismissAnomaly(
     request
   );
   return response.data;
+}
+
+/**
+ * List dismissed anomalies for the current company
+ */
+export async function listDismissedAnomalies(
+  params: { limit?: number; offset?: number } = {}
+): Promise<DismissedAnomaly[]> {
+  const response = await api.get<DismissedAnomaly[]>(
+    '/api/ai/anomalies/dismissed',
+    {
+      params: {
+        limit: params.limit ?? 50,
+        offset: params.offset ?? 0,
+      },
+    }
+  );
+  return response.data;
+}
+
+/**
+ * Restore a dismissed anomaly by deleting its dismissal row
+ */
+export async function restoreAnomalyDismissal(
+  dismissalId: number
+): Promise<void> {
+  await api.delete(`/api/ai/anomalies/dismissed/${dismissalId}`);
 }
 
 /**
@@ -520,6 +560,8 @@ export const aiApi = {
   getAnomalies,
   getAllAnomalies,
   dismissAnomaly,
+  listDismissedAnomalies,
+  restoreDismissal: restoreAnomalyDismissal,
   
   // Status
   getAIStatus,

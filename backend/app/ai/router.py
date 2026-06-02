@@ -14,7 +14,7 @@ API endpoints for AI features:
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -342,6 +342,67 @@ async def dismiss_anomaly(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to dismiss anomaly"
+        )
+
+
+@router.get(
+    "/anomalies/dismissed",
+    summary="List dismissed anomalies",
+    description="List persisted anomaly dismissals for the current admin's company."
+)
+async def list_dismissed_anomalies(
+    limit: int = 50,
+    offset: int = 0,
+    current_user: User = Depends(require_role(["admin", "super_admin", "manager"])),
+    db: AsyncSession = Depends(get_db)
+):
+    """List persisted anomaly dismissals for the current admin's company."""
+    try:
+        service = await get_anomaly_service(db)
+        return await service.list_dismissed(
+            company_id=current_user.company_id,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as e:
+        logger.error(f"Error listing dismissed anomalies: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list dismissed anomalies",
+        )
+
+
+@router.delete(
+    "/anomalies/dismissed/{dismissal_id}",
+    summary="Restore dismissed anomaly",
+    description="Restore a previously dismissed anomaly by deleting its dismissal record."
+)
+async def restore_anomaly_dismissal(
+    dismissal_id: int,
+    current_user: User = Depends(require_role(["admin", "super_admin", "manager"])),
+    db: AsyncSession = Depends(get_db)
+):
+    """Restore a previously-dismissed anomaly."""
+    try:
+        service = await get_anomaly_service(db)
+        success = await service.restore_dismissal(
+            dismissal_id=dismissal_id,
+            company_id=current_user.company_id,
+            acting_user_id=current_user.id,
+        )
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Dismissal not found",
+            )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error restoring anomaly dismissal: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to restore anomaly dismissal",
         )
 
 
