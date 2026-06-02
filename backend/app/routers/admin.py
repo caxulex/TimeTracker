@@ -17,6 +17,7 @@ from app.dependencies import (
     get_company_filter,
     get_company_timezone,
     require_admin,
+    require_role,
 )
 from app.models import Project, Task, TeamMember, TimeEntry, User
 from app.utils.timewindow import day_bounds, local_today, now_utc, range_bounds
@@ -26,7 +27,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 @router.get("/ws/metrics")
 async def get_websocket_metrics(
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_role(["admin", "super_admin", "manager"])),
 ):
     """Operational visibility for the WebSocket connection manager.
 

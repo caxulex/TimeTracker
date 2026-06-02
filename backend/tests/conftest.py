@@ -187,6 +187,44 @@ async def admin_user(db_session: AsyncSession) -> User:
 
 
 @pytest_asyncio.fixture(scope="function")
+async def role_admin_user(db_session: AsyncSession) -> User:
+    """Create a literal admin-role test user."""
+    import uuid
+
+    unique_email = f"role-admin-{uuid.uuid4().hex[:8]}@example.com"
+    user = User(
+        email=unique_email,
+        name="Role Admin User",
+        password_hash=AuthService.hash_password("adminpassword123"),
+        role="admin",
+        is_active=True,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    await db_session.refresh(user)
+    return user
+
+
+@pytest_asyncio.fixture(scope="function")
+async def manager_user(db_session: AsyncSession) -> User:
+    """Create a manager test user."""
+    import uuid
+
+    unique_email = f"manager-{uuid.uuid4().hex[:8]}@example.com"
+    user = User(
+        email=unique_email,
+        name="Manager User",
+        password_hash=AuthService.hash_password("managerpassword123"),
+        role="manager",
+        is_active=True,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    await db_session.refresh(user)
+    return user
+
+
+@pytest_asyncio.fixture(scope="function")
 async def auth_headers(test_user: User) -> dict:
     """Create authentication headers for test user."""
     token = AuthService.create_access_token({"sub": str(test_user.id), "email": test_user.email})
@@ -197,6 +235,20 @@ async def auth_headers(test_user: User) -> dict:
 async def admin_auth_headers(admin_user: User) -> dict:
     """Create authentication headers for admin user."""
     token = AuthService.create_access_token({"sub": str(admin_user.id), "email": admin_user.email})
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest_asyncio.fixture(scope="function")
+async def role_admin_auth_headers(role_admin_user: User) -> dict:
+    """Create authentication headers for literal admin-role user."""
+    token = AuthService.create_access_token({"sub": str(role_admin_user.id), "email": role_admin_user.email})
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest_asyncio.fixture(scope="function")
+async def manager_auth_headers(manager_user: User) -> dict:
+    """Create authentication headers for manager user."""
+    token = AuthService.create_access_token({"sub": str(manager_user.id), "email": manager_user.email})
     return {"Authorization": f"Bearer {token}"}
 
 @pytest_asyncio.fixture(scope="function")

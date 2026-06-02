@@ -211,6 +211,22 @@ class TestWebSocketMetricsEndpoint:
 
     @pytest.mark.asyncio
     @skip_without_db
+    async def test_metrics_endpoint_allows_manager(
+        self, client: AsyncClient, manager_auth_headers: dict
+    ):
+        response = await client.get("/api/admin/ws/metrics", headers=manager_auth_headers)
+        assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    @skip_without_db
+    async def test_metrics_endpoint_allows_admin(
+        self, client: AsyncClient, role_admin_auth_headers: dict
+    ):
+        response = await client.get("/api/admin/ws/metrics", headers=role_admin_auth_headers)
+        assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    @skip_without_db
     async def test_metrics_endpoint_rejects_non_admin(
         self, client: AsyncClient, auth_headers: dict
     ):
