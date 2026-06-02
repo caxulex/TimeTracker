@@ -201,21 +201,28 @@ describe('SessionWidget', () => {
 
     await user.click(screen.getByRole('button', { name: /clock in/i }));
 
-    await waitFor(() => {
-      expect(projectsApi.getAll).toHaveBeenCalledWith({
-        include_archived: false,
-        page_size: 100,
-      });
-    });
-
     const projectInput = await screen.findByLabelText(/project/i);
     await user.click(projectInput);
+    await waitFor(() => {
+      expect(projectsApi.getAll).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include_archived: false,
+          page_size: 20,
+        })
+      );
+    });
     await user.type(projectInput, 'dev');
+    await waitFor(() => {
+      expect(projectsApi.getAll).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include_archived: false,
+          page_size: 20,
+          search: 'dev',
+        })
+      );
+    });
 
     expect(screen.getByTestId('project-select-option-3')).toBeInTheDocument();
-    expect(screen.queryByTestId('project-select-option-1')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('project-select-option-2')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('project-select-option-4')).not.toBeInTheDocument();
   });
 
   it('clears the selected task when the project changes via typeahead', async () => {
@@ -229,12 +236,13 @@ describe('SessionWidget', () => {
     await user.type(projectInput, 'alpha');
     fireEvent.mouseDown(await screen.findByTestId('project-select-option-1'));
 
-    await waitFor(() => {
-      expect(tasksApi.getAll).toHaveBeenCalledWith({ project_id: 1, page_size: 100 });
-    });
-
     const taskInput = await screen.findByLabelText(/task/i);
     fireEvent.focus(taskInput);
+    await waitFor(() => {
+      expect(tasksApi.getAll).toHaveBeenCalledWith(
+        expect.objectContaining({ project_id: 1, page_size: 20 })
+      );
+    });
     fireEvent.mouseDown(await screen.findByTestId('task-select-option-11'));
     expect(taskInput).toHaveValue('Implement login');
 
@@ -243,8 +251,12 @@ describe('SessionWidget', () => {
     await user.type(projectInput, 'development');
     fireEvent.mouseDown(await screen.findByTestId('project-select-option-3'));
 
+    fireEvent.focus(taskInput);
+
     await waitFor(() => {
-      expect(tasksApi.getAll).toHaveBeenCalledWith({ project_id: 3, page_size: 100 });
+      expect(tasksApi.getAll).toHaveBeenCalledWith(
+        expect.objectContaining({ project_id: 3, page_size: 20 })
+      );
     });
 
     await waitFor(() => {

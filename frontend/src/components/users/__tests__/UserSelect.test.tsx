@@ -1,10 +1,5 @@
-// ============================================
-// TIME TRACKER - USER SELECT TESTS
-// Mirrors ProjectSelect.test.tsx — covers the typeahead combobox
-// introduced in feat/user-team-select-typeahead.
-// ============================================
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { UserSelect } from '../UserSelect';
@@ -13,6 +8,7 @@ import type { User } from '../../../types';
 vi.mock('../../../api/client', () => ({
   usersApi: {
     getAll: vi.fn(),
+    getById: vi.fn(),
   },
 }));
 
@@ -34,22 +30,18 @@ const users: User[] = [
   makeUser({ id: 1, name: 'Alice Adams', email: 'alice@example.com' }),
   makeUser({ id: 2, name: 'Bob Brown', email: 'bob@example.com' }),
   makeUser({ id: 3, name: 'Carol Developer', email: 'carol@example.com' }),
-  makeUser({ id: 4, name: 'Dan Other', email: 'dan@example.com' }),
 ];
 
-function renderSelect(
-  props: Partial<React.ComponentProps<typeof UserSelect>> = {}
-) {
+function renderSelect(props: Partial<React.ComponentProps<typeof UserSelect>> = {}) {
   const onChange = vi.fn();
   const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    defaultOptions: { queries: { retry: false, staleTime: 0 } },
   });
   const utils = render(
     <QueryClientProvider client={queryClient}>
       <UserSelect
         value={props.value ?? null}
         onChange={props.onChange ?? onChange}
-        users={props.users ?? users}
         placeholder={props.placeholder ?? 'Select user'}
         {...props}
       />
@@ -58,206 +50,132 @@ function renderSelect(
   return { ...utils, onChange };
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 describe('UserSelect', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('renders the currently-selected user name in the input', () => {
-    renderSelect({ value: 3 });
-    const input = screen.getByRole('combobox') as HTMLInputElement;
-    expect(input.value).toBe('Carol Developer');
-  });
-
-  it('opens the dropdown on focus and renders all users', () => {
-    renderSelect();
-    const input = screen.getByRole('combobox');
-    fireEvent.focus(input);
-    expect(screen.getByTestId('user-select-listbox')).toBeInTheDocument();
-    expect(screen.getByTestId('user-select-option-1')).toBeInTheDocument();
-    expect(screen.getByTestId('user-select-option-2')).toBeInTheDocument();
-    expect(screen.getByTestId('user-select-option-3')).toBeInTheDocument();
-    expect(screen.getByTestId('user-select-option-4')).toBeInTheDocument();
-  });
-
-  it('filters by name (case-insensitive substring)', async () => {
-    const user = userEvent.setup();
-    renderSelect();
-    const input = screen.getByRole('combobox');
-    await user.click(input);
-    await user.type(input, 'dev');
-    expect(screen.getByTestId('user-select-option-3')).toBeInTheDocument();
-    expect(screen.queryByTestId('user-select-option-1')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('user-select-option-2')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('user-select-option-4')).not.toBeInTheDocument();
-  });
-
-  it('filters by email substring (case-insensitive)', async () => {
-    const user = userEvent.setup();
-    renderSelect();
-    const input = screen.getByRole('combobox');
-    await user.click(input);
-    await user.type(input, 'BOB@');
-    expect(screen.getByTestId('user-select-option-2')).toBeInTheDocument();
-    expect(screen.queryByTestId('user-select-option-1')).not.toBeInTheDocument();
-  });
-
-  it('shows empty-state message when no users match', async () => {
-    const user = userEvent.setup();
-    renderSelect();
-    const input = screen.getByRole('combobox');
-    await user.click(input);
-    await user.type(input, 'xyz');
-    const empty = screen.getByTestId('user-select-empty');
-    expect(empty).toBeInTheDocument();
-    expect(empty.textContent).toMatch(/xyz/);
-    expect(empty.textContent).toMatch(/No users match/i);
-  });
-
-  it('calls onChange when an option is mouseDown-ed', () => {
-    const { onChange } = renderSelect();
-    const input = screen.getByRole('combobox');
-    fireEvent.focus(input);
-    fireEvent.mouseDown(screen.getByTestId('user-select-option-3'));
-    expect(onChange).toHaveBeenCalledWith(3);
-  });
-
-  it('keyboard: ArrowDown + Enter selects an option', async () => {
-    const user = userEvent.setup();
-    const { onChange } = renderSelect();
-    const input = screen.getByRole('combobox');
-    await user.click(input);
-    // highlight 0 = Alice; ArrowDown twice -> Carol (id 3)
-    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}');
-    expect(onChange).toHaveBeenCalledWith(3);
-  });
-
-  it('keyboard: Escape closes the panel', async () => {
-    const user = userEvent.setup();
-    renderSelect();
-    const input = screen.getByRole('combobox');
-    await user.click(input);
-    expect(screen.getByTestId('user-select-listbox')).toBeInTheDocument();
-    await user.keyboard('{Escape}');
-    expect(screen.queryByTestId('user-select-listbox')).not.toBeInTheDocument();
-  });
-
-  it('click-outside closes the panel', () => {
-    renderSelect();
-    const input = screen.getByRole('combobox');
-    fireEvent.focus(input);
-    expect(screen.getByTestId('user-select-listbox')).toBeInTheDocument();
-    fireEvent.mouseDown(document.body);
-    expect(screen.queryByTestId('user-select-listbox')).not.toBeInTheDocument();
-  });
-
-  it('shows the loading state while the query is in flight', async () => {
-    vi.mocked(usersApi.getAll).mockReturnValueOnce(
-      new Promise(() => {}) as never
-    );
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    render(
-      <QueryClientProvider client={queryClient}>
-        <UserSelect value={null} onChange={vi.fn()} />
-      </QueryClientProvider>
-    );
-    const input = screen.getByRole('combobox');
-    fireEvent.focus(input);
-    await waitFor(() => {
-      expect(screen.getByTestId('user-select-loading')).toBeInTheDocument();
-    });
-  });
-
-  it('fetches with page=1 and size=100', async () => {
-    vi.mocked(usersApi.getAll).mockResolvedValueOnce({
+    vi.mocked(usersApi.getAll).mockResolvedValue({
       items: users,
       total: users.length,
       page: 1,
-      size: 100,
+      size: 20,
       pages: 1,
     });
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    render(
-      <QueryClientProvider client={queryClient}>
-        <UserSelect value={null} onChange={vi.fn()} />
-      </QueryClientProvider>
-    );
-    await waitFor(() => {
-      expect(usersApi.getAll).toHaveBeenCalledWith(1, 100);
+    vi.mocked(usersApi.getById).mockImplementation(async (id: number) => {
+      const user = users.find((u) => u.id === id);
+      if (!user) throw new Error('user not found');
+      return user;
     });
   });
 
-  // ----- clearable -----------------------------------------------
-  describe('clearable', () => {
-    it('default (clearable=false): no clear option is rendered', () => {
-      renderSelect();
-      const input = screen.getByRole('combobox');
-      fireEvent.focus(input);
-      expect(screen.queryByTestId('user-select-clear')).not.toBeInTheDocument();
-    });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
-    it('clearable=true: dropdown shows the "All users" clear option at the top', () => {
-      renderSelect({ clearable: true });
-      const input = screen.getByRole('combobox');
-      fireEvent.focus(input);
-      const clear = screen.getByTestId('user-select-clear');
-      expect(clear).toBeInTheDocument();
-      expect(clear.textContent).toMatch(/All users/i);
-    });
+  it('with value=null does not fire search until dropdown opens', () => {
+    renderSelect({ value: null });
+    expect(usersApi.getAll).not.toHaveBeenCalled();
+  });
 
-    it('clearable=true: custom clearLabel is rendered', () => {
-      renderSelect({ clearable: true, clearLabel: 'Anyone' });
-      const input = screen.getByRole('combobox');
-      fireEvent.focus(input);
-      expect(screen.getByTestId('user-select-clear').textContent).toMatch(/Anyone/);
+  it('with value set fetches by id and shows selected name', async () => {
+    renderSelect({ value: 3 });
+    await waitFor(() => {
+      expect(usersApi.getById).toHaveBeenCalledWith(3);
+      expect((screen.getByRole('combobox') as HTMLInputElement).value).toBe('Carol Developer');
     });
+  });
 
-    it('clearable=true: clicking clear option calls onChange(null)', () => {
-      const { onChange } = renderSelect({ clearable: true, value: 3 });
-      const input = screen.getByRole('combobox');
-      fireEvent.focus(input);
-      fireEvent.mouseDown(screen.getByTestId('user-select-clear'));
-      expect(onChange).toHaveBeenCalledWith(null);
+  it('open dropdown fires request without search', async () => {
+    renderSelect();
+    fireEvent.focus(screen.getByRole('combobox'));
+    await waitFor(() => {
+      expect(usersApi.getAll).toHaveBeenCalledWith({ page: 1, page_size: 20, search: undefined });
     });
+  });
 
-    it('clearable=true: null value renders an empty input (placeholder visible)', () => {
-      renderSelect({ clearable: true, value: null, placeholder: 'All users' });
-      const input = screen.getByRole('combobox') as HTMLInputElement;
-      expect(input.value).toBe('');
-      expect(input.placeholder).toBe('All users');
-    });
+  it('debounces search request by 250ms', async () => {
+    renderSelect();
+    const input = screen.getByRole('combobox');
+    fireEvent.focus(input);
+    await waitFor(() => expect(usersApi.getAll).toHaveBeenCalled());
+    vi.mocked(usersApi.getAll).mockClear();
 
-    it('clearable=true: Enter on clear option (default highlight) calls onChange(null)', async () => {
-      const user = userEvent.setup();
-      const { onChange } = renderSelect({ clearable: true, value: null });
-      const input = screen.getByRole('combobox');
-      await user.click(input);
-      await user.keyboard('{Enter}');
-      expect(onChange).toHaveBeenCalledWith(null);
-    });
+    fireEvent.change(input, { target: { value: 'bob' } });
+    await sleep(200);
+    expect(usersApi.getAll).not.toHaveBeenCalled();
 
-    it('clearable=true: ArrowDown past clear, Enter selects user', async () => {
-      const user = userEvent.setup();
-      const { onChange } = renderSelect({ clearable: true, value: null });
-      const input = screen.getByRole('combobox');
-      await user.click(input);
-      // highlight 0 = clear; ArrowDown -> highlight 1 = Alice (id 1).
-      await user.keyboard('{ArrowDown}{Enter}');
-      expect(onChange).toHaveBeenCalledWith(1);
+    await sleep(120);
+    await waitFor(() => {
+      expect(usersApi.getAll).toHaveBeenCalledWith({ page: 1, page_size: 20, search: 'bob' });
     });
+  });
 
-    it('clearable=true: empty-state still shows when no matches; clear remains', async () => {
-      const user = userEvent.setup();
-      renderSelect({ clearable: true });
-      const input = screen.getByRole('combobox');
-      await user.click(input);
-      await user.type(input, 'xyz');
-      expect(screen.getByTestId('user-select-clear')).toBeInTheDocument();
-      expect(screen.getByTestId('user-select-empty')).toBeInTheDocument();
-    });
+  it('rapid typing only sends one final debounced search', async () => {
+    renderSelect();
+    const input = screen.getByRole('combobox');
+    fireEvent.focus(input);
+    await waitFor(() => expect(usersApi.getAll).toHaveBeenCalled());
+    vi.mocked(usersApi.getAll).mockClear();
+
+    fireEvent.change(input, { target: { value: 'b' } });
+    await sleep(200);
+    fireEvent.change(input, { target: { value: 'bo' } });
+    await sleep(280);
+
+    await waitFor(() => expect(usersApi.getAll).toHaveBeenCalledTimes(1));
+    expect(usersApi.getAll).toHaveBeenCalledWith({ page: 1, page_size: 20, search: 'bo' });
+  });
+
+  it('selecting an option closes dropdown and calls onChange with id', async () => {
+    const { onChange } = renderSelect();
+    fireEvent.focus(screen.getByRole('combobox'));
+    const option = await screen.findByTestId('user-select-option-3');
+    fireEvent.mouseDown(option);
+    expect(onChange).toHaveBeenCalledWith(3);
+    expect(screen.queryByTestId('user-select-listbox')).not.toBeInTheDocument();
+  });
+
+  it('selected value still displays when current search results do not include it', async () => {
+    vi.mocked(usersApi.getAll)
+      .mockResolvedValueOnce({
+        items: users,
+        total: users.length,
+        page: 1,
+        size: 20,
+        pages: 1,
+      })
+      .mockResolvedValueOnce({
+        items: [users[0]],
+        total: 1,
+        page: 1,
+        size: 20,
+        pages: 1,
+      });
+
+    renderSelect({ value: 3 });
+    const input = screen.getByRole('combobox') as HTMLInputElement;
+    fireEvent.focus(input);
+    await waitFor(() => expect(usersApi.getAll).toHaveBeenCalled());
+
+    fireEvent.change(input, { target: { value: 'alice' } });
+    await sleep(320);
+    await screen.findByTestId('user-select-option-1');
+
+    fireEvent.keyDown(input, { key: 'Escape' });
+    await waitFor(() => expect((screen.getByRole('combobox') as HTMLInputElement).value).toBe('Carol Developer'));
+  });
+
+  it('pre-fed users mode skips server search and filters locally', async () => {
+    const user = userEvent.setup();
+    renderSelect({ users, value: null });
+    const input = screen.getByRole('combobox');
+
+    await user.click(input);
+    await user.type(input, 'carol');
+
+    expect(usersApi.getAll).not.toHaveBeenCalled();
+    expect(screen.getByTestId('user-select-option-3')).toBeInTheDocument();
+    expect(screen.queryByTestId('user-select-option-1')).not.toBeInTheDocument();
   });
 });

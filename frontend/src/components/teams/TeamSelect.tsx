@@ -29,6 +29,7 @@ import {
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { teamsApi } from '../../api/client';
+import { useDebounce } from '../../hooks/useDebounce';
 import { cn } from '../../utils/helpers';
 import type { Team } from '../../types';
 
@@ -88,10 +89,30 @@ export function TeamSelect({
   const inputId = id ?? `team-select-${reactId}`;
   const listboxId = `${inputId}-listbox`;
 
-  const { data: teamsData, isLoading } = useQuery({
-    queryKey: TEAMS_QUERY_KEY,
-    queryFn: () => teamsApi.getAll(1, 100),
-    enabled: !teamsProp,
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [highlight, setHighlight] = useState<number>(-1);
+
+  const debouncedSearch = useDebounce(query, 250);
+  const search = debouncedSearch.trim() || undefined;
+
+  const { data: teamsData, isFetching: isFetchingTeams } = useQuery({
+    queryKey: ['teams', 'search', search ?? ''],
+    queryFn: () =>
+      teamsApi.getAll({
+        page: 1,
+        page_size: 20,
+        search,
+      }),
+    enabled: open && !teamsProp,
+    staleTime: 30_000,
+  });
+
+  const { data: selectedTeamData } = useQuery({
+    queryKey: ['teams', value],
+    queryFn: () => teamsApi.getById(value as number),
+    enabled: value !== null && value !== undefined,
+    staleTime: 60_000,
   });
 
   const teams: TeamSelectOption[] = useMemo(
@@ -99,25 +120,26 @@ export function TeamSelect({
     [teamsProp, teamsData]
   );
 
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [highlight, setHighlight] = useState<number>(-1);
-
   const wrapperRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const selected = useMemo(
-    () => teams.find((t) => t.id === value) ?? null,
-    [teams, value]
-  );
+  const selected = useMemo(() => {
+    const fromList = teams.find((t) => t.id === value) ?? null;
+    if (fromList) return fromList;
+    if (selectedTeamData && selectedTeamData.id === value) {
+      return selectedTeamData;
+    }
+    return null;
+  }, [teams, value, selectedTeamData]);
 
   const displayValue = open ? query : selected?.name ?? '';
 
   const filtered = useMemo(() => {
+    if (!teamsProp) return teams;
     const q = query.trim().toLowerCase();
     if (!q) return teams;
     return teams.filter((t) => t.name.toLowerCase().includes(q));
-  }, [teams, query]);
+  }, [teams, teamsProp, query]);
 
   const clearOffset = clearable ? 1 : 0;
   const totalOptions = clearOffset + filtered.length;
@@ -223,7 +245,7 @@ export function TeamSelect({
     }
   };
 
-  const showLoading = isLoading && teams.length === 0 && !teamsProp;
+  const showLoading = isFetchingTeams && teams.length === 0 && !teamsProp;
 
   return (
     <div
@@ -307,7 +329,9 @@ export function TeamSelect({
                   className="px-3 py-2 text-gray-500"
                   data-testid="team-select-empty"
                 >
-                  No teams match &lsquo;{query.trim()}&rsquo;
+                  {query.trim()
+                    ? `No teams match '${query.trim()}'`
+                    : 'No teams found'}
                 </li>
               ) : (
                 filtered.map((team, idx) => {

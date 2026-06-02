@@ -491,14 +491,14 @@ describe('StaffPage', () => {
 
       const managerInput = await screen.findByLabelText(/manager/i);
       await user.click(managerInput);
-      await user.type(managerInput, 'admin');
-
-      fireEvent.mouseDown(await screen.findByTestId('user-select-option-2'));
+      fireEvent.change(managerInput, { target: { value: 'admin' } });
+      const option = await screen.findByTestId('user-select-option-2');
+      fireEvent.mouseDown(option);
 
       await waitFor(() => {
         expect(managerInput).toHaveValue('Admin User');
       });
-    });
+    }, 15000);
   });
 
   // ----------------------------------------

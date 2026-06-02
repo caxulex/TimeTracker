@@ -36,6 +36,7 @@ import {
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { projectsApi } from '../../api/client';
+import { useDebounce } from '../../hooks/useDebounce';
 import { cn } from '../../utils/helpers';
 import type { Project } from '../../types';
 
@@ -130,15 +131,31 @@ export function ProjectSelect({
   const inputId = id ?? `project-select-${reactId}`;
   const listboxId = `${inputId}-listbox`;
 
-  const { data: projectsData, isLoading } = useQuery({
-    queryKey: ACTIVE_PROJECTS_QUERY_KEY,
+  // ------------ Open/close + query state ------------
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [highlight, setHighlight] = useState<number>(-1);
+
+  const debouncedSearch = useDebounce(query, 250);
+  const search = debouncedSearch.trim() || undefined;
+
+  const { data: projectsData, isFetching: isFetchingProjects } = useQuery({
+    queryKey: ['projects', 'search', search ?? '', { include_archived: false }],
     queryFn: () =>
-      projectsApi.getAll({ include_archived: false, page_size: 100 }),
-    // When the caller passed `projects` directly, we still mount the
-    // query (so subsequent uses without the prop hit a warm cache)
-    // but we don't need its result. Leaving it enabled is also fine
-    // because React Query dedupes by key.
-    enabled: !projectsProp,
+      projectsApi.getAll({
+        include_archived: false,
+        page_size: 20,
+        search,
+      }),
+    enabled: open && !projectsProp,
+    staleTime: 30_000,
+  });
+
+  const { data: selectedProjectData } = useQuery({
+    queryKey: ['projects', value],
+    queryFn: () => projectsApi.getById(value as number),
+    enabled: value !== null && value !== undefined,
+    staleTime: 60_000,
   });
 
   const projects: Project[] = useMemo(
@@ -146,36 +163,36 @@ export function ProjectSelect({
     [projectsProp, projectsData]
   );
 
-  // ------------ Open/close + query state ------------
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [highlight, setHighlight] = useState<number>(-1);
-
   const wrapperRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const selected = useMemo(
-    () => projects.find((p) => p.id === value) ?? null,
-    [projects, value]
-  );
+  const selected = useMemo(() => {
+    const fromList = projects.find((p) => p.id === value) ?? null;
+    if (fromList) return fromList;
+    if (selectedProjectData && selectedProjectData.id === value) {
+      return selectedProjectData;
+    }
+    return null;
+  }, [projects, value, selectedProjectData]);
 
   // The text shown in the input. When the panel is closed we show the
   // selected project's name; while the panel is open the user is
   // free-typing a search query.
   const displayValue = open ? query : selected?.name ?? '';
 
-  const filtered = useMemo(() => {
+  const options = useMemo(() => {
+    if (!projectsProp) return projects;
     const q = query.trim().toLowerCase();
     if (!q) return projects;
     return projects.filter((p) => p.name.toLowerCase().includes(q));
-  }, [projects, query]);
+  }, [projects, projectsProp, query]);
 
   // When `clearable` is true the dropdown carries an extra synthetic
   // option at index 0 (the "All projects" / clear affordance). All
   // keyboard-navigation math has to account for this offset so
   // arrows + Enter address the right entry.
   const clearOffset = clearable ? 1 : 0;
-  const totalOptions = clearOffset + filtered.length;
+  const totalOptions = clearOffset + options.length;
 
   // Keep the highlight inside the option range. When the option list
   // shrinks past the current highlight, clamp to the last available
@@ -194,13 +211,13 @@ export function ProjectSelect({
       // the clear option (when present), else the first project, so
       // Enter immediately commits something sensible.
       if (selected) {
-        const idx = filtered.findIndex((p) => p.id === selected.id);
+        const idx = options.findIndex((p) => p.id === selected.id);
         setHighlight(idx >= 0 ? idx + clearOffset : 0);
       } else {
         setHighlight(0);
       }
     }
-  }, [open, totalOptions, filtered, highlight, selected, clearOffset]);
+  }, [open, totalOptions, options, highlight, selected, clearOffset]);
 
   const openPanel = useCallback(() => {
     if (disabled) return;
@@ -237,9 +254,9 @@ export function ProjectSelect({
       commitClear();
       return;
     }
-    const project = filtered[highlight - clearOffset];
+    const project = options[highlight - clearOffset];
     if (project) commitSelection(project);
-  }, [highlight, clearable, clearOffset, filtered, commitClear, commitSelection]);
+  }, [highlight, clearable, clearOffset, options, commitClear, commitSelection]);
 
   // ------------ Click-outside ------------
   useEffect(() => {
@@ -291,7 +308,7 @@ export function ProjectSelect({
 
   // ------------ Render ------------
   const hasSelected = !!selected && !open;
-  const showLoading = isLoading && projects.length === 0;
+  const showLoading = !projectsProp && isFetchingProjects && options.length === 0;
 
   return (
     <div
@@ -389,7 +406,7 @@ export function ProjectSelect({
                   <span className="truncate">{clearLabel}</span>
                 </li>
               )}
-              {filtered.length === 0 ? (
+              {options.length === 0 ? (
                 <li
                   role="option"
                   aria-selected="false"
@@ -397,10 +414,12 @@ export function ProjectSelect({
                   className="px-3 py-2 text-gray-500"
                   data-testid="project-select-empty"
                 >
-                  No projects match &lsquo;{query.trim()}&rsquo;
+                  {query.trim()
+                    ? `No projects match '${query.trim()}'`
+                    : 'No projects found'}
                 </li>
               ) : (
-                filtered.map((project, idx) => {
+                options.map((project, idx) => {
                   const optionIdx = idx + clearOffset;
                   const isHighlighted = optionIdx === highlight;
                   const isSelected = selected?.id === project.id;

@@ -3,8 +3,8 @@
 // Covers the typeahead combobox introduced in
 // feat/task-select-typeahead.
 // ============================================
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { TaskSelect } from '../TaskSelect';
@@ -13,6 +13,7 @@ import type { Task } from '../../../types';
 vi.mock('../../../api/client', () => ({
   tasksApi: {
     getAll: vi.fn(),
+    getById: vi.fn(),
   },
 }));
 
@@ -64,6 +65,8 @@ function renderSelect(
   return { ...utils, onChange, queryClient };
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 describe('TaskSelect', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -71,9 +74,18 @@ describe('TaskSelect', () => {
       items: TASKS,
       total: TASKS.length,
       page: 1,
-      size: 100,
+      size: 20,
       pages: 1,
     });
+    vi.mocked(tasksApi.getById).mockImplementation(async (id: number) => {
+      const task = TASKS.find((t) => t.id === id);
+      if (!task) throw new Error('task not found');
+      return task;
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('renders disabled with "Select project first" when projectId is null', () => {
@@ -100,15 +112,16 @@ describe('TaskSelect', () => {
       const input = screen.getByRole('combobox') as HTMLInputElement;
       expect(input.value).toBe('Write docs');
     });
+    expect(tasksApi.getById).toHaveBeenCalledWith(12);
   });
 
   it('opens the dropdown on focus and lists all tasks', async () => {
     renderSelect();
-    await waitFor(() =>
-      expect(tasksApi.getAll).toHaveBeenCalledWith({ project_id: 1, page_size: 100 })
-    );
     const input = screen.getByRole('combobox');
     fireEvent.focus(input);
+    await waitFor(() =>
+      expect(tasksApi.getAll).toHaveBeenCalledWith({ project_id: 1, page_size: 20, search: undefined })
+    );
     await waitFor(() => {
       expect(screen.getByTestId('task-select-option-10')).toBeInTheDocument();
     });
@@ -117,27 +130,69 @@ describe('TaskSelect', () => {
     expect(screen.getByTestId('task-select-option-13')).toBeInTheDocument();
   });
 
-  it('filters options as the user types (case-insensitive substring)', async () => {
-    const user = userEvent.setup();
+  it('fires debounced server search 250ms after typing', async () => {
     renderSelect();
-    await waitFor(() =>
-      expect(tasksApi.getAll).toHaveBeenCalled()
-    );
     const input = screen.getByRole('combobox');
-    await user.click(input);
-    await user.type(input, 'desi');
-    expect(screen.getByTestId('task-select-option-10')).toBeInTheDocument();
-    expect(screen.queryByTestId('task-select-option-11')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('task-select-option-12')).not.toBeInTheDocument();
+    fireEvent.focus(input);
+    vi.mocked(tasksApi.getAll).mockClear();
+
+    fireEvent.change(input, { target: { value: 'desi' } });
+    await sleep(200);
+    expect(tasksApi.getAll).not.toHaveBeenCalled();
+
+    await sleep(120);
+    await waitFor(() => {
+      expect(tasksApi.getAll).toHaveBeenCalledWith({
+        project_id: 1,
+        page_size: 20,
+        search: 'desi',
+      });
+    });
+  });
+
+  it('rapid typing within debounce window only issues final search request', async () => {
+    renderSelect();
+    const input = screen.getByRole('combobox');
+    fireEvent.focus(input);
+    await waitFor(() => expect(tasksApi.getAll).toHaveBeenCalled());
+    vi.mocked(tasksApi.getAll).mockClear();
+
+    fireEvent.change(input, { target: { value: 'd' } });
+    await sleep(100);
+    fireEvent.change(input, { target: { value: 'de' } });
+    await sleep(100);
+    fireEvent.change(input, { target: { value: 'des' } });
+
+    await sleep(280);
+    await waitFor(() => expect(tasksApi.getAll).toHaveBeenCalledTimes(1));
+    expect(tasksApi.getAll).toHaveBeenCalledWith({
+      project_id: 1,
+      page_size: 20,
+      search: 'des',
+    });
   });
 
   it('shows empty-state message when no tasks match the query', async () => {
-    const user = userEvent.setup();
     renderSelect();
-    await waitFor(() => expect(tasksApi.getAll).toHaveBeenCalled());
+    vi.mocked(tasksApi.getAll)
+      .mockResolvedValueOnce({
+        items: TASKS,
+        total: TASKS.length,
+        page: 1,
+        size: 20,
+        pages: 1,
+      })
+      .mockResolvedValueOnce({
+        items: [],
+        total: 0,
+        page: 1,
+        size: 20,
+        pages: 0,
+      });
     const input = screen.getByRole('combobox');
-    await user.click(input);
-    await user.type(input, 'xyz');
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'xyz' } });
+    await sleep(320);
     const empty = await screen.findByTestId('task-select-empty');
     expect(empty.textContent).toMatch(/xyz/);
     expect(empty.textContent).toMatch(/No tasks match/i);
@@ -161,7 +216,6 @@ describe('TaskSelect', () => {
 
   it('calls onChange when an option is clicked', async () => {
     const { onChange } = renderSelect();
-    await waitFor(() => expect(tasksApi.getAll).toHaveBeenCalled());
     const input = screen.getByRole('combobox');
     fireEvent.focus(input);
     const option = await screen.findByTestId('task-select-option-12');
@@ -172,9 +226,9 @@ describe('TaskSelect', () => {
   it('keyboard: ArrowDown + Enter selects an option', async () => {
     const user = userEvent.setup();
     const { onChange } = renderSelect();
-    await waitFor(() => expect(tasksApi.getAll).toHaveBeenCalled());
     const input = screen.getByRole('combobox');
     await user.click(input);
+    await screen.findByTestId('task-select-option-10');
     // Highlight starts at index 0. ArrowDown twice -> index 2 (Write docs).
     await user.keyboard('{ArrowDown}{ArrowDown}{Enter}');
     expect(onChange).toHaveBeenCalledWith(12, expect.objectContaining({ id: 12, name: 'Write docs' }));
@@ -183,7 +237,6 @@ describe('TaskSelect', () => {
   it('keyboard: Escape closes the panel', async () => {
     const user = userEvent.setup();
     renderSelect();
-    await waitFor(() => expect(tasksApi.getAll).toHaveBeenCalled());
     const input = screen.getByRole('combobox');
     await user.click(input);
     await screen.findByTestId('task-select-listbox');
@@ -193,7 +246,6 @@ describe('TaskSelect', () => {
 
   it('click-outside closes the panel', async () => {
     renderSelect();
-    await waitFor(() => expect(tasksApi.getAll).toHaveBeenCalled());
     const input = screen.getByRole('combobox');
     fireEvent.focus(input);
     await screen.findByTestId('task-select-listbox');
@@ -215,10 +267,12 @@ describe('TaskSelect', () => {
 
   it('fetches with project_id and page_size=100', async () => {
     renderSelect({ projectId: 7 });
+    fireEvent.focus(screen.getByRole('combobox'));
     await waitFor(() => {
       expect(tasksApi.getAll).toHaveBeenCalledWith({
         project_id: 7,
-        page_size: 100,
+        page_size: 20,
+        search: undefined,
       });
     });
   });
@@ -231,8 +285,9 @@ describe('TaskSelect', () => {
         <TaskSelect projectId={1} value={null} onChange={onChange} />
       </QueryClientProvider>
     );
+    fireEvent.focus(screen.getByRole('combobox'));
     await waitFor(() =>
-      expect(tasksApi.getAll).toHaveBeenCalledWith({ project_id: 1, page_size: 100 })
+      expect(tasksApi.getAll).toHaveBeenCalledWith({ project_id: 1, page_size: 20, search: undefined })
     );
 
     rerender(
@@ -240,8 +295,9 @@ describe('TaskSelect', () => {
         <TaskSelect projectId={2} value={null} onChange={onChange} />
       </QueryClientProvider>
     );
+    fireEvent.focus(screen.getByRole('combobox'));
     await waitFor(() =>
-      expect(tasksApi.getAll).toHaveBeenCalledWith({ project_id: 2, page_size: 100 })
+      expect(tasksApi.getAll).toHaveBeenCalledWith({ project_id: 2, page_size: 20, search: undefined })
     );
   });
 
@@ -253,7 +309,6 @@ describe('TaskSelect', () => {
         <TaskSelect projectId={1} value={12} onChange={onChange} />
       </QueryClientProvider>
     );
-    await waitFor(() => expect(tasksApi.getAll).toHaveBeenCalled());
     // Initial mount must NOT fire onChange(null).
     expect(onChange).not.toHaveBeenCalled();
 
@@ -268,7 +323,6 @@ describe('TaskSelect', () => {
   it('does NOT fire onChange(null) on initial mount even when value is set', async () => {
     const onChange = vi.fn();
     renderSelect({ projectId: 1, value: 11, onChange });
-    await waitFor(() => expect(tasksApi.getAll).toHaveBeenCalled());
     // Give effects time to run.
     await new Promise((r) => setTimeout(r, 0));
     expect(onChange).not.toHaveBeenCalled();
