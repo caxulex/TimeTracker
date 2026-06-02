@@ -15,6 +15,8 @@ import {
   getAnomalies,
   getAllAnomalies,
   dismissAnomaly,
+  listDismissedAnomalies,
+  restoreAnomalyDismissal,
   getAIStatus,
   resetAIClient,
   SuggestionRequest,
@@ -25,11 +27,14 @@ import {
 
 // Query Keys
 export const aiServiceKeys = {
-  all: ['ai-services'] as const,
+  all: ['ai'] as const,
   suggestions: () => [...aiServiceKeys.all, 'suggestions'] as const,
   suggestionsWithParams: (params: SuggestionRequest) =>
     [...aiServiceKeys.suggestions(), params] as const,
   anomalies: () => [...aiServiceKeys.all, 'anomalies'] as const,
+  dismissedAnomalies: () => [...aiServiceKeys.anomalies(), 'dismissed'] as const,
+  dismissedAnomaliesWithParams: (limit: number, offset: number) =>
+    [...aiServiceKeys.dismissedAnomalies(), limit, offset] as const,
   myAnomalies: (periodDays: number) =>
     [...aiServiceKeys.anomalies(), 'my', periodDays] as const,
   allAnomalies: (periodDays: number, teamId?: number) =>
@@ -159,6 +164,43 @@ export function useDismissAnomaly() {
     mutationFn: (request: AnomalyDismissRequest) => dismissAnomaly(request),
     onSuccess: () => {
       // Invalidate anomaly queries
+      queryClient.invalidateQueries({
+        queryKey: aiServiceKeys.anomalies(),
+      });
+    },
+  });
+}
+
+/**
+ * Get dismissed anomalies for the current company
+ */
+export function useDismissedAnomalies(
+  params: { limit?: number; offset?: number } = {},
+  options?: { enabled?: boolean }
+) {
+  const limit = params.limit ?? 50;
+  const offset = params.offset ?? 0;
+
+  return useQuery({
+    queryKey: aiServiceKeys.dismissedAnomaliesWithParams(limit, offset),
+    queryFn: () => listDismissedAnomalies({ limit, offset }),
+    enabled: options?.enabled ?? true,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * Restore a dismissed anomaly
+ */
+export function useRestoreAnomalyDismissal() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (dismissalId: number) => restoreAnomalyDismissal(dismissalId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: aiServiceKeys.dismissedAnomalies(),
+      });
       queryClient.invalidateQueries({
         queryKey: aiServiceKeys.anomalies(),
       });

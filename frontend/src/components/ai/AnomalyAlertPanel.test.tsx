@@ -11,8 +11,25 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 // ----- Mock the AI hooks layer -----
 const refetchMock = vi.fn();
+const refetchDismissedMock = vi.fn();
 const scanMock = vi.fn();
 const dismissMutateMock = vi.fn();
+const restoreMutateMock = vi.fn();
+
+let dismissedItems = [
+  {
+    id: 7,
+    target_user_id: 42,
+    target_user_name: 'Target User',
+    target_user_email: 'target@example.com',
+    anomaly_type: 'extended_day',
+    reason: 'Approved overtime for delivery week',
+    dismissed_at: '2026-06-01T10:00:00.000Z',
+    dismissed_by_user_id: 9,
+    dismissed_by_name: 'Admin User',
+    dismissed_by_email: 'admin@example.com',
+  },
+];
 
 vi.mock('../../hooks/useAIServices', () => ({
   useAllAnomalies: () => ({
@@ -42,9 +59,19 @@ vi.mock('../../hooks/useAIServices', () => ({
     error: null,
     refetch: refetchMock,
   }),
+  useDismissedAnomalies: () => ({
+    data: dismissedItems,
+    isLoading: false,
+    error: null,
+    refetch: refetchDismissedMock,
+  }),
   useAnomalyScan: () => ({ mutate: scanMock, isPending: false }),
   useDismissAnomaly: () => ({
     mutate: dismissMutateMock,
+    isPending: false,
+  }),
+  useRestoreAnomalyDismissal: () => ({
+    mutate: restoreMutateMock,
     isPending: false,
   }),
 }));
@@ -54,8 +81,62 @@ import { AnomalyAlertPanel } from './AnomalyAlertPanel';
 describe('AnomalyAlertPanel - dismiss error path', () => {
   beforeEach(() => {
     refetchMock.mockReset();
+    refetchDismissedMock.mockReset();
     scanMock.mockReset();
     dismissMutateMock.mockReset();
+    restoreMutateMock.mockReset();
+    dismissedItems = [
+      {
+        id: 7,
+        target_user_id: 42,
+        target_user_name: 'Target User',
+        target_user_email: 'target@example.com',
+        anomaly_type: 'extended_day',
+        reason: 'Approved overtime for delivery week',
+        dismissed_at: '2026-06-01T10:00:00.000Z',
+        dismissed_by_user_id: 9,
+        dismissed_by_name: 'Admin User',
+        dismissed_by_email: 'admin@example.com',
+      },
+    ];
+  });
+
+  it('renders both tabs and switches to the dismissed list', async () => {
+    render(<AnomalyAlertPanel isAdmin periodDays={7} />);
+
+    expect(screen.getByRole('tab', { name: /active/i })).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.click(screen.getByRole('tab', { name: /dismissed/i }));
+
+    expect(await screen.findByText(/target user/i)).toBeInTheDocument();
+    expect(screen.getByText(/approved overtime for delivery week/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /restore/i })).toBeInTheDocument();
+  });
+
+  it('shows the dismissed empty state', async () => {
+    dismissedItems = [];
+
+    render(<AnomalyAlertPanel isAdmin periodDays={7} />);
+    fireEvent.click(screen.getByRole('tab', { name: /dismissed/i }));
+
+    expect(await screen.findByText(/no anomalies have been dismissed for your company/i)).toBeInTheDocument();
+  });
+
+  it('restores a dismissal and triggers cache refresh callbacks', async () => {
+    restoreMutateMock.mockImplementation((_dismissalId, options) => {
+      options?.onSuccess?.();
+    });
+
+    render(<AnomalyAlertPanel isAdmin periodDays={7} />);
+    fireEvent.click(screen.getByRole('tab', { name: /dismissed/i }));
+
+    fireEvent.click(screen.getByRole('button', { name: /restore/i }));
+
+    await waitFor(() => {
+      expect(restoreMutateMock).toHaveBeenCalledWith(7, expect.any(Object));
+    });
+    expect(refetchDismissedMock).toHaveBeenCalled();
+    expect(refetchMock).toHaveBeenCalled();
   });
 
   it('shows a user-facing error when the dismiss mutation fails', async () => {

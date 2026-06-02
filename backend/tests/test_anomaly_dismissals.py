@@ -120,6 +120,24 @@ async def _service(db_session: AsyncSession) -> AnomalyService:
     return AnomalyService(db_session, cache_manager=None)
 
 
+async def _create_dismissal(
+    service: AnomalyService,
+    target_user: User,
+    admin: User,
+    company: Company,
+    anomaly_type: str = "extended_day",
+    reason: str | None = None,
+) -> None:
+    await service.dismiss_anomaly(
+        user_id=target_user.id,
+        anomaly_type=anomaly_type,
+        dismissed_by=admin.id,
+        company_id=company.id,
+        dismissed_by_email=admin.email,
+        reason=reason,
+    )
+
+
 @pytest.mark.asyncio
 async def test_anomaly_dismissal_persists(
     db_session: AsyncSession,
@@ -250,6 +268,141 @@ async def test_anomaly_dismissal_per_company(
 
 
 @pytest.mark.asyncio
+async def test_anomaly_dismissal_list_returns_enriched_rows(
+    db_session: AsyncSession,
+    company_a: Company,
+    admin_a: User,
+    target_a: User,
+):
+    service = await _service(db_session)
+    await _create_dismissal(
+        service,
+        target_user=target_a,
+        admin=admin_a,
+        company=company_a,
+        reason="Approved overtime",
+    )
+
+    dismissed = await service.list_dismissed(company_a.id)
+    assert len(dismissed) == 1
+    row = dismissed[0]
+    assert row["target_user_id"] == target_a.id
+    assert row["target_user_name"] == target_a.name
+    assert row["target_user_email"] == target_a.email
+    assert row["anomaly_type"] == "extended_day"
+    assert row["reason"] == "Approved overtime"
+    assert row["dismissed_by_user_id"] == admin_a.id
+    assert row["dismissed_by_name"] == admin_a.name
+    assert row["dismissed_by_email"] == admin_a.email
+
+
+@pytest.mark.asyncio
+async def test_anomaly_dismissal_list_scoped_to_company(
+    db_session: AsyncSession,
+    company_a: Company,
+    company_b: Company,
+    admin_a: User,
+    admin_b: User,
+    target_a: User,
+    target_b: User,
+):
+    service = await _service(db_session)
+    await _create_dismissal(service, target_a, admin_a, company_a)
+    await _create_dismissal(service, target_b, admin_b, company_b)
+
+    dismissed_a = await service.list_dismissed(company_a.id)
+    dismissed_b = await service.list_dismissed(company_b.id)
+
+    assert len(dismissed_a) == 1
+    assert dismissed_a[0]["target_user_id"] == target_a.id
+    assert len(dismissed_b) == 1
+    assert dismissed_b[0]["target_user_id"] == target_b.id
+
+
+@pytest.mark.asyncio
+async def test_anomaly_restore_happy_path_logs_and_deletes(
+    db_session: AsyncSession,
+    company_a: Company,
+    admin_a: User,
+    target_a: User,
+):
+    service = await _service(db_session)
+    await _create_dismissal(service, target_a, admin_a, company_a, reason="Approved")
+
+    dismissal = (
+        await db_session.execute(select(AnomalyDismissal))
+    ).scalar_one()
+
+    ok = await service.restore_dismissal(
+        dismissal_id=dismissal.id,
+        company_id=company_a.id,
+        acting_user_id=admin_a.id,
+    )
+    assert ok is True
+
+    remaining = (
+        await db_session.execute(select(AnomalyDismissal))
+    ).scalars().all()
+    assert remaining == []
+
+    logs = (
+        await db_session.execute(
+            select(AuditLog).where(AuditLog.resource_type == "anomaly_dismissal")
+        )
+    ).scalars().all()
+    restore_log = next(entry for entry in logs if entry.action == "anomaly_dismissal.restored")
+    assert restore_log.resource_id == dismissal.id
+    assert restore_log.user_id == admin_a.id
+    assert restore_log.details and f"target_user_id={target_a.id}" in restore_log.details
+    assert "anomaly_type=extended_day" in restore_log.details
+
+
+@pytest.mark.asyncio
+async def test_anomaly_restore_wrong_company_returns_false(
+    db_session: AsyncSession,
+    company_a: Company,
+    company_b: Company,
+    admin_a: User,
+    admin_b: User,
+    target_b: User,
+):
+    service = await _service(db_session)
+    await _create_dismissal(service, target_b, admin_b, company_b)
+
+    dismissal = (
+        await db_session.execute(select(AnomalyDismissal))
+    ).scalar_one()
+
+    ok = await service.restore_dismissal(
+        dismissal_id=dismissal.id,
+        company_id=company_a.id,
+        acting_user_id=admin_a.id,
+    )
+    assert ok is False
+
+    rows = (
+        await db_session.execute(select(AnomalyDismissal))
+    ).scalars().all()
+    assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_anomaly_restore_nonexistent_id_returns_false(
+    db_session: AsyncSession,
+    company_a: Company,
+    admin_a: User,
+):
+    service = await _service(db_session)
+
+    ok = await service.restore_dismissal(
+        dismissal_id=999999,
+        company_id=company_a.id,
+        acting_user_id=admin_a.id,
+    )
+    assert ok is False
+
+
+@pytest.mark.asyncio
 async def test_anomaly_dismissal_audit_log(
     db_session: AsyncSession,
     company_a: Company,
@@ -358,3 +511,83 @@ async def test_anomaly_dismissal_endpoint_500_on_service_returning_false(
         ai_router.get_anomaly_service = original
 
     assert response.status_code == 500
+
+
+@pytest.mark.asyncio
+async def test_anomaly_list_dismissed_endpoint_role_gate(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    company_a: Company,
+):
+    regular = await _make_user(db_session, company_a, role="regular_user")
+    token = AuthService.create_access_token({"sub": str(regular.id), "email": regular.email})
+
+    response = await client.get(
+        "/api/ai/anomalies/dismissed",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_anomaly_restore_endpoint_role_gate(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    company_a: Company,
+):
+    regular = await _make_user(db_session, company_a, role="regular_user")
+    token = AuthService.create_access_token({"sub": str(regular.id), "email": regular.email})
+
+    response = await client.delete(
+        "/api/ai/anomalies/dismissed/123",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_anomaly_restore_endpoint_deletes_row_and_returns_204(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    company_a: Company,
+    admin_a: User,
+    target_a: User,
+):
+    service = await _service(db_session)
+    await _create_dismissal(service, target_a, admin_a, company_a)
+    dismissal = (await db_session.execute(select(AnomalyDismissal))).scalar_one()
+
+    token = AuthService.create_access_token({"sub": str(admin_a.id), "email": admin_a.email})
+    response = await client.delete(
+        f"/api/ai/anomalies/dismissed/{dismissal.id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 204
+    remaining = (
+        await db_session.execute(select(AnomalyDismissal))
+    ).scalars().all()
+    assert remaining == []
+
+
+@pytest.mark.asyncio
+async def test_anomaly_restore_endpoint_404_for_wrong_company(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    company_a: Company,
+    company_b: Company,
+    admin_a: User,
+    admin_b: User,
+    target_b: User,
+):
+    service = await _service(db_session)
+    await _create_dismissal(service, target_b, admin_b, company_b)
+    dismissal = (await db_session.execute(select(AnomalyDismissal))).scalar_one()
+
+    token = AuthService.create_access_token({"sub": str(admin_a.id), "email": admin_a.email})
+    response = await client.delete(
+        f"/api/ai/anomalies/dismissed/{dismissal.id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 404
