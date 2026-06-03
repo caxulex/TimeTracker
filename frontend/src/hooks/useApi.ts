@@ -73,6 +73,36 @@ export function useDeleteProject() {
   });
 }
 
+export function useAddTeamToProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, teamId }: { projectId: number; teamId: number }) =>
+      projectsApi.addTeam(projectId, teamId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
+export function useRemoveTeamFromProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, teamId }: { projectId: number; teamId: number }) =>
+      projectsApi.removeTeam(projectId, teamId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
+export function useProjectTeams(projectId: number) {
+  return useQuery({
+    queryKey: ['projectTeams', projectId],
+    queryFn: () => projectsApi.listTeams(projectId),
+    enabled: !!projectId,
+  });
+}
+
 // ============================================
 // TASK HOOKS
 // ============================================

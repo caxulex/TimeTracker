@@ -115,6 +115,14 @@ export interface Project {
   deadline?: string | null;
 }
 
+export interface ProjectTeamAssociation {
+  team_id: number;
+  team_name: string;
+  is_primary: boolean;
+  added_by_name?: string | null;
+  added_at: string;
+}
+
 export interface ProjectCreate {
   team_id: number;
   name: string;

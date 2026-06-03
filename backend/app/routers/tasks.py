@@ -19,6 +19,7 @@ from app.dependencies import (
 from app.models import BasecampTaskMapping, Project, Task, Team, TeamMember, User
 from app.routers.websocket import manager as ws_manager
 from app.schemas.auth import Message
+from app.services.project_team_service import build_project_visibility_filter
 
 router = APIRouter()
 
@@ -100,14 +101,15 @@ async def check_project_access(db: AsyncSession, project_id: int, user: User) ->
     if user.role in ["super_admin", "admin", "company_admin"]:
         return True
 
-    # Regular users need team membership (same rule as list_projects)
-    member_result = await db.execute(
-        select(TeamMember).where(
-            TeamMember.team_id == project.team_id,
-            TeamMember.user_id == user.id
+    # Visibility rule: regular users can access tasks on projects that are
+    # visible via either projects.team_id or a project_teams association.
+    visibility_result = await db.execute(
+        select(Project.id).where(
+            Project.id == project_id,
+            build_project_visibility_filter(user.id),
         )
     )
-    return member_result.scalar_one_or_none() is not None
+    return visibility_result.scalar_one_or_none() is not None
 
 
 @router.get("", response_model=PaginatedTasks)
@@ -135,9 +137,10 @@ async def list_tasks(
     count_query = select(func.count(Task.id))
 
     # Filter by accessible projects
-    if current_user.role != "super_admin":
-        user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
-        user_projects = select(Project.id).where(Project.team_id.in_(user_teams))
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
+        # Visibility rule: regular users can list tasks for projects they can
+        # see via primary or associated team membership.
+        user_projects = select(Project.id).where(build_project_visibility_filter(current_user.id))
         base_query = base_query.where(Task.project_id.in_(user_projects))
         count_query = count_query.where(Task.project_id.in_(user_projects))
 

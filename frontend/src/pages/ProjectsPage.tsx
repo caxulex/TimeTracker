@@ -8,6 +8,7 @@ import { Card, CardHeader, Button, Input, Modal, LoadingOverlay } from '../compo
 import { projectsApi, teamsApi } from '../api/client';
 import { formatDate, cn, generateRandomColor, isAdminUser } from '../utils/helpers';
 import { useAuth } from '../hooks/useAuth';
+import { useAddTeamToProject, useProjectTeams } from '../hooks/useApi';
 import { useNotifications } from '../hooks/useNotifications';
 import { useFeatureEnabled } from '../hooks/useAIFeatures';
 import { useDebounce } from '../hooks/useDebounce';
@@ -193,6 +194,32 @@ export function ProjectsPage() {
     },
   });
 
+  const addTeamToProjectMutation = useAddTeamToProject();
+
+  const handleAddProjectToTeam = (project: Project, team: Team) => {
+    addTeamToProjectMutation.mutate(
+      { projectId: project.id, teamId: team.id },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: ['projects'] });
+          queryClient.invalidateQueries({ queryKey: ['projectTeams', project.id] });
+          addNotification({
+            type: 'success',
+            title: 'Project Shared With Team',
+            message: `${project.name} is now available to ${team.name}`,
+          });
+        },
+        onError: () => {
+          addNotification({
+            type: 'error',
+            title: 'Failed to Share Project',
+            message: 'Please try again',
+          });
+        },
+      }
+    );
+  };
+
   const handleEdit = (project: Project) => {
     if (!isAdmin) return;
     setEditingProject(project);
@@ -320,8 +347,10 @@ export function ProjectsPage() {
                 key={project.id}
                 project={project}
                 isAdmin={isAdmin}
+                userTeams={teams}
                 showHealthButton={projectHealthEnabled}
                 onViewHealth={() => setSelectedProjectForHealth(project)}
+                onAddToTeam={(team) => handleAddProjectToTeam(project, team)}
                 onEdit={() => handleEdit(project)}
                 onArchive={() => setConfirmAction({ type: 'archive', project })}
                 onRestore={() => setConfirmAction({ type: 'restore', project })}
@@ -439,15 +468,38 @@ export function ProjectsPage() {
 interface ProjectCardProps {
   project: Project;
   isAdmin: boolean;
+  userTeams: Team[];
   showHealthButton?: boolean;
   onViewHealth?: () => void;
+  onAddToTeam: (team: Team) => void;
   onEdit: () => void;
   onArchive: () => void;
   onRestore: () => void;
   onDelete: () => void;
 }
 
-function ProjectCard({ project, isAdmin, showHealthButton, onViewHealth, onEdit, onArchive, onRestore, onDelete }: ProjectCardProps) {
+function ProjectCard({ project, isAdmin, userTeams, showHealthButton, onViewHealth, onAddToTeam, onEdit, onArchive, onRestore, onDelete }: ProjectCardProps) {
+  const { data: projectTeams = [] } = useProjectTeams(project.id);
+  const [selectedTeamId, setSelectedTeamId] = useState<number | ''>('');
+
+  const associatedTeamIds = new Set(projectTeams.map((row) => row.team_id));
+  const candidateTeams = userTeams.filter((team) => !associatedTeamIds.has(team.id));
+
+  React.useEffect(() => {
+    if (candidateTeams.length > 0) {
+      setSelectedTeamId((prev) => {
+        if (prev !== '' && candidateTeams.some((team) => team.id === prev)) {
+          return prev;
+        }
+        return candidateTeams[0].id;
+      });
+    } else {
+      setSelectedTeamId('');
+    }
+  }, [project.id, candidateTeams]);
+
+  const teamNames = projectTeams.map((row) => row.team_name).join(', ');
+
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -517,6 +569,56 @@ function ProjectCard({ project, isAdmin, showHealthButton, onViewHealth, onEdit,
             </button>
           </div>
         )}
+      </div>
+
+      <div className="mt-3 text-xs text-gray-500" title={teamNames || undefined}>
+        Teams: {teamNames || 'Unknown'}
+      </div>
+
+      <div className="mt-3 flex items-center gap-2">
+        {userTeams.length === 0 ? (
+          <Button size="sm" variant="secondary" disabled title="Join a team to add projects">
+            Add to my team
+          </Button>
+        ) : userTeams.length === 1 ? (
+          candidateTeams.length === 1 ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => onAddToTeam(candidateTeams[0])}
+              data-testid={`project-add-team-${project.id}`}
+            >
+              Add to {candidateTeams[0].name}
+            </Button>
+          ) : null
+        ) : candidateTeams.length > 0 ? (
+          <div className="flex items-center gap-2 w-full">
+            <select
+              aria-label={`Select team for ${project.name}`}
+              className="h-9 flex-1 rounded-lg border border-gray-300 bg-white px-2 text-sm"
+              value={selectedTeamId}
+              onChange={(e) => setSelectedTeamId(Number(e.target.value))}
+              data-testid={`project-team-select-${project.id}`}
+            >
+              {candidateTeams.map((team) => (
+                <option key={team.id} value={team.id}>
+                  {team.name}
+                </option>
+              ))}
+            </select>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                const selected = candidateTeams.find((team) => team.id === selectedTeamId);
+                if (selected) onAddToTeam(selected);
+              }}
+              data-testid={`project-add-team-${project.id}`}
+            >
+              Add to team...
+            </Button>
+          </div>
+        ) : null}
       </div>
       
       {/* Budget info - Admin only */}

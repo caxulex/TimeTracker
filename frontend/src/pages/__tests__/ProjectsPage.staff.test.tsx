@@ -31,15 +31,20 @@ vi.mock('../../components/ai/ProjectHealthCard', () => ({
 }));
 
 const projectsGetAll = vi.fn();
+const projectsListTeams = vi.fn();
+const projectsAddTeam = vi.fn();
 const teamsGetAll = vi.fn();
 
 vi.mock('../../api/client', () => ({
   projectsApi: {
     getAll: (...args: unknown[]) => projectsGetAll(...args),
+    listTeams: (...args: unknown[]) => projectsListTeams(...args),
+    addTeam: (...args: unknown[]) => projectsAddTeam(...args),
     create: vi.fn(),
     update: vi.fn(),
     restore: vi.fn(),
     delete: vi.fn(),
+    removeTeam: vi.fn(),
   },
   teamsApi: {
     getAll: (...args: unknown[]) => teamsGetAll(...args),
@@ -102,6 +107,16 @@ describe('ProjectsPage - staff project creation', () => {
       page_size: 20,
       pages: 1,
     });
+    projectsListTeams.mockResolvedValue([
+      {
+        team_id: 1,
+        team_name: 'My Team',
+        is_primary: true,
+        added_by_name: null,
+        added_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+    projectsAddTeam.mockResolvedValue({ message: 'ok' });
   });
 
   it('renders the "New Project" button for a non-admin team member', async () => {
@@ -183,5 +198,55 @@ describe('ProjectsPage - staff project creation', () => {
     expect(await screen.findByText(/budget settings/i)).toBeInTheDocument();
     expect(screen.getByText(/budget \(usd\)/i)).toBeInTheDocument();
     expect(screen.getByText(/^deadline$/i)).toBeInTheDocument();
+  });
+
+  it('shows add-to-team button when user has one team not yet associated', async () => {
+    projectsListTeams.mockResolvedValueOnce([
+      {
+        team_id: 99,
+        team_name: 'Engineering',
+        is_primary: true,
+        added_by_name: null,
+        added_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+    teamsGetAll.mockResolvedValueOnce({
+      items: [{ id: 1, name: 'My Team' }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    });
+
+    setUser('regular_user');
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: /add to my team/i })).toBeInTheDocument();
+  });
+
+  it('hides add-to-team button when user single team is already associated', async () => {
+    setUser('regular_user');
+    renderPage();
+    await screen.findByText('Existing Project');
+    expect(screen.queryByRole('button', { name: /add to my team/i })).not.toBeInTheDocument();
+  });
+
+  it('renders team dropdown for users with multiple teams', async () => {
+    teamsGetAll.mockResolvedValueOnce({
+      items: [
+        { id: 1, name: 'My Team' },
+        { id: 2, name: 'Admin Team' },
+      ],
+      total: 2,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    });
+
+    setUser('regular_user');
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: /add to team/i })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: /select team for existing project/i })).toBeInTheDocument();
   });
 });
