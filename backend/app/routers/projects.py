@@ -172,7 +172,7 @@ async def list_projects(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """List projects (user sees projects from their teams within their company)"""
+    """List projects scoped to the caller's company."""
     base_query = select(Project).join(Team, Project.team_id == Team.id)
     count_query = select(func.count(Project.id)).join(Team, Project.team_id == Team.id)
 
@@ -181,13 +181,10 @@ async def list_projects(
     base_query = apply_company_filter(base_query, Team.company_id, company_id)
     count_query = apply_company_filter(count_query, Team.company_id, company_id)
 
-    # Filter by accessible teams for non-admin users
-    if current_user.role not in ["super_admin", "admin", "company_admin"]:
-        # Visibility rule: list projects visible via either the primary
-        # team or a project_teams association.
-        access_filter = build_project_visibility_filter(current_user.id)
-        base_query = base_query.where(access_filter)
-        count_query = count_query.where(access_filter)
+    # Non-admin users see all projects in their company so they
+    # can discover and self-add projects via the "Add to my team"
+    # action. Operational access (time entries, tasks, reports)
+    # remains gated by team association.
 
     if team_id:
         # Team filter semantics: include projects owned by the team and
