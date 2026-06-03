@@ -3,18 +3,21 @@
 // ============================================
 import React, { useState } from 'react';
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { Card, CardHeader, Button, Input, Modal, LoadingOverlay } from '../components/common';
 import { projectsApi, teamsApi } from '../api/client';
 import { formatDate, cn, generateRandomColor, isAdminUser } from '../utils/helpers';
 import { useAuth } from '../hooks/useAuth';
 import { useNotifications } from '../hooks/useNotifications';
 import { useFeatureEnabled } from '../hooks/useAIFeatures';
+import { useDebounce } from '../hooks/useDebounce';
 import ProjectHealthCard from '../components/ai/ProjectHealthCard';
 import { TeamSelect } from '../components/teams/TeamSelect';
 import type { Project, ProjectCreate, Team } from '../types';
 
 export function ProjectsPage() {
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const { addNotification } = useNotifications();
   const isAdmin = isAdminUser(user);
@@ -24,7 +27,24 @@ export function ProjectsPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') || '');
+  const debouncedSearch = useDebounce(searchQuery, 250);
   const [confirmAction, setConfirmAction] = useState<{ type: 'archive' | 'restore' | 'delete'; project: Project } | null>(null);
+  const activeSearchQuery = debouncedSearch.trim();
+  const isSearchActive = activeSearchQuery.length > 0;
+
+  React.useEffect(() => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      const normalized = searchQuery.trim();
+      if (normalized) {
+        next.set('q', normalized);
+      } else {
+        next.delete('q');
+      }
+      return next;
+    }, { replace: true });
+  }, [searchQuery, setSearchParams]);
 
   // Fetch projects — paginated via Load More.
   //
@@ -49,13 +69,14 @@ export function ProjectsPage() {
     hasNextPage,
     isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ['projects', 'all', 'paginated'],
+    queryKey: ['projects', 'all', 'paginated', debouncedSearch || ''],
     initialPageParam: 1,
     queryFn: ({ pageParam }) =>
       projectsApi.getAll({
         include_archived: true,
         page: pageParam as number,
         page_size: PROJECTS_PAGE_SIZE,
+        search: activeSearchQuery || undefined,
       }),
     getNextPageParam: (lastPage, allPages) => {
       const loaded = allPages.reduce(
@@ -222,20 +243,61 @@ export function ProjectsPage() {
         </div>
       </div>
 
+      <div className="w-full sm:max-w-md">
+        <div className="relative">
+          <Input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search projects by name"
+            aria-label="Search projects"
+            data-testid="projects-search-input"
+            className={cn(searchQuery ? 'pr-10' : undefined)}
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              aria-label="Clear search"
+              data-testid="projects-search-clear"
+            >
+              <span aria-hidden="true">×</span>
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Projects grid */}
       {projects.length === 0 ? (
         <Card className="text-center py-12">
           <svg className="mx-auto w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
           </svg>
-          <h3 className="mt-4 text-lg font-medium text-gray-900">No projects yet</h3>
-          <p className="mt-2 text-gray-500">
-            {user ? 'Create your first project to start tracking time.' : 'No projects available. Contact your admin.'}
-          </p>
-          {user && (
-            <Button className="mt-4" onClick={() => setShowModal(true)}>
-              Create Project
-            </Button>
+          {isSearchActive ? (
+            <>
+              <h3 className="mt-4 text-lg font-medium text-gray-900">
+                No projects matching &quot;{activeSearchQuery}&quot;
+              </h3>
+              <p className="mt-2 text-gray-500">
+                Try a different project name or clear your search.
+              </p>
+              <Button className="mt-4" variant="secondary" onClick={() => setSearchQuery('')}>
+                Clear search
+              </Button>
+            </>
+          ) : (
+            <>
+              <h3 className="mt-4 text-lg font-medium text-gray-900">No projects yet</h3>
+              <p className="mt-2 text-gray-500">
+                {user ? 'Create your first project to start tracking time.' : 'No projects available. Contact your admin.'}
+              </p>
+              {user && (
+                <Button className="mt-4" onClick={() => setShowModal(true)}>
+                  Create Project
+                </Button>
+              )}
+            </>
           )}
         </Card>
       ) : (
@@ -246,7 +308,9 @@ export function ProjectsPage() {
               when more pages remain to be fetched. */}
           <div className="flex items-center justify-between">
             <p className="text-sm text-gray-500" data-testid="projects-count">
-              Showing {projects.length} of {totalProjects} projects
+              {isSearchActive
+                ? `Showing ${projects.length} projects matching "${activeSearchQuery}"`
+                : `Showing ${projects.length} of ${totalProjects} projects`}
             </p>
           </div>
 

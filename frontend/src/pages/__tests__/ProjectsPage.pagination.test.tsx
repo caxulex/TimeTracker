@@ -177,4 +177,152 @@ describe('ProjectsPage - pagination', () => {
     await screen.findByText('Archived One');
     expect(screen.queryByText('Active One')).not.toBeInTheDocument();
   });
+
+  it('fires API call with search param after 250ms debounce', async () => {
+    const user = userEvent.setup();
+
+    projectsGetAll.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 50,
+      pages: 1,
+    });
+
+    renderPage();
+    expect(await screen.findByTestId('projects-search-input')).toBeInTheDocument();
+
+    await user.type(screen.getByTestId('projects-search-input'), 'alpha');
+
+    // The debounced request should not fire immediately.
+    expect(projectsGetAll).toHaveBeenCalledTimes(1);
+
+    await waitFor(() => {
+      expect(projectsGetAll).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include_archived: true,
+          page: 1,
+          page_size: 50,
+          search: 'alpha',
+        })
+      );
+    }, { timeout: 2000 });
+  });
+
+  it('rapid typing only fires one debounced search request', async () => {
+    const user = userEvent.setup();
+
+    projectsGetAll.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 50,
+      pages: 1,
+    });
+
+    renderPage();
+    const searchInput = await screen.findByTestId('projects-search-input');
+
+    await user.type(searchInput, 'project');
+
+    await waitFor(() => {
+      expect(projectsGetAll).toHaveBeenCalledTimes(2);
+    }, { timeout: 2000 });
+  });
+
+  it('clearing search refetches without search param', async () => {
+    const user = userEvent.setup();
+
+    projectsGetAll.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 50,
+      pages: 1,
+    });
+
+    renderPage();
+    const searchInput = await screen.findByTestId('projects-search-input');
+
+    await user.type(searchInput, 'alpha');
+    await waitFor(() => {
+      expect(projectsGetAll).toHaveBeenCalledWith(
+        expect.objectContaining({ search: 'alpha' })
+      );
+    }, { timeout: 2000 });
+
+    const populatedInput = await screen.findByTestId('projects-search-input');
+    expect(populatedInput).toHaveValue('alpha');
+    await user.click(screen.getByTestId('projects-search-clear'));
+
+    await waitFor(() => {
+      expect(projectsGetAll).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          include_archived: true,
+          page: 1,
+          page_size: 50,
+          search: undefined,
+        })
+      );
+    }, { timeout: 2000 });
+  });
+
+  it('renders search-specific empty state when no projects match query', async () => {
+    const user = userEvent.setup();
+
+    projectsGetAll.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 50,
+      pages: 1,
+    });
+
+    renderPage();
+    const searchInput = await screen.findByTestId('projects-search-input');
+
+    await user.type(searchInput, 'unknown');
+
+    expect(await screen.findByText('No projects matching "unknown"', {}, { timeout: 2000 })).toBeInTheDocument();
+  });
+
+  it('"Show Archived" toggle still works alongside search', async () => {
+    const user = userEvent.setup();
+
+    projectsGetAll.mockImplementation((filters?: { search?: string }) => {
+      if (filters?.search === 'one') {
+        return Promise.resolve({
+          items: [
+            mkProject(1, { name: 'Active One', is_archived: false }),
+            mkProject(2, { name: 'Archived One', is_archived: true }),
+          ],
+          total: 2,
+          page: 1,
+          page_size: 50,
+          pages: 1,
+        });
+      }
+
+      return Promise.resolve({
+        items: [mkProject(10, { name: 'Starter', is_archived: false })],
+        total: 1,
+        page: 1,
+        page_size: 50,
+        pages: 1,
+      });
+    });
+
+    renderPage();
+
+    const searchInput = await screen.findByTestId('projects-search-input');
+    await user.type(searchInput, 'one');
+
+  await screen.findByText('Active One', {}, { timeout: 2000 });
+    expect(screen.queryByText('Archived One')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /show archived/i }));
+
+    await screen.findByText('Archived One');
+    expect(screen.queryByText('Active One')).not.toBeInTheDocument();
+  });
 });
