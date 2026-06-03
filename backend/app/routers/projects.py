@@ -6,9 +6,9 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -21,6 +21,7 @@ from app.dependencies import (
 from app.models import (
     Project,
     ProjectBudgetHistory,
+    ProjectTeam,
     Task,
     Team,
     TeamMember,
@@ -30,6 +31,12 @@ from app.models import (
 from app.routers.websocket import manager as ws_manager
 from app.schemas.auth import Message
 from app.services.audit_logger import AuditAction, AuditLogger
+from app.services.project_team_service import (
+    add_team_to_project,
+    build_project_visibility_filter,
+    list_project_teams,
+    remove_team_from_project,
+)
 
 router = APIRouter()
 
@@ -83,6 +90,18 @@ class PaginatedProjects(BaseModel):
     pages: int
 
 
+class ProjectTeamAddRequest(BaseModel):
+    team_id: int
+
+
+class ProjectTeamAssociationResponse(BaseModel):
+    team_id: int
+    team_name: str
+    is_primary: bool
+    added_by_name: Optional[str] = None
+    added_at: datetime
+
+
 async def check_team_access(db: AsyncSession, team_id: int, user: User, require_admin: bool = False) -> bool:
     """Check if user has access to team (within their company)"""
     # Multi-tenancy: first verify team belongs to user's company
@@ -128,6 +147,21 @@ async def check_team_access(db: AsyncSession, team_id: int, user: User, require_
     return result.scalar_one_or_none() is not None
 
 
+async def check_project_visibility(db: AsyncSession, project_id: int, user: User) -> bool:
+    """Return True when a user can see a project via primary or associated team."""
+    if user.role in ["super_admin", "admin", "company_admin"]:
+        return True
+
+    # Visibility rule: regular users can access projects from either
+    # their primary teams (projects.team_id) or shared associations
+    # in project_teams.
+    visibility_query = select(Project.id).where(
+        Project.id == project_id,
+        build_project_visibility_filter(user.id),
+    )
+    return (await db.execute(visibility_query)).scalar_one_or_none() is not None
+
+
 @router.get("", response_model=PaginatedProjects)
 async def list_projects(
     page: int = Query(1, ge=1),
@@ -149,14 +183,23 @@ async def list_projects(
 
     # Filter by accessible teams for non-admin users
     if current_user.role not in ["super_admin", "admin", "company_admin"]:
-        user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
-        access_filter = Project.team_id.in_(user_teams)
+        # Visibility rule: list projects visible via either the primary
+        # team or a project_teams association.
+        access_filter = build_project_visibility_filter(current_user.id)
         base_query = base_query.where(access_filter)
         count_query = count_query.where(access_filter)
 
     if team_id:
-        base_query = base_query.where(Project.team_id == team_id)
-        count_query = count_query.where(Project.team_id == team_id)
+        # Team filter semantics: include projects owned by the team and
+        # projects shared to the team through project_teams.
+        team_filter = or_(
+            Project.team_id == team_id,
+            Project.id.in_(
+                select(ProjectTeam.project_id).where(ProjectTeam.team_id == team_id)
+            ),
+        )
+        base_query = base_query.where(team_filter)
+        count_query = count_query.where(team_filter)
 
     if not include_archived:
         base_query = base_query.where(Project.is_archived == False)
@@ -249,7 +292,7 @@ async def get_project(
     # Check access (team membership for non-admins)
     is_admin = current_user.role in ["super_admin", "admin", "company_admin"]
     if not is_admin:
-        has_access = await check_team_access(db, project.team_id, current_user)
+        has_access = await check_project_visibility(db, project.id, current_user)
         if not has_access:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
@@ -340,6 +383,17 @@ async def create_project(
     await db.commit()
     await db.refresh(project)
 
+    # Keep project_teams in sync for new projects so the primary team is
+    # always represented in association metadata.
+    db.add(
+        ProjectTeam(
+            project_id=project.id,
+            team_id=project.team_id,
+            added_by_user_id=current_user.id,
+        )
+    )
+    await db.commit()
+
     # If budget was set, log initial budget history
     if is_admin and (project_data.budget_amount is not None or project_data.deadline is not None):
         budget_history = ProjectBudgetHistory(
@@ -408,6 +462,98 @@ async def create_project(
     )
 
 
+@router.post("/{project_id}/teams", status_code=status.HTTP_201_CREATED, response_model=Message)
+async def add_team_to_project_endpoint(
+    project_id: int,
+    body: ProjectTeamAddRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a team association to a project.
+
+    Caller must be a member of the team being added.
+    """
+    success, error_code = await add_team_to_project(
+        project_id=project_id,
+        team_id=body.team_id,
+        acting_user_id=current_user.id,
+        acting_user_email=current_user.email,
+        company_id=get_company_filter(current_user),
+        db=db,
+    )
+
+    if success:
+        return Message(message="Team associated with project")
+    if error_code in ["project_not_found", "team_not_found"]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project or team not found")
+    if error_code == "already_associated":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Team already associated with project")
+    if error_code == "not_team_member":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not a member of the selected team")
+    if error_code == "different_company":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project and team must belong to the same company")
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unable to associate team")
+
+
+@router.delete("/{project_id}/teams/{team_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_team_from_project_endpoint(
+    project_id: int,
+    team_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a team association from a project."""
+    success, error_code = await remove_team_from_project(
+        project_id=project_id,
+        team_id=team_id,
+        acting_user_id=current_user.id,
+        acting_user_email=current_user.email,
+        company_id=get_company_filter(current_user),
+        db=db,
+    )
+
+    if success:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if error_code == "not_found":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project-team association not found")
+    if error_code == "not_team_member":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not allowed to remove this team")
+    if error_code == "primary_team":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot remove the primary team. Change project.team_id first.",
+        )
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unable to remove team association")
+
+
+@router.get("/{project_id}/teams", response_model=List[ProjectTeamAssociationResponse])
+async def list_project_teams_endpoint(
+    project_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all teams associated with a project (primary first)."""
+    query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
+    query = apply_company_filter(query, Team.company_id, get_company_filter(current_user))
+    project = (await db.execute(query)).scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
+        # Visibility rule: regular users can list project teams if they can
+        # see the project via either primary or associated team membership.
+        has_access = await check_project_visibility(db, project_id, current_user)
+        if not has_access:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    rows = await list_project_teams(
+        project_id=project_id,
+        company_id=get_company_filter(current_user),
+        db=db,
+    )
+    return [ProjectTeamAssociationResponse(**row) for row in rows]
+
+
 @router.put("/{project_id}", response_model=ProjectResponse)
 async def update_project(
     project_id: int,
@@ -470,6 +616,7 @@ async def update_project(
 
     # Update fields - exclude budget fields for non-admins
     update_data = project_data.model_dump(exclude_unset=True)
+    team_changed = project_data.team_id is not None and project_data.team_id != old_values["team_id"]
 
     # Remove budget fields from update if not admin
     budget_change_reason = update_data.pop("budget_change_reason", None)
@@ -483,6 +630,22 @@ async def update_project(
 
     for key, value in update_data.items():
         setattr(project, key, value)
+
+    if team_changed:
+        existing_primary_assoc = await db.execute(
+            select(ProjectTeam.id).where(
+                ProjectTeam.project_id == project.id,
+                ProjectTeam.team_id == project.team_id,
+            )
+        )
+        if existing_primary_assoc.scalar_one_or_none() is None:
+            db.add(
+                ProjectTeam(
+                    project_id=project.id,
+                    team_id=project.team_id,
+                    added_by_user_id=current_user.id,
+                )
+            )
 
     # Track budget changes for history (admin only)
     budget_changed = False

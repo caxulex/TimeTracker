@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -20,7 +20,7 @@ from app.dependencies import (
     get_company_timezone,
     get_current_active_user,
 )
-from app.models import Project, Task, Team, TeamMember, TimeEntry, User
+from app.models import Project, ProjectTeam, Task, Team, TeamMember, TimeEntry, User
 from app.services.duration_service import calculate_entry_duration_for_period
 from app.services.email_log_utils import log_email_failed, log_email_sent
 from app.utils.timer_elapsed import compute_display_elapsed_seconds
@@ -228,12 +228,24 @@ async def get_dashboard_stats(
     month_seconds = sum(calculate_entry_duration_for_period(e, month_start, month_end, now) for e in month_entries)
 
     # Active projects (user has access to, within company)
-    user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
     project_query = select(func.count(Project.id)).join(Team, Project.team_id == Team.id).where(
-        Project.team_id.in_(user_teams),
         Project.is_archived == False,
         Team.deleted_at.is_(None),
     )
+    if current_user.role not in ["super_admin", "admin", "company_admin"]:
+        user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
+        # Visibility rule for regular users in reports: count projects
+        # visible via primary ownership OR project_teams association.
+        project_query = project_query.where(
+            or_(
+                Project.team_id.in_(user_teams),
+                Project.id.in_(
+                    select(ProjectTeam.project_id).where(
+                        ProjectTeam.team_id.in_(user_teams)
+                    )
+                ),
+            )
+        )
     if company_id is None:
         pass  # Super admin sees all
     elif company_id == FILTER_NULL_COMPANY:
@@ -541,8 +553,16 @@ async def get_team_report(
     # Get team members
     team_members = select(TeamMember.user_id).where(TeamMember.team_id == team_id)
 
-    # Get team projects
-    team_projects = select(Project.id).where(Project.team_id == team_id)
+    # Team report visibility includes projects where the team is primary
+    # owner and projects explicitly shared via project_teams.
+    team_projects = select(Project.id).where(
+        or_(
+            Project.team_id == team_id,
+            Project.id.in_(
+                select(ProjectTeam.project_id).where(ProjectTeam.team_id == team_id)
+            ),
+        )
+    )
 
     # Fetch all entries that OVERLAP with the period (instead of using SQL aggregates)
     entries_query = (

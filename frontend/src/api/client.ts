@@ -15,6 +15,7 @@ import type {
   Project,
   ProjectCreate,
   ProjectUpdate,
+  ProjectTeamAssociation,
   ProjectFilters,
   Task,
   TaskCreate,
@@ -452,6 +453,22 @@ export const projectsApi = {
 
   restore: async (id: number): Promise<Project> => {
     const response = await api.post<Project>(`/api/projects/${id}/restore`);
+    return response.data;
+  },
+
+  addTeam: async (projectId: number, teamId: number): Promise<{ message: string }> => {
+    const response = await api.post<{ message: string }>(`/api/projects/${projectId}/teams`, {
+      team_id: teamId,
+    });
+    return response.data;
+  },
+
+  removeTeam: async (projectId: number, teamId: number): Promise<void> => {
+    await api.delete(`/api/projects/${projectId}/teams/${teamId}`);
+  },
+
+  listTeams: async (projectId: number): Promise<ProjectTeamAssociation[]> => {
+    const response = await api.get<ProjectTeamAssociation[]>(`/api/projects/${projectId}/teams`);
     return response.data;
   },
 };

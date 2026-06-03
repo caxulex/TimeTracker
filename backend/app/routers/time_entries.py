@@ -36,6 +36,7 @@ from app.models import (
 from app.routers.websocket import manager as ws_manager
 from app.schemas.auth import Message
 from app.services.audit_logger import AuditAction, AuditLogger
+from app.services.project_team_service import build_project_visibility_filter
 from app.services.time_entry_description import resolve_description
 from app.utils.timer_elapsed import (
     compute_display_elapsed_seconds,
@@ -157,16 +158,16 @@ async def check_project_access(db: AsyncSession, project_id: int, user: User) ->
     if user.role in ["super_admin", "admin", "company_admin"]:
         return project
 
-    # Check team membership for project access
-    if project.team_id:
-        member_check = await db.execute(
-            select(TeamMember).where(
-                TeamMember.team_id == project.team_id,
-                TeamMember.user_id == user.id
-            )
+    # Visibility rule: regular users can access projects via primary team
+    # membership OR project_teams association membership.
+    visibility_result = await db.execute(
+        select(Project.id).where(
+            Project.id == project_id,
+            build_project_visibility_filter(user.id),
         )
-        if member_check.scalar_one_or_none():
-            return project
+    )
+    if visibility_result.scalar_one_or_none() is not None:
+        return project
 
     return None
 def calculate_duration_seconds(start: datetime, end: datetime, pause_seconds: int = 0) -> int:
@@ -1135,6 +1136,15 @@ async def list_time_entries(
         stats_query = stats_query.where(TimeEntry.user_id == user_id)
 
     if project_id:
+        if current_user.role not in ["super_admin", "admin", "company_admin"]:
+            # When filtering by project_id, enforce the same project visibility
+            # rule (primary team OR associated team) used by timer creation.
+            visible_project = await check_project_access(db, project_id, current_user)
+            if not visible_project:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Project not found or access denied",
+                )
         base_query = base_query.where(TimeEntry.project_id == project_id)
         stats_query = stats_query.where(TimeEntry.project_id == project_id)
 

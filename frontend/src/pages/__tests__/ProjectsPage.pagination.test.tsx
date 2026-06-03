@@ -31,15 +31,20 @@ vi.mock('../../components/ai/ProjectHealthCard', () => ({
 }));
 
 const projectsGetAll = vi.fn();
+const projectsListTeams = vi.fn();
+const projectsAddTeam = vi.fn();
 const teamsGetAll = vi.fn();
 
 vi.mock('../../api/client', () => ({
   projectsApi: {
     getAll: (...args: unknown[]) => projectsGetAll(...args),
+    listTeams: (...args: unknown[]) => projectsListTeams(...args),
+    addTeam: (...args: unknown[]) => projectsAddTeam(...args),
     create: vi.fn(),
     update: vi.fn(),
     restore: vi.fn(),
     delete: vi.fn(),
+    removeTeam: vi.fn(),
   },
   teamsApi: {
     getAll: (...args: unknown[]) => teamsGetAll(...args),
@@ -92,6 +97,16 @@ describe('ProjectsPage - pagination', () => {
       page_size: 20,
       pages: 1,
     });
+    projectsListTeams.mockResolvedValue([
+      {
+        team_id: 1,
+        team_name: 'Team',
+        is_primary: true,
+        added_by_name: null,
+        added_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+    projectsAddTeam.mockResolvedValue({ message: 'ok' });
     setAdmin();
   });
 

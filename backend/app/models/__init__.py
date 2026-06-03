@@ -302,6 +302,11 @@ class Team(Base):
     company: Mapped[Optional["Company"]] = relationship("Company", back_populates="teams")
     members: Mapped[list["TeamMember"]] = relationship("TeamMember", back_populates="team", cascade="all, delete-orphan")
     projects: Mapped[list["Project"]] = relationship("Project", back_populates="team", cascade="all, delete-orphan")
+    project_associations: Mapped[list["ProjectTeam"]] = relationship(
+        "ProjectTeam",
+        back_populates="team",
+        cascade="all, delete-orphan",
+    )
 
     @hybrid_property
     def is_deleted(self) -> bool:
@@ -328,6 +333,43 @@ class TeamMember(Base):
         return f"<TeamMember(team_id={self.team_id}, user_id={self.user_id}, role={self.role})>"
 
 
+class ProjectTeam(Base):
+    """Project-to-team association model for shared project visibility."""
+    __tablename__ = "project_teams"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    team_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("teams.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    added_by_user_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    project: Mapped["Project"] = relationship("Project", back_populates="team_associations")
+    team: Mapped["Team"] = relationship("Team", back_populates="project_associations")
+    added_by: Mapped[Optional["User"]] = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "team_id", name="uq_project_teams_project_team"),
+    )
+
+
 class Project(Base):
     """Project model"""
     __tablename__ = "projects"
@@ -347,6 +389,11 @@ class Project(Base):
 
     # Relationships
     team: Mapped[Team] = relationship("Team", back_populates="projects")
+    team_associations: Mapped[list["ProjectTeam"]] = relationship(
+        "ProjectTeam",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
     tasks: Mapped[list["Task"]] = relationship("Task", back_populates="project", cascade="all, delete-orphan")
     time_entries: Mapped[list["TimeEntry"]] = relationship("TimeEntry", back_populates="project", cascade="all, delete-orphan")
     budget_history: Mapped[list["ProjectBudgetHistory"]] = relationship("ProjectBudgetHistory", back_populates="project", cascade="all, delete-orphan")
