@@ -343,7 +343,7 @@ export const usersApi = {
 // ============================================
 export const teamsApi = {
   getAll: async (
-    pageOrParams: number | { page?: number; page_size?: number; search?: string } = 1,
+    pageOrParams: number | { page?: number; page_size?: number; search?: string; include_deleted?: boolean } = 1,
     size = 20
   ): Promise<PaginatedResponse<Team>> => {
     // Backend's actual query-param names are `page_size` and `search`
@@ -355,6 +355,7 @@ export const teamsApi = {
             page: pageOrParams.page ?? 1,
             page_size: pageOrParams.page_size ?? 20,
             search: pageOrParams.search,
+            include_deleted: pageOrParams.include_deleted ?? false,
           };
     const response = await api.get<PaginatedResponse<Team>>('/api/teams', {
       params,
@@ -362,8 +363,10 @@ export const teamsApi = {
     return response.data;
   },
 
-  getById: async (id: number): Promise<Team & { members: TeamMember[] }> => {
-    const response = await api.get<Team & { members: TeamMember[] }>(`/api/teams/${id}`);
+  getById: async (id: number, includeDeleted = false): Promise<Team & { members: TeamMember[] }> => {
+    const response = await api.get<Team & { members: TeamMember[] }>(`/api/teams/${id}`, {
+      params: { include_deleted: includeDeleted },
+    });
     return response.data;
   },
 
@@ -377,8 +380,24 @@ export const teamsApi = {
     return response.data;
   },
 
-  delete: async (id: number): Promise<void> => {
-    await api.delete(`/api/teams/${id}`);
+  delete: async (id: number, reason?: string): Promise<void> => {
+    await api.delete(`/api/teams/${id}`, {
+      data: reason ? { reason } : undefined,
+    });
+  },
+
+  restore: async (id: number): Promise<Team> => {
+    const response = await api.post<Team>(`/api/teams/${id}/restore`);
+    return response.data;
+  },
+
+  listDeleted: async (
+    params: { page?: number; page_size?: number } = {}
+  ): Promise<PaginatedResponse<Team>> => {
+    const response = await api.get<PaginatedResponse<Team>>('/api/teams/deleted', {
+      params,
+    });
+    return response.data;
   },
 
   addMember: async (teamId: number, userId: number, role = 'member'): Promise<TeamMember> => {

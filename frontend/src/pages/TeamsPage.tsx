@@ -24,6 +24,7 @@ export function TeamsPage() {
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
   const [selectedTeam, setSelectedTeam] = useState<number | null>(null);
   const [showMemberModal, setShowMemberModal] = useState(false);
+  const [showDeletedTeams, setShowDeletedTeams] = useState(false);
 
   // Fetch teams — paginated via Load More.
   //
@@ -56,10 +57,16 @@ export function TeamsPage() {
     },
   });
 
+  const { data: deletedTeamsData, isLoading: isLoadingDeletedTeams } = useQuery({
+    queryKey: ['deletedTeams', 1, 100],
+    queryFn: () => teamsApi.listDeleted({ page: 1, page_size: 100 }),
+    enabled: isAdmin && showDeletedTeams,
+  });
+
   // Fetch selected team details
   const { data: teamDetails, error: teamDetailsError, isLoading: isLoadingDetails } = useQuery({
-    queryKey: ['team', selectedTeam],
-    queryFn: () => teamsApi.getById(selectedTeam!),
+    queryKey: ['team', selectedTeam, { includeDeleted: showDeletedTeams }],
+    queryFn: () => teamsApi.getById(selectedTeam!, showDeletedTeams),
     enabled: !!selectedTeam,
   });
 
@@ -70,10 +77,14 @@ export function TeamsPage() {
     enabled: isAdmin,
   });
 
-  const teams: Team[] = (teamsData?.pages ?? []).flatMap(
+  const activeTeams: Team[] = (teamsData?.pages ?? []).flatMap(
     (p) => p.items || []
   );
-  const totalTeams = teamsData?.pages?.[0]?.total ?? teams.length;
+  const deletedTeams: Team[] = deletedTeamsData?.items || [];
+  const teams = showDeletedTeams ? deletedTeams : activeTeams;
+  const totalTeams = showDeletedTeams
+    ? (deletedTeamsData?.total ?? deletedTeams.length)
+    : (teamsData?.pages?.[0]?.total ?? activeTeams.length);
   const users = usersData?.items || [];
 
   // Silence the unused-var lint warning when teamsError is only
@@ -118,19 +129,37 @@ export function TeamsPage() {
 
   // Delete team mutation (admin only)
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => teamsApi.delete(id),
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) => teamsApi.delete(id, reason),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
+      queryClient.invalidateQueries({ queryKey: ['deletedTeams'] });
       setSelectedTeam(null);
-      notifications.notifySuccess('Team Deleted', 'Team has been successfully deleted.');
+      notifications.notifySuccess('Team Deleted', 'Team has been soft-deleted successfully.');
     },
     onError: (error: Error) => {
       const errorMessage = axios.isAxiosError(error) ? (error.response?.data?.detail || error.message || 'Failed to delete team') : (error.message || 'Failed to delete team');
       if (axios.isAxiosError(error) && error.response?.status === 403) {
         notifications.notifyError('Permission Denied', 'Only team owners and super admins can delete teams.');
+      } else if (axios.isAxiosError(error) && error.response?.status === 409) {
+        notifications.notifyError('Delete Blocked', 'This team has active projects. Archive those projects first, then delete the team.');
       } else {
         notifications.notifyError('Delete Failed', errorMessage);
       }
+    },
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: (id: number) => teamsApi.restore(id),
+    onSuccess: (team) => {
+      queryClient.invalidateQueries({ queryKey: ['teams'] });
+      queryClient.invalidateQueries({ queryKey: ['deletedTeams'] });
+      notifications.notifySuccess('Team Restored', `Team "${team.name}" has been restored.`);
+      setShowDeletedTeams(false);
+      setSelectedTeam(team.id);
+    },
+    onError: (error: Error) => {
+      const errorMessage = axios.isAxiosError(error) ? (error.response?.data?.detail || error.message || 'Failed to restore team') : (error.message || 'Failed to restore team');
+      notifications.notifyError('Restore Failed', errorMessage);
     },
   });
 
@@ -183,7 +212,7 @@ export function TeamsPage() {
     setShowModal(true);
   };
 
-  if (isLoading) {
+  if (isLoading || (showDeletedTeams && isLoadingDeletedTeams)) {
     return <LoadingOverlay message="Loading teams..." />;
   }
 
@@ -197,14 +226,27 @@ export function TeamsPage() {
             {isAdmin ? 'Manage your teams and members' : 'View your teams'}
           </p>
         </div>
-        {isAdmin && (
-          <Button onClick={() => setShowModal(true)}>
-            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            New Team
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {isAdmin && (
+            <Button
+              variant={showDeletedTeams ? 'secondary' : 'primary'}
+              onClick={() => {
+                setShowDeletedTeams((v) => !v);
+                setSelectedTeam(null);
+              }}
+            >
+              {showDeletedTeams ? 'View Active Teams' : 'View Deleted Teams'}
+            </Button>
+          )}
+          {isAdmin && !showDeletedTeams && (
+            <Button onClick={() => setShowModal(true)}>
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              New Team
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -240,7 +282,8 @@ export function TeamsPage() {
                   'cursor-pointer transition-all',
                   selectedTeam === team.id
                     ? 'ring-2 ring-blue-500 bg-blue-50'
-                    : 'hover:shadow-md'
+                    : 'hover:shadow-md',
+                  team.deleted_at ? 'border-red-200 bg-red-50/30' : ''
                 )}
                 onClick={() => setSelectedTeam(team.id)}
               >
@@ -250,6 +293,9 @@ export function TeamsPage() {
                     <p className="text-sm text-gray-500">
                       {team.member_count || 1} member{(team.member_count || 1) !== 1 ? 's' : ''}
                     </p>
+                    {team.deleted_at && (
+                      <p className="text-xs text-red-700 mt-1">Deleted {formatDate(team.deleted_at)}</p>
+                    )}
                   </div>
                   {team.owner_id === currentUser?.id && (
                     <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs rounded-full">
@@ -262,7 +308,7 @@ export function TeamsPage() {
           )}
 
           {/* Load More — server-side pagination via useInfiniteQuery. */}
-          {hasNextPage && (
+          {!showDeletedTeams && hasNextPage && (
             <div className="flex justify-center pt-2">
               <Button
                 variant="secondary"
@@ -316,7 +362,7 @@ export function TeamsPage() {
                     Created {formatDate(teamDetails.created_at)}
                   </p>
                 </div>
-                {isAdmin && (
+                {isAdmin && !teamDetails.deleted_at && (
                   <div className="flex gap-2">
                     <Button variant="secondary" size="sm" onClick={() => handleEdit(teamDetails)}>
                       Edit
@@ -326,7 +372,8 @@ export function TeamsPage() {
                       size="sm"
                       onClick={() => {
                         if (confirm('Are you sure you want to delete this team?')) {
-                          deleteMutation.mutate(teamDetails.id);
+                          const reasonInput = prompt('Optional delete reason (visible when restoring):') || undefined;
+                          deleteMutation.mutate({ id: teamDetails.id, reason: reasonInput });
                         }
                       }}
                     >
@@ -334,13 +381,31 @@ export function TeamsPage() {
                     </Button>
                   </div>
                 )}
+                {isAdmin && teamDetails.deleted_at && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => restoreMutation.mutate(teamDetails.id)}
+                    isLoading={restoreMutation.isPending}
+                  >
+                    Restore
+                  </Button>
+                )}
               </div>
+
+              {teamDetails.deleted_at && (
+                <div className="mb-4 p-3 rounded-lg border border-red-200 bg-red-50 text-sm text-red-900">
+                  <p><strong>Deleted at:</strong> {formatDate(teamDetails.deleted_at)}</p>
+                  <p><strong>Deleted by:</strong> {teamDetails.deleted_by_user_name || teamDetails.deleted_by_user_id || 'Unknown'}</p>
+                  <p><strong>Reason:</strong> {teamDetails.delete_reason || 'No reason provided'}</p>
+                </div>
+              )}
 
               {/* Members section */}
               <div>
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-semibold text-gray-900">Members</h3>
-                  {isAdmin && (
+                  {isAdmin && !teamDetails.deleted_at && (
                     <Button size="sm" onClick={() => setShowMemberModal(true)}>
                       Add Member
                     </Button>
@@ -375,7 +440,7 @@ export function TeamsPage() {
                         >
                           {member.role}
                         </span>
-                        {isAdmin && member.user_id !== teamDetails.owner_id && (
+                        {isAdmin && !teamDetails.deleted_at && member.user_id !== teamDetails.owner_id && (
                           <button
                             onClick={() =>
                               removeMemberMutation.mutate({
@@ -409,7 +474,7 @@ export function TeamsPage() {
       </div>
 
       {/* Create/Edit Team Modal - Admin only */}
-      {isAdmin && (
+      {isAdmin && !showDeletedTeams && (
         <TeamModal
           isOpen={showModal}
           onClose={() => {

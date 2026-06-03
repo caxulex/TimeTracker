@@ -92,17 +92,25 @@ async def check_team_access(db: AsyncSession, team_id: int, user: User, require_
     if company_id is None:
         # Super admin - can access any team
         team_result = await db.execute(
-            select(Team).where(Team.id == team_id)
+            select(Team).where(Team.id == team_id, Team.deleted_at.is_(None))
         )
     elif company_id == FILTER_NULL_COMPANY:
         # Platform user - can only access teams with NULL company_id
         team_result = await db.execute(
-            select(Team).where(Team.id == team_id, Team.company_id.is_(None))
+            select(Team).where(
+                Team.id == team_id,
+                Team.company_id.is_(None),
+                Team.deleted_at.is_(None),
+            )
         )
     else:
         # Company-scoped user
         team_result = await db.execute(
-            select(Team).where(Team.id == team_id, Team.company_id == company_id)
+            select(Team).where(
+                Team.id == team_id,
+                Team.company_id == company_id,
+                Team.deleted_at.is_(None),
+            )
         )
 
     if not team_result.scalar_one_or_none():
@@ -173,6 +181,9 @@ async def list_projects(
     team_ids = [p.team_id for p in projects]
     team_names = {}
     if team_ids:
+        # Keep this enrichment unfiltered: project rows remain valid even when
+        # a parent team is soft-deleted, and responses should still show the
+        # historical team label.
         teams_result = await db.execute(select(Team.id, Team.name).where(Team.id.in_(team_ids)))
         team_names = dict(teams_result.all())
 
@@ -295,6 +306,22 @@ async def create_project(
     # Check team access
     has_access = await check_team_access(db, project_data.team_id, current_user)
     if not has_access:
+        company_id = get_company_filter(current_user)
+        deleted_team_query = select(Team).where(
+            Team.id == project_data.team_id,
+            Team.deleted_at.is_not(None),
+        )
+        deleted_team_query = apply_company_filter(
+            deleted_team_query,
+            Team.company_id,
+            company_id,
+        )
+        deleted_team = (await db.execute(deleted_team_query)).scalar_one_or_none()
+        if deleted_team is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Target team has been deleted. Restore it first.",
+            )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to this team")
 
     # Only admins can set budget fields
@@ -410,12 +437,30 @@ async def update_project(
     # If team_id is being changed, validate the new team
     if project_data.team_id is not None and project_data.team_id != project.team_id:
         # Verify new team exists and user has access
-        new_team_query = select(Team).where(Team.id == project_data.team_id)
+        new_team_query = select(Team).where(
+            Team.id == project_data.team_id,
+            Team.deleted_at.is_(None),
+        )
         company_id = get_company_filter(current_user)
         new_team_query = apply_company_filter(new_team_query, Team.company_id, company_id)
         new_team_result = await db.execute(new_team_query)
         new_team = new_team_result.scalar_one_or_none()
         if not new_team:
+            deleted_team_query = select(Team).where(
+                Team.id == project_data.team_id,
+                Team.deleted_at.is_not(None),
+            )
+            deleted_team_query = apply_company_filter(
+                deleted_team_query,
+                Team.company_id,
+                company_id,
+            )
+            deleted_team = (await db.execute(deleted_team_query)).scalar_one_or_none()
+            if deleted_team is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Target team has been deleted. Restore it first.",
+                )
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid team_id")
 
     # Track old values
@@ -459,7 +504,12 @@ async def update_project(
             db.add(budget_history)
 
     # Audit log
-    new_values = {"name": project.name, "color": project.color, "is_archived": project.is_archived, "team_id": project.team_id}
+    new_values = {
+        "name": project.name,
+        "color": project.color,
+        "is_archived": project.is_archived,
+        "team_id": project.team_id,
+    }
     if is_admin:
         old_values["budget_amount"] = float(old_budget_amount) if old_budget_amount else None
         old_values["deadline"] = str(old_deadline) if old_deadline else None

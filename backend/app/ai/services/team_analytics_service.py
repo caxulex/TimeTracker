@@ -135,7 +135,7 @@ class TeamAnalyticsService:
 
         # Get team info
         team_result = await self.db.execute(
-            select(Team).where(Team.id == team_id)
+            select(Team).where(Team.id == team_id, Team.deleted_at.is_(None))
         )
         team = team_result.scalar_one_or_none()
 

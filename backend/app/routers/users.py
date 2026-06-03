@@ -251,13 +251,14 @@ async def create_user(
             # Verify team exists AND belongs to the admin's company
             team_query = select(Team).where(Team.id == team_id)
             team_query = apply_company_filter(team_query, Team.company_id, company_filter)
+            team_query = team_query.where(Team.deleted_at.is_(None))
 
             team_result = await db.execute(team_query)
             team = team_result.scalar_one_or_none()
             if not team:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Team with ID {team_id} not found or not in your company"
+                    detail=f"Team with ID {team_id} not found, deleted, or not in your company"
                 )
 
             # Add user to team

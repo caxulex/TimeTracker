@@ -1,15 +1,15 @@
 # ============================================
 # TIME TRACKER - TEAMS API TESTS
 # ============================================
-from datetime import datetime, timedelta, timezone
-
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AuditLog, Project, Team, TeamMember, TimeEntry, User
+from app.dependencies import get_company_filter
+from app.models import AuditLog, Project, Team, TeamMember, User
+from app.services.team_service import restore_team, soft_delete_team
 
 
 @pytest_asyncio.fixture
@@ -127,15 +127,35 @@ class TestTeamUpdate:
         data = response.json()
         assert data["name"] == "Updated Team Name"
 
+    @pytest.mark.asyncio
+    async def test_update_deleted_team_returns_409(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        test_team: Team,
+    ):
+        delete_response = await client.delete(
+            f"/api/teams/{test_team.id}",
+            headers=auth_headers,
+        )
+        assert delete_response.status_code == 204
+
+        response = await client.put(
+            f"/api/teams/{test_team.id}",
+            json={"name": "Should Fail"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 409
+
 
 class TestTeamDelete:
-    """Test team deletion endpoint."""
+    """Test team soft-deletion endpoint."""
     
     @pytest.mark.asyncio
     async def test_delete_team(
         self, client: AsyncClient, auth_headers: dict
     ):
-        """Test deleting a team (create one without members for clean deletion)."""
+        """DELETE performs soft-delete and returns 204."""
         # First create a team
         create_response = await client.post(
             "/api/teams",
@@ -150,107 +170,249 @@ class TestTeamDelete:
             f"/api/teams/{team_id}",
             headers=auth_headers,
         )
-        # Check for successful deletion (200 or 204)
-        assert response.status_code in [200, 204]
+        assert response.status_code == 204
 
     @pytest.mark.asyncio
-    async def test_delete_team_refused_when_projects_have_time_entries(
+    async def test_delete_team_refused_when_team_has_active_projects(
         self,
         client: AsyncClient,
         auth_headers: dict,
         db_session: AsyncSession,
-        test_user: User,
         test_team: Team,
     ):
-        """Team delete must be refused (400) when a project in the team has time entries."""
-        # Create a project in the team with a time entry attached
+        """Soft-delete must be blocked with 409 when non-archived projects exist."""
         project = Project(
-            name="Project With Entries",
+            name="Active Project",
             team_id=test_team.id,
             color="#3B82F6",
+            is_archived=False,
         )
         db_session.add(project)
-        await db_session.flush()
-
-        start = datetime.now(timezone.utc) - timedelta(hours=1)
-        entry = TimeEntry(
-            user_id=test_user.id,
-            project_id=project.id,
-            start_time=start,
-            end_time=start + timedelta(minutes=30),
-            duration_seconds=1800,
-            is_running=False,
-        )
-        db_session.add(entry)
         await db_session.commit()
 
         response = await client.delete(
             f"/api/teams/{test_team.id}",
             headers=auth_headers,
         )
-        assert response.status_code == 400
+        assert response.status_code == 409
         body = response.json()
-        assert "time entries" in body["detail"].lower()
-        # Message communicates the count of blocking projects
-        assert "1" in body["detail"]
+        assert "active" in body["detail"].lower()
 
-        # Team and project must still exist
-        team_still_there = await db_session.scalar(
-            select(func.count()).select_from(Team).where(Team.id == test_team.id)
+        team_row = await db_session.scalar(
+            select(Team).where(Team.id == test_team.id)
         )
-        assert team_still_there == 1
-        project_still_there = await db_session.scalar(
-            select(func.count()).select_from(Project).where(Project.id == project.id)
-        )
-        assert project_still_there == 1
+        assert team_row is not None
+        assert team_row.deleted_at is None
 
     @pytest.mark.asyncio
-    async def test_delete_team_with_empty_projects_writes_per_project_audit_logs(
+    async def test_soft_delete_hides_team_from_default_list_and_get(
         self,
         client: AsyncClient,
         auth_headers: dict,
-        db_session: AsyncSession,
-        test_user: User,
         test_team: Team,
     ):
-        """Team delete succeeds when projects exist but have no time entries, and writes a per-project audit log."""
-        project_a = Project(name="Proj A", team_id=test_team.id, color="#3B82F6")
-        project_b = Project(name="Proj B", team_id=test_team.id, color="#3B82F6")
-        db_session.add_all([project_a, project_b])
-        await db_session.commit()
-        project_a_id = project_a.id
-        project_b_id = project_b.id
-
         response = await client.delete(
             f"/api/teams/{test_team.id}",
             headers=auth_headers,
         )
-        assert response.status_code in [200, 204]
+        assert response.status_code == 204
 
-        # Per-project DELETE audit log rows must exist for each cascaded project
-        rows = (
-            await db_session.execute(
-                select(AuditLog).where(
-                    AuditLog.resource_type == "project",
-                    AuditLog.action == "DELETE",
-                    AuditLog.resource_id.in_([project_a_id, project_b_id]),
-                )
-            )
-        ).scalars().all()
-        logged_ids = {r.resource_id for r in rows}
-        assert logged_ids == {project_a_id, project_b_id}
-        for row in rows:
-            assert row.user_id == test_user.id
-            assert "Cascaded delete from team" in (row.details or "")
+        list_response = await client.get("/api/teams", headers=auth_headers)
+        assert list_response.status_code == 200
+        ids = {item["id"] for item in list_response.json()["items"]}
+        assert test_team.id not in ids
 
-        # Team-level DELETE audit log is still written
-        team_log = (
-            await db_session.execute(
-                select(AuditLog).where(
-                    AuditLog.resource_type == "team",
-                    AuditLog.action == "DELETE",
-                    AuditLog.resource_id == test_team.id,
-                )
+        get_response = await client.get(f"/api/teams/{test_team.id}", headers=auth_headers)
+        assert get_response.status_code == 404
+
+
+class TestTeamRestore:
+    @pytest.mark.asyncio
+    async def test_restore_team_success(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        test_team: Team,
+    ):
+        delete_response = await client.delete(
+            f"/api/teams/{test_team.id}",
+            headers=auth_headers,
+        )
+        assert delete_response.status_code == 204
+
+        restore_response = await client.post(
+            f"/api/teams/{test_team.id}/restore",
+            headers=auth_headers,
+        )
+        assert restore_response.status_code == 200
+        data = restore_response.json()
+        assert data["id"] == test_team.id
+        assert data["deleted_at"] is None
+
+    @pytest.mark.asyncio
+    async def test_restore_team_not_deleted_returns_400(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        test_team: Team,
+    ):
+        restore_response = await client.post(
+            f"/api/teams/{test_team.id}/restore",
+            headers=auth_headers,
+        )
+        assert restore_response.status_code == 400
+
+
+class TestTeamDeletedViews:
+    @pytest.mark.asyncio
+    async def test_include_deleted_admin_and_regular_behaviors(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        admin_auth_headers: dict,
+        test_team: Team,
+    ):
+        delete_response = await client.delete(
+            f"/api/teams/{test_team.id}",
+            headers=auth_headers,
+        )
+        assert delete_response.status_code == 204
+
+        admin_list = await client.get(
+            "/api/teams?include_deleted=true",
+            headers=admin_auth_headers,
+        )
+        assert admin_list.status_code == 200
+        admin_items = admin_list.json()["items"]
+        deleted_item = next(item for item in admin_items if item["id"] == test_team.id)
+        assert deleted_item["deleted_at"] is not None
+
+        regular_list = await client.get(
+            "/api/teams?include_deleted=true",
+            headers=auth_headers,
+        )
+        assert regular_list.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_deleted_endpoint_returns_enriched_rows(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        admin_auth_headers: dict,
+        test_team: Team,
+    ):
+        response = await client.request(
+            "DELETE",
+            f"/api/teams/{test_team.id}",
+            json={"reason": "cleanup"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 204
+
+        deleted_response = await client.get(
+            "/api/teams/deleted",
+            headers=admin_auth_headers,
+        )
+        assert deleted_response.status_code == 200
+        items = deleted_response.json()["items"]
+        row = next(item for item in items if item["id"] == test_team.id)
+        assert row["deleted_at"] is not None
+        assert row["delete_reason"] == "cleanup"
+        assert row.get("deleted_by_user_name")
+
+
+class TestTeamService:
+    @pytest.mark.asyncio
+    async def test_soft_delete_service_marks_team_and_logs(
+        self,
+        db_session: AsyncSession,
+        test_team: Team,
+        test_user: User,
+    ):
+        ok, error_code = await soft_delete_team(
+            team_id=test_team.id,
+            company_id=get_company_filter(test_user),
+            acting_user_id=test_user.id,
+            acting_user_email=test_user.email,
+            reason="cleanup",
+            db=db_session,
+        )
+        assert ok is True
+        assert error_code is None
+
+        team = await db_session.scalar(select(Team).where(Team.id == test_team.id))
+        assert team is not None
+        assert team.deleted_at is not None
+        assert team.delete_reason == "cleanup"
+
+        log = await db_session.scalar(
+            select(AuditLog).where(
+                AuditLog.resource_type == "team",
+                AuditLog.resource_id == test_team.id,
+                AuditLog.action == "team.soft_deleted",
             )
-        ).scalar_one_or_none()
-        assert team_log is not None
+        )
+        assert log is not None
+
+    @pytest.mark.asyncio
+    async def test_soft_delete_service_has_active_projects_conflict(
+        self,
+        db_session: AsyncSession,
+        test_team: Team,
+        test_user: User,
+    ):
+        db_session.add(Project(name="Active", team_id=test_team.id, color="#3B82F6", is_archived=False))
+        await db_session.commit()
+
+        ok, error_code = await soft_delete_team(
+            team_id=test_team.id,
+            company_id=get_company_filter(test_user),
+            acting_user_id=test_user.id,
+            acting_user_email=test_user.email,
+            reason=None,
+            db=db_session,
+        )
+        assert ok is False
+        assert error_code == "has_active_projects"
+
+    @pytest.mark.asyncio
+    async def test_restore_service_success_and_not_deleted_case(
+        self,
+        db_session: AsyncSession,
+        test_team: Team,
+        test_user: User,
+    ):
+        ok, error_code = await soft_delete_team(
+            team_id=test_team.id,
+            company_id=get_company_filter(test_user),
+            acting_user_id=test_user.id,
+            acting_user_email=test_user.email,
+            reason=None,
+            db=db_session,
+        )
+        assert ok is True
+        assert error_code is None
+
+        ok, error_code = await restore_team(
+            team_id=test_team.id,
+            company_id=get_company_filter(test_user),
+            acting_user_id=test_user.id,
+            acting_user_email=test_user.email,
+            db=db_session,
+        )
+        assert ok is True
+        assert error_code is None
+
+        team = await db_session.scalar(select(Team).where(Team.id == test_team.id))
+        assert team is not None
+        assert team.deleted_at is None
+
+        ok, error_code = await restore_team(
+            team_id=test_team.id,
+            company_id=get_company_filter(test_user),
+            acting_user_id=test_user.id,
+            acting_user_email=test_user.email,
+            db=db_session,
+        )
+        assert ok is False
+        assert error_code == "not_deleted"

@@ -208,17 +208,17 @@ export function useStopTimer() {
 // ============================================
 // TEAM HOOKS
 // ============================================
-export function useTeams() {
+export function useTeams(includeDeleted = false) {
   return useQuery({
-    queryKey: ['teams'],
-    queryFn: () => teamsApi.getAll(),
+    queryKey: ['teams', { includeDeleted }],
+    queryFn: () => teamsApi.getAll({ include_deleted: includeDeleted }),
   });
 }
 
-export function useTeam(id: number) {
+export function useTeam(id: number, includeDeleted = false) {
   return useQuery({
-    queryKey: ['teams', id],
-    queryFn: () => teamsApi.getById(id),
+    queryKey: ['teams', id, { includeDeleted }],
+    queryFn: () => teamsApi.getById(id, includeDeleted),
     enabled: !!id,
   });
 }
@@ -247,10 +247,32 @@ export function useUpdateTeam() {
 export function useDeleteTeam() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => teamsApi.delete(id),
+    mutationFn: (input: number | { id: number; reason?: string }) =>
+      typeof input === 'number'
+        ? teamsApi.delete(input)
+        : teamsApi.delete(input.id, input.reason),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
+      queryClient.invalidateQueries({ queryKey: ['deletedTeams'] });
     },
+  });
+}
+
+export function useRestoreTeam() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => teamsApi.restore(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['teams'] });
+      queryClient.invalidateQueries({ queryKey: ['deletedTeams'] });
+    },
+  });
+}
+
+export function useDeletedTeams(page = 1, pageSize = 20) {
+  return useQuery({
+    queryKey: ['deletedTeams', page, pageSize],
+    queryFn: () => teamsApi.listDeleted({ page, page_size: pageSize }),
   });
 }
 

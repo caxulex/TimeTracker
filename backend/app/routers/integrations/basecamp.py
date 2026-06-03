@@ -409,7 +409,10 @@ async def get_status(
     target_team_name: Optional[str] = None
     if creds.target_team_id is not None:
         team_row = await db.execute(
-            select(Team).where(Team.id == creds.target_team_id)
+            select(Team).where(
+                Team.id == creds.target_team_id,
+                Team.deleted_at.is_(None),
+            )
         )
         team = team_row.scalar_one_or_none()
         if team is not None:
@@ -456,7 +459,10 @@ async def update_settings(
             creds.target_team_id = None
         else:
             team_row = await db.execute(
-                select(Team).where(Team.id == new_team_id)
+                select(Team).where(
+                    Team.id == new_team_id,
+                    Team.deleted_at.is_(None),
+                )
             )
             team = team_row.scalar_one_or_none()
             if team is None:
@@ -480,7 +486,10 @@ async def update_settings(
 
     if creds.target_team_id is not None and target_team_name is None:
         team_row = await db.execute(
-            select(Team).where(Team.id == creds.target_team_id)
+            select(Team).where(
+                Team.id == creds.target_team_id,
+                Team.deleted_at.is_(None),
+            )
         )
         team = team_row.scalar_one_or_none()
         if team is not None:

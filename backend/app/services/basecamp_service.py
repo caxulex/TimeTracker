@@ -475,10 +475,12 @@ class BasecampService:
         }
 
         # Resolve target team:
-        #   - If credentials.target_team_id is set AND points to a team
-        #     in this company, use it.
-        #   - Otherwise fall back to the legacy behavior: lowest-id team
-        #     for the company. Project rows require a non-null team_id.
+        #   - If credentials.target_team_id is set AND points to an active
+        #     team in this company, use it.
+        #   - If target_team_id points to a soft-deleted team, skip sync for
+        #     this company (explicit operator signal needed).
+        #   - Otherwise fall back to the legacy behavior: lowest-id active
+        #     team for the company. Project rows require a non-null team_id.
         team = None
         if credentials.target_team_id is not None:
             target_row = await db.execute(
@@ -488,6 +490,16 @@ class BasecampService:
                 )
             )
             team = target_row.scalar_one_or_none()
+            if team is not None and team.deleted_at is not None:
+                logger.warning(
+                    "basecamp.sync_skipped:target_team_deleted company_id=%s target_team_id=%s",
+                    company_id,
+                    credentials.target_team_id,
+                )
+                report["errors"].append(
+                    "Configured Basecamp target team is soft-deleted; update integration target before syncing"
+                )
+                return report
             if team is None:
                 # Configured team was deleted or reassigned; fall back.
                 logger.warning(
@@ -498,7 +510,10 @@ class BasecampService:
 
         if team is None:
             team_row = await db.execute(
-                select(Team).where(Team.company_id == company_id).order_by(Team.id).limit(1)
+                select(Team)
+                .where(Team.company_id == company_id, Team.deleted_at.is_(None))
+                .order_by(Team.id)
+                .limit(1)
             )
             team = team_row.scalar_one_or_none()
         if team is None:
