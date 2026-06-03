@@ -76,7 +76,12 @@ export interface Team {
   name: string;
   owner_id: number;
   created_at: string;
+  updated_at?: string | null;
   member_count?: number;
+  deleted_at?: string | null;
+  deleted_by_user_id?: number | null;
+  deleted_by_user_name?: string | null;
+  delete_reason?: string | null;
 }
 
 export interface TeamMember {

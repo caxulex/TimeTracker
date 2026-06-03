@@ -1,6 +1,8 @@
 # ============================================
 # TIME TRACKER - PROJECTS API TESTS
 # ============================================
+from datetime import datetime, timezone
+
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
@@ -94,6 +96,28 @@ class TestProjectCreate:
         # HTTPBearer returns 403 when no credentials
         assert response.status_code == 403
 
+    @pytest.mark.asyncio
+    async def test_create_project_under_deleted_team_fails(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        db_session: AsyncSession,
+        test_team: Team,
+    ):
+        test_team.deleted_at = datetime.now(timezone.utc)
+        await db_session.commit()
+
+        response = await client.post(
+            "/api/projects",
+            json={
+                "name": "Blocked by Deleted Team",
+                "team_id": test_team.id,
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 409
+        assert "deleted" in response.json()["detail"].lower()
+
 
 class TestProjectList:
     """Test project listing endpoint."""
@@ -180,6 +204,32 @@ class TestProjectUpdate:
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "New Name Only"
+
+    @pytest.mark.asyncio
+    async def test_move_project_to_deleted_team_fails(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+        db_session: AsyncSession,
+        test_user: User,
+        test_project: Project,
+    ):
+        deleted_team = Team(name="Deleted Team", owner_id=test_user.id)
+        db_session.add(deleted_team)
+        await db_session.flush()
+        db_session.add(
+            TeamMember(team_id=deleted_team.id, user_id=test_user.id, role="owner")
+        )
+        deleted_team.deleted_at = datetime.now(timezone.utc)
+        await db_session.commit()
+
+        response = await client.put(
+            f"/api/projects/{test_project.id}",
+            json={"team_id": deleted_team.id},
+            headers=auth_headers,
+        )
+        assert response.status_code == 409
+        assert "deleted" in response.json()["detail"].lower()
 
 
 class TestProjectDelete:

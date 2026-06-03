@@ -391,6 +391,52 @@ class TestService:
         assert rows.scalars().all() == []
 
     @pytest.mark.asyncio
+    async def test_basecamp_fallback_skips_deleted_lowest_id_team(
+        self, configured_basecamp, db_session, company, super_admin, team
+    ):
+        creds = _make_creds(company.id)
+        db_session.add(creds)
+
+        # The fixture team is the lowest-id team for this company. Soft-delete
+        # it so fallback must choose the next active team.
+        team.deleted_at = datetime.now(timezone.utc)
+
+        active_team = Team(
+            name="Fallback Active Team",
+            owner_id=super_admin.id,
+            company_id=company.id,
+        )
+        db_session.add(active_team)
+        await db_session.flush()
+
+        async def fake_list(_creds, _db):
+            return [
+                {
+                    "id": "fallback-1",
+                    "name": "Fallback Project",
+                    "description": None,
+                    "status": "active",
+                    "created_at": "2026-01-01T00:00:00Z",
+                }
+            ]
+
+        with patch.object(BasecampService, "list_projects", side_effect=fake_list):
+            report = await BasecampService.sync_projects_to_company(
+                creds, company.id, db_session, dry_run=False
+            )
+
+        assert report["created"] == 1
+        assert report["errors"] == []
+
+        project = (
+            await db_session.execute(
+                select(Project).where(Project.name == "Fallback Project")
+            )
+        ).scalar_one_or_none()
+        assert project is not None
+        assert project.team_id == active_team.id
+
+    @pytest.mark.asyncio
     async def test_sync_creates_then_idempotent(
         self, configured_basecamp, db_session, company, team
     ):

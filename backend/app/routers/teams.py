@@ -5,9 +5,9 @@ Teams management router
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import distinct, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -16,10 +16,11 @@ from app.dependencies import (
     get_company_filter,
     get_current_active_user,
 )
-from app.models import Project, Team, TeamMember, TimeEntry, User
+from app.models import Team, TeamMember, User
 from app.routers.websocket import manager as ws_manager
 from app.schemas.auth import Message
 from app.services.audit_logger import AuditAction, AuditLogger
+from app.services.team_service import restore_team, soft_delete_team
 
 router = APIRouter()
 
@@ -30,6 +31,10 @@ class TeamCreate(BaseModel):
 
 class TeamUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
+
+
+class TeamDeleteRequest(BaseModel):
+    reason: Optional[str] = Field(None, max_length=2000)
 
 
 class MemberAdd(BaseModel):
@@ -70,6 +75,9 @@ class TeamResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime]
     member_count: Optional[int] = None
+    deleted_at: Optional[datetime] = None
+    deleted_by_user_id: Optional[int] = None
+    delete_reason: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -87,15 +95,52 @@ class PaginatedTeams(BaseModel):
     pages: int
 
 
+class DeletedTeamResponse(TeamResponse):
+    deleted_by_user_name: Optional[str] = None
+
+
+class PaginatedDeletedTeams(BaseModel):
+    items: List[DeletedTeamResponse]
+    total: int
+    page: int
+    page_size: int
+    pages: int
+
+
+def _is_admin(user: User) -> bool:
+    return user.role in ["super_admin", "admin", "company_admin"]
+
+
+def _team_base_payload(team: Team, member_count: int) -> dict:
+    return {
+        "id": team.id,
+        "name": team.name,
+        "owner_id": team.owner_id,
+        "created_at": team.created_at,
+        "updated_at": team.updated_at,
+        "member_count": member_count,
+        "deleted_at": team.deleted_at,
+        "deleted_by_user_id": team.deleted_by_user_id,
+        "delete_reason": team.delete_reason,
+    }
+
+
 @router.get("", response_model=PaginatedTeams)
 async def list_teams(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     search: Optional[str] = None,
+    include_deleted: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """List teams (user sees their teams, admin sees all within company)"""
+    if include_deleted and not _is_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required for include_deleted=true",
+        )
+
     base_query = select(Team)
     count_query = select(func.count(Team.id))
 
@@ -104,11 +149,16 @@ async def list_teams(
     base_query = apply_company_filter(base_query, Team.company_id, company_id)
     count_query = apply_company_filter(count_query, Team.company_id, company_id)
 
-    # Non-admin users only see teams they're members of
-    if current_user.role not in ["super_admin", "admin", "company_admin"]:
+    # Non-admin users only see teams they're members of.
+    if not _is_admin(current_user):
         member_subquery = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
         base_query = base_query.where(Team.id.in_(member_subquery))
         count_query = count_query.where(Team.id.in_(member_subquery))
+
+    # Active teams by default. Deleted teams are admin-only with include_deleted.
+    if not include_deleted:
+        base_query = base_query.where(Team.deleted_at.is_(None))
+        count_query = count_query.where(Team.deleted_at.is_(None))
 
     if search:
         search_filter = f"%{search}%"
@@ -138,14 +188,7 @@ async def list_teams(
 
     items = []
     for team in teams:
-        items.append(TeamResponse(
-            id=team.id,
-            name=team.name,
-            owner_id=team.owner_id,
-            created_at=team.created_at,
-            updated_at=team.updated_at,
-            member_count=member_counts.get(team.id, 0)
-        ))
+        items.append(TeamResponse(**_team_base_payload(team, member_counts.get(team.id, 0))))
 
     return PaginatedTeams(
         items=items,
@@ -156,13 +199,83 @@ async def list_teams(
     )
 
 
+@router.get("/deleted", response_model=PaginatedDeletedTeams)
+async def list_deleted_teams(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """List soft-deleted teams for the current company (admin-only)."""
+    if not _is_admin(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+
+    company_id = get_company_filter(current_user)
+    base_query = select(Team).where(Team.deleted_at.is_not(None))
+    count_query = select(func.count(Team.id)).where(Team.deleted_at.is_not(None))
+    base_query = apply_company_filter(base_query, Team.company_id, company_id)
+    count_query = apply_company_filter(count_query, Team.company_id, company_id)
+
+    total = (await db.execute(count_query)).scalar() or 0
+    offset = (page - 1) * page_size
+    result = await db.execute(
+        base_query.order_by(Team.deleted_at.desc(), Team.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
+    teams = result.scalars().all()
+
+    member_counts: dict[int, int] = {}
+    team_ids = [t.id for t in teams]
+    if team_ids:
+        count_result = await db.execute(
+            select(TeamMember.team_id, func.count(TeamMember.user_id))
+            .where(TeamMember.team_id.in_(team_ids))
+            .group_by(TeamMember.team_id)
+        )
+        member_counts = dict(count_result.all())
+
+    deleted_by_name: dict[int, str] = {}
+    user_ids = [t.deleted_by_user_id for t in teams if t.deleted_by_user_id is not None]
+    if user_ids:
+        users_result = await db.execute(select(User.id, User.name).where(User.id.in_(user_ids)))
+        deleted_by_name = dict(users_result.all())
+
+    items = [
+        DeletedTeamResponse(
+            **_team_base_payload(team, member_counts.get(team.id, 0)),
+            deleted_by_user_name=(
+                deleted_by_name.get(team.deleted_by_user_id)
+                if team.deleted_by_user_id is not None
+                else None
+            ),
+        )
+        for team in teams
+    ]
+
+    return PaginatedDeletedTeams(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        pages=(total + page_size - 1) // page_size if total > 0 else 1,
+    )
+
+
 @router.get("/{team_id}", response_model=TeamDetailResponse)
 async def get_team(
     team_id: int,
+    include_deleted: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Get team details with members"""
+    if include_deleted and not _is_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required for include_deleted=true",
+        )
+
     query = select(Team).where(Team.id == team_id)
 
     # Multi-tenancy: filter by company
@@ -173,6 +286,9 @@ async def get_team(
     team = result.scalar_one_or_none()
 
     if not team:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+
+    if team.deleted_at is not None and not include_deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
 
     # Check access
@@ -216,6 +332,9 @@ async def get_team(
         created_at=team.created_at,
         updated_at=team.updated_at,
         member_count=len(members),
+        deleted_at=team.deleted_at,
+        deleted_by_user_id=team.deleted_by_user_id,
+        delete_reason=team.delete_reason,
         members=members
     )
 
@@ -290,6 +409,12 @@ async def update_team(
     if not team:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
 
+    if team.deleted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Team is soft-deleted. Restore it before updating.",
+        )
+
     # Check permission
     if current_user.role != "super_admin":
         member = await db.execute(
@@ -342,13 +467,14 @@ async def update_team(
     )
 
 
-@router.delete("/{team_id}", response_model=Message)
+@router.delete("/{team_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_team(
     team_id: int,
+    body: Optional[TeamDeleteRequest] = Body(default=None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Delete team (owner only)"""
+    """Soft-delete a team (owner only)."""
     query = select(Team).where(Team.id == team_id)
 
     # Multi-tenancy: filter by company
@@ -373,66 +499,73 @@ async def delete_team(
         if not member.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only team owner can delete")
 
-    # Pre-flight guard: refuse deletion if any project in this team has time
-    # entries. Deleting the team would otherwise cascade-delete those projects
-    # (and their tasks) via the SQLAlchemy ORM relationship, leaving the
-    # time entries orphaned with project_id=NULL. Mirrors the safeguard on
-    # DELETE /projects/{id} in app/routers/projects.py.
-    projects_with_entries = await db.scalar(
-        select(func.count(distinct(Project.id)))
-        .select_from(Project)
-        .join(TimeEntry, TimeEntry.project_id == Project.id)
-        .where(Project.team_id == team_id)
-    )
-    if projects_with_entries and projects_with_entries > 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Cannot delete team while {projects_with_entries} project(s) "
-                "still have time entries. Archive those projects first, or "
-                "move their time entries to another team."
-            ),
-        )
-
-    # Per-project audit logs for the upcoming ORM cascade. The cascade itself
-    # happens silently at flush time, so we record each project's deletion
-    # explicitly before the team is removed. Closes the audit-coverage gap
-    # that hid the 2026-05-21 "Development" project incident.
-    cascaded_projects = (
-        await db.execute(
-            select(Project.id, Project.name).where(Project.team_id == team_id)
-        )
-    ).all()
-    for project_id, project_name in cascaded_projects:
-        await AuditLogger.log(
-            db=db,
-            action=AuditAction.DELETE,
-            resource_type="project",
-            resource_id=project_id,
-            user_id=current_user.id,
-            user_email=current_user.email,
-            old_values={"name": project_name, "team_id": team_id},
-            details=(
-                f"Cascaded delete from team '{team.name}' (team_id={team_id})"
-            ),
-        )
-
-    # Audit log before deletion
-    await AuditLogger.log(
+    ok, error_code = await soft_delete_team(
+        team_id=team_id,
+        company_id=company_id,
+        acting_user_id=current_user.id,
+        acting_user_email=current_user.email,
+        reason=(body.reason if body else None),
         db=db,
-        action=AuditAction.DELETE,
-        resource_type="team",
-        resource_id=team.id,
-        user_id=current_user.id,
-        user_email=current_user.email,
-        old_values={"name": team.name, "owner_id": team.owner_id},
-        details=f"Deleted team '{team.name}'"
     )
+    if not ok and error_code == "already_deleted":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    if not ok and error_code == "has_active_projects":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete team while it has active (non-archived) projects. Archive those projects first.",
+        )
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
 
-    await db.delete(team)
-    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    return Message(message="Team deleted successfully")
+
+@router.post("/{team_id}/restore", response_model=TeamResponse)
+async def restore_soft_deleted_team(
+    team_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Restore a soft-deleted team."""
+    query = select(Team).where(Team.id == team_id)
+    company_id = get_company_filter(current_user)
+    query = apply_company_filter(query, Team.company_id, company_id)
+    existing = (await db.execute(query)).scalar_one_or_none()
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+
+    if current_user.role != "super_admin":
+        member = await db.execute(
+            select(TeamMember).where(
+                TeamMember.team_id == team_id,
+                TeamMember.user_id == current_user.id,
+                TeamMember.role == "owner",
+            )
+        )
+        if not member.scalar_one_or_none():
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only team owner can restore")
+
+    ok, error_code = await restore_team(
+        team_id=team_id,
+        company_id=company_id,
+        acting_user_id=current_user.id,
+        acting_user_email=current_user.email,
+        db=db,
+    )
+    if not ok and error_code == "not_deleted":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Team is not deleted")
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+
+    refreshed_team = (
+        await db.execute(select(Team).where(Team.id == team_id))
+    ).scalar_one()
+    member_count = (
+        await db.execute(
+            select(func.count(TeamMember.user_id)).where(TeamMember.team_id == team_id)
+        )
+    ).scalar() or 0
+    return TeamResponse(**_team_base_payload(refreshed_team, member_count))
 
 
 @router.post("/{team_id}/members", response_model=MemberResponse, status_code=status.HTTP_201_CREATED)
@@ -453,6 +586,11 @@ async def add_member(
     team = team_result.scalar_one_or_none()
     if not team:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    if team.deleted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Team is soft-deleted. Restore it before managing members.",
+        )
 
     # Check permission
     if current_user.role != "super_admin":

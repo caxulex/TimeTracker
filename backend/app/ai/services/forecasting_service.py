@@ -746,7 +746,8 @@ class ForecastingService:
                     .where(
                         and_(
                             Project.id == project_id,
-                            Team.company_id == company_id
+                            Team.company_id == company_id,
+                            Team.deleted_at.is_(None),
                         )
                     )
                 )
@@ -758,7 +759,8 @@ class ForecastingService:
                         and_(
                             Project.team_id == team_id,
                             Project.is_archived == False,
-                            Team.company_id == company_id
+                            Team.company_id == company_id,
+                            Team.deleted_at.is_(None),
                         )
                     )
                 )
@@ -769,7 +771,8 @@ class ForecastingService:
                     .where(
                         and_(
                             Project.is_archived == False,
-                            Team.company_id == company_id
+                            Team.company_id == company_id,
+                            Team.deleted_at.is_(None),
                         )
                     )
                     .limit(20)

@@ -231,7 +231,8 @@ async def get_dashboard_stats(
     user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
     project_query = select(func.count(Project.id)).join(Team, Project.team_id == Team.id).where(
         Project.team_id.in_(user_teams),
-        Project.is_archived == False
+        Project.is_archived == False,
+        Team.deleted_at.is_(None),
     )
     if company_id is None:
         pass  # Super admin sees all
@@ -510,6 +511,7 @@ async def get_team_report(
     company_id = get_company_filter(current_user)
     team_query = select(Team).where(Team.id == team_id)
     team_query = apply_company_filter(team_query, Team.company_id, company_id)
+    team_query = team_query.where(Team.deleted_at.is_(None))
     team_result = await db.execute(team_query)
     team = team_result.scalar_one_or_none()
     if not team:
@@ -883,6 +885,7 @@ async def get_admin_dashboard(
 
     # Active projects (within company)
     project_query = select(func.count(Project.id)).join(Team, Project.team_id == Team.id).where(Project.is_archived == False)
+    project_query = project_query.where(Team.deleted_at.is_(None))
     if company_id is None:
         pass  # Super admin sees all
     elif company_id == FILTER_NULL_COMPANY:
@@ -973,6 +976,7 @@ async def get_team_analytics(
     company_id = get_company_filter(current_user)
     teams_query = select(Team)
     teams_query = apply_company_filter(teams_query, Team.company_id, company_id)
+    teams_query = teams_query.where(Team.deleted_at.is_(None))
     teams_result = await db.execute(teams_query)
     teams = teams_result.scalars().all()
 
@@ -1695,6 +1699,7 @@ async def get_team_timesheet(
         # Specific team selected
         team_query = select(Team).where(Team.id == team_id)
         team_query = apply_company_filter(team_query, Team.company_id, company_id)
+        team_query = team_query.where(Team.deleted_at.is_(None))
         team_result = await db.execute(team_query)
         team = team_result.scalar_one_or_none()
         if not team:
