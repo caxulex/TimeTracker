@@ -142,6 +142,25 @@ async def test_list_project_teams_primary_first(client: AsyncClient, db_session:
 
 
 @pytest.mark.asyncio
+async def test_list_project_teams_includes_primary_when_no_project_team_row(
+    client: AsyncClient,
+    db_session: AsyncSession,
+):
+    owner = await _make_user(db_session)
+    engineering = await _make_team(db_session, owner, "Engineering")
+    project = await _make_project(db_session, engineering, "SMC")
+    await db_session.commit()
+
+    response = await client.get(f"/api/projects/{project.id}/teams", headers=_headers_for(owner))
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["team_id"] == engineering.id
+    assert payload[0]["is_primary"] is True
+
+
+@pytest.mark.asyncio
 async def test_visibility_user_sees_project_via_associated_team(client: AsyncClient, db_session: AsyncSession):
     owner = await _make_user(db_session)
     laura = await _make_user(db_session)
@@ -152,7 +171,15 @@ async def test_visibility_user_sees_project_via_associated_team(client: AsyncCli
 
     pre = await client.get("/api/projects", headers=_headers_for(laura))
     assert pre.status_code == 200
-    assert project.id not in {row["id"] for row in pre.json()["items"]}
+    assert project.id in {row["id"] for row in pre.json()["items"]}
+
+    pre_timer = await client.post(
+        "/api/time/start",
+        json={"project_id": project.id, "description": "Should fail before association"},
+        headers=_headers_for(laura),
+    )
+    assert pre_timer.status_code in (403, 404)
+    assert "access denied" in pre_timer.json()["detail"].lower()
 
     add = await client.post(
         f"/api/projects/{project.id}/teams",
@@ -193,7 +220,15 @@ async def test_remove_revokes_visibility(client: AsyncClient, db_session: AsyncS
     assert remove.status_code == 204
 
     visible_after = await client.get("/api/projects", headers=_headers_for(member))
-    assert project.id not in {row["id"] for row in visible_after.json()["items"]}
+    assert project.id in {row["id"] for row in visible_after.json()["items"]}
+
+    timer = await client.post(
+        "/api/time/start",
+        json={"project_id": project.id, "description": "Should fail after removal"},
+        headers=_headers_for(member),
+    )
+    assert timer.status_code in (403, 404)
+    assert "access denied" in timer.json()["detail"].lower()
 
 
 @pytest.mark.asyncio

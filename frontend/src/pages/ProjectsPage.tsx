@@ -479,11 +479,16 @@ interface ProjectCardProps {
 }
 
 function ProjectCard({ project, isAdmin, userTeams, showHealthButton, onViewHealth, onAddToTeam, onEdit, onArchive, onRestore, onDelete }: ProjectCardProps) {
-  const { data: projectTeams = [] } = useProjectTeams(project.id);
+  const { data: projectTeams = [], isFetched: projectTeamsLoaded } = useProjectTeams(project.id);
   const [selectedTeamId, setSelectedTeamId] = useState<number | ''>('');
 
-  const associatedTeamIds = new Set(projectTeams.map((row) => row.team_id));
+  // Treat project.team_id as an implicit association so the UI remains
+  // correct even if the associations payload is delayed or incomplete.
+  const associatedTeamIds = new Set<number>([project.team_id, ...projectTeams.map((row) => row.team_id)]);
+  const userTeamIds = new Set(userTeams.map((team) => team.id));
   const candidateTeams = userTeams.filter((team) => !associatedTeamIds.has(team.id));
+  const userHasTeamAccess = [...userTeamIds].some((teamId) => associatedTeamIds.has(teamId));
+  const showNotOnYourTeam = projectTeamsLoaded && userTeams.length > 0 && !userHasTeamAccess;
 
   React.useEffect(() => {
     if (candidateTeams.length > 0) {
@@ -570,6 +575,17 @@ function ProjectCard({ project, isAdmin, userTeams, showHealthButton, onViewHeal
           </div>
         )}
       </div>
+
+      {showNotOnYourTeam && (
+        <div className="mt-2">
+          <span
+            className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+            title="You can see this project but can't track time. Click 'Add to my team' to start working on it."
+          >
+            Not on your team
+          </span>
+        </div>
+      )}
 
       <div className="mt-3 text-xs text-gray-500" title={teamNames || undefined}>
         Teams: {teamNames || 'Unknown'}

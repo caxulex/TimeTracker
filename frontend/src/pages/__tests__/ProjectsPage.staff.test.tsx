@@ -201,6 +201,24 @@ describe('ProjectsPage - staff project creation', () => {
   });
 
   it('shows add-to-team button when user has one team not yet associated', async () => {
+    projectsGetAll.mockResolvedValueOnce({
+      items: [
+        {
+          id: 1,
+          name: 'Existing Project',
+          description: '',
+          color: '#3B82F6',
+          team_id: 99,
+          is_archived: false,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: null,
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    });
     projectsListTeams.mockResolvedValueOnce([
       {
         team_id: 99,
@@ -222,6 +240,115 @@ describe('ProjectsPage - staff project creation', () => {
     renderPage();
 
     expect(await screen.findByRole('button', { name: /add to my team/i })).toBeInTheDocument();
+  });
+
+  it('renders "Not on your team" badge for projects without user team association', async () => {
+    projectsGetAll.mockResolvedValueOnce({
+      items: [
+        {
+          id: 1,
+          name: 'Existing Project',
+          description: '',
+          color: '#3B82F6',
+          team_id: 99,
+          is_archived: false,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: null,
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    });
+    projectsListTeams.mockResolvedValueOnce([
+      {
+        team_id: 99,
+        team_name: 'Engineering',
+        is_primary: true,
+        added_by_name: null,
+        added_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+
+    setUser('regular_user');
+    renderPage();
+
+    const badge = await screen.findByText(/not on your team/i);
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveAttribute(
+      'title',
+      "You can see this project but can't track time. Click 'Add to my team' to start working on it."
+    );
+  });
+
+  it('does not render "Not on your team" badge when project is already associated', async () => {
+    setUser('regular_user');
+    renderPage();
+
+    await screen.findByText('Existing Project');
+    expect(screen.queryByText(/not on your team/i)).not.toBeInTheDocument();
+  });
+
+  it('shows mixed associated and non-associated projects returned by the API', async () => {
+    projectsGetAll.mockResolvedValueOnce({
+      items: [
+        {
+          id: 1,
+          name: 'Associated Project',
+          description: '',
+          color: '#3B82F6',
+          team_id: 1,
+          is_archived: false,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: null,
+        },
+        {
+          id: 2,
+          name: 'Discovery Project',
+          description: '',
+          color: '#10B981',
+          team_id: 99,
+          is_archived: false,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: null,
+        },
+      ],
+      total: 2,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    });
+    projectsListTeams.mockImplementation((projectId: number) => {
+      if (projectId === 1) {
+        return Promise.resolve([
+          {
+            team_id: 1,
+            team_name: 'My Team',
+            is_primary: true,
+            added_by_name: null,
+            added_at: '2026-01-01T00:00:00Z',
+          },
+        ]);
+      }
+      return Promise.resolve([
+        {
+          team_id: 99,
+          team_name: 'Other Team',
+          is_primary: true,
+          added_by_name: null,
+          added_at: '2026-01-01T00:00:00Z',
+        },
+      ]);
+    });
+
+    setUser('regular_user');
+    renderPage();
+
+    expect(await screen.findByText('Associated Project')).toBeInTheDocument();
+    expect(await screen.findByText('Discovery Project')).toBeInTheDocument();
+    expect(await screen.findByText(/not on your team/i)).toBeInTheDocument();
+    expect(await screen.findByTestId('project-add-team-2')).toBeInTheDocument();
   });
 
   it('hides add-to-team button when user single team is already associated', async () => {
