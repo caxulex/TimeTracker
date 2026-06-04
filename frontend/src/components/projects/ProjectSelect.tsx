@@ -147,7 +147,7 @@ export function ProjectSelect({
         page_size: 20,
         search,
       }),
-    enabled: open && !projectsProp,
+    enabled: open && (!projectsProp || !!search),
     staleTime: 30_000,
   });
 
@@ -162,6 +162,10 @@ export function ProjectSelect({
     () => projectsProp ?? projectsData?.items ?? [],
     [projectsProp, projectsData]
   );
+
+  const displayed = search
+    ? (projectsData?.items ?? [])
+    : (projectsProp ?? projectsData?.items ?? []);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -180,12 +184,7 @@ export function ProjectSelect({
   // free-typing a search query.
   const displayValue = open ? query : selected?.name ?? '';
 
-  const options = useMemo(() => {
-    if (!projectsProp) return projects;
-    const q = query.trim().toLowerCase();
-    if (!q) return projects;
-    return projects.filter((p) => p.name.toLowerCase().includes(q));
-  }, [projects, projectsProp, query]);
+  const options = useMemo(() => displayed, [displayed]);
 
   // When `clearable` is true the dropdown carries an extra synthetic
   // option at index 0 (the "All projects" / clear affordance). All
@@ -308,7 +307,13 @@ export function ProjectSelect({
 
   // ------------ Render ------------
   const hasSelected = !!selected && !open;
-  const showLoading = !projectsProp && isFetchingProjects && options.length === 0;
+  // When a parent passes `projects` (TimerWidget, TimePage manual entry):
+  //   - no search text: show the parent's prefetched list (usually the first ~100)
+  //   - with search text: hit the server so the dropdown can find any project,
+  //     including ones that the parent's capped list does not contain
+  // Without `projects`, keep the existing server-backed behavior for both empty
+  // and non-empty search text.
+  const showLoading = isFetchingProjects && options.length === 0 && (search || !projectsProp);
 
   return (
     <div

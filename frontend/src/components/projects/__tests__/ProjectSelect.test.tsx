@@ -35,6 +35,21 @@ const projects: Project[] = [
   makeProject({ id: 3, name: 'Development', color: '#0000FF' }),
 ];
 
+const prefetchedProjects: Project[] = Array.from({ length: 100 }, (_, index) => {
+  const id = index + 21;
+  return makeProject({
+    id,
+    name: `Prefetched ${id}`,
+    color: '#64748B',
+  });
+});
+
+const smcProject = makeProject({
+  id: 20,
+  name: 'SMC Automations',
+  color: '#F97316',
+});
+
 function renderSelect(props: Partial<React.ComponentProps<typeof ProjectSelect>> = {}) {
   const onChange = vi.fn();
   const queryClient = new QueryClient({
@@ -99,6 +114,55 @@ describe('ProjectSelect', () => {
         search: undefined,
       });
     });
+  });
+
+  it('with projects prop and no typing, renders the prefetched list without server search', async () => {
+    renderSelect({ projects: prefetchedProjects, value: null });
+
+    await userEvent.click(screen.getByRole('combobox'));
+
+    expect(projectsApi.getAll).not.toHaveBeenCalled();
+    expect(screen.getByTestId('project-select-option-21')).toBeInTheDocument();
+    expect(screen.getByTestId('project-select-option-120')).toBeInTheDocument();
+  });
+
+  it('with projects prop and typing, fires server search and shows the server result', async () => {
+    vi.mocked(projectsApi.getAll).mockImplementation(async (filters?: { search?: string }) => {
+      if (filters?.search === 'SMC') {
+        return {
+          items: [smcProject],
+          total: 1,
+          page: 1,
+          size: 20,
+          pages: 1,
+        };
+      }
+
+      return {
+        items: prefetchedProjects,
+        total: prefetchedProjects.length,
+        page: 1,
+        size: 20,
+        pages: 5,
+      };
+    });
+
+    renderSelect({ projects: prefetchedProjects, value: null });
+    const input = screen.getByRole('combobox');
+
+    await userEvent.click(input);
+    await userEvent.type(input, 'SMC');
+
+    await sleep(320);
+    await waitFor(() => {
+      expect(projectsApi.getAll).toHaveBeenCalledWith({
+        include_archived: false,
+        page_size: 20,
+        search: 'SMC',
+      });
+    });
+    expect(screen.getByTestId('project-select-option-20')).toBeInTheDocument();
+    expect(screen.getByText('SMC Automations')).toBeInTheDocument();
   });
 
   it('fires debounced server search after 250ms', async () => {
@@ -185,16 +249,15 @@ describe('ProjectSelect', () => {
     await waitFor(() => expect((screen.getByRole('combobox') as HTMLInputElement).value).toBe('Development'));
   });
 
-  it('pre-fed list mode skips server search and filters locally', async () => {
+  it('pre-fed list mode shows the provided projects when search is empty', async () => {
     const user = userEvent.setup();
     renderSelect({ projects, value: null });
     const input = screen.getByRole('combobox');
 
     await user.click(input);
-    await user.type(input, 'dev');
 
     expect(projectsApi.getAll).not.toHaveBeenCalled();
     expect(screen.getByTestId('project-select-option-3')).toBeInTheDocument();
-    expect(screen.queryByTestId('project-select-option-1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('project-select-option-1')).toBeInTheDocument();
   });
 });
