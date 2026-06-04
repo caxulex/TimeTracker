@@ -9,7 +9,7 @@ import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Company, Project, Team, TeamMember, User
+from app.models import Company, Project, ProjectTeam, Team, TeamMember, User
 from app.services.auth_service import AuthService
 
 
@@ -187,6 +187,63 @@ class TestProjectList:
         response = await client.get("/api/projects")
         # HTTPBearer returns 403 when no credentials
         assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_list_projects_includes_team_associations(
+    client: AsyncClient,
+    db_session: AsyncSession,
+):
+    company = await _make_company(db_session, "Inline Assoc Co")
+    user = await _make_user(db_session, company_id=company.id)
+    primary_team = await _make_team(db_session, user, "Primary Team", company.id)
+    project = await _make_project(db_session, primary_team, "Inline Assoc Project")
+    await db_session.commit()
+
+    response = await client.get("/api/projects", headers=_headers_for(user))
+    assert response.status_code == 200
+
+    row = next(item for item in response.json()["items"] if item["id"] == project.id)
+    assert "team_associations" in row
+    assert isinstance(row["team_associations"], list)
+    assert len(row["team_associations"]) == 1
+    assert row["team_associations"][0]["team_id"] == primary_team.id
+    assert row["team_associations"][0]["team_name"] == "Primary Team"
+    assert row["team_associations"][0]["is_primary"] is True
+
+
+@pytest.mark.asyncio
+async def test_list_projects_team_associations_for_associated_team(
+    client: AsyncClient,
+    db_session: AsyncSession,
+):
+    company = await _make_company(db_session, "Assoc Flag Co")
+    owner = await _make_user(db_session, company_id=company.id)
+    primary_team = await _make_team(db_session, owner, "Team One", company.id)
+    secondary_team = await _make_team(db_session, owner, "Team Two", company.id)
+    project = await _make_project(db_session, primary_team, "Shared Project")
+    db_session.add(
+        ProjectTeam(
+            project_id=project.id,
+            team_id=secondary_team.id,
+            added_by_user_id=owner.id,
+        )
+    )
+    await db_session.commit()
+
+    response = await client.get("/api/projects", headers=_headers_for(owner))
+    assert response.status_code == 200
+
+    row = next(item for item in response.json()["items"] if item["id"] == project.id)
+    team_flags = {
+        assoc["team_id"]: assoc["is_primary"]
+        for assoc in row["team_associations"]
+    }
+
+    assert team_flags == {
+        primary_team.id: True,
+        secondary_team.id: False,
+    }
 
 
 class TestProjectGet:

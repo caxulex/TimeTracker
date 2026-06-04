@@ -80,6 +80,15 @@ const mkProject = (id: number, overrides: Record<string, unknown> = {}) => ({
   color: '#3B82F6',
   team_id: 1,
   team_name: 'Team',
+  team_associations: [
+    {
+      team_id: 1,
+      team_name: 'Team',
+      is_primary: true,
+      added_by_name: null,
+      added_at: '2026-01-01T00:00:00Z',
+    },
+  ],
   is_archived: false,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: null,
@@ -125,6 +134,7 @@ describe('ProjectsPage - pagination', () => {
         /Showing 50 of 97 projects/
       );
     });
+    expect(projectsListTeams).not.toHaveBeenCalled();
     expect(screen.getByTestId('projects-load-more')).toBeInTheDocument();
   });
 

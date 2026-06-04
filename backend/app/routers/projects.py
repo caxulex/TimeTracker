@@ -9,6 +9,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, or_, select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -63,6 +64,14 @@ class ProjectUpdate(BaseModel):
     budget_change_reason: Optional[str] = Field(None, max_length=500, description="Reason for budget change")
 
 
+class ProjectTeamAssociationResponse(BaseModel):
+    team_id: int
+    team_name: str
+    is_primary: bool
+    added_by_name: Optional[str] = None
+    added_at: Optional[datetime] = None
+
+
 class ProjectResponse(BaseModel):
     id: int
     name: str
@@ -74,6 +83,7 @@ class ProjectResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime]
     task_count: Optional[int] = None
+    team_associations: list[ProjectTeamAssociationResponse] = Field(default_factory=list)
     # Budget fields (only populated for admins)
     budget_amount: Optional[float] = None
     deadline: Optional[date] = None
@@ -92,14 +102,6 @@ class PaginatedProjects(BaseModel):
 
 class ProjectTeamAddRequest(BaseModel):
     team_id: int
-
-
-class ProjectTeamAssociationResponse(BaseModel):
-    team_id: int
-    team_name: str
-    is_primary: bool
-    added_by_name: Optional[str] = None
-    added_at: datetime
 
 
 async def check_team_access(db: AsyncSession, team_id: int, user: User, require_admin: bool = False) -> bool:
@@ -162,6 +164,46 @@ async def check_project_visibility(db: AsyncSession, project_id: int, user: User
     return (await db.execute(visibility_query)).scalar_one_or_none() is not None
 
 
+def _serialize_project_team_associations(
+    *,
+    project: Project,
+    primary_team_name: Optional[str],
+) -> list[ProjectTeamAssociationResponse]:
+    """Build team association rows with primary team first."""
+    details_by_team_id: dict[int, ProjectTeamAssociationResponse] = {}
+
+    for assoc in project.team_associations:
+        team_name = assoc.team.name if assoc.team is not None else None
+        if team_name is None and assoc.team_id == project.team_id:
+            team_name = primary_team_name
+
+        details_by_team_id[assoc.team_id] = ProjectTeamAssociationResponse(
+            team_id=assoc.team_id,
+            team_name=team_name or "Unknown",
+            is_primary=assoc.team_id == project.team_id,
+            added_by_name=assoc.added_by.name if assoc.added_by is not None else None,
+            added_at=assoc.added_at,
+        )
+
+    primary_row = details_by_team_id.get(project.team_id)
+    if primary_row is None:
+        primary_row = ProjectTeamAssociationResponse(
+            team_id=project.team_id,
+            team_name=primary_team_name or "Unknown",
+            is_primary=True,
+            added_by_name=None,
+            added_at=project.created_at,
+        )
+    else:
+        primary_row.is_primary = True
+
+    rows = [primary_row]
+    for team_id, data in details_by_team_id.items():
+        if team_id != project.team_id:
+            rows.append(data)
+    return rows
+
+
 @router.get("", response_model=PaginatedProjects)
 async def list_projects(
     page: int = Query(1, ge=1),
@@ -173,7 +215,14 @@ async def list_projects(
     current_user: User = Depends(get_current_active_user)
 ):
     """List projects scoped to the caller's company."""
-    base_query = select(Project).join(Team, Project.team_id == Team.id)
+    base_query = (
+        select(Project)
+        .join(Team, Project.team_id == Team.id)
+        .options(
+            selectinload(Project.team_associations).selectinload(ProjectTeam.team),
+            selectinload(Project.team_associations).selectinload(ProjectTeam.added_by),
+        )
+    )
     count_query = select(func.count(Project.id)).join(Team, Project.team_id == Team.id)
 
     # Multi-tenancy: filter by company through team
@@ -243,6 +292,10 @@ async def list_projects(
 
     items = []
     for project in projects:
+        team_associations = _serialize_project_team_associations(
+            project=project,
+            primary_team_name=team_names.get(project.team_id),
+        )
         item = ProjectResponse(
             id=project.id,
             name=project.name,
@@ -254,6 +307,7 @@ async def list_projects(
             created_at=project.created_at,
             updated_at=project.updated_at,
             task_count=task_counts.get(project.id, 0),
+            team_associations=team_associations,
             budget_amount=float(project.budget_amount) if project.budget_amount and is_admin else None,
             deadline=project.deadline if is_admin else None
         )

@@ -97,6 +97,15 @@ describe('ProjectsPage - staff project creation', () => {
           description: '',
           color: '#3B82F6',
           team_id: 1,
+          team_associations: [
+            {
+              team_id: 1,
+              team_name: 'My Team',
+              is_primary: true,
+              added_by_name: null,
+              added_at: '2026-01-01T00:00:00Z',
+            },
+          ],
           is_archived: false,
           created_at: '2026-01-01T00:00:00Z',
           updated_at: null,
@@ -107,15 +116,6 @@ describe('ProjectsPage - staff project creation', () => {
       page_size: 20,
       pages: 1,
     });
-    projectsListTeams.mockResolvedValue([
-      {
-        team_id: 1,
-        team_name: 'My Team',
-        is_primary: true,
-        added_by_name: null,
-        added_at: '2026-01-01T00:00:00Z',
-      },
-    ]);
     projectsAddTeam.mockResolvedValue({ message: 'ok' });
   });
 
@@ -209,6 +209,15 @@ describe('ProjectsPage - staff project creation', () => {
           description: '',
           color: '#3B82F6',
           team_id: 99,
+          team_associations: [
+            {
+              team_id: 99,
+              team_name: 'Engineering',
+              is_primary: true,
+              added_by_name: null,
+              added_at: '2026-01-01T00:00:00Z',
+            },
+          ],
           is_archived: false,
           created_at: '2026-01-01T00:00:00Z',
           updated_at: null,
@@ -219,15 +228,6 @@ describe('ProjectsPage - staff project creation', () => {
       page_size: 20,
       pages: 1,
     });
-    projectsListTeams.mockResolvedValueOnce([
-      {
-        team_id: 99,
-        team_name: 'Engineering',
-        is_primary: true,
-        added_by_name: null,
-        added_at: '2026-01-01T00:00:00Z',
-      },
-    ]);
     teamsGetAll.mockResolvedValueOnce({
       items: [{ id: 1, name: 'My Team' }],
       total: 1,
@@ -251,6 +251,15 @@ describe('ProjectsPage - staff project creation', () => {
           description: '',
           color: '#3B82F6',
           team_id: 99,
+          team_associations: [
+            {
+              team_id: 99,
+              team_name: 'Engineering',
+              is_primary: true,
+              added_by_name: null,
+              added_at: '2026-01-01T00:00:00Z',
+            },
+          ],
           is_archived: false,
           created_at: '2026-01-01T00:00:00Z',
           updated_at: null,
@@ -261,15 +270,6 @@ describe('ProjectsPage - staff project creation', () => {
       page_size: 20,
       pages: 1,
     });
-    projectsListTeams.mockResolvedValueOnce([
-      {
-        team_id: 99,
-        team_name: 'Engineering',
-        is_primary: true,
-        added_by_name: null,
-        added_at: '2026-01-01T00:00:00Z',
-      },
-    ]);
 
     setUser('regular_user');
     renderPage();
@@ -299,6 +299,15 @@ describe('ProjectsPage - staff project creation', () => {
           description: '',
           color: '#3B82F6',
           team_id: 1,
+          team_associations: [
+            {
+              team_id: 1,
+              team_name: 'My Team',
+              is_primary: true,
+              added_by_name: null,
+              added_at: '2026-01-01T00:00:00Z',
+            },
+          ],
           is_archived: false,
           created_at: '2026-01-01T00:00:00Z',
           updated_at: null,
@@ -309,6 +318,15 @@ describe('ProjectsPage - staff project creation', () => {
           description: '',
           color: '#10B981',
           team_id: 99,
+          team_associations: [
+            {
+              team_id: 99,
+              team_name: 'Other Team',
+              is_primary: true,
+              added_by_name: null,
+              added_at: '2026-01-01T00:00:00Z',
+            },
+          ],
           is_archived: false,
           created_at: '2026-01-01T00:00:00Z',
           updated_at: null,
@@ -319,28 +337,6 @@ describe('ProjectsPage - staff project creation', () => {
       page_size: 20,
       pages: 1,
     });
-    projectsListTeams.mockImplementation((projectId: number) => {
-      if (projectId === 1) {
-        return Promise.resolve([
-          {
-            team_id: 1,
-            team_name: 'My Team',
-            is_primary: true,
-            added_by_name: null,
-            added_at: '2026-01-01T00:00:00Z',
-          },
-        ]);
-      }
-      return Promise.resolve([
-        {
-          team_id: 99,
-          team_name: 'Other Team',
-          is_primary: true,
-          added_by_name: null,
-          added_at: '2026-01-01T00:00:00Z',
-        },
-      ]);
-    });
 
     setUser('regular_user');
     renderPage();
@@ -349,6 +345,7 @@ describe('ProjectsPage - staff project creation', () => {
     expect(await screen.findByText('Discovery Project')).toBeInTheDocument();
     expect(await screen.findByText(/not on your team/i)).toBeInTheDocument();
     expect(await screen.findByTestId('project-add-team-2')).toBeInTheDocument();
+    expect(projectsListTeams).not.toHaveBeenCalled();
   });
 
   it('hides add-to-team button when user single team is already associated', async () => {
