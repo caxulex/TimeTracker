@@ -267,15 +267,21 @@ describe('TimePage', () => {
       const descriptionInput = await screen.findByLabelText(/description/i) as HTMLInputElement;
       expect(descriptionInput.value).toBe('');
 
+      // waitFor needed: modal renders inputs in multiple passes; description appears first via findByLabelText, but project/task inputs may be a tick behind. Sync getElementById fails intermittently in CI without this wait.
+      await waitFor(() => {
+        expect(document.getElementById('manual-entry-project')).toBeTruthy();
+      });
       const projectInput = document.getElementById('manual-entry-project') as HTMLInputElement;
-      expect(projectInput).toBeTruthy();
       await user.click(projectInput);
       await user.type(projectInput, 'Project A');
       const projectOption = await screen.findByTestId('project-select-option-1');
       fireEvent.mouseDown(projectOption);
 
+      // waitFor needed: modal renders inputs in multiple passes; description appears first via findByLabelText, but project/task inputs may be a tick behind. Sync getElementById fails intermittently in CI without this wait.
+      await waitFor(() => {
+        expect(document.getElementById('manual-entry-task')).toBeTruthy();
+      });
       const taskInput = document.getElementById('manual-entry-task') as HTMLInputElement;
-      expect(taskInput).toBeTruthy();
       await user.click(taskInput);
       const taskOption = await screen.findByTestId('task-select-option-101');
       fireEvent.mouseDown(taskOption);
@@ -329,15 +335,21 @@ describe('TimePage', () => {
       const descriptionInput = await screen.findByLabelText(/description/i) as HTMLInputElement;
       await user.type(descriptionInput, 'My custom text');
 
+      // waitFor needed: modal renders inputs in multiple passes; description appears first via findByLabelText, but project/task inputs may be a tick behind. Sync getElementById fails intermittently in CI without this wait.
+      await waitFor(() => {
+        expect(document.getElementById('manual-entry-project')).toBeTruthy();
+      });
       const projectInput = document.getElementById('manual-entry-project') as HTMLInputElement;
-      expect(projectInput).toBeTruthy();
       await user.click(projectInput);
       await user.type(projectInput, 'Project A');
       const projectOption = await screen.findByTestId('project-select-option-1');
       fireEvent.mouseDown(projectOption);
 
+      // waitFor needed: modal renders inputs in multiple passes; description appears first via findByLabelText, but project/task inputs may be a tick behind. Sync getElementById fails intermittently in CI without this wait.
+      await waitFor(() => {
+        expect(document.getElementById('manual-entry-task')).toBeTruthy();
+      });
       const taskInput = document.getElementById('manual-entry-task') as HTMLInputElement;
-      expect(taskInput).toBeTruthy();
       await user.click(taskInput);
       const taskOption = await screen.findByTestId('task-select-option-102');
       fireEvent.mouseDown(taskOption);
