@@ -110,6 +110,7 @@ export interface Project {
   is_archived: boolean;
   created_at: string;
   team?: Team;
+  team_associations: ProjectTeamAssociation[];
   // Budget fields (admin only)
   budget_amount?: number | null;
   deadline?: string | null;
@@ -120,7 +121,7 @@ export interface ProjectTeamAssociation {
   team_name: string;
   is_primary: boolean;
   added_by_name?: string | null;
-  added_at: string;
+  added_at?: string;
 }
 
 export interface ProjectCreate {

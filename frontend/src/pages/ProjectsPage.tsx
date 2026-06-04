@@ -8,7 +8,7 @@ import { Card, CardHeader, Button, Input, Modal, LoadingOverlay } from '../compo
 import { projectsApi, teamsApi } from '../api/client';
 import { formatDate, cn, generateRandomColor, isAdminUser } from '../utils/helpers';
 import { useAuth } from '../hooks/useAuth';
-import { useAddTeamToProject, useProjectTeams } from '../hooks/useApi';
+import { useAddTeamToProject } from '../hooks/useApi';
 import { useNotifications } from '../hooks/useNotifications';
 import { useFeatureEnabled } from '../hooks/useAIFeatures';
 import { useDebounce } from '../hooks/useDebounce';
@@ -479,16 +479,14 @@ interface ProjectCardProps {
 }
 
 function ProjectCard({ project, isAdmin, userTeams, showHealthButton, onViewHealth, onAddToTeam, onEdit, onArchive, onRestore, onDelete }: ProjectCardProps) {
-  const { data: projectTeams = [], isFetched: projectTeamsLoaded } = useProjectTeams(project.id);
+  const projectTeams = project.team_associations ?? [];
   const [selectedTeamId, setSelectedTeamId] = useState<number | ''>('');
 
-  // Treat project.team_id as an implicit association so the UI remains
-  // correct even if the associations payload is delayed or incomplete.
-  const associatedTeamIds = new Set<number>([project.team_id, ...projectTeams.map((row) => row.team_id)]);
+  const associatedTeamIds = new Set<number>(projectTeams.map((row) => row.team_id));
   const userTeamIds = new Set(userTeams.map((team) => team.id));
   const candidateTeams = userTeams.filter((team) => !associatedTeamIds.has(team.id));
   const userHasTeamAccess = [...userTeamIds].some((teamId) => associatedTeamIds.has(teamId));
-  const showNotOnYourTeam = projectTeamsLoaded && userTeams.length > 0 && !userHasTeamAccess;
+  const showNotOnYourTeam = userTeams.length > 0 && !userHasTeamAccess;
 
   React.useEffect(() => {
     if (candidateTeams.length > 0) {
