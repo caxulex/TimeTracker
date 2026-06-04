@@ -13,7 +13,8 @@ import { usersApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import { useNotifications } from '../hooks/useNotifications';
 import { isAdminUser } from '../utils/helpers';
-import type { APIKey, APIKeyCreate, AIProvider } from '../types/apiKey';
+import { formatDistanceToNow } from '../utils/helpers';
+import type { APIKey, APIKeyCreate, AIProvider, APIKeyHealthStatus } from '../types/apiKey';
 
 // Provider options with display info
 const PROVIDERS: { id: AIProvider; name: string; icon: string; hint: string }[] = [
@@ -182,6 +183,73 @@ export function AdminSettingsPage() {
 
   const getProviderIcon = (provider: AIProvider) => {
     return PROVIDERS.find(p => p.id === provider)?.icon || '🔑';
+  };
+
+  const getHealthBadge = (status: APIKeyHealthStatus) => {
+    switch (status) {
+      case 'healthy':
+        return {
+          label: 'Healthy',
+          className: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+        };
+      case 'degraded':
+        return {
+          label: 'Degraded',
+          className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
+        };
+      case 'failing':
+        return {
+          label: 'Failing',
+          className: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+        };
+      default:
+        return {
+          label: 'Not Used',
+          className: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
+        };
+    }
+  };
+
+  const getHealthSummary = (key: APIKey) => {
+    const healthStatus = key.health_status;
+    const totalCalls = key.success_count + key.failure_count;
+    const successRate = totalCalls > 0 ? Math.round((key.success_count / totalCalls) * 100) : 0;
+
+    if (healthStatus === 'healthy') {
+      if (!key.last_successful_call_at) {
+        return { text: 'Last successful call: unavailable', errorText: null };
+      }
+      return {
+        text: `Last successful call: ${formatDistanceToNow(new Date(key.last_successful_call_at))}`,
+        errorText: null,
+      };
+    }
+
+    if (healthStatus === 'failing') {
+      const totalFailedAttempts = key.usage_count > 0 ? key.usage_count : key.failure_count;
+      const shortError = key.last_error_message
+        ? key.last_error_message.length > 120
+          ? `${key.last_error_message.slice(0, 117)}...`
+          : key.last_error_message
+        : null;
+      const errorText = shortError ? ` Last error: ${shortError}` : '';
+      return {
+        text: `Failed ${key.failure_count} of ${totalFailedAttempts} recent calls.${errorText}`,
+        errorText: key.last_error_message,
+      };
+    }
+
+    if (healthStatus === 'degraded') {
+      return {
+        text: `${key.success_count} of ${totalCalls} recent calls succeeded (${successRate}%)`,
+        errorText: key.last_error_message,
+      };
+    }
+
+    return {
+      text: 'No calls made yet',
+      errorText: null,
+    };
   };
 
   // Access denied for non-super admins for API keys, but admins can access AI features
@@ -444,6 +512,10 @@ export function AdminSettingsPage() {
                 key={key.id}
                 className="p-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/50"
               >
+                {(() => {
+                  const healthBadge = getHealthBadge(key.health_status);
+                  const healthSummary = getHealthSummary(key);
+                  return (
                 <div className="flex items-center gap-4">
                   {/* Provider Icon */}
                   <div className="text-2xl">{getProviderIcon(key.provider)}</div>
@@ -459,6 +531,11 @@ export function AdminSettingsPage() {
                           — {key.label}
                         </span>
                       )}
+                      <span
+                        className={`px-2 py-0.5 text-xs rounded-full ${healthBadge.className}`}
+                      >
+                        {healthBadge.label}
+                      </span>
                       <span
                         className={`px-2 py-0.5 text-xs rounded-full ${
                           key.is_active
@@ -480,8 +557,16 @@ export function AdminSettingsPage() {
                         </span>
                       )}
                     </div>
+                    <div
+                      className="text-xs text-gray-600 dark:text-gray-300 mt-1"
+                      title={healthSummary.errorText || undefined}
+                    >
+                      {healthSummary.text}
+                    </div>
                   </div>
                 </div>
+                  );
+                })()}
 
                 {/* Actions */}
                 <div className="flex items-center gap-2">
