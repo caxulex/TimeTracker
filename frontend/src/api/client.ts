@@ -151,8 +151,8 @@ api.interceptors.response.use(
 
     const status = error.response?.status;
 
-    // Handle 401 (Unauthorized) and 403 (Forbidden) - redirect to login
-    if ((status === 401 || status === 403) && !originalRequest._retry) {
+    // Handle 401 (Unauthorized) - redirect to login
+    if (status === 401 && !originalRequest._retry) {
       // Skip if this is a login/refresh request to avoid infinite loops
       const isAuthEndpoint = originalRequest.url?.includes('/auth/login') || 
                              originalRequest.url?.includes('/auth/refresh');
@@ -236,6 +236,12 @@ api.interceptors.response.use(
 
       // Clear tokens AND Zustand auth state, then redirect to login
       forceLogoutAndRedirect();
+      return Promise.reject(error);
+    }
+
+    // 403 Forbidden: authenticated but not authorized for this specific resource.
+    // Let the caller handle the error - do NOT logout or redirect.
+    if (status === 403) {
       return Promise.reject(error);
     }
 
