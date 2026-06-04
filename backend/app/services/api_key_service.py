@@ -146,7 +146,7 @@ class APIKeyService:
             logger.error(f"Failed to decrypt API key {key_id}: {e}")
             return None
 
-    async def get_active_key_for_provider(self, provider: str) -> Optional[str]:
+    async def get_active_key_for_provider(self, provider: str) -> Optional[APIKeyInternal]:
         """
         Get the decrypted active API key for a specific provider.
         This is the primary method for AI services to retrieve keys.
@@ -155,7 +155,7 @@ class APIKeyService:
             provider: Provider name (e.g., 'gemini', 'openai')
 
         Returns:
-            Decrypted API key string or None
+            Decrypted active API key metadata or None
         """
         result = await self.db.execute(
             select(APIKey).where(
@@ -173,22 +173,69 @@ class APIKeyService:
 
         try:
             decrypted = encryption_service.decrypt(api_key.encrypted_key)
-
-            # Update usage tracking
-            await self.db.execute(
-                update(APIKey)
-                .where(APIKey.id == api_key.id)
-                .values(
-                    last_used_at=datetime.now(timezone.utc),
-                    usage_count=APIKey.usage_count + 1
-                )
+            return APIKeyInternal(
+                id=api_key.id,
+                provider=api_key.provider,
+                decrypted_key=decrypted,
+                is_active=api_key.is_active,
             )
-            await self.db.commit()
-
-            return decrypted
         except EncryptionError as e:
             logger.error(f"Failed to decrypt API key for {provider}: {e}")
             return None
+
+    async def record_success(self, key_id: int) -> None:
+        """Record a successful AI call for a key (best-effort)."""
+        now = datetime.now(timezone.utc)
+        try:
+            await self.db.execute(
+                update(APIKey)
+                .where(APIKey.id == key_id)
+                .values(
+                    last_successful_call_at=now,
+                    last_used_at=now,
+                    success_count=APIKey.success_count + 1,
+                    usage_count=APIKey.usage_count + 1,
+                )
+            )
+            await self.db.commit()
+        except Exception as exc:
+            await self.db.rollback()
+            logger.warning(
+                "Failed to record API key success for key_id=%s: %s",
+                key_id,
+                exc,
+            )
+
+    async def record_failure(
+        self,
+        key_id: int,
+        error_message: str,
+        status_code: Optional[int] = None,
+    ) -> None:
+        """Record a failed AI call for a key (best-effort)."""
+        now = datetime.now(timezone.utc)
+        safe_error = (error_message or "Unknown error")[:1000]
+        try:
+            await self.db.execute(
+                update(APIKey)
+                .where(APIKey.id == key_id)
+                .values(
+                    last_failed_call_at=now,
+                    last_used_at=now,
+                    failure_count=APIKey.failure_count + 1,
+                    usage_count=APIKey.usage_count + 1,
+                    last_error_message=safe_error,
+                    last_error_status_code=status_code,
+                )
+            )
+            await self.db.commit()
+        except Exception as exc:
+            await self.db.rollback()
+            logger.warning(
+                "Failed to record API key failure for key_id=%s: %s",
+                key_id,
+                exc,
+            )
 
     async def list_all(
         self,

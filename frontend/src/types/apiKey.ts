@@ -8,6 +8,8 @@
  */
 export type AIProvider = 'gemini' | 'openai' | 'anthropic' | 'azure_openai' | 'other';
 
+export type APIKeyHealthStatus = 'healthy' | 'degraded' | 'failing' | 'unused';
+
 /**
  * API Key response from server (never contains actual key)
  */
@@ -22,6 +24,13 @@ export interface APIKey {
   updated_at: string;
   last_used_at: string | null;
   usage_count: number;
+  last_successful_call_at: string | null;
+  last_failed_call_at: string | null;
+  success_count: number;
+  failure_count: number;
+  last_error_message: string | null;
+  last_error_status_code: number | null;
+  health_status: APIKeyHealthStatus;
   notes: string | null;
 }
 

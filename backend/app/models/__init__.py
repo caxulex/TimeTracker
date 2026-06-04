@@ -815,12 +815,57 @@ class APIKey(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     usage_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_successful_call_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_failed_call_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    success_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_error_status_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Additional metadata
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationships
     creator: Mapped[User] = relationship("User", foreign_keys=[created_by])
+
+    @hybrid_property
+    def health_status(self) -> str:
+        """Compute provider health from recent call outcomes.
+
+        Thresholds:
+        - Success recency window: 24 hours
+        - Failure recency window: 1 hour
+        """
+        if self.usage_count == 0:
+            return "unused"
+
+        now = datetime.now(timezone.utc)
+        success_window = now.timestamp() - (24 * 60 * 60)
+        failure_window = now.timestamp() - (60 * 60)
+
+        has_recent_success = bool(
+            self.last_successful_call_at
+            and self.last_successful_call_at.timestamp() >= success_window
+        )
+        has_recent_failure = bool(
+            self.last_failed_call_at
+            and self.last_failed_call_at.timestamp() >= failure_window
+        )
+
+        # Explicit outage signature: key has been used but never succeeded.
+        if self.usage_count > 0 and self.success_count == 0:
+            return "failing"
+
+        if has_recent_success and has_recent_failure:
+            return "degraded"
+
+        if has_recent_success and not has_recent_failure:
+            return "healthy"
+
+        if not has_recent_success and has_recent_failure:
+            return "failing"
+
+        return "unused"
 
     def __repr__(self) -> str:
         return f"<APIKey(id={self.id}, provider={self.provider}, active={self.is_active})>"

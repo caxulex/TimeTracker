@@ -86,6 +86,13 @@ class APIKeyResponse(BaseModel):
     updated_at: datetime
     last_used_at: Optional[datetime] = None
     usage_count: int
+    last_successful_call_at: Optional[datetime] = None
+    last_failed_call_at: Optional[datetime] = None
+    success_count: int = 0
+    failure_count: int = 0
+    last_error_message: Optional[str] = None
+    last_error_status_code: Optional[int] = None
+    health_status: str = "unused"
     notes: Optional[str] = None
 
     class Config:

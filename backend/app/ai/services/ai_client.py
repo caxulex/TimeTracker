@@ -38,6 +38,9 @@ class InvalidResponseError(AIProviderError):
 class BaseAIProvider(ABC):
     """Abstract base class for AI providers."""
 
+    def __init__(self, key_id: int):
+        self.key_id = key_id
+
     @abstractmethod
     async def generate(
         self,
@@ -58,7 +61,8 @@ class BaseAIProvider(ABC):
 class GeminiProvider(BaseAIProvider):
     """Google Gemini AI provider."""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, key_id: int):
+        super().__init__(key_id)
         self.api_key = api_key
         self._client = None
         self._model_name = ai_settings.GEMINI_MODEL
@@ -148,7 +152,8 @@ class GeminiProvider(BaseAIProvider):
 class OpenAIProvider(BaseAIProvider):
     """OpenAI GPT provider."""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, key_id: int):
+        super().__init__(key_id)
         self.api_key = api_key
         self._client = None
         self._model_name = ai_settings.OPENAI_MODEL
@@ -244,23 +249,31 @@ class AIClient:
     def __init__(self):
         self._primary_provider: Optional[BaseAIProvider] = None
         self._fallback_provider: Optional[BaseAIProvider] = None
+        self._api_key_service: Optional[APIKeyService] = None
         self._initialized = False
+
+    def bind_db(self, db) -> None:
+        """Bind a request-scoped DB session for key health tracking writes."""
+        self._api_key_service = APIKeyService(db)
 
     async def initialize(self, db) -> bool:
         """Initialize AI clients with API keys from database."""
         try:
-            api_key_service = APIKeyService(db)
+            self.bind_db(db)
+            api_key_service = self._api_key_service
+            if api_key_service is None:
+                return False
 
             # Get Gemini key (primary)
             gemini_key = await api_key_service.get_active_key_for_provider("gemini")
             if gemini_key:
-                self._primary_provider = GeminiProvider(gemini_key)
+                self._primary_provider = GeminiProvider(gemini_key.decrypted_key, gemini_key.id)
                 logger.info("Gemini provider initialized")
 
             # Get OpenAI key (fallback)
             openai_key = await api_key_service.get_active_key_for_provider("openai")
             if openai_key:
-                self._fallback_provider = OpenAIProvider(openai_key)
+                self._fallback_provider = OpenAIProvider(openai_key.decrypted_key, openai_key.id)
                 logger.info("OpenAI fallback provider initialized")
 
             self._initialized = self._primary_provider is not None or self._fallback_provider is not None
@@ -324,18 +337,23 @@ class AIClient:
                 if feature:
                     response["feature"] = feature
 
+                await self._record_success(provider)
+
                 return response
 
             except RateLimitError as e:
                 logger.warning(f"Rate limit hit on {e.provider}, trying fallback")
+                await self._record_failure(provider, e)
                 errors.append(str(e))
                 continue
             except AIProviderError as e:
                 logger.warning(f"Provider {e.provider} failed: {e}")
+                await self._record_failure(provider, e)
                 errors.append(str(e))
                 continue
             except Exception as e:
                 logger.error(f"Unexpected error with provider: {e}")
+                await self._record_failure(provider, e)
                 errors.append(str(e))
                 continue
 
@@ -344,6 +362,25 @@ class AIClient:
             f"All AI providers failed: {'; '.join(errors)}",
             "all"
         )
+
+    async def _record_success(self, provider: BaseAIProvider) -> None:
+        """Best-effort success tracking per API key."""
+        if self._api_key_service is None:
+            return
+        key_id = getattr(provider, "key_id", None)
+        if key_id is None:
+            return
+        await self._api_key_service.record_success(key_id)
+
+    async def _record_failure(self, provider: BaseAIProvider, error: Exception) -> None:
+        """Best-effort failure tracking per API key."""
+        if self._api_key_service is None:
+            return
+        key_id = getattr(provider, "key_id", None)
+        if key_id is None:
+            return
+        status_code = getattr(error, "status_code", None)
+        await self._api_key_service.record_failure(key_id, str(error), status_code)
 
     def _get_provider_order(
         self,
@@ -388,6 +425,8 @@ async def get_ai_client(db) -> AIClient:
     if _ai_client_instance is None:
         _ai_client_instance = AIClient()
         await _ai_client_instance.initialize(db)
+    else:
+        _ai_client_instance.bind_db(db)
 
     return _ai_client_instance
 
