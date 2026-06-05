@@ -349,10 +349,13 @@ class TestProjectDelete:
             f"/api/projects/{test_project.id}",
             headers=auth_headers,
         )
-        # API permanently deletes the project and returns 200 with message
+        # API permanently deletes the project and returns deletion counts
         assert response.status_code == 200
         data = response.json()
-        assert "message" in data
+        assert "deleted_tasks" in data
+        assert "deleted_entries" in data
+        assert isinstance(data["deleted_tasks"], int)
+        assert isinstance(data["deleted_entries"], int)
         
         # Verify project is permanently deleted (returns 404)
         get_response = await client.get(

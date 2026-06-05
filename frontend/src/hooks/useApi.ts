@@ -74,6 +74,28 @@ export function useDeleteProject() {
   });
 }
 
+export function useArchiveProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, isArchived }: { id: number; isArchived: boolean }) =>
+      projectsApi.archive(id, isArchived),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
+export function useMergeProjects() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sourceId, targetProjectId }: { sourceId: number; targetProjectId: number }) =>
+      projectsApi.merge(sourceId, { target_project_id: targetProjectId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
 export function useAddTeamToProject() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -149,10 +149,40 @@ export interface ProjectUpdate {
   description?: string | null;
   color?: string;
   is_archived?: boolean;
+  team_id?: number;
   // Budget fields (admin only)
   budget_amount?: number | null;
   deadline?: string | null;
   budget_change_reason?: string;
+}
+
+export interface ProjectDeletePreview {
+  tasks: number;
+  entries: number;
+}
+
+export interface ProjectDeleteResult {
+  deleted_tasks: number;
+  deleted_entries: number;
+}
+
+export interface ProjectMergeRequest {
+  target_project_id: number;
+}
+
+export interface ProjectMergeResult {
+  moved_tasks: number;
+  moved_entries: number;
+  renamed_tasks: string[];
+  archived_source: boolean;
+}
+
+export interface ProjectMergePreview {
+  tasks_to_move: number;
+  entries_to_move: number;
+  task_name_conflicts: string[];
+  target_existing_tasks: number;
+  source_will_be_archived: boolean;
 }
 
 // Task Types

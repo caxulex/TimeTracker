@@ -17,6 +17,11 @@ import type {
   ProjectUpdate,
   ProjectTeamAssociation,
   TeamProject,
+  ProjectDeletePreview,
+  ProjectDeleteResult,
+  ProjectMergeRequest,
+  ProjectMergeResult,
+  ProjectMergePreview,
   ProjectFilters,
   Task,
   TaskCreate,
@@ -461,12 +466,35 @@ export const projectsApi = {
     return response.data;
   },
 
-  delete: async (id: number): Promise<void> => {
-    await api.delete(`/api/projects/${id}`);
+  archive: async (id: number, isArchived: boolean): Promise<Project> => {
+    const response = await api.patch<Project>(`/api/projects/${id}/archive`, {
+      is_archived: isArchived,
+    });
+    return response.data;
+  },
+
+  deletePreview: async (id: number): Promise<ProjectDeletePreview> => {
+    const response = await api.get<ProjectDeletePreview>(`/api/projects/${id}/delete-preview`);
+    return response.data;
+  },
+
+  delete: async (id: number): Promise<ProjectDeleteResult> => {
+    const response = await api.delete<ProjectDeleteResult>(`/api/projects/${id}`);
+    return response.data;
   },
 
   restore: async (id: number): Promise<Project> => {
     const response = await api.post<Project>(`/api/projects/${id}/restore`);
+    return response.data;
+  },
+
+  merge: async (sourceId: number, data: ProjectMergeRequest): Promise<ProjectMergeResult> => {
+    const response = await api.post<ProjectMergeResult>(`/api/projects/${sourceId}/merge`, data);
+    return response.data;
+  },
+
+  mergePreview: async (sourceId: number, data: ProjectMergeRequest): Promise<ProjectMergePreview> => {
+    const response = await api.post<ProjectMergePreview>(`/api/projects/${sourceId}/merge/preview`, data);
     return response.data;
   },
 
