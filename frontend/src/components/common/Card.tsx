@@ -1,17 +1,16 @@
 // ============================================
 // TIME TRACKER - CARD COMPONENT
 // ============================================
-import { ReactNode } from 'react';
+import { HTMLAttributes, ReactNode } from 'react';
 import { cn } from '../../utils/helpers';
 
-export interface CardProps {
+export interface CardProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode;
   className?: string;
   padding?: 'none' | 'sm' | 'md' | 'lg';
-  onClick?: () => void;
 }
 
-export function Card({ children, className, padding = 'md', onClick }: CardProps) {
+export function Card({ children, className, padding = 'md', onClick, ...rest }: CardProps) {
   const paddingStyles = {
     none: '',
     sm: 'p-3',
@@ -24,6 +23,7 @@ export function Card({ children, className, padding = 'md', onClick }: CardProps
   return (
     <Component
       onClick={onClick}
+      {...rest}
       className={cn(
         'bg-white rounded-xl shadow-sm border border-gray-200',
         paddingStyles[padding],

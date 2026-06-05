@@ -91,6 +91,17 @@ function renderPage() {
 }
 
 describe('ProjectsPage per-project actions', () => {
+  const clickActionForProject = async (
+    user: ReturnType<typeof userEvent.setup>,
+    projectId: number,
+    actionLabel: string
+  ) => {
+    const card = await screen.findByTestId(`project-card-${projectId}`);
+    const kebabButton = within(card).getByTestId('project-kebab-button');
+    await user.click(kebabButton);
+    await user.click(await screen.findByText(actionLabel));
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     teamsGetAll.mockResolvedValue({
@@ -141,10 +152,7 @@ describe('ProjectsPage per-project actions', () => {
     const user = userEvent.setup();
     renderPage();
 
-    const buttons = await screen.findAllByTestId('project-kebab-button');
-    await user.click(buttons[0]);
-    const menu = await screen.findByTestId('project-kebab-menu');
-    await user.click(within(menu).getByText('Edit'));
+    await clickActionForProject(user, 1, 'Edit');
 
     const nameInput = await screen.findByDisplayValue('Source Project');
     expect(nameInput).toHaveValue('Source Project');
@@ -165,9 +173,7 @@ describe('ProjectsPage per-project actions', () => {
     const user = userEvent.setup();
     renderPage();
 
-    const buttons = await screen.findAllByTestId('project-kebab-button');
-    await user.click(buttons[0]);
-    await user.click(screen.getByText('Archive'));
+    await clickActionForProject(user, 1, 'Archive');
 
     expect(await screen.findByText(/Archive "Source Project"/i)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Archive' }));
@@ -187,9 +193,7 @@ describe('ProjectsPage per-project actions', () => {
     const user = userEvent.setup();
     renderPage();
 
-    const buttons = await screen.findAllByTestId('project-kebab-button');
-    await user.click(buttons[0]);
-    await user.click(screen.getByText('Delete'));
+    await clickActionForProject(user, 1, 'Delete');
 
     const modal = await screen.findByRole('dialog');
     expect(modal).toHaveTextContent(/381\s*tasks/);
@@ -213,9 +217,7 @@ describe('ProjectsPage per-project actions', () => {
     const user = userEvent.setup();
     renderPage();
 
-    const buttons = await screen.findAllByTestId('project-kebab-button');
-    await user.click(buttons[0]);
-    await user.click(screen.getByText('Merge with...'));
+    await clickActionForProject(user, 1, 'Merge with...');
 
     expect(await screen.findByTestId('merge-target-search')).toBeInTheDocument();
     expect(screen.queryByTestId('merge-target-option-1')).not.toBeInTheDocument();
