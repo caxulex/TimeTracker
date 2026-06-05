@@ -10,6 +10,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useAuth } from '../hooks/useAuth';
 import { useStaffNotifications } from '../hooks/useStaffNotifications';
 import { UserSelect } from '../components/users/UserSelect';
+import { TeamProjectsSection } from '../components/teams/TeamProjectsSection';
 import type { Team, TeamMember, User } from '../types';
 import axios from 'axios';
 
@@ -460,6 +461,12 @@ export function TeamsPage() {
                   ))}
                 </div>
               </div>
+
+              <TeamProjectsSection
+                teamId={teamDetails.id}
+                teamName={teamDetails.name}
+                isArchivedTeam={!!teamDetails.deleted_at}
+              />
             </Card>
           ) : (
             <Card className="text-center py-12">

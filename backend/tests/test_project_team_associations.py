@@ -77,7 +77,7 @@ async def test_add_team_success_and_audit_log(client: AsyncClient, db_session: A
 
 
 @pytest.mark.asyncio
-async def test_add_team_requires_team_membership(client: AsyncClient, db_session: AsyncSession):
+async def test_add_team_allows_any_authenticated_user(client: AsyncClient, db_session: AsyncSession):
     owner = await _make_user(db_session)
     outsider = await _make_user(db_session)
     engineering = await _make_team(db_session, owner, "Engineering")
@@ -90,11 +90,11 @@ async def test_add_team_requires_team_membership(client: AsyncClient, db_session
         json={"team_id": admin_team.id},
         headers=_headers_for(outsider),
     )
-    assert response.status_code == 403
+    assert response.status_code == 201
 
 
 @pytest.mark.asyncio
-async def test_add_team_already_associated_returns_409(client: AsyncClient, db_session: AsyncSession):
+async def test_add_team_already_associated_is_idempotent(client: AsyncClient, db_session: AsyncSession):
     owner = await _make_user(db_session)
     engineering = await _make_team(db_session, owner, "Engineering")
     admin_team = await _make_team(db_session, owner, "Admin")
@@ -107,7 +107,12 @@ async def test_add_team_already_associated_returns_409(client: AsyncClient, db_s
         json={"team_id": admin_team.id},
         headers=_headers_for(owner),
     )
-    assert response.status_code == 409
+    assert response.status_code == 201
+
+    assoc_rows = await db_session.execute(
+        select(ProjectTeam).where(ProjectTeam.project_id == project.id, ProjectTeam.team_id == admin_team.id)
+    )
+    assert len(assoc_rows.scalars().all()) == 1
 
 
 @pytest.mark.asyncio

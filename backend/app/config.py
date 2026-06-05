@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     """Application settings with security validation"""
 
     model_config = {
-        "env_file": ".env",
+        "env_file": None if os.getenv("TESTING") == "1" else ".env",
         "env_file_encoding": "utf-8",
         "extra": "ignore",
         "case_sensitive": True,

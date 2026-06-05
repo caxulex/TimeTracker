@@ -1,0 +1,233 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { TeamsPage } from '../TeamsPage';
+
+const mockAdmin = {
+  id: 1,
+  name: 'Admin',
+  email: 'admin@example.com',
+  role: 'super_admin' as const,
+  is_active: true,
+  company_id: 1,
+  created_at: '2026-01-01T00:00:00Z',
+};
+
+vi.mock('../../stores/authStore', () => ({
+  useAuthStore: () => ({ user: mockAdmin }),
+}));
+
+vi.mock('../../hooks/useAuth', () => ({
+  useAuth: () => ({ user: mockAdmin, isAuthenticated: true }),
+}));
+
+const notifySuccess = vi.fn();
+const notifyError = vi.fn();
+
+vi.mock('../../hooks/useStaffNotifications', () => ({
+  useStaffNotifications: () => ({
+    notifySuccess,
+    notifyError,
+  }),
+}));
+
+vi.mock('../../hooks/useDebounce', () => ({
+  useDebounce: vi.fn((value: unknown) => value),
+}));
+
+const teamsGetAll = vi.fn();
+const teamsGetById = vi.fn();
+const teamsGetProjects = vi.fn();
+const usersGetAll = vi.fn();
+const projectsGetAll = vi.fn();
+const addTeamToProject = vi.fn();
+const removeTeamFromProject = vi.fn();
+
+vi.mock('../../api/client', () => ({
+  teamsApi: {
+    getAll: (...args: unknown[]) => teamsGetAll(...args),
+    getById: (...args: unknown[]) => teamsGetById(...args),
+    getProjects: (...args: unknown[]) => teamsGetProjects(...args),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    addMember: vi.fn(),
+    removeMember: vi.fn(),
+    restore: vi.fn(),
+    listDeleted: vi.fn(),
+  },
+  usersApi: {
+    getAll: (...args: unknown[]) => usersGetAll(...args),
+  },
+  projectsApi: {
+    getAll: (...args: unknown[]) => projectsGetAll(...args),
+    getById: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    restore: vi.fn(),
+    addTeam: (...args: unknown[]) => addTeamToProject(...args),
+    removeTeam: (...args: unknown[]) => removeTeamFromProject(...args),
+    listTeams: vi.fn(),
+  },
+}));
+
+function renderPage() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <TeamsPage />
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
+const mkTeam = (id: number, overrides: Record<string, unknown> = {}) => ({
+  id,
+  name: `Team ${id}`,
+  owner_id: 1,
+  member_count: 2,
+  created_at: '2026-01-01T00:00:00Z',
+  ...overrides,
+});
+
+const allProjects = [
+  { id: 11, name: 'Alpha Project', color: '#f97316', is_archived: false, primary_team_id: 1, primary_team_name: 'Team 1', association_type: 'primary' as const },
+  { id: 12, name: 'Beta Project', color: '#10b981', is_archived: false, primary_team_id: 2, primary_team_name: 'Other Team', association_type: 'additional' as const },
+  { id: 13, name: 'Gamma Project', color: '#3b82f6', is_archived: false, primary_team_id: 2, primary_team_name: 'Other Team', association_type: 'additional' as const },
+];
+
+let teamProjects = [allProjects[0], allProjects[1]];
+
+describe('TeamsPage - projects section', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    teamProjects = [allProjects[0], allProjects[1]];
+
+    teamsGetAll.mockResolvedValue({
+      items: [mkTeam(1)],
+      total: 1,
+      page: 1,
+      page_size: 50,
+      pages: 1,
+    });
+
+    teamsGetById.mockResolvedValue({
+      ...mkTeam(1),
+      members: [
+        {
+          user_id: 1,
+          team_id: 1,
+          role: 'owner',
+          joined_at: '2026-01-01T00:00:00Z',
+          user: {
+            id: 1,
+            email: 'admin@example.com',
+            name: 'Admin',
+            role: 'super_admin',
+            is_active: true,
+            created_at: '2026-01-01T00:00:00Z',
+          },
+        },
+      ],
+    });
+
+    teamsGetProjects.mockImplementation(async () => teamProjects);
+    usersGetAll.mockResolvedValue({ items: [], total: 0, page: 1, size: 20, pages: 1 });
+
+    projectsGetAll.mockImplementation(async (filters?: { search?: string }) => {
+      const search = (filters?.search ?? '').toLowerCase();
+      const items = allProjects.filter(
+        (project) => project.name.toLowerCase().includes(search) && !teamProjects.some((assoc) => assoc.id === project.id)
+      );
+      return { items, total: items.length, page: 1, size: 100, pages: 1 };
+    });
+
+    addTeamToProject.mockImplementation(async ({ projectId }: { projectId: number }) => {
+      const project = allProjects.find((item) => item.id === projectId);
+      if (project && !teamProjects.some((assoc) => assoc.id === project.id)) {
+        teamProjects = [...teamProjects, project];
+      }
+      return { message: 'Team associated with project' };
+    });
+
+    removeTeamFromProject.mockImplementation(async ({ projectId }: { projectId: number }) => {
+      teamProjects = teamProjects.filter((project) => project.id !== projectId);
+    });
+  });
+
+  it('renders the projects section, info banner, and primary-team label', async () => {
+    renderPage();
+
+    const teamCard = await screen.findByText('Team 1');
+    await userEvent.setup().click(teamCard);
+
+    await screen.findByText('Projects (2)');
+    expect(screen.getByText('Changes here affect all team members, not just you.')).toBeInTheDocument();
+    expect(screen.getByText('Alpha Project')).toBeInTheDocument();
+    expect(screen.getByText('Beta Project')).toBeInTheDocument();
+    expect(screen.getByText('Primary: Other Team')).toBeInTheDocument();
+  });
+
+  it('shows the empty state when a team has no projects', async () => {
+    teamProjects = [];
+    renderPage();
+
+    const teamCard = await screen.findByText('Team 1');
+    await userEvent.setup().click(teamCard);
+
+    await screen.findByText('No projects yet. Click + Add Project to get started.');
+  });
+
+  it('supports searching, selecting, confirming, and immediately showing an added project', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const teamCard = await screen.findByText('Team 1');
+    await user.click(teamCard);
+    await screen.findByText('Projects (2)');
+
+    await user.click(screen.getByRole('button', { name: '+ Add Project' }));
+    const search = screen.getByLabelText('Search projects');
+    await user.type(search, 'Gamma');
+
+    await screen.findByRole('button', { name: 'Gamma Project' });
+    await user.click(screen.getByRole('button', { name: 'Gamma Project' }));
+    const addDialog = await screen.findByRole('dialog', { name: /Add Project to Team 1/i });
+    expect(addDialog.textContent).toContain('Gamma Project');
+
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+
+    await waitFor(() => {
+      expect(addTeamToProject).toHaveBeenCalled();
+    });
+    expect(await screen.findByRole('heading', { name: 'Projects (3)' })).toBeInTheDocument();
+    expect(screen.getByText('Gamma Project')).toBeInTheDocument();
+  });
+
+  it('supports removing a project with confirmation and updates the list', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const teamCard = await screen.findByText('Team 1');
+    await user.click(teamCard);
+    await screen.findByText('Projects (2)');
+
+    await user.click(screen.getByRole('button', { name: /Remove Beta Project from team/i }));
+    const removeDialog = await screen.findByRole('dialog', { name: /Remove project from team\?/i });
+    expect(removeDialog.textContent).toContain('Beta Project');
+
+    await user.click(screen.getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() => {
+      expect(removeTeamFromProject).toHaveBeenCalled();
+    });
+    expect(await screen.findByRole('heading', { name: 'Projects (1)' })).toBeInTheDocument();
+    expect(screen.queryByText('Beta Project')).not.toBeInTheDocument();
+  });
+});

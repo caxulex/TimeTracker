@@ -124,6 +124,16 @@ export interface ProjectTeamAssociation {
   added_at?: string;
 }
 
+export interface TeamProject {
+  id: number;
+  name: string;
+  color: string;
+  is_archived: boolean;
+  primary_team_id: number;
+  primary_team_name?: string | null;
+  association_type: 'primary' | 'additional';
+}
+
 export interface ProjectCreate {
   team_id: number;
   name: string;
