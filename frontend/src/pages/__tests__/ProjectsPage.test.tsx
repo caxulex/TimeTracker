@@ -91,12 +91,22 @@ function renderPage() {
 }
 
 describe('ProjectsPage per-project actions', () => {
+  const findProjectCard = async (projectId: number) => {
+    return waitFor(() => {
+      const card = screen.queryByTestId(`project-card-${projectId}`);
+      if (!card) {
+        throw new Error(`Card with id ${projectId} not found in DOM`);
+      }
+      return card;
+    });
+  };
+
   const clickActionForProject = async (
     user: ReturnType<typeof userEvent.setup>,
     projectId: number,
     actionLabel: string
   ) => {
-    const card = await screen.findByTestId(`project-card-${projectId}`);
+    const card = await findProjectCard(projectId);
     const kebabButton = within(card).getByTestId('project-kebab-button');
     await user.click(kebabButton);
     await user.click(await screen.findByText(actionLabel));
@@ -192,6 +202,7 @@ describe('ProjectsPage per-project actions', () => {
   it('delete modal shows counts and requires exact name before enabling delete', async () => {
     const user = userEvent.setup();
     renderPage();
+    await findProjectCard(1);
 
     await clickActionForProject(user, 1, 'Delete');
 

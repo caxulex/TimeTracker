@@ -18,10 +18,8 @@ export function Card({ children, className, padding = 'md', onClick, ...rest }: 
     lg: 'p-6',
   };
 
-  const Component = onClick ? 'button' : 'div';
-
   return (
-    <Component
+    <div
       onClick={onClick}
       {...rest}
       className={cn(
@@ -32,7 +30,7 @@ export function Card({ children, className, padding = 'md', onClick, ...rest }: 
       )}
     >
       {children}
-    </Component>
+    </div>
   );
 }
 
