@@ -3,7 +3,7 @@
 // Phase 7: Testing - Time entries page component
 // ============================================
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -264,24 +264,17 @@ describe('TimePage', () => {
       const addButton = screen.getAllByRole('button', { name: /manual|add/i })[0];
       await user.click(addButton);
 
+      const modal = await screen.findByRole('dialog');
       const descriptionInput = await screen.findByLabelText(/description/i) as HTMLInputElement;
       expect(descriptionInput.value).toBe('');
 
-      // waitFor needed: modal renders inputs in multiple passes; description appears first via findByLabelText, but project/task inputs may be a tick behind. Sync getElementById fails intermittently in CI without this wait.
-      await waitFor(() => {
-        expect(document.getElementById('manual-entry-project')).toBeTruthy();
-      });
-      const projectInput = document.getElementById('manual-entry-project') as HTMLInputElement;
+      const projectInput = await within(modal).findByLabelText(/project/i) as HTMLInputElement;
       await user.click(projectInput);
       await user.type(projectInput, 'Project A');
       const projectOption = await screen.findByTestId('project-select-option-1');
       fireEvent.mouseDown(projectOption);
 
-      // waitFor needed: modal renders inputs in multiple passes; description appears first via findByLabelText, but project/task inputs may be a tick behind. Sync getElementById fails intermittently in CI without this wait.
-      await waitFor(() => {
-        expect(document.getElementById('manual-entry-task')).toBeTruthy();
-      });
-      const taskInput = document.getElementById('manual-entry-task') as HTMLInputElement;
+      const taskInput = await within(modal).findByLabelText(/task/i) as HTMLInputElement;
       await user.click(taskInput);
       const taskOption = await screen.findByTestId('task-select-option-101');
       fireEvent.mouseDown(taskOption);
@@ -332,24 +325,17 @@ describe('TimePage', () => {
       const addButton = screen.getAllByRole('button', { name: /manual|add/i })[0];
       await user.click(addButton);
 
+      const modal = await screen.findByRole('dialog');
       const descriptionInput = await screen.findByLabelText(/description/i) as HTMLInputElement;
       await user.type(descriptionInput, 'My custom text');
 
-      // waitFor needed: modal renders inputs in multiple passes; description appears first via findByLabelText, but project/task inputs may be a tick behind. Sync getElementById fails intermittently in CI without this wait.
-      await waitFor(() => {
-        expect(document.getElementById('manual-entry-project')).toBeTruthy();
-      });
-      const projectInput = document.getElementById('manual-entry-project') as HTMLInputElement;
+      const projectInput = await within(modal).findByLabelText(/project/i) as HTMLInputElement;
       await user.click(projectInput);
       await user.type(projectInput, 'Project A');
       const projectOption = await screen.findByTestId('project-select-option-1');
       fireEvent.mouseDown(projectOption);
 
-      // waitFor needed: modal renders inputs in multiple passes; description appears first via findByLabelText, but project/task inputs may be a tick behind. Sync getElementById fails intermittently in CI without this wait.
-      await waitFor(() => {
-        expect(document.getElementById('manual-entry-task')).toBeTruthy();
-      });
-      const taskInput = document.getElementById('manual-entry-task') as HTMLInputElement;
+      const taskInput = await within(modal).findByLabelText(/task/i) as HTMLInputElement;
       await user.click(taskInput);
       const taskOption = await screen.findByTestId('task-select-option-102');
       fireEvent.mouseDown(taskOption);
@@ -367,10 +353,7 @@ describe('TimePage', () => {
       );
 
       await waitFor(() => {
-        // Look for filter or select element
-        const filterSelect = screen.queryByRole('combobox');
-        // Should have filter available
-        expect(filterSelect).toBeDefined();
+        expect(screen.getByText('All Projects')).toBeInTheDocument();
       });
     });
   });
