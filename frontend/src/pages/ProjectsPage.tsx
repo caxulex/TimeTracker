@@ -555,7 +555,7 @@ function ProjectCard({
   };
 
   return (
-    <Card className="hover:shadow-md transition-shadow">
+    <Card className="hover:shadow-md transition-shadow" data-testid={`project-card-${project.id}`}>
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           <div
