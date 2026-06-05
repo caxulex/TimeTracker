@@ -199,7 +199,9 @@ describe('ProjectsPage per-project actions', () => {
     expect(submit).toBeDisabled();
 
     await user.type(screen.getByTestId('delete-project-confirm-name'), 'Source Project');
-    expect(submit).toBeEnabled();
+    await waitFor(() => {
+      expect(submit).toBeEnabled();
+    });
 
     await user.click(submit);
     await waitFor(() => {
