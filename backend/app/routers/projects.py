@@ -32,6 +32,11 @@ from app.models import (
 from app.routers.websocket import manager as ws_manager
 from app.schemas.auth import Message
 from app.services.audit_logger import AuditAction, AuditLogger
+from app.services.project_service import (
+    delete_project_with_cascade,
+    get_merge_preview,
+    merge_projects,
+)
 from app.services.project_team_service import (
     add_team_to_project,
     build_project_visibility_filter,
@@ -102,6 +107,39 @@ class PaginatedProjects(BaseModel):
 
 class ProjectTeamAddRequest(BaseModel):
     team_id: int
+
+
+class ProjectArchiveRequest(BaseModel):
+    is_archived: bool
+
+
+class ProjectDeleteResponse(BaseModel):
+    deleted_tasks: int
+    deleted_entries: int
+
+
+class ProjectDeletePreviewResponse(BaseModel):
+    tasks: int
+    entries: int
+
+
+class ProjectMergeRequest(BaseModel):
+    target_project_id: int
+
+
+class ProjectMergeResponse(BaseModel):
+    moved_tasks: int
+    moved_entries: int
+    renamed_tasks: list[str]
+    archived_source: bool
+
+
+class ProjectMergePreviewResponse(BaseModel):
+    tasks_to_move: int
+    entries_to_move: int
+    task_name_conflicts: list[str]
+    target_existing_tasks: int
+    source_will_be_archived: bool
 
 
 async def check_team_access(db: AsyncSession, team_id: int, user: User, require_admin: bool = False) -> bool:
@@ -202,6 +240,17 @@ def _serialize_project_team_associations(
         if team_id != project.team_id:
             rows.append(data)
     return rows
+
+
+async def _get_company_scoped_project(
+    *,
+    db: AsyncSession,
+    project_id: int,
+    current_user: User,
+) -> Optional[Project]:
+    query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
+    query = apply_company_filter(query, Team.company_id, get_company_filter(current_user))
+    return (await db.execute(query)).scalar_one_or_none()
 
 
 @router.get("", response_model=PaginatedProjects)
@@ -621,12 +670,8 @@ async def update_project(
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
-    # Check access (team membership for non-admins)
+    # Any authenticated user can update projects in their company scope.
     is_admin = current_user.role in ["super_admin", "admin", "company_admin"]
-    if not is_admin:
-        has_access = await check_team_access(db, project.team_id, current_user)
-        if not has_access:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     # If team_id is being changed, validate the new team
     if project_data.team_id is not None and project_data.team_id != project.team_id:
@@ -769,64 +814,181 @@ async def update_project(
     )
 
 
-@router.delete("/{project_id}", response_model=Message)
+@router.delete("/{project_id}", response_model=ProjectDeleteResponse)
 async def delete_project(
     project_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Permanently delete a project (hard delete)"""
-    # Multi-tenancy: join with team to filter by company
-    query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
-    company_id = get_company_filter(current_user)
-    query = apply_company_filter(query, Team.company_id, company_id)
-
-    result = await db.execute(query)
-    project = result.scalar_one_or_none()
+    """Permanently delete a project and dependent rows in one transaction."""
+    project = await _get_company_scoped_project(db=db, project_id=project_id, current_user=current_user)
 
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
-    # Check access (team membership for non-admins)
-    if current_user.role not in ["super_admin", "admin", "company_admin"]:
-        has_access = await check_team_access(db, project.team_id, current_user)
-        if not has_access:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-
-    # Check if there are any time entries associated with this project
-    time_entries_count = await db.execute(
-        select(func.count()).select_from(TimeEntry).where(TimeEntry.project_id == project_id)
+    result = await delete_project_with_cascade(db=db, project=project, acting_user=current_user)
+    return ProjectDeleteResponse(
+        deleted_tasks=result.deleted_tasks,
+        deleted_entries=result.deleted_entries,
     )
-    if time_entries_count.scalar() > 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete project with existing time entries. Archive it instead."
-        )
 
-    project_name = project.name
 
-    # Delete associated tasks first
-    await db.execute(delete(Task).where(Task.project_id == project_id))
+@router.get("/{project_id}/delete-preview", response_model=ProjectDeletePreviewResponse)
+async def delete_project_preview(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Return the counts that would be hard-deleted for a project."""
+    project = await _get_company_scoped_project(db=db, project_id=project_id, current_user=current_user)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
-    # Permanently delete the project
-    await db.delete(project)
+    task_count = (
+        await db.execute(select(func.count(Task.id)).where(Task.project_id == project.id))
+    ).scalar() or 0
+    entry_count = (
+        await db.execute(select(func.count(TimeEntry.id)).where(TimeEntry.project_id == project.id))
+    ).scalar() or 0
+    return ProjectDeletePreviewResponse(tasks=task_count, entries=entry_count)
 
-    # Audit log
+
+@router.patch("/{project_id}/archive", response_model=ProjectResponse)
+async def set_project_archive_status(
+    project_id: int,
+    body: ProjectArchiveRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Archive or unarchive a project."""
+    project = await _get_company_scoped_project(db=db, project_id=project_id, current_user=current_user)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+    old_values = {"is_archived": project.is_archived}
+    project.is_archived = body.is_archived
+
     await AuditLogger.log(
         db=db,
-        action=AuditAction.DELETE,
+        action=AuditAction.UPDATE,
         resource_type="project",
-        resource_id=project_id,
+        resource_id=project.id,
         user_id=current_user.id,
         user_email=current_user.email,
-        old_values={"name": project_name},
-        new_values=None,
-        details=f"Permanently deleted project '{project_name}'"
+        old_values=old_values,
+        new_values={"is_archived": project.is_archived},
+        details=("Archived" if body.is_archived else "Unarchived") + f" project '{project.name}'",
     )
 
     await db.commit()
+    await db.refresh(project)
 
-    return Message(message="Project deleted permanently")
+    team_name = (await db.execute(select(Team.name).where(Team.id == project.team_id))).scalar()
+    task_count = (
+        await db.execute(select(func.count(Task.id)).where(Task.project_id == project.id))
+    ).scalar() or 0
+    is_admin = current_user.role in ["super_admin", "admin", "company_admin"]
+
+    return ProjectResponse(
+        id=project.id,
+        name=project.name,
+        description=project.description,
+        team_id=project.team_id,
+        team_name=team_name,
+        color=project.color,
+        is_archived=project.is_archived,
+        created_at=project.created_at,
+        updated_at=project.updated_at,
+        task_count=task_count,
+        budget_amount=float(project.budget_amount) if project.budget_amount and is_admin else None,
+        deadline=project.deadline if is_admin else None,
+    )
+
+
+@router.post("/{source_project_id}/merge", response_model=ProjectMergeResponse)
+async def merge_project_endpoint(
+    source_project_id: int,
+    body: ProjectMergeRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Merge source project into target and archive source in a single transaction."""
+    if source_project_id == body.target_project_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source and target must be different")
+
+    source_project = await _get_company_scoped_project(
+        db=db,
+        project_id=source_project_id,
+        current_user=current_user,
+    )
+    if not source_project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source project not found")
+
+    target_project = await _get_company_scoped_project(
+        db=db,
+        project_id=body.target_project_id,
+        current_user=current_user,
+    )
+    if not target_project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target project not found")
+    if target_project.is_archived:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Target project cannot be archived")
+
+    result = await merge_projects(
+        db=db,
+        source_project=source_project,
+        target_project=target_project,
+        acting_user=current_user,
+    )
+    return ProjectMergeResponse(
+        moved_tasks=result.moved_tasks,
+        moved_entries=result.moved_entries,
+        renamed_tasks=result.renamed_tasks,
+        archived_source=result.archived_source,
+    )
+
+
+@router.post("/{source_project_id}/merge/preview", response_model=ProjectMergePreviewResponse)
+async def merge_project_preview_endpoint(
+    source_project_id: int,
+    body: ProjectMergeRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Preview merge results without modifying data."""
+    if source_project_id == body.target_project_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source and target must be different")
+
+    source_project = await _get_company_scoped_project(
+        db=db,
+        project_id=source_project_id,
+        current_user=current_user,
+    )
+    if not source_project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source project not found")
+
+    target_project = await _get_company_scoped_project(
+        db=db,
+        project_id=body.target_project_id,
+        current_user=current_user,
+    )
+    if not target_project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target project not found")
+    if target_project.is_archived:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Target project cannot be archived")
+
+    preview = await get_merge_preview(
+        db=db,
+        source_project=source_project,
+        target_project=target_project,
+    )
+    return ProjectMergePreviewResponse(
+        tasks_to_move=preview.tasks_to_move,
+        entries_to_move=preview.entries_to_move,
+        task_name_conflicts=preview.task_name_conflicts,
+        target_existing_tasks=preview.target_existing_tasks,
+        source_will_be_archived=preview.source_will_be_archived,
+    )
 
 
 @router.post("/{project_id}/restore", response_model=ProjectResponse)

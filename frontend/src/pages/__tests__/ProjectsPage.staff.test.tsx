@@ -139,19 +139,13 @@ describe('ProjectsPage - staff project creation', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('keeps edit / archive / delete icons hidden for non-admin users', async () => {
+  it('shows project kebab menu for non-admin users', async () => {
     setUser('regular_user');
     renderPage();
     await screen.findByText('Existing Project');
     expect(
-      screen.queryByRole('button', { name: /edit project/i })
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /archive project/i })
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /delete project/i })
-    ).not.toBeInTheDocument();
+      screen.getByRole('button', { name: /project actions/i })
+    ).toBeInTheDocument();
   });
 
   it('shows only teams the (non-admin) user is a member of in the team selector', async () => {

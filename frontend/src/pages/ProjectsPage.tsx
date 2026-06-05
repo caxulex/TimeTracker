@@ -8,13 +8,23 @@ import { Card, CardHeader, Button, Input, Modal, LoadingOverlay } from '../compo
 import { projectsApi, teamsApi } from '../api/client';
 import { formatDate, cn, generateRandomColor, isAdminUser } from '../utils/helpers';
 import { useAuth } from '../hooks/useAuth';
-import { useAddTeamToProject } from '../hooks/useApi';
+import {
+  useAddTeamToProject,
+  useArchiveProject,
+  useDeleteProject,
+  useMergeProjects,
+  useUpdateProject,
+} from '../hooks/useApi';
 import { useNotifications } from '../hooks/useNotifications';
 import { useFeatureEnabled } from '../hooks/useAIFeatures';
 import { useDebounce } from '../hooks/useDebounce';
 import ProjectHealthCard from '../components/ai/ProjectHealthCard';
 import { TeamSelect } from '../components/teams/TeamSelect';
-import type { Project, ProjectCreate, Team } from '../types';
+import { DeleteProjectModal } from '../components/projects/DeleteProjectModal';
+import { EditProjectModal } from '../components/projects/EditProjectModal';
+import { MergeProjectModal } from '../components/projects/MergeProjectModal';
+import { ProjectKebabMenu } from '../components/projects/ProjectKebabMenu';
+import type { Project, ProjectCreate, ProjectDeletePreview, ProjectUpdate, Team } from '../types';
 
 export function ProjectsPage() {
   const queryClient = useQueryClient();
@@ -25,12 +35,16 @@ export function ProjectsPage() {
   const { data: projectHealthEnabled } = useFeatureEnabled('ai_report_summaries');
   const [selectedProjectForHealth, setSelectedProjectForHealth] = useState<Project | null>(null);
 
-  const [showModal, setShowModal] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [mergeSourceProject, setMergeSourceProject] = useState<Project | null>(null);
+  const [deleteProjectTarget, setDeleteProjectTarget] = useState<Project | null>(null);
+  const [deletePreview, setDeletePreview] = useState<ProjectDeletePreview | null>(null);
+  const [isLoadingDeletePreview, setIsLoadingDeletePreview] = useState(false);
+  const [archiveConfirmationProject, setArchiveConfirmationProject] = useState<Project | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') || '');
   const debouncedSearch = useDebounce(searchQuery, 250);
-  const [confirmAction, setConfirmAction] = useState<{ type: 'archive' | 'restore' | 'delete'; project: Project } | null>(null);
   const activeSearchQuery = debouncedSearch.trim();
   const isSearchActive = activeSearchQuery.length > 0;
 
@@ -109,7 +123,7 @@ export function ProjectsPage() {
     mutationFn: (data: ProjectCreate) => projectsApi.create(data),
     onSuccess: (newProject) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
-      setShowModal(false);
+      setShowCreateModal(false);
       addNotification({
         type: 'success',
         title: 'Project Created',
@@ -125,74 +139,10 @@ export function ProjectsPage() {
     },
   });
 
-  // Update mutation (admin only)
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<Project> }) =>
-      projectsApi.update(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] });
-      setShowModal(false);
-      setEditingProject(null);
-      addNotification({
-        type: 'success',
-        title: 'Project Updated',
-        message: 'Changes have been saved',
-      });
-    },
-    onError: () => {
-      addNotification({
-        type: 'error',
-        title: 'Failed to Update Project',
-        message: 'Please try again',
-      });
-    },
-  });
-
-  // Archive mutation (admin only)
-  const archiveMutation = useMutation({
-    mutationFn: (id: number) => projectsApi.update(id, { is_archived: true }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] });
-      addNotification({
-        type: 'info',
-        title: 'Project Archived',
-        message: 'The project has been archived',
-      });
-    },
-  });
-
-  // Restore mutation (admin only)
-  const restoreMutation = useMutation({
-    mutationFn: (id: number) => projectsApi.restore(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] });
-      addNotification({
-        type: 'success',
-        title: 'Project Restored',
-        message: 'The project is now active',
-      });
-    },
-  });
-
-  // Delete mutation (admin only)
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => projectsApi.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] });
-      addNotification({
-        type: 'success',
-        title: 'Project Deleted',
-        message: 'The project has been permanently deleted',
-      });
-    },
-    onError: () => {
-      addNotification({
-        type: 'error',
-        title: 'Failed to Delete',
-        message: 'Could not delete the project. It may have time entries.',
-      });
-    },
-  });
+  const updateProjectMutation = useUpdateProject();
+  const archiveProjectMutation = useArchiveProject();
+  const deleteProjectMutation = useDeleteProject();
+  const mergeProjectsMutation = useMergeProjects();
 
   const addTeamToProjectMutation = useAddTeamToProject();
 
@@ -221,21 +171,89 @@ export function ProjectsPage() {
   };
 
   const handleEdit = (project: Project) => {
-    if (!isAdmin) return;
     setEditingProject(project);
-    setShowModal(true);
   };
 
-  const handleConfirmAction = () => {
-    if (!confirmAction) return;
-    if (confirmAction.type === 'archive') {
-      archiveMutation.mutate(confirmAction.project.id);
-    } else if (confirmAction.type === 'restore') {
-      restoreMutation.mutate(confirmAction.project.id);
-    } else if (confirmAction.type === 'delete') {
-      deleteMutation.mutate(confirmAction.project.id);
+  const handleSaveEdit = (data: { name: string; description?: string | null; color: string }) => {
+    if (!editingProject) return;
+    updateProjectMutation.mutate(
+      { id: editingProject.id, data: data as ProjectUpdate },
+      {
+        onSuccess: () => {
+          setEditingProject(null);
+          addNotification({ type: 'success', title: 'Project Updated', message: 'Changes have been saved' });
+        },
+        onError: () => {
+          addNotification({ type: 'error', title: 'Failed to Update Project', message: 'Please try again' });
+        },
+      }
+    );
+  };
+
+  const handleArchiveToggle = (project: Project) => {
+    setArchiveConfirmationProject(project);
+  };
+
+  const confirmArchiveToggle = () => {
+    if (!archiveConfirmationProject) return;
+    const shouldArchive = !archiveConfirmationProject.is_archived;
+    archiveProjectMutation.mutate(
+      { id: archiveConfirmationProject.id, isArchived: shouldArchive },
+      {
+        onSuccess: () => {
+          addNotification({
+            type: shouldArchive ? 'info' : 'success',
+            title: shouldArchive ? 'Project Archived' : 'Project Restored',
+            message: shouldArchive ? 'The project has been archived' : 'The project is now active',
+          });
+          setArchiveConfirmationProject(null);
+        },
+      }
+    );
+  };
+
+  const handleOpenDelete = async (project: Project) => {
+    setDeleteProjectTarget(project);
+    setDeletePreview(null);
+    setIsLoadingDeletePreview(true);
+    try {
+      const preview = await projectsApi.deletePreview(project.id);
+      setDeletePreview(preview);
+    } catch (_error) {
+      addNotification({ type: 'error', title: 'Failed to Load Delete Details', message: 'Please try again.' });
+    } finally {
+      setIsLoadingDeletePreview(false);
     }
-    setConfirmAction(null);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!deleteProjectTarget) return;
+    deleteProjectMutation.mutate(deleteProjectTarget.id, {
+      onSuccess: () => {
+        setDeleteProjectTarget(null);
+        setDeletePreview(null);
+        addNotification({ type: 'success', title: 'Project Deleted', message: 'The project has been permanently deleted' });
+      },
+      onError: () => {
+        addNotification({ type: 'error', title: 'Failed to Delete', message: 'Could not delete the project.' });
+      },
+    });
+  };
+
+  const handleConfirmMerge = (targetProjectId: number) => {
+    if (!mergeSourceProject) return;
+    mergeProjectsMutation.mutate(
+      { sourceId: mergeSourceProject.id, targetProjectId },
+      {
+        onSuccess: () => {
+          addNotification({ type: 'success', title: 'Project Merged', message: 'The source project was merged and archived.' });
+          setMergeSourceProject(null);
+        },
+        onError: () => {
+          addNotification({ type: 'error', title: 'Failed to Merge', message: 'Please try again.' });
+        },
+      }
+    );
   };
 
   if (isLoading) {
@@ -260,7 +278,7 @@ export function ProjectsPage() {
             {showArchived ? 'Show Active' : 'Show Archived'}
           </Button>
           {user && (
-            <Button onClick={() => setShowModal(true)}>
+            <Button onClick={() => setShowCreateModal(true)}>
               <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
@@ -320,7 +338,7 @@ export function ProjectsPage() {
                 {user ? 'Create your first project to start tracking time.' : 'No projects available. Contact your admin.'}
               </p>
               {user && (
-                <Button className="mt-4" onClick={() => setShowModal(true)}>
+                <Button className="mt-4" onClick={() => setShowCreateModal(true)}>
                   Create Project
                 </Button>
               )}
@@ -346,15 +364,16 @@ export function ProjectsPage() {
               <ProjectCard
                 key={project.id}
                 project={project}
-                isAdmin={isAdmin}
+                canManage={!!user}
+                showBudgetInfo={isAdmin}
                 userTeams={teams}
                 showHealthButton={projectHealthEnabled}
                 onViewHealth={() => setSelectedProjectForHealth(project)}
                 onAddToTeam={(team) => handleAddProjectToTeam(project, team)}
                 onEdit={() => handleEdit(project)}
-                onArchive={() => setConfirmAction({ type: 'archive', project })}
-                onRestore={() => setConfirmAction({ type: 'restore', project })}
-                onDelete={() => setConfirmAction({ type: 'delete', project })}
+                onArchiveToggle={() => handleArchiveToggle(project)}
+                onDelete={() => handleOpenDelete(project)}
+                onMerge={() => setMergeSourceProject(project)}
               />
             ))}
           </div>
@@ -405,61 +424,71 @@ export function ProjectsPage() {
         </div>
       )}
 
-      {/* Confirmation Modal */}
       <Modal
-        isOpen={!!confirmAction}
-        onClose={() => setConfirmAction(null)}
-        title={
-          confirmAction?.type === 'archive' ? 'Archive Project' : 
-          confirmAction?.type === 'restore' ? 'Restore Project' : 
-          'Delete Project'
-        }
+        isOpen={!!archiveConfirmationProject}
+        onClose={() => setArchiveConfirmationProject(null)}
+        title={archiveConfirmationProject?.is_archived ? 'Unarchive Project' : 'Archive Project'}
       >
         <div className="space-y-4">
           <p className="text-gray-600">
-            {confirmAction?.type === 'archive' 
-              ? `Are you sure you want to archive "${confirmAction?.project.name}"? Archived projects won't appear in active project lists.`
-              : confirmAction?.type === 'restore'
-              ? `Are you sure you want to restore "${confirmAction?.project.name}"? It will become active again.`
-              : `Are you sure you want to permanently delete "${confirmAction?.project.name}"? This action cannot be undone.`
-            }
+            {archiveConfirmationProject?.is_archived
+              ? `Unarchive "${archiveConfirmationProject.name}"? It will appear in active project lists.`
+              : `Archive "${archiveConfirmationProject?.name}"? It will be hidden from default lists but data is preserved.`}
           </p>
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setConfirmAction(null)}>
+            <Button variant="secondary" onClick={() => setArchiveConfirmationProject(null)}>
               Cancel
             </Button>
-            <Button 
-              variant={confirmAction?.type === 'restore' ? 'primary' : 'danger'}
-              onClick={handleConfirmAction}
-              isLoading={archiveMutation.isPending || restoreMutation.isPending || deleteMutation.isPending}
-            >
-              {confirmAction?.type === 'archive' ? 'Archive' : confirmAction?.type === 'restore' ? 'Restore' : 'Delete'}
+            <Button onClick={confirmArchiveToggle} isLoading={archiveProjectMutation.isPending}>
+              {archiveConfirmationProject?.is_archived ? 'Unarchive' : 'Archive'}
             </Button>
           </div>
         </div>
       </Modal>
 
-      {/* Create modal open to all team members; edit still admin-only */}
       {user && (
         <ProjectModal
-          isOpen={showModal}
+          isOpen={showCreateModal}
           onClose={() => {
-            setShowModal(false);
-            setEditingProject(null);
+            setShowCreateModal(false);
           }}
-          project={editingProject}
+          project={null}
           teams={teams}
-          onSubmit={(data) => {
-            if (editingProject) {
-              updateMutation.mutate({ id: editingProject.id, data });
-            } else {
-              createMutation.mutate(data as ProjectCreate);
-            }
-          }}
-          isLoading={createMutation.isPending || updateMutation.isPending}
+          onSubmit={(data) => createMutation.mutate(data as ProjectCreate)}
+          isLoading={createMutation.isPending}
           isAdmin={isAdmin}
         />
       )}
+
+      <EditProjectModal
+        isOpen={!!editingProject}
+        project={editingProject}
+        isSaving={updateProjectMutation.isPending}
+        onClose={() => setEditingProject(null)}
+        onSave={handleSaveEdit}
+      />
+
+      <DeleteProjectModal
+        isOpen={!!deleteProjectTarget}
+        project={deleteProjectTarget}
+        preview={deletePreview}
+        isLoadingPreview={isLoadingDeletePreview}
+        isDeleting={deleteProjectMutation.isPending}
+        onClose={() => {
+          setDeleteProjectTarget(null);
+          setDeletePreview(null);
+        }}
+        onConfirm={handleConfirmDelete}
+      />
+
+      <MergeProjectModal
+        isOpen={!!mergeSourceProject}
+        sourceProject={mergeSourceProject}
+        projects={allProjects}
+        isMerging={mergeProjectsMutation.isPending}
+        onClose={() => setMergeSourceProject(null)}
+        onConfirm={handleConfirmMerge}
+      />
     </div>
   );
 }
@@ -467,18 +496,31 @@ export function ProjectsPage() {
 // Project Card Component
 interface ProjectCardProps {
   project: Project;
-  isAdmin: boolean;
+  canManage: boolean;
+  showBudgetInfo: boolean;
   userTeams: Team[];
   showHealthButton?: boolean;
   onViewHealth?: () => void;
   onAddToTeam: (team: Team) => void;
   onEdit: () => void;
-  onArchive: () => void;
-  onRestore: () => void;
+  onArchiveToggle: () => void;
+  onMerge: () => void;
   onDelete: () => void;
 }
 
-function ProjectCard({ project, isAdmin, userTeams, showHealthButton, onViewHealth, onAddToTeam, onEdit, onArchive, onRestore, onDelete }: ProjectCardProps) {
+function ProjectCard({
+  project,
+  canManage,
+  showBudgetInfo,
+  userTeams,
+  showHealthButton,
+  onViewHealth,
+  onAddToTeam,
+  onEdit,
+  onArchiveToggle,
+  onMerge,
+  onDelete,
+}: ProjectCardProps) {
   const projectTeams = project.team_associations ?? [];
   const [selectedTeamId, setSelectedTeamId] = useState<number | ''>('');
 
@@ -529,48 +571,15 @@ function ProjectCard({ project, isAdmin, userTeams, showHealthButton, onViewHeal
             )}
           </div>
         </div>
-        {isAdmin && (
-          <div className="flex gap-1">
-            <button
-              onClick={onEdit}
-              className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100"
-              title="Edit project"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-              </svg>
-            </button>
-            {project.is_archived ? (
-              <button
-                onClick={onRestore}
-                className="p-1.5 rounded-lg text-green-400 hover:text-green-600 hover:bg-green-50"
-                title="Restore project"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-              </button>
-            ) : (
-              <button
-                onClick={onArchive}
-                className="p-1.5 rounded-lg text-gray-400 hover:text-orange-600 hover:bg-orange-50"
-                title="Archive project"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-                </svg>
-              </button>
-            )}
-            <button
-              onClick={onDelete}
-              className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50"
-              title="Delete project"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-            </button>
-          </div>
+        {canManage && (
+          <ProjectKebabMenu
+            isArchived={project.is_archived}
+            canMerge={!project.is_archived}
+            onEdit={onEdit}
+            onArchiveToggle={onArchiveToggle}
+            onMerge={onMerge}
+            onDelete={onDelete}
+          />
         )}
       </div>
 
@@ -636,7 +645,7 @@ function ProjectCard({ project, isAdmin, userTeams, showHealthButton, onViewHeal
       </div>
       
       {/* Budget info - Admin only */}
-      {isAdmin && (project.budget_amount || project.deadline) && (
+      {showBudgetInfo && (project.budget_amount || project.deadline) && (
         <div className="mt-3 flex items-center gap-3 text-xs">
           {project.budget_amount && (
             <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-50 text-green-700 rounded-md">
