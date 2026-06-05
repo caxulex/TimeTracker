@@ -44,7 +44,7 @@ async def add_team_to_project(
 
     Returns ``(success, error_code)`` where error_code can be:
     ``project_not_found``, ``team_not_found``, ``already_associated``,
-    ``not_team_member``, ``different_company``.
+    ``different_company``.
     """
     project_query = (
         select(Project, Team.company_id)
@@ -71,15 +71,6 @@ async def add_team_to_project(
     if project_company_id != team.company_id:
         return False, "different_company"
 
-    member_check = await db.execute(
-        select(TeamMember).where(
-            TeamMember.team_id == team_id,
-            TeamMember.user_id == acting_user_id,
-        )
-    )
-    if member_check.scalar_one_or_none() is None:
-        return False, "not_team_member"
-
     existing = await db.execute(
         select(ProjectTeam.id).where(
             ProjectTeam.project_id == project_id,
@@ -87,7 +78,7 @@ async def add_team_to_project(
         )
     )
     if existing.scalar_one_or_none() is not None:
-        return False, "already_associated"
+        return True, None
 
     association = ProjectTeam(
         project_id=project_id,
@@ -127,7 +118,7 @@ async def remove_team_from_project(
     """Remove a team's association with a project.
 
     Returns ``(success, error_code)`` where error_code can be:
-    ``not_found``, ``not_team_member``, ``primary_team``.
+    ``not_found``, ``primary_team``.
     """
     project_query = (
         select(Project)
@@ -148,19 +139,6 @@ async def remove_team_from_project(
     team = (await db.execute(team_query)).scalar_one_or_none()
     if not team:
         return False, "not_found"
-
-    actor_query = select(User).where(User.id == acting_user_id)
-    actor = (await db.execute(actor_query)).scalar_one_or_none()
-    is_admin = bool(actor and actor.role in ["super_admin", "admin", "company_admin"])
-    if not is_admin:
-        member_check = await db.execute(
-            select(TeamMember).where(
-                TeamMember.team_id == team_id,
-                TeamMember.user_id == acting_user_id,
-            )
-        )
-        if member_check.scalar_one_or_none() is None:
-            return False, "not_team_member"
 
     association_query = (
         select(ProjectTeam)
@@ -190,6 +168,70 @@ async def remove_team_from_project(
     )
     await db.commit()
     return True, None
+
+
+async def get_projects_for_team(
+    team_id: int,
+    include_archived: bool = False,
+    company_id: Optional[int] | str = None,
+    db: AsyncSession | None = None,
+) -> list[dict]:
+    """Return projects attached to a team through primary or shared membership."""
+    if db is None:
+        return []
+
+    items_by_project_id: dict[int, dict] = {}
+
+    def _project_payload(project: Project, primary_team_name: Optional[str], association_type: str) -> dict:
+        return {
+            "id": project.id,
+            "name": project.name,
+            "color": project.color,
+            "is_archived": project.is_archived,
+            "primary_team_id": project.team_id,
+            "primary_team_name": primary_team_name,
+            "association_type": association_type,
+        }
+
+    primary_query = (
+        select(Project, Team.name)
+        .join(Team, Project.team_id == Team.id)
+        .where(Project.team_id == team_id)
+    )
+    associated_query = (
+        select(Project, Team.name)
+        .join(ProjectTeam, Project.id == ProjectTeam.project_id)
+        .join(Team, Project.team_id == Team.id)
+        .where(ProjectTeam.team_id == team_id)
+    )
+
+    if not include_archived:
+        primary_query = primary_query.where(Project.is_archived.is_(False))
+        associated_query = associated_query.where(Project.is_archived.is_(False))
+
+    primary_query = apply_company_filter(primary_query, Team.company_id, company_id)
+    associated_query = apply_company_filter(associated_query, Team.company_id, company_id)
+
+    primary_rows = (await db.execute(primary_query.order_by(Project.created_at.desc()))).all()
+    for project, primary_team_name in primary_rows:
+        items_by_project_id[project.id] = _project_payload(
+            project,
+            primary_team_name,
+            "primary",
+        )
+
+    associated_rows = (await db.execute(associated_query.order_by(Project.created_at.desc()))).all()
+    for project, primary_team_name in associated_rows:
+        items_by_project_id.setdefault(
+            project.id,
+            _project_payload(
+                project,
+                primary_team_name,
+                "additional",
+            ),
+        )
+
+    return list(items_by_project_id.values())
 
 
 async def list_project_teams(

@@ -14,6 +14,7 @@ import type {
   ProjectCreate,
   ProjectUpdate,
   ProjectFilters,
+  TeamProject,
   TaskCreate,
   TaskUpdate,
   TaskFilters,
@@ -90,6 +91,38 @@ export function useRemoveTeamFromProject() {
     mutationFn: ({ projectId, teamId }: { projectId: number; teamId: number }) =>
       projectsApi.removeTeam(projectId, teamId),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
+export function useTeamProjects(teamId: number | null, includeArchived = false) {
+  return useQuery({
+    queryKey: ['teamProjects', teamId, includeArchived],
+    queryFn: () => teamsApi.getProjects(teamId as number, includeArchived),
+    enabled: teamId !== null,
+  });
+}
+
+export function useAddProjectToTeam() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, teamId }: { projectId: number; teamId: number }) =>
+      projectsApi.addTeam(projectId, teamId),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['teamProjects'] });
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
+export function useRemoveProjectFromTeam() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, teamId }: { projectId: number; teamId: number }) =>
+      projectsApi.removeTeam(projectId, teamId),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['teamProjects'] });
       queryClient.invalidateQueries({ queryKey: ['projects'] });
     },
   });

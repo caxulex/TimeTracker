@@ -16,6 +16,7 @@ import type {
   ProjectCreate,
   ProjectUpdate,
   ProjectTeamAssociation,
+  TeamProject,
   ProjectFilters,
   Task,
   TaskCreate,
@@ -373,6 +374,13 @@ export const teamsApi = {
   getById: async (id: number, includeDeleted = false): Promise<Team & { members: TeamMember[] }> => {
     const response = await api.get<Team & { members: TeamMember[] }>(`/api/teams/${id}`, {
       params: { include_deleted: includeDeleted },
+    });
+    return response.data;
+  },
+
+  getProjects: async (teamId: number, includeArchived = false): Promise<TeamProject[]> => {
+    const response = await api.get<TeamProject[]>(`/api/teams/${teamId}/projects`, {
+      params: { include_archived: includeArchived },
     });
     return response.data;
   },

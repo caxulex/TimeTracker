@@ -522,7 +522,7 @@ async def add_team_to_project_endpoint(
 ):
     """Add a team association to a project.
 
-    Caller must be a member of the team being added.
+    Any authenticated user may associate a team with a project.
     """
     success, error_code = await add_team_to_project(
         project_id=project_id,
@@ -537,10 +537,6 @@ async def add_team_to_project_endpoint(
         return Message(message="Team associated with project")
     if error_code in ["project_not_found", "team_not_found"]:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project or team not found")
-    if error_code == "already_associated":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Team already associated with project")
-    if error_code == "not_team_member":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not a member of the selected team")
     if error_code == "different_company":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project and team must belong to the same company")
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unable to associate team")
@@ -553,7 +549,10 @@ async def remove_team_from_project_endpoint(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Remove a team association from a project."""
+    """Remove a team association from a project.
+
+    Any authenticated user may remove a shared association.
+    """
     success, error_code = await remove_team_from_project(
         project_id=project_id,
         team_id=team_id,
@@ -567,8 +566,6 @@ async def remove_team_from_project_endpoint(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     if error_code == "not_found":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project-team association not found")
-    if error_code == "not_team_member":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not allowed to remove this team")
     if error_code == "primary_team":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

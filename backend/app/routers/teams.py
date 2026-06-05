@@ -20,6 +20,7 @@ from app.models import Team, TeamMember, User
 from app.routers.websocket import manager as ws_manager
 from app.schemas.auth import Message
 from app.services.audit_logger import AuditAction, AuditLogger
+from app.services.project_team_service import get_projects_for_team
 from app.services.team_service import restore_team, soft_delete_team
 
 router = APIRouter()
@@ -97,6 +98,16 @@ class PaginatedTeams(BaseModel):
 
 class DeletedTeamResponse(TeamResponse):
     deleted_by_user_name: Optional[str] = None
+
+
+class TeamProjectResponse(BaseModel):
+    id: int
+    name: str
+    color: str
+    is_archived: bool
+    primary_team_id: int
+    primary_team_name: Optional[str] = None
+    association_type: str
 
 
 class PaginatedDeletedTeams(BaseModel):
@@ -337,6 +348,29 @@ async def get_team(
         delete_reason=team.delete_reason,
         members=members
     )
+
+
+@router.get("/{team_id}/projects", response_model=List[TeamProjectResponse])
+async def get_team_projects(
+    team_id: int,
+    include_archived: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Get projects associated with a team."""
+    query = select(Team).where(Team.id == team_id, Team.deleted_at.is_(None))
+    query = apply_company_filter(query, Team.company_id, get_company_filter(current_user))
+    team = (await db.execute(query)).scalar_one_or_none()
+    if not team:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+
+    rows = await get_projects_for_team(
+        team_id=team_id,
+        include_archived=include_archived,
+        company_id=get_company_filter(current_user),
+        db=db,
+    )
+    return [TeamProjectResponse(**row) for row in rows]
 
 
 @router.post("", response_model=TeamResponse, status_code=status.HTTP_201_CREATED)
