@@ -139,6 +139,8 @@ export interface ProjectCreate {
   name: string;
   description?: string;
   color?: string;
+  force?: boolean;
+  similar_project_ids?: number[];
   // Budget fields (admin only)
   budget_amount?: number | null;
   deadline?: string | null;
@@ -183,6 +185,22 @@ export interface ProjectMergePreview {
   task_name_conflicts: string[];
   target_existing_tasks: number;
   source_will_be_archived: boolean;
+}
+
+export type ProjectSimilarityMatchType = 'exact' | 'substring' | 'fuzzy';
+
+export interface SimilarProjectMatch {
+  id: number;
+  name: string;
+  team_id: number;
+  team_name: string;
+  is_archived: boolean;
+  match_type: ProjectSimilarityMatchType;
+  match_score: number;
+}
+
+export interface SimilarProjectsResponse {
+  matches: SimilarProjectMatch[];
 }
 
 // Task Types

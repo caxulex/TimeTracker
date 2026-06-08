@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from typing import Literal
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.dependencies import apply_company_filter
 from app.models import Project, ProjectTeam, Task, TimeEntry, User
 from app.services.audit_logger import AuditAction, AuditLogger
 
@@ -31,6 +34,124 @@ class ProjectMergeResult:
     moved_entries: int
     renamed_tasks: list[str]
     archived_source: bool
+
+
+@dataclass
+class ProjectSimilarityMatch:
+    id: int
+    name: str
+    team_id: int
+    team_name: str
+    is_archived: bool
+    match_type: Literal["exact", "substring", "fuzzy"]
+    match_score: float
+
+
+def normalize_for_comparison(name: str) -> str:
+    """Lowercase, trim, and remove non-alphanumeric characters."""
+    return re.sub(r"[^a-z0-9]", "", name.lower().strip())
+
+
+def _levenshtein_with_cutoff(left: str, right: str, cutoff: int) -> int:
+    """Compute Levenshtein distance with early-exit once cutoff is exceeded."""
+    if left == right:
+        return 0
+    if not left:
+        return len(right)
+    if not right:
+        return len(left)
+    if abs(len(left) - len(right)) > cutoff:
+        return cutoff + 1
+
+    previous = list(range(len(right) + 1))
+    for i, left_char in enumerate(left, start=1):
+        current = [i]
+        row_min = i
+        for j, right_char in enumerate(right, start=1):
+            insert_cost = current[j - 1] + 1
+            delete_cost = previous[j] + 1
+            replace_cost = previous[j - 1] + (0 if left_char == right_char else 1)
+            value = min(insert_cost, delete_cost, replace_cost)
+            current.append(value)
+            if value < row_min:
+                row_min = value
+
+        if row_min > cutoff:
+            return cutoff + 1
+        previous = current
+
+    return previous[-1]
+
+
+async def find_similar_projects(
+    db: AsyncSession,
+    company_id: int | str,
+    name: str,
+    exclude_id: int | None = None,
+    include_archived: bool = False,
+) -> list[ProjectSimilarityMatch]:
+    """Return projects in the same company whose names are similar to ``name``."""
+    normalized_input = normalize_for_comparison(name)
+    if not normalized_input:
+        return []
+
+    # Keep company scoping aligned with existing project routes.
+    from app.models import Team
+
+    query = select(Project, Team.name).join(Team, Project.team_id == Team.id)
+    query = apply_company_filter(query, Team.company_id, company_id)
+
+    if exclude_id is not None:
+        query = query.where(Project.id != exclude_id)
+    if not include_archived:
+        query = query.where(Project.is_archived.is_(False))
+
+    rows = (await db.execute(query)).all()
+
+    matches: list[ProjectSimilarityMatch] = []
+    for project, team_name in rows:
+        normalized_project = normalize_for_comparison(project.name)
+        if not normalized_project:
+            continue
+
+        match_type: Literal["exact", "substring", "fuzzy"] | None = None
+        match_score = 0.0
+
+        if normalized_project == normalized_input:
+            match_type = "exact"
+            match_score = 1.0
+        elif (
+            normalized_project in normalized_input
+            or normalized_input in normalized_project
+        ):
+            shorter = min(len(normalized_project), len(normalized_input))
+            longer = max(len(normalized_project), len(normalized_input))
+            overlap_ratio = shorter / longer if longer else 0
+            match_type = "substring"
+            match_score = round(0.8 + min(0.1, overlap_ratio * 0.1), 2)
+        else:
+            distance = _levenshtein_with_cutoff(normalized_project, normalized_input, cutoff=2)
+            if distance <= 2:
+                match_type = "fuzzy"
+                match_score = 0.7 if distance == 1 else 0.6
+
+        if match_type is None:
+            continue
+
+        matches.append(
+            ProjectSimilarityMatch(
+                id=project.id,
+                name=project.name,
+                team_id=project.team_id,
+                team_name=team_name or "Unknown",
+                is_archived=project.is_archived,
+                match_type=match_type,
+                match_score=match_score,
+            )
+        )
+
+    matches.sort(key=lambda row: (-row.match_score, row.name.lower(), row.id))
+    return matches[:10]
 
 
 async def delete_project_with_cascade(

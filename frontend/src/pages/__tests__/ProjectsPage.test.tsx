@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -13,6 +13,8 @@ const projectsDeletePreview = vi.fn();
 const projectsDelete = vi.fn();
 const projectsMerge = vi.fn();
 const projectsAddTeam = vi.fn();
+const projectsGetSimilar = vi.fn();
+const projectsCreate = vi.fn();
 const teamsGetAll = vi.fn();
 
 vi.mock('../../hooks/useAuth', () => ({
@@ -43,7 +45,8 @@ vi.mock('../../api/client', () => ({
     delete: (...args: unknown[]) => projectsDelete(...args),
     merge: (...args: unknown[]) => projectsMerge(...args),
     addTeam: (...args: unknown[]) => projectsAddTeam(...args),
-    create: vi.fn(),
+    getSimilar: (...args: unknown[]) => projectsGetSimilar(...args),
+    create: (...args: unknown[]) => projectsCreate(...args),
     restore: vi.fn(),
     removeTeam: vi.fn(),
     listTeams: vi.fn(),
@@ -91,6 +94,13 @@ function renderPage() {
 }
 
 describe('ProjectsPage per-project actions', () => {
+  const openCreateModal = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(await screen.findByRole('button', { name: /new project/i }));
+    const dialog = await screen.findByRole('dialog', { name: 'New Project' });
+    const nameInput = within(dialog).getByPlaceholderText('My Project');
+    return { dialog, nameInput };
+  };
+
   const findProjectCard = async (projectId: number) => {
     return waitFor(() => {
       const card = screen.queryByTestId(`project-card-${projectId}`);
@@ -109,11 +119,23 @@ describe('ProjectsPage per-project actions', () => {
     const card = await findProjectCard(projectId);
     const kebabButton = within(card).getByTestId('project-kebab-button');
     await user.click(kebabButton);
-    await user.click(await screen.findByText(actionLabel));
+    const menu = await screen.findByTestId('project-kebab-menu');
+    await user.click(within(menu).getByText(actionLabel));
+  };
+
+  const openMenuForProject = async (
+    user: ReturnType<typeof userEvent.setup>,
+    projectId: number
+  ) => {
+    const card = await findProjectCard(projectId);
+    const kebabButton = within(card).getByTestId('project-kebab-button');
+    await user.click(kebabButton);
+    return screen.findByTestId('project-kebab-menu');
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
     teamsGetAll.mockResolvedValue({
       items: [{ id: 1, name: 'Team' }],
       total: 1,
@@ -142,14 +164,19 @@ describe('ProjectsPage per-project actions', () => {
     projectsDelete.mockResolvedValue({ deleted_tasks: 381, deleted_entries: 1247 });
     projectsMerge.mockResolvedValue({ moved_tasks: 5, moved_entries: 12, renamed_tasks: [], archived_source: true });
     projectsAddTeam.mockResolvedValue({ message: 'ok' });
+    projectsGetSimilar.mockResolvedValue({ matches: [] });
+    projectsCreate.mockResolvedValue(makeProject(4, 'Created Project'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('opens kebab menu on click', async () => {
     const user = userEvent.setup();
     renderPage();
 
-    const buttons = await screen.findAllByTestId('project-kebab-button');
-    await user.click(buttons[0]);
+    await openMenuForProject(user, 1);
 
     expect(await screen.findByTestId('project-kebab-menu')).toBeInTheDocument();
     expect(screen.getByText('Edit')).toBeInTheDocument();
@@ -158,25 +185,142 @@ describe('ProjectsPage per-project actions', () => {
     expect(screen.getByText('Delete')).toBeInTheDocument();
   });
 
-  it('edit modal pre-populates and submits updates', async () => {
+
+  it('renders similar warning when API returns matches', async () => {
     const user = userEvent.setup();
+    projectsGetSimilar.mockResolvedValue({
+      matches: [
+        {
+          id: 2,
+          name: 'Target Project',
+          team_id: 1,
+          team_name: 'Team',
+          is_archived: false,
+          match_type: 'substring',
+          match_score: 0.9,
+        },
+      ],
+    });
+
     renderPage();
+    const { nameInput } = await openCreateModal(user);
+    await user.type(nameInput, 'Target Project');
 
-    await clickActionForProject(user, 1, 'Edit');
+    expect(await screen.findByTestId('similar-projects-warning')).toBeInTheDocument();
+    expect(await screen.findByTestId('similar-project-match-2')).toBeInTheDocument();
+  });
 
-    const nameInput = await screen.findByDisplayValue('Source Project');
-    expect(nameInput).toHaveValue('Source Project');
+  it('hides warning when similar matches are empty', async () => {
+    const user = userEvent.setup();
+    projectsGetSimilar.mockResolvedValue({ matches: [] });
 
-    await user.clear(nameInput);
-    await user.type(nameInput, 'Source Project Renamed');
-    await user.click(screen.getByRole('button', { name: 'Save' }));
+    renderPage();
+    const { nameInput } = await openCreateModal(user);
+    await user.type(nameInput, 'Completely New Name');
 
     await waitFor(() => {
-      expect(projectsUpdate).toHaveBeenCalledWith(
-        1,
-        expect.objectContaining({ name: 'Source Project Renamed' })
+      expect(screen.queryByTestId('similar-projects-warning')).not.toBeInTheDocument();
+    });
+  });
+
+  it('submit-time check shows confirmation modal when matches exist', async () => {
+    const user = userEvent.setup();
+    projectsGetSimilar
+      .mockResolvedValueOnce({
+        matches: [
+          {
+            id: 2,
+            name: 'Target Project',
+            team_id: 1,
+            team_name: 'Team',
+            is_archived: false,
+            match_type: 'exact',
+            match_score: 1.0,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        matches: [
+          {
+            id: 2,
+            name: 'Target Project',
+            team_id: 1,
+            team_name: 'Team',
+            is_archived: false,
+            match_type: 'exact',
+            match_score: 1.0,
+          },
+        ],
+      });
+
+    renderPage();
+    const { dialog, nameInput } = await openCreateModal(user);
+    await user.type(nameInput, 'Target Project');
+    await user.click(within(dialog).getByRole('button', { name: 'Create Project' }));
+
+    expect(await screen.findByText(/Similar projects exist/i)).toBeInTheDocument();
+  });
+
+  it('Create anyway submits despite warnings', async () => {
+    const user = userEvent.setup();
+    projectsGetSimilar.mockResolvedValue({
+      matches: [
+        {
+          id: 2,
+          name: 'Target Project',
+          team_id: 1,
+          team_name: 'Team',
+          is_archived: false,
+          match_type: 'exact',
+          match_score: 1.0,
+        },
+      ],
+    });
+
+    renderPage();
+    const { dialog, nameInput } = await openCreateModal(user);
+    await user.type(nameInput, 'Target Project');
+    await user.click(within(dialog).getByRole('button', { name: 'Create Project' }));
+    await user.click(await screen.findByTestId('create-project-create-anyway'));
+
+    await waitFor(() => {
+      expect(projectsCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Target Project',
+          force: true,
+          similar_project_ids: [2],
+        })
       );
     });
+  });
+
+  it('Use this instead in create mode closes modal and focuses existing flow', async () => {
+    const user = userEvent.setup();
+    projectsGetSimilar.mockResolvedValue({
+      matches: [
+        {
+          id: 2,
+          name: 'Target Project',
+          team_id: 1,
+          team_name: 'Team',
+          is_archived: false,
+          match_type: 'exact',
+          match_score: 1.0,
+        },
+      ],
+    });
+
+    renderPage();
+    const { nameInput } = await openCreateModal(user);
+    await user.type(nameInput, 'Target Project');
+
+    const warning = await screen.findByTestId('similar-projects-warning');
+    await user.click(within(warning).getByTestId('similar-project-action-2'));
+
+    await waitFor(() => {
+      expect(screen.queryByText('New Project')).not.toBeInTheDocument();
+    });
+    expect(await screen.findByTestId('projects-search-input')).toHaveValue('Target Project');
   });
 
   it('archive confirmation appears and archived projects expose Unarchive', async () => {
@@ -194,13 +338,13 @@ describe('ProjectsPage per-project actions', () => {
 
     await user.click(screen.getByRole('button', { name: /show archived/i }));
 
-    const archivedMenuButton = (await screen.findAllByTestId('project-kebab-button'))[0];
-    await user.click(archivedMenuButton);
+    await openMenuForProject(user, 3);
     expect(await screen.findByText('Unarchive')).toBeInTheDocument();
   });
 
   it('delete modal shows counts and requires exact name before enabling delete', async () => {
     const user = userEvent.setup();
+    projectsGetSimilar.mockResolvedValue({ matches: [] });
     renderPage();
     await findProjectCard(1);
 
