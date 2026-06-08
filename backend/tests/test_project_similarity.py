@@ -105,11 +105,55 @@ async def test_find_similar_substring_returns_high_score(db_session: AsyncSessio
     await _make_project(db_session, team=team, name="Shae Marcus Consulting")
     await db_session.commit()
 
-    matches = await find_similar_projects(db_session, company.id, "ShaeMarcus")
+    matches = await find_similar_projects(db_session, company.id, "ShaeMarcusCon")
 
     assert len(matches) == 1
     assert matches[0].match_type == "substring"
     assert 0.8 <= matches[0].match_score <= 0.9
+
+
+@pytest.mark.asyncio
+async def test_substring_does_not_match_when_ratio_too_low(db_session: AsyncSession):
+    company = await _make_company(db_session, "SMC")
+    owner = await _make_user(db_session, company_id=company.id)
+    team = await _make_team(db_session, owner=owner, name="SEO Team", company_id=company.id)
+    await _make_project(db_session, team=team, name="Development")
+    await db_session.commit()
+
+    matches_for_de = await find_similar_projects(db_session, company.id, "de")
+    matches_for_dev = await find_similar_projects(db_session, company.id, "dev")
+
+    assert matches_for_de == []
+    assert matches_for_dev == []
+
+
+@pytest.mark.asyncio
+async def test_substring_matches_when_ratio_sufficient(db_session: AsyncSession):
+    company = await _make_company(db_session, "SMC")
+    owner = await _make_user(db_session, company_id=company.id)
+    team = await _make_team(db_session, owner=owner, name="SEO Team", company_id=company.id)
+    development = await _make_project(db_session, team=team, name="Development")
+    shae = await _make_project(db_session, team=team, name="ShaeMarcusConsulting")
+    await db_session.commit()
+
+    develop_matches = await find_similar_projects(db_session, company.id, "develop")
+    shae_matches = await find_similar_projects(db_session, company.id, "ShaeMarcus")
+
+    assert any(match.id == development.id and match.match_type == "substring" for match in develop_matches)
+    assert any(match.id == shae.id and match.match_type == "substring" for match in shae_matches)
+
+
+@pytest.mark.asyncio
+async def test_substring_ratio_exact_50_percent_matches(db_session: AsyncSession):
+    company = await _make_company(db_session, "SMC")
+    owner = await _make_user(db_session, company_id=company.id)
+    team = await _make_team(db_session, owner=owner, name="SEO Team", company_id=company.id)
+    project = await _make_project(db_session, team=team, name="1234567890abcdefghij")
+    await db_session.commit()
+
+    matches = await find_similar_projects(db_session, company.id, "1234567890")
+
+    assert any(match.id == project.id and match.match_type == "substring" for match in matches)
 
 
 @pytest.mark.asyncio

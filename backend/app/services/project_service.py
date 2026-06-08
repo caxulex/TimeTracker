@@ -127,8 +127,9 @@ async def find_similar_projects(
             shorter = min(len(normalized_project), len(normalized_input))
             longer = max(len(normalized_project), len(normalized_input))
             overlap_ratio = shorter / longer if longer else 0
-            match_type = "substring"
-            match_score = round(0.8 + min(0.1, overlap_ratio * 0.1), 2)
+            if overlap_ratio >= 0.5:
+                match_type = "substring"
+                match_score = round(0.8 + min(0.1, overlap_ratio * 0.1), 2)
         else:
             distance = _levenshtein_with_cutoff(normalized_project, normalized_input, cutoff=2)
             if distance <= 2:
