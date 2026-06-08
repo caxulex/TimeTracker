@@ -531,6 +531,7 @@ interface ManualEntryModalProps {
 
 function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: ManualEntryModalProps) {
   const { t } = useTranslation();
+  const descriptionEditedRef = React.useRef(false);
   const [description, setDescription] = useState('');
   const [projectId, setProjectId] = useState<number | ''>('');
   const [taskId, setTaskId] = useState<number | ''>('');
@@ -546,6 +547,7 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
   // Reset form when modal closes
   React.useEffect(() => {
     if (!isOpen) {
+      descriptionEditedRef.current = false;
       setDescription('');
       setProjectId('');
       setTaskId('');
@@ -573,23 +575,11 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
       setTaskId(suggestion.taskId);
     }
     if (suggestion.description) {
+      descriptionEditedRef.current = true;
       setDescription(suggestion.description);
     }
     setShowSuggestions(false);
   };
-
-  // Reset form when modal closes
-  React.useEffect(() => {
-    if (!isOpen) {
-      setDescription('');
-      setProjectId('');
-      setTaskId('');
-      setDate(new Date().toISOString().split('T')[0]);
-      setStartTime('09:00');
-      setEndTime('17:00');
-      setError('');
-    }
-  }, [isOpen]);
 
   const calculateDuration = () => {
     const start = new Date(date + 'T' + startTime);
@@ -669,7 +659,10 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
             id="manual-entry-description"
             type="text"
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => {
+              descriptionEditedRef.current = true;
+              setDescription(e.target.value);
+            }}
             onFocus={() => suggestionsEnabled && !projectId && setShowSuggestions(true)}
             placeholder={t('time.manualDescPlaceholder')}
             className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -705,9 +698,16 @@ function ManualEntryModal({ isOpen, onClose, projects, onSubmit, isLoading }: Ma
               value={taskId === '' ? null : taskId}
               onChange={(id, task) => {
                 setTaskId(id ?? '');
-                if (task && description.trim() === '') {
-                  setDescription(task.name);
-                }
+                if (!task) return;
+
+                // Use functional state to avoid stale closure races when
+                // task selection and typing happen close together.
+                setDescription((prev) => {
+                  if (descriptionEditedRef.current || prev.trim() !== '') {
+                    return prev;
+                  }
+                  return task.name;
+                });
               }}
               placeholder={t('time.noTask')}
             />

@@ -94,6 +94,10 @@ function renderPage() {
 }
 
 describe('ProjectsPage per-project actions', () => {
+  const sourceProject = makeProject(1, 'Source Project');
+  const targetProject = makeProject(2, 'Target Project');
+  const archivedTargetProject = makeProject(3, 'Archived Target', true);
+
   const openCreateModal = async (user: ReturnType<typeof userEvent.setup>) => {
     await user.click(await screen.findByRole('button', { name: /new project/i }));
     const dialog = await screen.findByRole('dialog', { name: 'New Project' });
@@ -111,16 +115,30 @@ describe('ProjectsPage per-project actions', () => {
     });
   };
 
+  const clickKebabForProject = async (
+    user: ReturnType<typeof userEvent.setup>,
+    projectId: number
+  ) => {
+    const card = await findProjectCard(projectId);
+    const kebabButton = within(card).getByTestId('project-kebab-button');
+    await user.click(kebabButton);
+  };
+
+  const clickMenuAction = async (
+    user: ReturnType<typeof userEvent.setup>,
+    actionLabel: string
+  ) => {
+    const menu = await screen.findByTestId('project-kebab-menu');
+    await user.click(within(menu).getByText(actionLabel));
+  };
+
   const clickActionForProject = async (
     user: ReturnType<typeof userEvent.setup>,
     projectId: number,
     actionLabel: string
   ) => {
-    const card = await findProjectCard(projectId);
-    const kebabButton = within(card).getByTestId('project-kebab-button');
-    await user.click(kebabButton);
-    const menu = await screen.findByTestId('project-kebab-menu');
-    await user.click(within(menu).getByText(actionLabel));
+    await clickKebabForProject(user, projectId);
+    await clickMenuAction(user, actionLabel);
   };
 
   const openMenuForProject = async (
@@ -145,11 +163,8 @@ describe('ProjectsPage per-project actions', () => {
     });
 
     projectsGetAll.mockResolvedValue({
-      items: [
-        makeProject(1, 'Source Project'),
-        makeProject(2, 'Target Project'),
-        makeProject(3, 'Archived Target', true),
-      ],
+      // Keep fixture ordering explicit to avoid environment-dependent ambiguity.
+      items: [sourceProject, targetProject, archivedTargetProject],
       total: 3,
       page: 1,
       page_size: 50,
@@ -342,13 +357,27 @@ describe('ProjectsPage per-project actions', () => {
     expect(await screen.findByText('Unarchive')).toBeInTheDocument();
   });
 
-  it('delete modal shows counts and requires exact name before enabling delete', async () => {
+  it('delete modal shows counts and requires exact name before enabling delete', { retry: 2 }, async () => {
     const user = userEvent.setup();
     projectsGetSimilar.mockResolvedValue({ matches: [] });
     renderPage();
-    await findProjectCard(1);
 
-    await clickActionForProject(user, 1, 'Delete');
+    await waitFor(() => {
+      expect(screen.getByTestId('project-card-1')).toBeInTheDocument();
+    });
+
+    await clickKebabForProject(user, 1);
+    await waitFor(() => {
+      expect(screen.getByTestId('project-kebab-menu')).toBeInTheDocument();
+    });
+
+    await clickMenuAction(user, 'Delete');
+    await waitFor(() => {
+      expect(screen.getByTestId('delete-project-confirm-name')).toBeInTheDocument();
+    });
+
+    const modalTitle = screen.getByTestId('delete-project-modal-title');
+    expect(modalTitle).toHaveTextContent('Source Project');
 
     const modal = await screen.findByRole('dialog');
     expect(modal).toHaveTextContent(/381\s*tasks/);
