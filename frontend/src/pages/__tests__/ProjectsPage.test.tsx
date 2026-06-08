@@ -119,7 +119,18 @@ describe('ProjectsPage per-project actions', () => {
     const card = await findProjectCard(projectId);
     const kebabButton = within(card).getByTestId('project-kebab-button');
     await user.click(kebabButton);
-    await user.click(await screen.findByText(actionLabel));
+    const menu = await screen.findByTestId('project-kebab-menu');
+    await user.click(within(menu).getByText(actionLabel));
+  };
+
+  const openMenuForProject = async (
+    user: ReturnType<typeof userEvent.setup>,
+    projectId: number
+  ) => {
+    const card = await findProjectCard(projectId);
+    const kebabButton = within(card).getByTestId('project-kebab-button');
+    await user.click(kebabButton);
+    return screen.findByTestId('project-kebab-menu');
   };
 
   beforeEach(() => {
@@ -165,8 +176,7 @@ describe('ProjectsPage per-project actions', () => {
     const user = userEvent.setup();
     renderPage();
 
-    const buttons = await screen.findAllByTestId('project-kebab-button');
-    await user.click(buttons[0]);
+    await openMenuForProject(user, 1);
 
     expect(await screen.findByTestId('project-kebab-menu')).toBeInTheDocument();
     expect(screen.getByText('Edit')).toBeInTheDocument();
@@ -328,13 +338,13 @@ describe('ProjectsPage per-project actions', () => {
 
     await user.click(screen.getByRole('button', { name: /show archived/i }));
 
-    const archivedMenuButton = (await screen.findAllByTestId('project-kebab-button'))[0];
-    await user.click(archivedMenuButton);
+    await openMenuForProject(user, 3);
     expect(await screen.findByText('Unarchive')).toBeInTheDocument();
   });
 
   it('delete modal shows counts and requires exact name before enabling delete', async () => {
     const user = userEvent.setup();
+    projectsGetSimilar.mockResolvedValue({ matches: [] });
     renderPage();
     await findProjectCard(1);
 
