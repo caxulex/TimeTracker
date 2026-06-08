@@ -8,9 +8,9 @@ from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, or_, select
-from sqlalchemy.orm import selectinload
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.dependencies import (
@@ -281,7 +281,7 @@ async def list_projects(
     include_archived: bool = False,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
-):
+) -> PaginatedProjects:
     """List projects scoped to the caller's company."""
     base_query = (
         select(Project)
@@ -290,38 +290,6 @@ async def list_projects(
             selectinload(Project.team_associations).selectinload(ProjectTeam.team),
             selectinload(Project.team_associations).selectinload(ProjectTeam.added_by),
         )
-    )
-
-
-@router.get("/similar", response_model=SimilarProjectsResponse)
-async def get_similar_projects(
-    name: str = Query(..., min_length=1, max_length=255),
-    exclude_id: Optional[int] = Query(None, ge=1),
-    include_archived: bool = False,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-):
-    """Find similar project names scoped to the caller's company."""
-    matches = await find_similar_projects(
-        db=db,
-        company_id=get_company_filter(current_user),
-        name=name,
-        exclude_id=exclude_id,
-        include_archived=include_archived,
-    )
-    return SimilarProjectsResponse(
-        matches=[
-            SimilarProjectMatchResponse(
-                id=row.id,
-                name=row.name,
-                team_id=row.team_id,
-                team_name=row.team_name,
-                is_archived=row.is_archived,
-                match_type=row.match_type,
-                match_score=row.match_score,
-            )
-            for row in matches
-        ]
     )
     count_query = select(func.count(Project.id)).join(Team, Project.team_id == Team.id)
 
@@ -348,8 +316,8 @@ async def get_similar_projects(
         count_query = count_query.where(team_filter)
 
     if not include_archived:
-        base_query = base_query.where(Project.is_archived == False)
-        count_query = count_query.where(Project.is_archived == False)
+        base_query = base_query.where(Project.is_archived.is_(False))
+        count_query = count_query.where(Project.is_archived.is_(False))
 
     if search:
         search_filter = f"%{search}%"
@@ -422,12 +390,44 @@ async def get_similar_projects(
     )
 
 
+@router.get("/similar", response_model=SimilarProjectsResponse)
+async def get_similar_projects(
+    name: str = Query(..., min_length=1, max_length=255),
+    exclude_id: Optional[int] = Query(None, ge=1),
+    include_archived: bool = False,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> SimilarProjectsResponse:
+    """Find similar project names scoped to the caller's company."""
+    matches = await find_similar_projects(
+        db=db,
+        company_id=get_company_filter(current_user),
+        name=name,
+        exclude_id=exclude_id,
+        include_archived=include_archived,
+    )
+    return SimilarProjectsResponse(
+        matches=[
+            SimilarProjectMatchResponse(
+                id=row.id,
+                name=row.name,
+                team_id=row.team_id,
+                team_name=row.team_name,
+                is_archived=row.is_archived,
+                match_type=row.match_type,
+                match_score=row.match_score,
+            )
+            for row in matches
+        ]
+    )
+
+
 @router.get("/{project_id}", response_model=ProjectResponse)
 async def get_project(
     project_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
-):
+) -> ProjectResponse:
     """Get project details"""
     # Multi-tenancy: join with team to filter by company
     query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
@@ -478,7 +478,7 @@ async def create_project(
     project_data: ProjectCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
-):
+) -> ProjectResponse:
     """Create a new project.
 
     Open to any authenticated user who has access to the target team
@@ -627,7 +627,7 @@ async def add_team_to_project_endpoint(
     body: ProjectTeamAddRequest,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> Message:
     """Add a team association to a project.
 
     Any authenticated user may associate a team with a project.
@@ -656,7 +656,7 @@ async def remove_team_from_project_endpoint(
     team_id: int,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> Response:
     """Remove a team association from a project.
 
     Any authenticated user may remove a shared association.
@@ -687,7 +687,7 @@ async def list_project_teams_endpoint(
     project_id: int,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> List[ProjectTeamAssociationResponse]:
     """List all teams associated with a project (primary first)."""
     query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
     query = apply_company_filter(query, Team.company_id, get_company_filter(current_user))
@@ -716,7 +716,7 @@ async def update_project(
     project_data: ProjectUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
-):
+) -> ProjectResponse:
     """Update a project"""
     # Multi-tenancy: join with team to filter by company
     query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)
@@ -887,7 +887,7 @@ async def delete_project(
     project_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
-):
+) -> ProjectDeleteResponse:
     """Permanently delete a project and dependent rows in one transaction."""
     project = await _get_company_scoped_project(db=db, project_id=project_id, current_user=current_user)
 
@@ -906,7 +906,7 @@ async def delete_project_preview(
     project_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-):
+) -> ProjectDeletePreviewResponse:
     """Return the counts that would be hard-deleted for a project."""
     project = await _get_company_scoped_project(db=db, project_id=project_id, current_user=current_user)
     if not project:
@@ -927,7 +927,7 @@ async def set_project_archive_status(
     body: ProjectArchiveRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-):
+) -> ProjectResponse:
     """Archive or unarchive a project."""
     project = await _get_company_scoped_project(db=db, project_id=project_id, current_user=current_user)
     if not project:
@@ -979,7 +979,7 @@ async def merge_project_endpoint(
     body: ProjectMergeRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-):
+) -> ProjectMergeResponse:
     """Merge source project into target and archive source in a single transaction."""
     if source_project_id == body.target_project_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source and target must be different")
@@ -1022,7 +1022,7 @@ async def merge_project_preview_endpoint(
     body: ProjectMergeRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-):
+) -> ProjectMergePreviewResponse:
     """Preview merge results without modifying data."""
     if source_project_id == body.target_project_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source and target must be different")
@@ -1064,7 +1064,7 @@ async def restore_project(
     project_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
-):
+) -> ProjectResponse:
     """Restore an archived project"""
     # Multi-tenancy: join with team to filter by company
     query = select(Project).join(Team, Project.team_id == Team.id).where(Project.id == project_id)

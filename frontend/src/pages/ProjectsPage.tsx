@@ -125,11 +125,11 @@ export function ProjectsPage() {
     if (!highlightedProjectId) return;
 
     const timeoutId = window.setTimeout(() => {
-      const card = document.querySelector(`[data-testid=\"project-card-${highlightedProjectId}\"]`) as HTMLElement | null;
+      const card = document.querySelector(`[data-testid="project-card-${highlightedProjectId}"]`) as HTMLElement | null;
       if (!card) return;
 
       card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      const addButton = card.querySelector(`[data-testid=\"project-add-team-${highlightedProjectId}\"]`) as HTMLElement | null;
+      const addButton = card.querySelector(`[data-testid="project-add-team-${highlightedProjectId}"]`) as HTMLElement | null;
       addButton?.focus();
     }, 300);
 
