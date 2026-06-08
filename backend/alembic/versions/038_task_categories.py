@@ -1,6 +1,6 @@
 """Add categories and task_categories tables.
 
-Revision ID: 038_categories_and_task_categories
+Revision ID: 038_task_categories
 Revises: 037_api_keys_health_tracking
 Create Date: 2026-06-08
 """
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = "038_categories_and_task_categories"
+revision = "038_task_categories"
 down_revision = "037_api_keys_health_tracking"
 branch_labels = None
 depends_on = None
