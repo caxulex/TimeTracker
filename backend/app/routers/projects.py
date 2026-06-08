@@ -4,7 +4,7 @@ Projects management router
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
@@ -34,6 +34,7 @@ from app.schemas.auth import Message
 from app.services.audit_logger import AuditAction, AuditLogger
 from app.services.project_service import (
     delete_project_with_cascade,
+    find_similar_projects,
     get_merge_preview,
     merge_projects,
 )
@@ -52,6 +53,8 @@ class ProjectCreate(BaseModel):
     description: Optional[str] = None
     team_id: int
     color: Optional[str] = Field(None, pattern="^#[0-9A-Fa-f]{6}$")
+    force: bool = False
+    similar_project_ids: Optional[list[int]] = None
     # Budget fields (admin only)
     budget_amount: Optional[float] = Field(None, ge=0, description="Project budget in USD")
     deadline: Optional[date] = Field(None, description="Project deadline date")
@@ -63,6 +66,8 @@ class ProjectUpdate(BaseModel):
     color: Optional[str] = Field(None, pattern="^#[0-9A-Fa-f]{6}$")
     is_archived: Optional[bool] = None
     team_id: Optional[int] = None
+    force: bool = False
+    similar_project_ids: Optional[list[int]] = None
     # Budget fields (admin only)
     budget_amount: Optional[float] = Field(None, ge=0, description="Project budget in USD")
     deadline: Optional[date] = Field(None, description="Project deadline date")
@@ -140,6 +145,20 @@ class ProjectMergePreviewResponse(BaseModel):
     task_name_conflicts: list[str]
     target_existing_tasks: int
     source_will_be_archived: bool
+
+
+class SimilarProjectMatchResponse(BaseModel):
+    id: int
+    name: str
+    team_id: int
+    team_name: str
+    is_archived: bool
+    match_type: Literal["exact", "substring", "fuzzy"]
+    match_score: float
+
+
+class SimilarProjectsResponse(BaseModel):
+    matches: list[SimilarProjectMatchResponse]
 
 
 async def check_team_access(db: AsyncSession, team_id: int, user: User, require_admin: bool = False) -> bool:
@@ -271,6 +290,38 @@ async def list_projects(
             selectinload(Project.team_associations).selectinload(ProjectTeam.team),
             selectinload(Project.team_associations).selectinload(ProjectTeam.added_by),
         )
+    )
+
+
+@router.get("/similar", response_model=SimilarProjectsResponse)
+async def get_similar_projects(
+    name: str = Query(..., min_length=1, max_length=255),
+    exclude_id: Optional[int] = Query(None, ge=1),
+    include_archived: bool = False,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Find similar project names scoped to the caller's company."""
+    matches = await find_similar_projects(
+        db=db,
+        company_id=get_company_filter(current_user),
+        name=name,
+        exclude_id=exclude_id,
+        include_archived=include_archived,
+    )
+    return SimilarProjectsResponse(
+        matches=[
+            SimilarProjectMatchResponse(
+                id=row.id,
+                name=row.name,
+                team_id=row.team_id,
+                team_name=row.team_name,
+                is_archived=row.is_archived,
+                match_type=row.match_type,
+                match_score=row.match_score,
+            )
+            for row in matches
+        ]
     )
     count_query = select(func.count(Project.id)).join(Team, Project.team_id == Team.id)
 
@@ -514,6 +565,14 @@ async def create_project(
         audit_values["budget_amount"] = float(project.budget_amount) if project.budget_amount else None
         audit_values["deadline"] = str(project.deadline) if project.deadline else None
 
+    audit_details = f"Created project '{project.name}' in team {project.team_id}"
+    if project_data.force and project_data.similar_project_ids:
+        audit_details += (
+            " | Created despite "
+            f"{len(project_data.similar_project_ids)} similar project warnings: "
+            f"{project_data.similar_project_ids}"
+        )
+
     await AuditLogger.log(
         db=db,
         action=AuditAction.CREATE,
@@ -522,7 +581,7 @@ async def create_project(
         user_id=current_user.id,
         user_email=current_user.email,
         new_values=audit_values,
-        details=f"Created project '{project.name}' in team {project.team_id}"
+        details=audit_details,
     )
     await db.commit()
 
@@ -713,6 +772,8 @@ async def update_project(
 
     # Remove budget fields from update if not admin
     budget_change_reason = update_data.pop("budget_change_reason", None)
+    force_override = update_data.pop("force", False)
+    similar_project_ids = update_data.pop("similar_project_ids", None)
     if not is_admin:
         update_data.pop("budget_amount", None)
         update_data.pop("deadline", None)
@@ -773,6 +834,13 @@ async def update_project(
         new_values["deadline"] = str(project.deadline) if project.deadline else None
 
     if old_values != new_values or budget_changed:
+        details = f"Updated project '{project.name}'" + (" (budget changed)" if budget_changed else "")
+        if force_override and similar_project_ids:
+            details += (
+                " | Renamed despite "
+                f"{len(similar_project_ids)} similar project warnings: "
+                f"{similar_project_ids}"
+            )
         await AuditLogger.log(
             db=db,
             action=AuditAction.UPDATE,
@@ -782,7 +850,7 @@ async def update_project(
             user_email=current_user.email,
             old_values=old_values,
             new_values=new_values,
-            details=f"Updated project '{project.name}'" + (" (budget changed)" if budget_changed else "")
+            details=details,
         )
 
     await db.commit()

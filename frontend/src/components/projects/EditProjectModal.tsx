@@ -1,53 +1,115 @@
 import React, { useEffect, useState } from 'react';
 
 import { Button, Input, Modal } from '../common';
-import type { Project } from '../../types';
+import { projectsApi } from '../../api/client';
+import { useSimilarProjects } from '../../hooks/useApi';
+import type { Project, SimilarProjectMatch } from '../../types';
+import { SimilarProjectsWarning } from './SimilarProjectsWarning';
 
 interface EditProjectModalProps {
   project: Project | null;
   isOpen: boolean;
   isSaving: boolean;
   onClose: () => void;
-  onSave: (payload: { name: string; description?: string | null; color: string }) => void;
+  onSave: (payload: {
+    name: string;
+    description?: string | null;
+    color: string;
+    force?: boolean;
+    similar_project_ids?: number[];
+  }) => void | Promise<void>;
+  onViewExisting?: (project: SimilarProjectMatch) => void;
 }
 
-export function EditProjectModal({ project, isOpen, isSaving, onClose, onSave }: EditProjectModalProps) {
+export function EditProjectModal({
+  project,
+  isOpen,
+  isSaving,
+  onClose,
+  onSave,
+  onViewExisting,
+}: EditProjectModalProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [color, setColor] = useState('#3B82F6');
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [pendingSimilarMatches, setPendingSimilarMatches] = useState<SimilarProjectMatch[]>([]);
+  const { matches } = useSimilarProjects(name, project?.id);
 
   useEffect(() => {
     if (!project) {
       setName('');
       setDescription('');
       setColor('#3B82F6');
+      setConfirmOpen(false);
+      setPendingSimilarMatches([]);
       return;
     }
 
     setName(project.name);
     setDescription(project.description || '');
     setColor(project.color || '#3B82F6');
+    setConfirmOpen(false);
+    setPendingSimilarMatches([]);
   }, [project]);
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!project) return;
 
-    onSave({
-      name: name.trim(),
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+
+    const finalCheck = await projectsApi.getSimilar(trimmedName, project.id);
+    if (finalCheck.matches.length > 0) {
+      setPendingSimilarMatches(finalCheck.matches);
+      setConfirmOpen(true);
+      return;
+    }
+
+    await onSave({
+      name: trimmedName,
       description: description.trim() ? description.trim() : null,
       color,
     });
   };
 
+  const handleConfirmOverride = async () => {
+    await onSave({
+      name: name.trim(),
+      description: description.trim() ? description.trim() : null,
+      color,
+      force: true,
+      similar_project_ids: pendingSimilarMatches.map((item) => item.id),
+    });
+    setConfirmOpen(false);
+    setPendingSimilarMatches([]);
+  };
+
+  const handleClose = () => {
+    setConfirmOpen(false);
+    setPendingSimilarMatches([]);
+    onClose();
+  };
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Edit Project">
+    <>
+    <Modal isOpen={isOpen} onClose={handleClose} title="Edit Project">
       <form className="space-y-4" onSubmit={handleSubmit}>
         <Input
           label="Name"
           value={name}
           onChange={(event) => setName(event.target.value)}
           required
+        />
+
+        <SimilarProjectsWarning
+          matches={matches}
+          mode="edit"
+          onUseExisting={(match) => {
+            onViewExisting?.(match);
+            handleClose();
+          }}
         />
 
         <div>
@@ -79,7 +141,7 @@ export function EditProjectModal({ project, isOpen, isSaving, onClose, onSave }:
         </div>
 
         <div className="flex justify-end gap-2 pt-2">
-          <Button type="button" variant="secondary" onClick={onClose}>
+          <Button type="button" variant="secondary" onClick={handleClose}>
             Cancel
           </Button>
           <Button type="submit" isLoading={isSaving} disabled={!name.trim()}>
@@ -88,5 +150,32 @@ export function EditProjectModal({ project, isOpen, isSaving, onClose, onSave }:
         </div>
       </form>
     </Modal>
+
+    <Modal
+      isOpen={confirmOpen}
+      onClose={() => setConfirmOpen(false)}
+      title="Similar projects found"
+      size="sm"
+    >
+      <div className="space-y-4">
+        <p className="text-sm text-gray-700">
+          Similar projects exist. Are you sure you want to rename this project to &quot;{name.trim()}&quot;?
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={() => setConfirmOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={handleConfirmOverride}
+            isLoading={isSaving}
+            data-testid="edit-project-create-anyway"
+          >
+            Rename anyway
+          </Button>
+        </div>
+      </div>
+    </Modal>
+    </>
   );
 }

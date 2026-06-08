@@ -10,10 +10,12 @@ import {
   reportsApi,
 } from '../api/client';
 import { isNoRunningTimerError } from '../utils/timerErrors';
+import { useDebounce } from './useDebounce';
 import type {
   ProjectCreate,
   ProjectUpdate,
   ProjectFilters,
+  SimilarProjectMatch,
   TeamProject,
   TaskCreate,
   TaskUpdate,
@@ -49,6 +51,7 @@ export function useCreateProject() {
     mutationFn: (data: ProjectCreate) => projectsApi.create(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
+      queryClient.invalidateQueries({ queryKey: ['projects', 'similar'] });
     },
   });
 }
@@ -60,8 +63,28 @@ export function useUpdateProject() {
       projectsApi.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
+      queryClient.invalidateQueries({ queryKey: ['projects', 'similar'] });
     },
   });
+}
+
+export function useSimilarProjects(name: string, excludeId?: number, debounceMs = 300): {
+  matches: SimilarProjectMatch[];
+  isLoading: boolean;
+} {
+  const debouncedName = useDebounce(name, debounceMs);
+  const normalized = debouncedName.trim();
+
+  const query = useQuery({
+    queryKey: ['projects', 'similar', normalized, excludeId ?? null],
+    queryFn: () => projectsApi.getSimilar(normalized, excludeId),
+    enabled: normalized.length > 0,
+  });
+
+  return {
+    matches: query.data?.matches ?? [],
+    isLoading: query.isLoading || query.isFetching,
+  };
 }
 
 export function useDeleteProject() {

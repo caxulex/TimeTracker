@@ -22,6 +22,7 @@ import type {
   ProjectMergeRequest,
   ProjectMergeResult,
   ProjectMergePreview,
+  SimilarProjectsResponse,
   ProjectFilters,
   Task,
   TaskCreate,
@@ -458,6 +459,21 @@ export const projectsApi = {
 
   create: async (data: ProjectCreate): Promise<Project> => {
     const response = await api.post<Project>('/api/projects', data);
+    return response.data;
+  },
+
+  getSimilar: async (
+    name: string,
+    excludeId?: number,
+    includeArchived = false
+  ): Promise<SimilarProjectsResponse> => {
+    const response = await api.get<SimilarProjectsResponse>('/api/projects/similar', {
+      params: {
+        name,
+        exclude_id: excludeId,
+        include_archived: includeArchived,
+      },
+    });
     return response.data;
   },
 

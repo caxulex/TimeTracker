@@ -13,6 +13,7 @@ import {
   useArchiveProject,
   useDeleteProject,
   useMergeProjects,
+  useSimilarProjects,
   useUpdateProject,
 } from '../hooks/useApi';
 import { useNotifications } from '../hooks/useNotifications';
@@ -24,7 +25,8 @@ import { DeleteProjectModal } from '../components/projects/DeleteProjectModal';
 import { EditProjectModal } from '../components/projects/EditProjectModal';
 import { MergeProjectModal } from '../components/projects/MergeProjectModal';
 import { ProjectKebabMenu } from '../components/projects/ProjectKebabMenu';
-import type { Project, ProjectCreate, ProjectDeletePreview, ProjectUpdate, Team } from '../types';
+import { SimilarProjectsWarning } from '../components/projects/SimilarProjectsWarning';
+import type { Project, ProjectCreate, ProjectDeletePreview, ProjectUpdate, SimilarProjectMatch, Team } from '../types';
 
 export function ProjectsPage() {
   const queryClient = useQueryClient();
@@ -43,6 +45,7 @@ export function ProjectsPage() {
   const [isLoadingDeletePreview, setIsLoadingDeletePreview] = useState(false);
   const [archiveConfirmationProject, setArchiveConfirmationProject] = useState<Project | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [highlightedProjectId, setHighlightedProjectId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') || '');
   const debouncedSearch = useDebounce(searchQuery, 250);
   const activeSearchQuery = debouncedSearch.trim();
@@ -118,11 +121,27 @@ export function ProjectsPage() {
     : allProjects.filter((p) => !p.is_archived);
   const teams = teamsData?.items || [];
 
+  React.useEffect(() => {
+    if (!highlightedProjectId) return;
+
+    const timeoutId = window.setTimeout(() => {
+      const card = document.querySelector(`[data-testid=\"project-card-${highlightedProjectId}\"]`) as HTMLElement | null;
+      if (!card) return;
+
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const addButton = card.querySelector(`[data-testid=\"project-add-team-${highlightedProjectId}\"]`) as HTMLElement | null;
+      addButton?.focus();
+    }, 300);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [highlightedProjectId, allProjects.length]);
+
   // Create mutation (admin only)
   const createMutation = useMutation({
     mutationFn: (data: ProjectCreate) => projectsApi.create(data),
     onSuccess: (newProject) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
+      queryClient.invalidateQueries({ queryKey: ['projects', 'similar'] });
       setShowCreateModal(false);
       addNotification({
         type: 'success',
@@ -174,20 +193,30 @@ export function ProjectsPage() {
     setEditingProject(project);
   };
 
-  const handleSaveEdit = (data: { name: string; description?: string | null; color: string }) => {
+  const handleSaveEdit = async (data: {
+    name: string;
+    description?: string | null;
+    color: string;
+    force?: boolean;
+    similar_project_ids?: number[];
+  }) => {
     if (!editingProject) return;
-    updateProjectMutation.mutate(
-      { id: editingProject.id, data: data as ProjectUpdate },
-      {
-        onSuccess: () => {
-          setEditingProject(null);
-          addNotification({ type: 'success', title: 'Project Updated', message: 'Changes have been saved' });
-        },
-        onError: () => {
-          addNotification({ type: 'error', title: 'Failed to Update Project', message: 'Please try again' });
-        },
-      }
-    );
+
+    try {
+      await updateProjectMutation.mutateAsync({ id: editingProject.id, data: data as ProjectUpdate });
+      setEditingProject(null);
+      addNotification({ type: 'success', title: 'Project Updated', message: 'Changes have been saved' });
+    } catch (_error) {
+      addNotification({ type: 'error', title: 'Failed to Update Project', message: 'Please try again' });
+    }
+  };
+
+  const focusExistingProject = (project: SimilarProjectMatch) => {
+    setShowCreateModal(false);
+    setEditingProject(null);
+    setShowArchived(false);
+    setSearchQuery(project.name);
+    setHighlightedProjectId(project.id);
   };
 
   const handleArchiveToggle = (project: Project) => {
@@ -457,6 +486,7 @@ export function ProjectsPage() {
           onSubmit={(data) => createMutation.mutate(data as ProjectCreate)}
           isLoading={createMutation.isPending}
           isAdmin={isAdmin}
+          onUseExistingProject={focusExistingProject}
         />
       )}
 
@@ -466,6 +496,7 @@ export function ProjectsPage() {
         isSaving={updateProjectMutation.isPending}
         onClose={() => setEditingProject(null)}
         onSave={handleSaveEdit}
+        onViewExisting={focusExistingProject}
       />
 
       <DeleteProjectModal
@@ -702,15 +733,28 @@ interface ProjectModalProps {
   onSubmit: (data: Partial<ProjectCreate>) => void;
   isLoading: boolean;
   isAdmin: boolean;
+  onUseExistingProject?: (project: SimilarProjectMatch) => void;
 }
 
-function ProjectModal({ isOpen, onClose, project, teams, onSubmit, isLoading, isAdmin }: ProjectModalProps) {
+function ProjectModal({
+  isOpen,
+  onClose,
+  project,
+  teams,
+  onSubmit,
+  isLoading,
+  isAdmin,
+  onUseExistingProject,
+}: ProjectModalProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [teamId, setTeamId] = useState<number | ''>('');
   const [color, setColor] = useState('#3B82F6');
   const [budgetAmount, setBudgetAmount] = useState<string>('');
   const [deadline, setDeadline] = useState<string>('');
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [pendingSimilarMatches, setPendingSimilarMatches] = useState<SimilarProjectMatch[]>([]);
+  const { matches } = useSimilarProjects(name);
 
   // Reset form when modal opens/closes or project changes
   React.useEffect(() => {
@@ -729,15 +773,20 @@ function ProjectModal({ isOpen, onClose, project, teams, onSubmit, isLoading, is
       setBudgetAmount('');
       setDeadline('');
     }
+
+    setConfirmOpen(false);
+    setPendingSimilarMatches([]);
   }, [project, isOpen, teams]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const submitPayload = (force = false) => {
+    const ids = pendingSimilarMatches.map((item) => item.id);
     const data: Partial<ProjectCreate> = {
-      name,
-      description: description || undefined,
+      name: name.trim(),
+      description: description.trim() ? description.trim() : undefined,
       team_id: teamId as number,
       color,
+      force,
+      similar_project_ids: force && ids.length > 0 ? ids : undefined,
     };
     
     // Include budget fields only if admin
@@ -745,11 +794,27 @@ function ProjectModal({ isOpen, onClose, project, teams, onSubmit, isLoading, is
       data.budget_amount = budgetAmount ? parseFloat(budgetAmount) : null;
       data.deadline = deadline || null;
     }
-    
+
     onSubmit(data);
   };
 
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+
+    const finalCheck = await projectsApi.getSimilar(trimmedName);
+    if (finalCheck.matches.length > 0) {
+      setPendingSimilarMatches(finalCheck.matches);
+      setConfirmOpen(true);
+      return;
+    }
+
+    submitPayload(false);
+  };
+
   return (
+    <>
     <Modal isOpen={isOpen} onClose={onClose} title={project ? 'Edit Project' : 'New Project'}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <Input
@@ -758,6 +823,15 @@ function ProjectModal({ isOpen, onClose, project, teams, onSubmit, isLoading, is
           onChange={(e) => setName(e.target.value)}
           placeholder="My Project"
           required
+        />
+
+        <SimilarProjectsWarning
+          matches={matches}
+          mode="create"
+          onUseExisting={(match) => {
+            onUseExistingProject?.(match);
+            onClose();
+          }}
         />
 
         <div>
@@ -867,5 +941,32 @@ function ProjectModal({ isOpen, onClose, project, teams, onSubmit, isLoading, is
         </div>
       </form>
     </Modal>
+
+    <Modal
+      isOpen={confirmOpen}
+      onClose={() => setConfirmOpen(false)}
+      title="Similar projects found"
+      size="sm"
+    >
+      <div className="space-y-4">
+        <p className="text-sm text-gray-700">
+          Similar projects exist. Are you sure you want to create &quot;{name.trim()}&quot;?
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={() => setConfirmOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={() => submitPayload(true)}
+            isLoading={isLoading}
+            data-testid="create-project-create-anyway"
+          >
+            Create anyway
+          </Button>
+        </div>
+      </div>
+    </Modal>
+    </>
   );
 }
