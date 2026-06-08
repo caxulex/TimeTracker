@@ -35,6 +35,9 @@ export function DeleteProjectModal({
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Delete Project">
       <div className="space-y-4">
+        <p className="text-sm font-medium text-gray-800" data-testid="delete-project-modal-title">
+          Delete &quot;{project?.name}&quot;
+        </p>
         <p className="text-sm font-semibold text-red-700">This permanently deletes:</p>
         <ul className="space-y-1 text-sm text-gray-700">
           <li>• The project &quot;{project?.name}&quot;</li>
