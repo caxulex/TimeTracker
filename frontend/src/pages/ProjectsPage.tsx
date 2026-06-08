@@ -746,6 +746,7 @@ function ProjectModal({
   isAdmin,
   onUseExistingProject,
 }: ProjectModalProps) {
+  const wasOpenRef = React.useRef(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [teamId, setTeamId] = useState<number | ''>('');
@@ -756,8 +757,22 @@ function ProjectModal({
   const [pendingSimilarMatches, setPendingSimilarMatches] = useState<SimilarProjectMatch[]>([]);
   const { matches } = useSimilarProjects(name);
 
-  // Reset form when modal opens/closes or project changes
+  // Initialize form when the modal opens or when switching edited project.
   React.useEffect(() => {
+    const justOpened = isOpen && !wasOpenRef.current;
+    const justClosed = !isOpen && wasOpenRef.current;
+    wasOpenRef.current = isOpen;
+
+    if (justClosed) {
+      setConfirmOpen(false);
+      setPendingSimilarMatches([]);
+      return;
+    }
+
+    if (!justOpened) {
+      return;
+    }
+
     if (project) {
       setName(project.name);
       setDescription(project.description || '');
@@ -777,6 +792,14 @@ function ProjectModal({
     setConfirmOpen(false);
     setPendingSimilarMatches([]);
   }, [project, isOpen, teams]);
+
+  React.useEffect(() => {
+    if (!isOpen || project || teamId !== '' || teams.length === 0) {
+      return;
+    }
+
+    setTeamId(teams[0].id);
+  }, [isOpen, project, teamId, teams]);
 
   const submitPayload = (force = false) => {
     const ids = pendingSimilarMatches.map((item) => item.id);

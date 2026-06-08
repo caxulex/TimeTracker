@@ -214,10 +214,46 @@ export interface Task {
   status: TaskStatus;
   created_at: string;
   project?: Project;
+  categories?: TaskCategory[];
   // Basecamp-sourced disambiguation metadata (null for native tasks).
   basecamp_due_on?: string | null;
   basecamp_todo_created_at?: string | null;
   basecamp_todo_position?: number | null;
+}
+
+export interface TaskCategory {
+  id: number;
+  name: string;
+  color: string;
+}
+
+export interface Category {
+  id: number;
+  name: string;
+  color: string;
+  description: string | null;
+  task_count: number;
+  created_at: string;
+  created_by_name?: string | null;
+  updated_at: string;
+}
+
+export interface CategoryCreate {
+  name: string;
+  color: string;
+  description?: string;
+}
+
+export interface CategoryUpdate {
+  name?: string;
+  color?: string;
+  description?: string | null;
+}
+
+export interface CategoryDeleteResult {
+  id: number;
+  task_count: number;
+  message: string;
 }
 
 export interface TaskCreate {
@@ -225,12 +261,15 @@ export interface TaskCreate {
   name: string;
   description?: string;
   status?: TaskStatus;
+  category_ids?: number[];
 }
 
 export interface TaskUpdate {
   name?: string;
   description?: string | null;
   status?: TaskStatus;
+  project_id?: number;
+  category_ids?: number[];
 }
 
 // Time Entry Types
@@ -400,6 +439,7 @@ export interface TaskFilters {
   project_id?: number;
   status?: TaskStatus;
   search?: string;
+  category_ids?: string;
   page?: number;
   /** @deprecated Use `page_size`. Backend (app/routers/tasks.py) only honors `page_size`. */
   size?: number;

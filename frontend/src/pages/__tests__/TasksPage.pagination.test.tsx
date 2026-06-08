@@ -29,8 +29,14 @@ vi.mock('../../api/client', () => ({
   projectsApi: {
     getAll: (...args: unknown[]) => projectsGetAll(...args),
   },
+  categoriesApi: {
+    list: vi.fn().mockResolvedValue([]),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    getById: vi.fn(),
+  },
 }));
-
 vi.mock('../../hooks/useAIFeatures', () => ({
   useFeatureEnabled: () => ({ data: false }),
 }));

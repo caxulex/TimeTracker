@@ -3,6 +3,7 @@ API Routers
 """
 from app.routers import (
     auth,
+    categories,
     pay_rates,
     payroll,
     payroll_reports,
@@ -16,7 +17,7 @@ from app.routers import (
 )
 
 __all__ = [
-    "auth", "users", "teams", "projects", "tasks",
+    "auth", "users", "teams", "projects", "tasks", "categories",
     "time_entries", "reports", "websocket",
     "pay_rates", "payroll", "payroll_reports"
 ]
