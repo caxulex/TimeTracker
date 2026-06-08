@@ -7,6 +7,7 @@ import {
   tasksApi,
   timeEntriesApi,
   teamsApi,
+  categoriesApi,
   reportsApi,
 } from '../api/client';
 import { isNoRunningTimerError } from '../utils/timerErrors';
@@ -20,6 +21,8 @@ import type {
   TaskCreate,
   TaskUpdate,
   TaskFilters,
+  CategoryCreate,
+  CategoryUpdate,
   TimeEntryCreate,
   TimeEntryFilters,
   TeamCreate,
@@ -225,6 +228,58 @@ export function useDeleteTask() {
   return useMutation({
     mutationFn: (id: number) => tasksApi.delete(id),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    },
+  });
+}
+
+// ============================================
+// CATEGORY HOOKS
+// ============================================
+export function useCategories() {
+  return useQuery({
+    queryKey: ['categories'],
+    queryFn: () => categoriesApi.list(),
+  });
+}
+
+export function useCategory(id: number) {
+  return useQuery({
+    queryKey: ['categories', id],
+    queryFn: () => categoriesApi.getById(id),
+    enabled: !!id,
+  });
+}
+
+export function useCreateCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: CategoryCreate) => categoriesApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['categories'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    },
+  });
+}
+
+export function useUpdateCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: CategoryUpdate }) =>
+      categoriesApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['categories'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    },
+  });
+}
+
+export function useDeleteCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => categoriesApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['categories'] });
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
     },
   });

@@ -28,6 +28,13 @@ vi.mock('../../api/client', () => ({
       pages: 1,
     }),
   },
+  categoriesApi: {
+    list: vi.fn().mockResolvedValue([]),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    getById: vi.fn(),
+  },
 }));
 
 vi.mock('../../hooks/useAIFeatures', () => ({

@@ -12,6 +12,8 @@ import {
 import { Card, CardHeader, Button, Input, Modal, LoadingOverlay, Select } from '../components/common';
 import { TaskEstimationCard } from '../components/ai';
 import { ProjectSelect } from '../components/projects/ProjectSelect';
+import { CategoryPicker } from '../components/categories/CategoryPicker';
+import { CategoryChip } from '../components/categories/CategoryChip';
 import { tasksApi, projectsApi } from '../api/client';
 import { formatDate, cn } from '../utils/helpers';
 import { useFeatureEnabled } from '../hooks/useAIFeatures';
@@ -342,6 +344,14 @@ function TaskCard({ task, projects, onEdit, onDelete, onStatusChange }: TaskCard
         </div>
       </div>
 
+      {!!task.categories?.length && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {task.categories.map((category) => (
+            <CategoryChip key={category.id} category={category} size="sm" />
+          ))}
+        </div>
+      )}
+
       {task.description && (
         <p className="mt-2 text-xs text-gray-500 line-clamp-2">{task.description}</p>
       )}
@@ -392,6 +402,7 @@ function TaskModal({ isOpen, onClose, task, projects, onSubmit, isLoading }: Tas
   const [description, setDescription] = useState('');
   const [projectId, setProjectId] = useState<number | ''>('');
   const [status, setStatus] = useState<TaskStatus>('TODO');
+  const [categoryIds, setCategoryIds] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Reset form when modal opens/closes or task changes
@@ -401,11 +412,13 @@ function TaskModal({ isOpen, onClose, task, projects, onSubmit, isLoading }: Tas
       setDescription(task.description || '');
       setProjectId(task.project_id);
       setStatus(task.status);
+      setCategoryIds(task.categories?.map((category) => category.id) ?? []);
     } else {
       setName('');
       setDescription('');
       setProjectId(projects[0]?.id || '');
       setStatus('TODO');
+      setCategoryIds([]);
     }
     setError(null);
   }, [task, isOpen, projects]);
@@ -423,6 +436,7 @@ function TaskModal({ isOpen, onClose, task, projects, onSubmit, isLoading }: Tas
       description: description || undefined,
       project_id: projectId as number,
       status,
+      category_ids: categoryIds,
     });
   };
 
@@ -487,6 +501,11 @@ function TaskModal({ isOpen, onClose, task, projects, onSubmit, isLoading }: Tas
             rows={3}
             className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-gray-700">Categories</label>
+          <CategoryPicker selectedIds={categoryIds} onChange={setCategoryIds} />
         </div>
 
         <div className="flex justify-end gap-2 pt-4">
