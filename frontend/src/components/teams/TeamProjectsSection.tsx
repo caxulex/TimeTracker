@@ -21,6 +21,7 @@ export function TeamProjectsSection({ teamId, teamName, isArchivedTeam = false }
   const removeProjectMutation = useRemoveProjectFromTeam();
 
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [projectSearch, setProjectSearch] = useState('');
   const [search, setSearch] = useState('');
   const [pendingProject, setPendingProject] = useState<Project | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<TeamProject | null>(null);
@@ -30,8 +31,19 @@ export function TeamProjectsSection({ teamId, teamName, isArchivedTeam = false }
     setProjects(teamProjectsData ?? []);
   }, [teamProjectsData]);
 
+  useEffect(() => {
+    setProjectSearch('');
+  }, [teamId]);
+
+  const debouncedProjectSearch = useDebounce(projectSearch, 250).trim();
   const debouncedSearch = useDebounce(search, 250).trim();
+  const isProjectSearchActive = debouncedProjectSearch.length > 0;
   const associatedIds = useMemo(() => new Set(projects.map((project) => project.id)), [projects]);
+  const visibleProjects = useMemo(() => {
+    if (!isProjectSearchActive) return projects;
+    const query = debouncedProjectSearch.toLowerCase();
+    return projects.filter((project) => project.name.toLowerCase().includes(query));
+  }, [projects, debouncedProjectSearch, isProjectSearchActive]);
 
   const { data: projectResults, isFetching: isSearching } = useQuery({
     queryKey: ['projects', 'team-assignment-search', teamId, debouncedSearch],
@@ -43,6 +55,9 @@ export function TeamProjectsSection({ teamId, teamName, isArchivedTeam = false }
   const availableProjects = (projectResults?.items ?? []).filter((project) => !associatedIds.has(project.id));
 
   const teamProjects = projects;
+  const projectCountLabel = isProjectSearchActive
+    ? `Projects (${visibleProjects.length} of ${teamProjects.length})`
+    : `Projects (${teamProjects.length})`;
 
   const openAddModal = () => {
     setSearch('');
@@ -118,7 +133,7 @@ export function TeamProjectsSection({ teamId, teamName, isArchivedTeam = false }
   return (
     <div className="mt-6 rounded-2xl border border-gray-200 bg-white/90 p-4 shadow-sm">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="font-semibold text-gray-900">Projects ({teamProjects.length})</h3>
+        <h3 className="font-semibold text-gray-900">{projectCountLabel}</h3>
         {!isArchivedTeam && (
           <Button size="sm" variant="secondary" onClick={openAddModal}>
             + Add Project
@@ -133,15 +148,29 @@ export function TeamProjectsSection({ teamId, teamName, isArchivedTeam = false }
         <p>Changes here affect all team members, not just you.</p>
       </div>
 
+      <div className="mt-4">
+        <Input
+          label="Search projects"
+          value={projectSearch}
+          onChange={(event) => setProjectSearch(event.target.value)}
+          placeholder="Search by project name"
+          data-testid="team-projects-search-input"
+        />
+      </div>
+
       <div className="mt-4 space-y-2">
         {isLoading ? (
           <div className="py-6 text-sm text-gray-500">Loading projects...</div>
         ) : teamProjects.length === 0 ? (
           <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-sm text-gray-600">
-            No projects yet. Click + Add Project to get started.
+            {isProjectSearchActive ? 'No projects match' : 'No projects yet. Click + Add Project to get started.'}
+          </div>
+        ) : visibleProjects.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-sm text-gray-600">
+            No projects match
           </div>
         ) : (
-          teamProjects.map((project) => (
+          visibleProjects.map((project) => (
             <div key={project.id} className="flex items-start justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-3">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">

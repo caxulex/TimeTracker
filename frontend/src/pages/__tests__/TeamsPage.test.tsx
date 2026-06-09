@@ -193,7 +193,7 @@ describe('TeamsPage - projects section', () => {
     await screen.findByText('Projects (2)');
 
     await user.click(screen.getByRole('button', { name: '+ Add Project' }));
-    const search = screen.getByLabelText('Search projects');
+    const search = screen.getByPlaceholderText('Search projects...');
     await user.type(search, 'Gamma');
 
     await screen.findByRole('button', { name: 'Gamma Project' });
@@ -229,5 +229,66 @@ describe('TeamsPage - projects section', () => {
     });
     expect(await screen.findByRole('heading', { name: 'Projects (1)' })).toBeInTheDocument();
     expect(screen.queryByText('Beta Project')).not.toBeInTheDocument();
+  });
+
+  it('filters team projects by name (case-insensitive)', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const teamCard = await screen.findByText('Team 1');
+    await user.click(teamCard);
+    await screen.findByRole('heading', { name: 'Projects (2)' });
+
+    const searchInput = screen.getByTestId('team-projects-search-input');
+    await user.type(searchInput, 'alpha');
+
+    expect(await screen.findByText('Alpha Project')).toBeInTheDocument();
+    expect(screen.queryByText('Beta Project')).not.toBeInTheDocument();
+  });
+
+  it('shows N of M indicator when filter is active', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const teamCard = await screen.findByText('Team 1');
+    await user.click(teamCard);
+    await screen.findByRole('heading', { name: 'Projects (2)' });
+
+    await user.type(screen.getByTestId('team-projects-search-input'), 'alpha');
+
+    expect(await screen.findByRole('heading', { name: 'Projects (1 of 2)' })).toBeInTheDocument();
+  });
+
+  it('shows empty state when filter yields no matches', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const teamCard = await screen.findByText('Team 1');
+    await user.click(teamCard);
+    await screen.findByRole('heading', { name: 'Projects (2)' });
+
+    await user.type(screen.getByTestId('team-projects-search-input'), 'zzz');
+
+    expect(await screen.findByText('No projects match')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Projects (0 of 2)' })).toBeInTheDocument();
+  });
+
+  it('clearing the filter shows all projects again', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const teamCard = await screen.findByText('Team 1');
+    await user.click(teamCard);
+    await screen.findByRole('heading', { name: 'Projects (2)' });
+
+    const searchInput = screen.getByTestId('team-projects-search-input');
+    await user.type(searchInput, 'alpha');
+    expect(await screen.findByRole('heading', { name: 'Projects (1 of 2)' })).toBeInTheDocument();
+
+    await user.clear(searchInput);
+
+    expect(await screen.findByRole('heading', { name: 'Projects (2)' })).toBeInTheDocument();
+    expect(screen.getByText('Alpha Project')).toBeInTheDocument();
+    expect(screen.getByText('Beta Project')).toBeInTheDocument();
   });
 });
