@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { Button, Input, Modal } from '../common';
+import { ProjectKebabMenu } from '../projects/ProjectKebabMenu';
 import { projectsApi } from '../../api/client';
 import { useDebounce } from '../../hooks/useDebounce';
 import { useAddProjectToTeam, useRemoveProjectFromTeam, useTeamProjects } from '../../hooks/useApi';
 import { useStaffNotifications } from '../../hooks/useStaffNotifications';
-import { cn } from '../../utils/helpers';
 import type { Project, TeamProject } from '../../types';
 
 interface TeamProjectsSectionProps {
@@ -15,6 +16,7 @@ interface TeamProjectsSectionProps {
 }
 
 export function TeamProjectsSection({ teamId, teamName, isArchivedTeam = false }: TeamProjectsSectionProps) {
+  const navigate = useNavigate();
   const notifications = useStaffNotifications();
   const { data: teamProjectsData, isLoading, error } = useTeamProjects(teamId);
   const addProjectMutation = useAddProjectToTeam();
@@ -120,7 +122,9 @@ export function TeamProjectsSection({ teamId, teamName, isArchivedTeam = false }
     );
   };
 
-  const removeButtonDisabled = isArchivedTeam || removeProjectMutation.isPending;
+  const openProjectAction = (param: 'edit' | 'archive' | 'merge' | 'delete', projectId: number) => {
+    navigate(`/projects?${param}=${projectId}`);
+  };
 
   if (error) {
     return (
@@ -171,11 +175,22 @@ export function TeamProjectsSection({ teamId, teamName, isArchivedTeam = false }
           </div>
         ) : (
           visibleProjects.map((project) => (
-            <div key={project.id} className="flex items-start justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-3">
+            <div
+              key={project.id}
+              className="flex items-start justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-3"
+              data-testid={`team-project-row-${project.id}`}
+            >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="h-2.5 w-2.5 rounded-full border border-gray-300" style={{ backgroundColor: project.color }} />
-                  <span className="truncate font-medium text-gray-900">{project.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => openProjectAction('edit', project.id)}
+                    className="truncate text-left font-medium text-blue-700 hover:text-blue-800 hover:underline"
+                    data-testid={`team-project-link-${project.id}`}
+                  >
+                    {project.name}
+                  </button>
                 </div>
                 {project.primary_team_id !== teamId && (
                   <p className="mt-1 text-xs text-gray-500">
@@ -184,15 +199,21 @@ export function TeamProjectsSection({ teamId, teamName, isArchivedTeam = false }
                 )}
               </div>
               {!isArchivedTeam && (
-                <button
-                  type="button"
-                  onClick={() => setPendingRemoval(project)}
-                  className={cn('rounded px-2 py-1 text-sm text-gray-500 hover:text-red-600', removeButtonDisabled ? 'opacity-50' : '')}
-                  aria-label={`Remove ${project.name} from team`}
-                  disabled={removeButtonDisabled}
-                >
-                  X
-                </button>
+                <ProjectKebabMenu
+                  isArchived={project.is_archived}
+                  canMerge
+                  topAction={{
+                    label: 'Remove from team',
+                    onClick: () => setPendingRemoval(project),
+                    className: 'w-full px-3 py-2 text-left text-sm font-semibold text-gray-900 hover:bg-gray-50',
+                    testId: 'project-kebab-action-remove-team',
+                  }}
+                  onEdit={() => openProjectAction('edit', project.id)}
+                  onArchiveToggle={() => openProjectAction('archive', project.id)}
+                  onMerge={() => openProjectAction('merge', project.id)}
+                  onDelete={() => openProjectAction('delete', project.id)}
+                  mergeLabel="Merge"
+                />
               )}
             </div>
           ))

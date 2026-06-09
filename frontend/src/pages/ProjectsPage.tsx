@@ -122,6 +122,68 @@ export function ProjectsPage() {
   const teams = teamsData?.items || [];
 
   React.useEffect(() => {
+    if (isLoading) return;
+
+    const actionParams: Array<{ key: 'edit' | 'archive' | 'merge' | 'delete'; value: string | null }> = [
+      { key: 'edit', value: searchParams.get('edit') },
+      { key: 'archive', value: searchParams.get('archive') },
+      { key: 'merge', value: searchParams.get('merge') },
+      { key: 'delete', value: searchParams.get('delete') },
+    ];
+
+    const action = actionParams.find((item) => !!item.value);
+    if (!action?.value) return;
+
+    const projectId = Number(action.value);
+    if (!Number.isInteger(projectId) || projectId <= 0) {
+      addNotification({
+        type: 'error',
+        title: 'Invalid project action',
+        message: 'Could not open project action from URL.',
+      });
+      setSearchParams({}, { replace: true });
+      return;
+    }
+
+    const targetProject = allProjects.find((project) => project.id === projectId);
+    if (!targetProject) {
+      addNotification({
+        type: 'error',
+        title: 'Project not found',
+        message: 'The requested project is unavailable or you do not have access.',
+      });
+      setSearchParams({}, { replace: true });
+      return;
+    }
+
+    if (action.key === 'edit') {
+      setEditingProject(targetProject);
+    } else if (action.key === 'archive') {
+      setArchiveConfirmationProject(targetProject);
+    } else if (action.key === 'merge') {
+      setMergeSourceProject(targetProject);
+    } else {
+      setDeleteProjectTarget(targetProject);
+      setDeletePreview(null);
+      setIsLoadingDeletePreview(true);
+      void projectsApi.deletePreview(targetProject.id)
+        .then((preview) => setDeletePreview(preview))
+        .catch(() => {
+          addNotification({
+            type: 'error',
+            title: 'Failed to Load Delete Details',
+            message: 'Please try again.',
+          });
+        })
+        .finally(() => {
+          setIsLoadingDeletePreview(false);
+        });
+    }
+
+    setSearchParams({}, { replace: true });
+  }, [isLoading, searchParams, allProjects, addNotification, setSearchParams]);
+
+  React.useEffect(() => {
     if (!highlightedProjectId) return;
 
     const timeoutId = window.setTimeout(() => {
@@ -241,7 +303,7 @@ export function ProjectsPage() {
     );
   };
 
-  const handleOpenDelete = async (project: Project) => {
+  const handleOpenDelete = React.useCallback(async (project: Project) => {
     setDeleteProjectTarget(project);
     setDeletePreview(null);
     setIsLoadingDeletePreview(true);
@@ -253,7 +315,7 @@ export function ProjectsPage() {
     } finally {
       setIsLoadingDeletePreview(false);
     }
-  };
+  }, [addNotification]);
 
   const handleConfirmDelete = () => {
     if (!deleteProjectTarget) return;

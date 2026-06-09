@@ -5,6 +5,16 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { TeamsPage } from '../TeamsPage';
 
+const mockNavigate = vi.fn();
+
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
+
 const mockAdmin = {
   id: 1,
   name: 'Admin',
@@ -107,6 +117,7 @@ let teamProjects = [allProjects[0], allProjects[1]];
 describe('TeamsPage - projects section', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockNavigate.mockReset();
     teamProjects = [allProjects[0], allProjects[1]];
 
     teamsGetAll.mockResolvedValue({
@@ -218,7 +229,10 @@ describe('TeamsPage - projects section', () => {
     await user.click(teamCard);
     await screen.findByText('Projects (2)');
 
-    await user.click(screen.getByRole('button', { name: /Remove Beta Project from team/i }));
+    const row = await screen.findByTestId('team-project-row-12');
+    await user.click(row.querySelector('[data-testid="project-kebab-button"]') as HTMLElement);
+    await user.click(await screen.findByTestId('project-kebab-action-remove-team'));
+
     const removeDialog = await screen.findByRole('dialog', { name: /Remove project from team\?/i });
     expect(removeDialog.textContent).toContain('Beta Project');
 
@@ -229,6 +243,82 @@ describe('TeamsPage - projects section', () => {
     });
     expect(await screen.findByRole('heading', { name: 'Projects (1)' })).toBeInTheDocument();
     expect(screen.queryByText('Beta Project')).not.toBeInTheDocument();
+  });
+
+  it('clicking project name navigates to /projects?edit={id}', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const teamCard = await screen.findByText('Team 1');
+    await user.click(teamCard);
+    await screen.findByRole('heading', { name: 'Projects (2)' });
+
+    await user.click(screen.getByTestId('team-project-link-11'));
+
+    expect(mockNavigate).toHaveBeenCalledWith('/projects?edit=11');
+  });
+
+  it('kebab menu shows Remove from team as most prominent action', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const teamCard = await screen.findByText('Team 1');
+    await user.click(teamCard);
+    await screen.findByRole('heading', { name: 'Projects (2)' });
+
+    const row = await screen.findByTestId('team-project-row-12');
+    await user.click(row.querySelector('[data-testid="project-kebab-button"]') as HTMLElement);
+
+    const menu = await screen.findByTestId('project-kebab-menu');
+    const buttons = menu.querySelectorAll('button');
+    expect(buttons[0].textContent).toContain('Remove from team');
+    expect(await screen.findByTestId('project-kebab-action-remove-team')).toHaveClass('font-semibold');
+  });
+
+  it('Remove from team kebab action calls the remove handler (no nav)', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const teamCard = await screen.findByText('Team 1');
+    await user.click(teamCard);
+    await screen.findByRole('heading', { name: 'Projects (2)' });
+
+    const row = await screen.findByTestId('team-project-row-12');
+    await user.click(row.querySelector('[data-testid="project-kebab-button"]') as HTMLElement);
+    await user.click(await screen.findByTestId('project-kebab-action-remove-team'));
+
+    expect(await screen.findByRole('dialog', { name: /Remove project from team\?/i })).toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('Edit kebab action navigates to /projects?edit={id}', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const teamCard = await screen.findByText('Team 1');
+    await user.click(teamCard);
+    await screen.findByRole('heading', { name: 'Projects (2)' });
+
+    const row = await screen.findByTestId('team-project-row-12');
+    await user.click(row.querySelector('[data-testid="project-kebab-button"]') as HTMLElement);
+    await user.click(await screen.findByTestId('project-kebab-action-edit'));
+
+    expect(mockNavigate).toHaveBeenCalledWith('/projects?edit=12');
+  });
+
+  it('Delete kebab action navigates to /projects?delete={id}', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const teamCard = await screen.findByText('Team 1');
+    await user.click(teamCard);
+    await screen.findByRole('heading', { name: 'Projects (2)' });
+
+    const row = await screen.findByTestId('team-project-row-12');
+    await user.click(row.querySelector('[data-testid="project-kebab-button"]') as HTMLElement);
+    await user.click(await screen.findByTestId('project-kebab-action-delete'));
+
+    expect(mockNavigate).toHaveBeenCalledWith('/projects?delete=12');
   });
 
   it('filters team projects by name (case-insensitive)', async () => {
