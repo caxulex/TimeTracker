@@ -2,7 +2,6 @@
 // TIME TRACKER - SETTINGS PAGE
 // ============================================
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, Button, Input, PasswordInput } from '../components/common';
@@ -355,21 +354,6 @@ export function SettingsPage() {
 
       {/* AI Features section */}
       <AIFeaturePanel />
-
-      <Card>
-        <CardHeader title="Task Categories" subtitle="Manage reusable task tags for your company" />
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Categories are available to all authenticated users.
-          </p>
-          <Link
-            to="/settings/categories"
-            className="inline-flex items-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
-          >
-            Open Categories
-          </Link>
-        </div>
-      </Card>
 
       {/* Account info */}
       <Card>

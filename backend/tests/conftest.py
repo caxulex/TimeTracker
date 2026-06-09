@@ -96,6 +96,38 @@ async def _truncate_tables_around_test(async_engine) -> AsyncGenerator[None, Non
     not drift.
     """
     async with async_engine.begin() as conn:
+        # Keep test schema aligned with latest model additions when local
+        # test databases lag behind migrations.
+        await conn.execute(
+            text(
+                """
+                ALTER TABLE teams
+                ADD COLUMN IF NOT EXISTS color VARCHAR(20) NOT NULL DEFAULT '#6B7280'
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS task_teams (
+                    task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                    team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    created_by INTEGER NULL REFERENCES users(id),
+                    PRIMARY KEY (task_id, team_id)
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_task_teams_team_id_task_id
+                ON task_teams (team_id, task_id)
+                """
+            )
+        )
+
         result = await conn.execute(
             text(
                 "SELECT tablename "

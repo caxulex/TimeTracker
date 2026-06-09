@@ -7,7 +7,6 @@ import {
   tasksApi,
   timeEntriesApi,
   teamsApi,
-  categoriesApi,
   reportsApi,
 } from '../api/client';
 import { isNoRunningTimerError } from '../utils/timerErrors';
@@ -21,8 +20,6 @@ import type {
   TaskCreate,
   TaskUpdate,
   TaskFilters,
-  CategoryCreate,
-  CategoryUpdate,
   TimeEntryCreate,
   TimeEntryFilters,
   TeamCreate,
@@ -234,58 +231,6 @@ export function useDeleteTask() {
 }
 
 // ============================================
-// CATEGORY HOOKS
-// ============================================
-export function useCategories() {
-  return useQuery({
-    queryKey: ['categories'],
-    queryFn: () => categoriesApi.list(),
-  });
-}
-
-export function useCategory(id: number) {
-  return useQuery({
-    queryKey: ['categories', id],
-    queryFn: () => categoriesApi.getById(id),
-    enabled: !!id,
-  });
-}
-
-export function useCreateCategory() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (data: CategoryCreate) => categoriesApi.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['categories'] });
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
-    },
-  });
-}
-
-export function useUpdateCategory() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, data }: { id: number; data: CategoryUpdate }) =>
-      categoriesApi.update(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['categories'] });
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
-    },
-  });
-}
-
-export function useDeleteCategory() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: number) => categoriesApi.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['categories'] });
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
-    },
-  });
-}
-
-// ============================================
 // TIME ENTRY HOOKS
 // ============================================
 export function useTimeEntries(filters?: TimeEntryFilters) {
@@ -403,6 +348,18 @@ export function useUpdateTeam() {
       teamsApi.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
+    },
+  });
+}
+
+export function useUpdateTeamColor() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, color }: { id: number; color: string }) =>
+      teamsApi.update(id, { color }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['teams'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
     },
   });
 }

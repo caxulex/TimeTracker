@@ -163,9 +163,12 @@ export function ProjectSelect({
     [projectsProp, projectsData]
   );
 
-  const displayed = search
-    ? (projectsData?.items ?? [])
-    : (projectsProp ?? projectsData?.items ?? []);
+  const displayed = useMemo(
+    () => (search
+      ? (projectsData?.items ?? [])
+      : (projectsProp ?? projectsData?.items ?? [])),
+    [projectsData, projectsProp, search]
+  );
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -184,7 +187,7 @@ export function ProjectSelect({
   // free-typing a search query.
   const displayValue = open ? query : selected?.name ?? '';
 
-  const options = useMemo(() => displayed, [displayed]);
+  const options = displayed;
 
   // When `clearable` is true the dropdown carries an extra synthetic
   // option at index 0 (the "All projects" / clear affordance). All

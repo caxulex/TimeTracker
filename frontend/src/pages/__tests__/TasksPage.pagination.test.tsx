@@ -18,6 +18,7 @@ import { TasksPage } from '../TasksPage';
 
 const tasksGetAll = vi.fn();
 const projectsGetAll = vi.fn();
+const teamsGetAll = vi.fn();
 
 vi.mock('../../api/client', () => ({
   tasksApi: {
@@ -29,12 +30,8 @@ vi.mock('../../api/client', () => ({
   projectsApi: {
     getAll: (...args: unknown[]) => projectsGetAll(...args),
   },
-  categoriesApi: {
-    list: vi.fn().mockResolvedValue([]),
-    create: vi.fn(),
-    update: vi.fn(),
-    delete: vi.fn(),
-    getById: vi.fn(),
+  teamsApi: {
+    getAll: (...args: unknown[]) => teamsGetAll(...args),
   },
 }));
 vi.mock('../../hooks/useAIFeatures', () => ({
@@ -100,6 +97,7 @@ const projectsList = [
 describe('TasksPage - pagination & filters', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    teamsGetAll.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100, pages: 1 });
     projectsGetAll.mockResolvedValue({
       items: projectsList,
       total: projectsList.length,

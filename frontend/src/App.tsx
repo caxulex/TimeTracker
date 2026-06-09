@@ -44,7 +44,6 @@ const TimePage = lazy(() => import('./pages/TimePage').then(m => ({ default: m.T
 const TeamsPage = lazy(() => import('./pages/TeamsPage').then(m => ({ default: m.TeamsPage })));
 const ReportsPage = lazy(() => import('./pages/ReportsPage').then(m => ({ default: m.ReportsPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
-const CategoriesSettingsPage = lazy(() => import('./pages/CategoriesSettingsPage').then(m => ({ default: m.CategoriesSettingsPage })));
 
 // Admin pages - lazy loaded (separate chunk)
 const AdminPage = lazy(() => import('./pages/AdminPage').then(m => ({ default: m.AdminPage })));
@@ -295,14 +294,6 @@ function App() {
               element={
                 <ProtectedRoute>
                   <ErrorBoundary name="SettingsPage"><SettingsPage /></ErrorBoundary>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/settings/categories"
-              element={
-                <ProtectedRoute>
-                  <ErrorBoundary name="CategoriesSettingsPage"><CategoriesSettingsPage /></ErrorBoundary>
                 </ProtectedRoute>
               }
             />
