@@ -39,7 +39,9 @@ describe('TeamMultiSelect', () => {
     const onChange = vi.fn();
     renderWithQuery(<TeamMultiSelect selectedIds={[]} onChange={onChange} />);
 
-    await user.selectOptions(await screen.findByLabelText('Add team'), '1');
+    // Wait for the async query to populate options before selecting
+    await screen.findByRole('option', { name: 'SEO' });
+    await user.selectOptions(screen.getByLabelText('Add team'), '1');
     expect(onChange).toHaveBeenCalledWith([1]);
   });
 });
