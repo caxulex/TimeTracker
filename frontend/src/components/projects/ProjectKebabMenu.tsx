@@ -1,5 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 
+interface ProjectKebabTopAction {
+  label: string;
+  onClick: () => void;
+  className?: string;
+  testId?: string;
+}
+
 interface ProjectKebabMenuProps {
   isArchived: boolean;
   canMerge: boolean;
@@ -7,6 +14,8 @@ interface ProjectKebabMenuProps {
   onArchiveToggle: () => void;
   onMerge: () => void;
   onDelete: () => void;
+  mergeLabel?: string;
+  topAction?: ProjectKebabTopAction;
 }
 
 export function ProjectKebabMenu({
@@ -16,6 +25,8 @@ export function ProjectKebabMenu({
   onArchiveToggle,
   onMerge,
   onDelete,
+  mergeLabel = 'Merge with...',
+  topAction,
 }: ProjectKebabMenuProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -44,7 +55,10 @@ export function ProjectKebabMenu({
         className="h-8 w-8 rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700"
         aria-label="Project actions"
         data-testid="project-kebab-button"
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen((prev) => !prev);
+        }}
       >
         <span aria-hidden="true">⋮</span>
       </button>
@@ -55,10 +69,24 @@ export function ProjectKebabMenu({
           role="menu"
           data-testid="project-kebab-menu"
         >
+          {topAction && (
+            <>
+              <button
+                type="button"
+                className={topAction.className ?? 'w-full px-3 py-2 text-left text-sm font-semibold text-gray-900 hover:bg-gray-50'}
+                onClick={() => run(topAction.onClick)}
+                data-testid={topAction.testId ?? 'project-kebab-action-top'}
+              >
+                {topAction.label}
+              </button>
+              <div className="my-1 border-t border-gray-100" />
+            </>
+          )}
           <button
             type="button"
             className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
             onClick={() => run(onEdit)}
+            data-testid="project-kebab-action-edit"
           >
             Edit
           </button>
@@ -66,16 +94,18 @@ export function ProjectKebabMenu({
             type="button"
             className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
             onClick={() => run(onArchiveToggle)}
+            data-testid="project-kebab-action-archive"
           >
             {isArchived ? 'Unarchive' : 'Archive'}
           </button>
-          {!isArchived && canMerge && (
+          {canMerge && (
             <button
               type="button"
               className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
               onClick={() => run(onMerge)}
+              data-testid="project-kebab-action-merge"
             >
-              Merge with...
+              {mergeLabel}
             </button>
           )}
           <div className="my-1 border-t border-gray-100" />
@@ -83,6 +113,7 @@ export function ProjectKebabMenu({
             type="button"
             className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
             onClick={() => run(onDelete)}
+            data-testid="project-kebab-action-delete"
           >
             Delete
           </button>

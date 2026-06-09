@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 import { ProjectsPage } from '../ProjectsPage';
 
@@ -79,15 +79,21 @@ const makeProject = (id: number, name: string, archived = false) => ({
   task_count: 5,
 });
 
-function renderPage() {
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location-search">{location.search}</div>;
+}
+
+function renderPage(initialEntry: string = '/projects') {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <ProjectsPage />
+        <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>
   );
@@ -198,6 +204,33 @@ describe('ProjectsPage per-project actions', () => {
     expect(screen.getByText('Archive')).toBeInTheDocument();
     expect(screen.getByText('Merge with...')).toBeInTheDocument();
     expect(screen.getByText('Delete')).toBeInTheDocument();
+  });
+
+  it('opens edit modal when ?edit={id} param is present and clears param', async () => {
+    renderPage('/projects?edit=2');
+
+    expect(await screen.findByRole('dialog', { name: 'Edit Project' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('location-search').textContent).toBe('');
+    });
+  });
+
+  it('clears ?edit param after opening the edit modal', async () => {
+    renderPage('/projects?edit=1');
+
+    await screen.findByRole('dialog', { name: 'Edit Project' });
+    await waitFor(() => {
+      expect(screen.getByTestId('location-search').textContent).toBe('');
+    });
+  });
+
+  it('opens delete modal when ?delete={id} param is present', async () => {
+    renderPage('/projects?delete=2');
+
+    expect(await screen.findByRole('dialog', { name: 'Delete Project' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('location-search').textContent).toBe('');
+    });
   });
 
 
