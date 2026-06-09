@@ -648,23 +648,6 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             </NavLink>
           )}
 
-          <NavLink
-            to="/settings/categories"
-            onClick={onClose}
-            className={({ isActive }) =>
-              cn(
-                'flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-blue-50 text-blue-600'
-                  : 'text-gray-700 hover:bg-gray-100'
-              )
-            }
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h10M7 12h10M7 17h6M4 5h16a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1z" />
-            </svg>
-            <span>Categories</span>
-          </NavLink>
         </nav>
 
         {/* Footer */}

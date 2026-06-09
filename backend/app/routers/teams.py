@@ -2,6 +2,7 @@
 Teams management router
 """
 
+import re
 from datetime import datetime
 from typing import List, Optional
 
@@ -32,6 +33,7 @@ class TeamCreate(BaseModel):
 
 class TeamUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
+    color: Optional[str] = Field(None, min_length=7, max_length=20)
 
 
 class TeamDeleteRequest(BaseModel):
@@ -72,6 +74,7 @@ class MemberResponse(BaseModel):
 class TeamResponse(BaseModel):
     id: int
     name: str
+    color: str
     owner_id: int
     created_at: datetime
     updated_at: Optional[datetime]
@@ -122,10 +125,20 @@ def _is_admin(user: User) -> bool:
     return user.role in ["super_admin", "admin", "company_admin"]
 
 
+def _validate_color_or_422(color: str) -> str:
+    if not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Color must be a valid hex value in #RRGGBB format",
+        )
+    return color.upper()
+
+
 def _team_base_payload(team: Team, member_count: int) -> dict:
     return {
         "id": team.id,
         "name": team.name,
+        "color": team.color,
         "owner_id": team.owner_id,
         "created_at": team.created_at,
         "updated_at": team.updated_at,
@@ -339,6 +352,7 @@ async def get_team(
     return TeamDetailResponse(
         id=team.id,
         name=team.name,
+        color=team.color,
         owner_id=team.owner_id,
         created_at=team.created_at,
         updated_at=team.updated_at,
@@ -416,6 +430,7 @@ async def create_team(
     return TeamResponse(
         id=team.id,
         name=team.name,
+        color=team.color,
         owner_id=team.owner_id,
         created_at=team.created_at,
         updated_at=team.updated_at,
@@ -463,13 +478,18 @@ async def update_team(
 
     # Track old values
     old_name = team.name
+    old_color = team.color
 
     # Update fields
     if team_data.name:
         team.name = team_data.name
+    if team_data.color is not None:
+        team.color = _validate_color_or_422(team_data.color)
 
-    # Audit log if name changed
-    if team_data.name and team_data.name != old_name:
+    # Audit log if properties changed
+    if (team_data.name and team_data.name != old_name) or (
+        team_data.color is not None and team.color != old_color
+    ):
         await AuditLogger.log(
             db=db,
             action=AuditAction.UPDATE,
@@ -477,9 +497,9 @@ async def update_team(
             resource_id=team.id,
             user_id=current_user.id,
             user_email=current_user.email,
-            old_values={"name": old_name},
-            new_values={"name": team.name},
-            details=f"Updated team name from '{old_name}' to '{team.name}'"
+            old_values={"name": old_name, "color": old_color},
+            new_values={"name": team.name, "color": team.color},
+            details=f"Updated team settings for '{team.name}'"
         )
 
     await db.commit()
@@ -494,6 +514,7 @@ async def update_team(
     return TeamResponse(
         id=team.id,
         name=team.name,
+        color=team.color,
         owner_id=team.owner_id,
         created_at=team.created_at,
         updated_at=team.updated_at,

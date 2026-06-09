@@ -12,17 +12,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import apply_company_filter, get_company_filter, get_current_active_user
-from app.models import BasecampTaskMapping, Project, Task, TaskCategory, Team, User
+from app.models import BasecampTaskMapping, Project, Task, TaskTeam, Team, User
 from app.routers.websocket import manager as ws_manager
 from app.schemas.auth import Message
 from app.services.audit_logger import AuditAction, AuditLogger
-from app.services.category_service import apply_categories_to_task, get_task_categories_map
 from app.services.project_team_service import build_project_visibility_filter
+from app.services.task_service import apply_teams_to_task, get_task_teams_map
 
 router = APIRouter()
 
 
-class TaskCategoryResponse(BaseModel):
+class TaskTeamResponse(BaseModel):
     id: int
     name: str
     color: str
@@ -33,7 +33,7 @@ class TaskCreate(BaseModel):
     description: Optional[str] = None
     project_id: int
     status: str = Field(default="TODO", pattern="^(TODO|IN_PROGRESS|DONE)$")
-    category_ids: Optional[list[int]] = None
+    team_ids: Optional[list[int]] = None
 
 
 class TaskUpdate(BaseModel):
@@ -41,7 +41,7 @@ class TaskUpdate(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = Field(None, pattern="^(TODO|IN_PROGRESS|DONE)$")
     project_id: Optional[int] = None
-    category_ids: Optional[list[int]] = None
+    team_ids: Optional[list[int]] = None
 
 
 class TaskResponse(BaseModel):
@@ -56,7 +56,7 @@ class TaskResponse(BaseModel):
     basecamp_due_on: Optional[date] = None
     basecamp_todo_created_at: Optional[datetime] = None
     basecamp_todo_position: Optional[int] = None
-    categories: list[TaskCategoryResponse] = Field(default_factory=list)
+    teams: list[TaskTeamResponse] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
@@ -99,7 +99,7 @@ async def list_tasks(
     project_id: Optional[int] = None,
     status: Optional[str] = Query(None, pattern="^(TODO|IN_PROGRESS|DONE)$"),
     search: Optional[str] = None,
-    category_ids: Optional[str] = Query(None),
+    team_ids: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -143,18 +143,18 @@ async def list_tasks(
         base_query = base_query.where(Task.name.ilike(search_filter))
         count_query = count_query.where(Task.name.ilike(search_filter))
 
-    parsed_category_ids: list[int] = []
-    if category_ids:
+    parsed_team_ids: list[int] = []
+    if team_ids:
         try:
-            parsed_category_ids = sorted({int(raw.strip()) for raw in category_ids.split(",") if raw.strip()})
+            parsed_team_ids = sorted({int(raw.strip()) for raw in team_ids.split(",") if raw.strip()})
         except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="category_ids must be a comma-separated list of integers",
+                detail="team_ids must be a comma-separated list of integers",
             ) from exc
 
-    if parsed_category_ids:
-        matching_task_ids = select(TaskCategory.task_id).where(TaskCategory.category_id.in_(parsed_category_ids))
+    if parsed_team_ids:
+        matching_task_ids = select(TaskTeam.task_id).where(TaskTeam.team_id.in_(parsed_team_ids))
         base_query = base_query.where(Task.id.in_(matching_task_ids))
         count_query = count_query.where(Task.id.in_(matching_task_ids))
 
@@ -174,7 +174,7 @@ async def list_tasks(
         )
 
     task_ids = [row[0].id for row in rows]
-    categories_map = await get_task_categories_map(db, task_ids)
+    teams_map = await get_task_teams_map(db, task_ids)
 
     items: list[TaskResponse] = []
     for task, bc_due_on, bc_created_at, bc_position in rows:
@@ -191,7 +191,7 @@ async def list_tasks(
                 basecamp_due_on=bc_due_on,
                 basecamp_todo_created_at=bc_created_at,
                 basecamp_todo_position=bc_position,
-                categories=[TaskCategoryResponse(**item) for item in categories_map.get(task.id, [])],
+                teams=[TaskTeamResponse(**item) for item in teams_map.get(task.id, [])],
             )
         )
 
@@ -233,7 +233,7 @@ async def get_task(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     project_name = (await db.execute(select(Project.name).where(Project.id == task.project_id))).scalar()
-    categories = (await get_task_categories_map(db, [task.id])).get(task.id, [])
+    teams = (await get_task_teams_map(db, [task.id])).get(task.id, [])
 
     return TaskResponse(
         id=task.id,
@@ -247,7 +247,7 @@ async def get_task(
         basecamp_due_on=bc_due_on,
         basecamp_todo_created_at=bc_created_at,
         basecamp_todo_position=bc_position,
-        categories=[TaskCategoryResponse(**item) for item in categories],
+        teams=[TaskTeamResponse(**item) for item in teams],
     )
 
 
@@ -272,19 +272,24 @@ async def create_task(
     db.add(task)
     await db.flush()
 
-    if task_data.category_ids is not None:
-        await apply_categories_to_task(db, task.id, task_data.category_ids, current_user.id)
-        await AuditLogger.log(
-            db=db,
-            action=AuditAction.UPDATE,
-            resource_type="task",
-            resource_id=task.id,
-            user_id=current_user.id,
-            user_email=current_user.email,
-            old_values={"category_ids": []},
-            new_values={"category_ids": sorted(set(task_data.category_ids))},
-            details=f"Applied categories to task '{task.name}'",
-        )
+    if task_data.team_ids is not None:
+        try:
+            added_team_ids, removed_team_ids = await apply_teams_to_task(db, task.id, task_data.team_ids, current_user.id)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+        if added_team_ids or removed_team_ids:
+            await AuditLogger.log(
+                db=db,
+                action=AuditAction.UPDATE,
+                resource_type="task",
+                resource_id=task.id,
+                user_id=current_user.id,
+                user_email=current_user.email,
+                old_values={"team_ids": removed_team_ids},
+                new_values={"team_ids": added_team_ids},
+                details=f"Updated task-team assignments for task '{task.name}'",
+            )
 
     await db.commit()
     await db.refresh(task)
@@ -304,7 +309,7 @@ async def create_task(
         project.team_id,
     )
 
-    categories = (await get_task_categories_map(db, [task.id])).get(task.id, [])
+    teams = (await get_task_teams_map(db, [task.id])).get(task.id, [])
     return TaskResponse(
         id=task.id,
         name=task.name,
@@ -314,7 +319,7 @@ async def create_task(
         status=task.status,
         created_at=task.created_at,
         updated_at=task.updated_at,
-        categories=[TaskCategoryResponse(**item) for item in categories],
+        teams=[TaskTeamResponse(**item) for item in teams],
     )
 
 
@@ -346,33 +351,30 @@ async def update_task(
     if task_data.project_id is not None:
         task.project_id = task_data.project_id
 
-    if task_data.category_ids is not None:
-        old_category_ids = list(
-            (
-                await db.execute(
-                    select(TaskCategory.category_id).where(TaskCategory.task_id == task.id)
-                )
-            ).scalars().all()
-        )
-        await apply_categories_to_task(db, task.id, task_data.category_ids, current_user.id)
+    if task_data.team_ids is not None:
+        try:
+            added_team_ids, removed_team_ids = await apply_teams_to_task(db, task.id, task_data.team_ids, current_user.id)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-        await AuditLogger.log(
-            db=db,
-            action=AuditAction.UPDATE,
-            resource_type="task",
-            resource_id=task.id,
-            user_id=current_user.id,
-            user_email=current_user.email,
-            old_values={"category_ids": sorted(set(old_category_ids))},
-            new_values={"category_ids": sorted(set(task_data.category_ids))},
-            details=f"Updated categories for task '{task.name}'",
-        )
+        if added_team_ids or removed_team_ids:
+            await AuditLogger.log(
+                db=db,
+                action=AuditAction.UPDATE,
+                resource_type="task",
+                resource_id=task.id,
+                user_id=current_user.id,
+                user_email=current_user.email,
+                old_values={"removed_team_ids": removed_team_ids},
+                new_values={"added_team_ids": added_team_ids},
+                details=f"Updated task-team assignments for task '{task.name}'",
+            )
 
     await db.commit()
     await db.refresh(task)
 
     project_name = (await db.execute(select(Project.name).where(Project.id == task.project_id))).scalar()
-    categories = (await get_task_categories_map(db, [task.id])).get(task.id, [])
+    teams = (await get_task_teams_map(db, [task.id])).get(task.id, [])
 
     return TaskResponse(
         id=task.id,
@@ -383,7 +385,7 @@ async def update_task(
         status=task.status,
         created_at=task.created_at,
         updated_at=task.updated_at,
-        categories=[TaskCategoryResponse(**item) for item in categories],
+        teams=[TaskTeamResponse(**item) for item in teams],
     )
 
 

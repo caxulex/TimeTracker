@@ -14,6 +14,8 @@ import { TeamProjectsSection } from '../components/teams/TeamProjectsSection';
 import type { Team, TeamMember, User } from '../types';
 import axios from 'axios';
 
+const DEFAULT_TEAM_COLOR = '#6B7280';
+
 export function TeamsPage() {
   const queryClient = useQueryClient();
   const { user: currentUser } = useAuthStore();
@@ -109,8 +111,8 @@ export function TeamsPage() {
 
   // Update team mutation (admin only)
   const updateMutation = useMutation({
-    mutationFn: ({ id, name }: { id: number; name: string }) =>
-      teamsApi.update(id, { name }),
+    mutationFn: ({ id, name, color }: { id: number; name: string; color: string }) =>
+      teamsApi.update(id, { name, color }),
     onSuccess: (team) => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
       queryClient.invalidateQueries({ queryKey: ['team', selectedTeam] });
@@ -290,7 +292,14 @@ export function TeamsPage() {
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="font-semibold text-gray-900">{team.name}</h3>
+                    <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                      <span
+                        className="inline-block h-2.5 w-2.5 rounded-full"
+                        style={{ backgroundColor: team.color || DEFAULT_TEAM_COLOR }}
+                        aria-hidden="true"
+                      />
+                      {team.name}
+                    </h3>
                     <p className="text-sm text-gray-500">
                       {team.member_count || 1} member{(team.member_count || 1) !== 1 ? 's' : ''}
                     </p>
@@ -359,6 +368,14 @@ export function TeamsPage() {
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <h2 className="text-xl font-bold text-gray-900">{teamDetails.name}</h2>
+                  <div className="mt-1 flex items-center gap-2 text-sm text-gray-600">
+                    <span
+                      className="inline-block h-3 w-3 rounded-full"
+                      style={{ backgroundColor: teamDetails.color || DEFAULT_TEAM_COLOR }}
+                      aria-hidden="true"
+                    />
+                    {teamDetails.color || DEFAULT_TEAM_COLOR}
+                  </div>
                   <p className="text-sm text-gray-500">
                     Created {formatDate(teamDetails.created_at)}
                   </p>
@@ -489,9 +506,9 @@ export function TeamsPage() {
             setEditingTeam(null);
           }}
           team={editingTeam}
-          onSubmit={(name) => {
+          onSubmit={(name, color) => {
             if (editingTeam) {
-              updateMutation.mutate({ id: editingTeam.id, name });
+              updateMutation.mutate({ id: editingTeam.id, name, color });
             } else {
               createMutation.mutate(name);
             }
@@ -525,20 +542,22 @@ interface TeamModalProps {
   isOpen: boolean;
   onClose: () => void;
   team: Team | null;
-  onSubmit: (name: string) => void;
+  onSubmit: (name: string, color: string) => void;
   isLoading: boolean;
 }
 
 function TeamModal({ isOpen, onClose, team, onSubmit, isLoading }: TeamModalProps) {
   const [name, setName] = useState('');
+  const [color, setColor] = useState(DEFAULT_TEAM_COLOR);
 
   React.useEffect(() => {
     setName(team?.name || '');
+    setColor(team?.color || DEFAULT_TEAM_COLOR);
   }, [team, isOpen]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit(name);
+    onSubmit(name, color);
   };
 
   return (
@@ -551,6 +570,24 @@ function TeamModal({ isOpen, onClose, team, onSubmit, isLoading }: TeamModalProp
           placeholder="My Team"
           required
         />
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Team Color</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={color}
+              onChange={(e) => setColor(e.target.value.toUpperCase())}
+              className="h-10 w-14 rounded border border-gray-300 p-1"
+              aria-label="Team color"
+            />
+            <Input
+              value={color}
+              onChange={(e) => setColor(e.target.value.toUpperCase())}
+              placeholder="#6B7280"
+            />
+          </div>
+        </div>
 
         <div className="flex justify-end gap-2 pt-4">
           <Button type="button" variant="secondary" onClick={onClose}>

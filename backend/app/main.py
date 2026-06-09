@@ -34,7 +34,6 @@ from app.routers import (
     approvals,
     audit_logs,  # Audit log viewing
     auth,
-    categories,
     companies,  # Multi-tenancy / White-label support
     email_logs,  # Email delivery monitoring
     export,
@@ -415,7 +414,6 @@ app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(teams.router, prefix="/api/teams", tags=["Teams"])
 app.include_router(projects.router, prefix="/api/projects", tags=["Projects"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["Tasks"])
-app.include_router(categories.router, prefix="/api/categories", tags=["Categories"])
 app.include_router(time_entries.router, prefix="/api/time", tags=["Time Entries"])
 app.include_router(reports.router, prefix="/api/reports", tags=["Reports"])
 app.include_router(websocket.router, prefix="/api/ws", tags=["WebSocket"])

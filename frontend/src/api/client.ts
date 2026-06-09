@@ -28,10 +28,6 @@ import type {
   TaskCreate,
   TaskUpdate,
   TaskFilters,
-  Category,
-  CategoryCreate,
-  CategoryUpdate,
-  CategoryDeleteResult,
   TimeEntry,
   TimeEntryCreate,
   TimeEntryUpdate,
@@ -563,36 +559,6 @@ export const tasksApi = {
 
   delete: async (id: number): Promise<void> => {
     await api.delete(`/api/tasks/${id}`);
-  },
-};
-
-// ============================================
-// CATEGORIES API
-// ============================================
-export const categoriesApi = {
-  list: async (): Promise<Category[]> => {
-    const response = await api.get<Category[]>('/api/categories');
-    return response.data;
-  },
-
-  getById: async (id: number): Promise<Category> => {
-    const response = await api.get<Category>(`/api/categories/${id}`);
-    return response.data;
-  },
-
-  create: async (data: CategoryCreate): Promise<Category> => {
-    const response = await api.post<Category>('/api/categories', data);
-    return response.data;
-  },
-
-  update: async (id: number, data: CategoryUpdate): Promise<Category> => {
-    const response = await api.put<Category>(`/api/categories/${id}`, data);
-    return response.data;
-  },
-
-  delete: async (id: number): Promise<CategoryDeleteResult> => {
-    const response = await api.delete<CategoryDeleteResult>(`/api/categories/${id}`);
-    return response.data;
   },
 };
 

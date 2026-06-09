@@ -280,6 +280,7 @@ class Team(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    color: Mapped[str] = mapped_column(String(20), nullable=False, default="#6B7280", server_default="#6B7280")
     owner_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     # Multi-tenancy: company isolation
     company_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
@@ -304,6 +305,11 @@ class Team(Base):
     projects: Mapped[list["Project"]] = relationship("Project", back_populates="team", cascade="all, delete-orphan")
     project_associations: Mapped[list["ProjectTeam"]] = relationship(
         "ProjectTeam",
+        back_populates="team",
+        cascade="all, delete-orphan",
+    )
+    task_links: Mapped[list["TaskTeam"]] = relationship(
+        "TaskTeam",
         back_populates="team",
         cascade="all, delete-orphan",
     )
@@ -436,8 +442,8 @@ class Task(Base):
         back_populates="parent_task",
         foreign_keys=[parent_task_id],
     )
-    category_links: Mapped[list["TaskCategory"]] = relationship(
-        "TaskCategory",
+    team_links: Mapped[list["TaskTeam"]] = relationship(
+        "TaskTeam",
         back_populates="task",
         cascade="all, delete-orphan",
     )
@@ -447,61 +453,30 @@ class Task(Base):
         return f"<Task(id={self.id}, name={self.name}, status={self.status})>"
 
 
-class Category(Base):
-    """Task category scoped to a company."""
-    __tablename__ = "categories"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    company_id: Mapped[int] = mapped_column(Integer, ForeignKey("companies.id"), nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String(50), nullable=False)
-    color: Mapped[str] = mapped_column(String(20), nullable=False, default="#6B7280", server_default="#6B7280")
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    created_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    updated_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
-    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
-    deleted_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
-
-    task_links: Mapped[list["TaskCategory"]] = relationship(
-        "TaskCategory",
-        back_populates="category",
-        cascade="all, delete-orphan",
-    )
-
-    __table_args__ = (
-        Index(
-            "ix_categories_company_id_deleted_at",
-            "company_id",
-            "deleted_at",
-        ),
-    )
-
-
-class TaskCategory(Base):
-    """M2M link table between tasks and categories."""
-    __tablename__ = "task_categories"
+class TaskTeam(Base):
+    """M2M link table between tasks and teams."""
+    __tablename__ = "task_teams"
 
     task_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("tasks.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    category_id: Mapped[int] = mapped_column(
+    team_id: Mapped[int] = mapped_column(
         Integer,
-        ForeignKey("categories.id", ondelete="CASCADE"),
+        ForeignKey("teams.id", ondelete="CASCADE"),
         primary_key=True,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     created_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
 
-    task: Mapped[Task] = relationship("Task", back_populates="category_links")
-    category: Mapped[Category] = relationship("Category", back_populates="task_links")
+    task: Mapped[Task] = relationship("Task", back_populates="team_links")
+    team: Mapped[Team] = relationship("Team", back_populates="task_links")
 
     __table_args__ = (
         Index(
-            "ix_task_categories_category_id_task_id",
-            "category_id",
+            "ix_task_teams_team_id_task_id",
+            "team_id",
             "task_id",
         ),
     )

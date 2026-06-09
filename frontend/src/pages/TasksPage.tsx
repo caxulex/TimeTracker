@@ -9,15 +9,16 @@ import {
   useQueryClient,
   keepPreviousData,
 } from '@tanstack/react-query';
-import { Card, CardHeader, Button, Input, Modal, LoadingOverlay, Select } from '../components/common';
+import { Card, Button, Input, Modal, LoadingOverlay } from '../components/common';
 import { TaskEstimationCard } from '../components/ai';
 import { ProjectSelect } from '../components/projects/ProjectSelect';
-import { CategoryPicker } from '../components/categories/CategoryPicker';
-import { CategoryChip } from '../components/categories/CategoryChip';
-import { tasksApi, projectsApi } from '../api/client';
+import { TeamChip } from '../components/teams/TeamChip';
+import { TeamMultiSelect } from '../components/teams/TeamMultiSelect';
+import { TaskTeamWarning } from '../components/tasks/TaskTeamWarning';
+import { tasksApi, projectsApi, teamsApi } from '../api/client';
 import { formatDate, cn } from '../utils/helpers';
 import { useFeatureEnabled } from '../hooks/useAIFeatures';
-import type { Task, TaskCreate, TaskStatus, Project } from '../types';
+import type { Task, TaskCreate, TaskUpdate, TaskStatus, Project } from '../types';
 
 const STATUS_OPTIONS = [
   { value: 'TODO', label: 'To Do' },
@@ -117,7 +118,7 @@ export function TasksPage() {
 
   // Update mutation
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<Task> }) =>
+    mutationFn: ({ id, data }: { id: number; data: TaskUpdate }) =>
       tasksApi.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
@@ -346,10 +347,10 @@ function TaskCard({ task, projects, onEdit, onDelete, onStatusChange }: TaskCard
         </div>
       </div>
 
-      {!!task.categories?.length && (
+      {!!task.teams?.length && (
         <div className="mt-2 flex flex-wrap gap-1">
-          {task.categories.map((category) => (
-            <CategoryChip key={category.id} category={category} size="sm" />
+          {task.teams.map((team) => (
+            <TeamChip key={team.id} team={team} size="sm" />
           ))}
         </div>
       )}
@@ -404,8 +405,16 @@ function TaskModal({ isOpen, onClose, task, projects, onSubmit, isLoading }: Tas
   const [description, setDescription] = useState('');
   const [projectId, setProjectId] = useState<number | ''>('');
   const [status, setStatus] = useState<TaskStatus>('TODO');
-  const [categoryIds, setCategoryIds] = useState<number[]>([]);
+  const [teamIds, setTeamIds] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const { data: teamsData } = useQuery({
+    queryKey: ['teams', 'task-modal'],
+    queryFn: () => teamsApi.getAll({ page: 1, page_size: 100 }),
+    enabled: isOpen,
+  });
+
+  const allTeams = teamsData?.items ?? [];
 
   // Reset form when modal opens/closes or task changes
   React.useEffect(() => {
@@ -414,16 +423,30 @@ function TaskModal({ isOpen, onClose, task, projects, onSubmit, isLoading }: Tas
       setDescription(task.description || '');
       setProjectId(task.project_id);
       setStatus(task.status);
-      setCategoryIds(task.categories?.map((category) => category.id) ?? []);
+      setTeamIds(task.teams?.map((team) => team.id) ?? []);
     } else {
       setName('');
       setDescription('');
       setProjectId(projects[0]?.id || '');
       setStatus('TODO');
-      setCategoryIds([]);
+      setTeamIds([]);
     }
     setError(null);
   }, [task, isOpen, projects]);
+
+  const selectedProject =
+    projectId === '' ? null : projects.find((project) => project.id === projectId) ?? null;
+  const projectTeamIds = selectedProject
+    ? new Set<number>([
+        selectedProject.team_id,
+        ...(selectedProject.team_associations || []).map((association) => association.team_id),
+      ])
+    : new Set<number>();
+
+  const offProjectTeamNames = teamIds
+    .filter((id) => !projectTeamIds.has(id))
+    .map((id) => allTeams.find((team) => team.id === id)?.name)
+    .filter((name): name is string => Boolean(name));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -438,7 +461,7 @@ function TaskModal({ isOpen, onClose, task, projects, onSubmit, isLoading }: Tas
       description: description || undefined,
       project_id: projectId as number,
       status,
-      category_ids: categoryIds,
+      team_ids: teamIds,
     });
   };
 
@@ -506,8 +529,11 @@ function TaskModal({ isOpen, onClose, task, projects, onSubmit, isLoading }: Tas
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700">Categories</label>
-          <CategoryPicker selectedIds={categoryIds} onChange={setCategoryIds} />
+          <label className="mb-1 block text-sm font-medium text-gray-700">Teams</label>
+          <TeamMultiSelect selectedIds={teamIds} onChange={setTeamIds} />
+          <div className="mt-2">
+            <TaskTeamWarning offProjectTeamNames={offProjectTeamNames} />
+          </div>
         </div>
 
         <div className="flex justify-end gap-2 pt-4">
