@@ -93,7 +93,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
         <div
           ref={modalRef}
           className={cn(
-            'relative bg-white rounded-xl shadow-xl w-full transform transition-all',
+            'relative flex max-h-[calc(100vh-2rem)] w-full flex-col overflow-hidden rounded-xl bg-white shadow-xl transform transition-all',
             sizes[size]
           )}
           onClick={(e) => e.stopPropagation()}
@@ -116,7 +116,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
           </div>
 
           {/* Content */}
-          <div className="px-6 py-4">
+          <div className="overflow-y-auto px-6 py-4">
             {children}
           </div>
         </div>

@@ -327,6 +327,7 @@ function TaskCard({ task, projects, onEdit, onDelete, onStatusChange }: TaskCard
         <div className="flex gap-1">
           <button
             onClick={onEdit}
+            aria-label={`Edit task ${task.name}`}
             className="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -335,6 +336,7 @@ function TaskCard({ task, projects, onEdit, onDelete, onStatusChange }: TaskCard
           </button>
           <button
             onClick={onDelete}
+            aria-label={`Delete task ${task.name}`}
             className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
