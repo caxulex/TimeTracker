@@ -135,7 +135,11 @@ class AnomalyService:
             # Check cache
             cache_date = date.today().isoformat()
             if self.cache:
-                cached = await self.cache.get_anomaly_cache(cache_date, user_id)
+                cached = await self.cache.get_anomaly_cache(
+                    cache_date,
+                    user_id=user_id,
+                    period_days=period_days,
+                )
                 if cached:
                     # Re-apply dismissal filter even on cache hit, since
                     # admins may have dismissed entries between scans.
@@ -175,7 +179,8 @@ class AnomalyService:
                 await self.cache.set_anomaly_cache(
                     cache_date,
                     result,
-                    user_id
+                    user_id=user_id,
+                    period_days=period_days,
                 )
 
             # Filter out dismissed anomalies for this user's company.

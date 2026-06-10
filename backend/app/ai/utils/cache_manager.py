@@ -99,15 +99,25 @@ class AICacheManager:
     async def get_anomaly_cache(
         self,
         date: str,  # YYYY-MM-DD format
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        period_days: int = 7,
+        team_id: Optional[int] = None,
+        company_id: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """Get cached anomaly results."""
         try:
             r = await self.get_redis()
-            if user_id:
-                key = self._make_key("anomalies", date, user_id)
+            scope_parts = [f"period_{period_days}"]
+            if company_id is not None:
+                scope_parts.append(f"company_{company_id}")
+            if team_id is not None:
+                scope_parts.append(f"team_{team_id}")
+            if user_id is not None:
+                scope_parts.append(f"user_{user_id}")
             else:
-                key = self._make_key("anomalies", date, "all")
+                scope_parts.append("all_users")
+
+            key = self._make_key("anomalies", date, *scope_parts)
 
             data = await r.get(key)
             if data:
@@ -120,15 +130,25 @@ class AICacheManager:
         self,
         date: str,
         anomalies: Dict[str, Any],
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        period_days: int = 7,
+        team_id: Optional[int] = None,
+        company_id: Optional[int] = None,
     ) -> bool:
         """Cache anomaly results."""
         try:
             r = await self.get_redis()
-            if user_id:
-                key = self._make_key("anomalies", date, user_id)
+            scope_parts = [f"period_{period_days}"]
+            if company_id is not None:
+                scope_parts.append(f"company_{company_id}")
+            if team_id is not None:
+                scope_parts.append(f"team_{team_id}")
+            if user_id is not None:
+                scope_parts.append(f"user_{user_id}")
             else:
-                key = self._make_key("anomalies", date, "all")
+                scope_parts.append("all_users")
+
+            key = self._make_key("anomalies", date, *scope_parts)
 
             await r.setex(
                 key,
