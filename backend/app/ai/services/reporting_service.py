@@ -136,6 +136,9 @@ class ReportSummary:
             "most_productive_day": most_productive_day,
             "entry_count": self.metrics.get("entry_count", 0),
             "trend": self.metrics.get("trend", "stable"),
+            "comparison_label": self.metrics.get("comparison_label", "vs Last Week"),
+            "comparison_range_label": self.metrics.get("comparison_range_label", "full week"),
+            "comparison_is_week_complete": self.metrics.get("comparison_is_week_complete", True),
         }
 
         return {
@@ -175,6 +178,52 @@ class AIReportingService:
         self.cache = cache_manager
         self._feature_manager: Optional[AIFeatureManager] = None
         self._last_tokens_used: int = 0  # Track tokens from last AI call
+
+    def _weekday_name(self, value: date) -> str:
+        """Return short weekday name for UI text."""
+        return value.strftime("%a")
+
+    def _build_week_comparison_context(
+        self,
+        week_start: date,
+        week_end: date,
+        reference_date: date,
+    ) -> Dict[str, Any]:
+        """Build same-day comparison context for current and previous week."""
+        comparison_end = min(reference_date, week_end)
+        if comparison_end < week_start:
+            comparison_end = week_start
+
+        previous_week_start = week_start - timedelta(days=7)
+        previous_week_end = comparison_end - timedelta(days=7)
+        is_week_complete = comparison_end == week_end
+
+        if is_week_complete:
+            comparison_label = "vs Last Week"
+            comparison_suffix = "vs last week"
+            comparison_range_label = "full week"
+        else:
+            comparison_range_label = f"{self._weekday_name(week_start)}-{self._weekday_name(comparison_end)}"
+            comparison_label = f"vs Same Period Last Week ({comparison_range_label})"
+            comparison_suffix = f"vs same period last week ({comparison_range_label})"
+
+        return {
+            "comparison_end": comparison_end,
+            "previous_week_start": previous_week_start,
+            "previous_week_end": previous_week_end,
+            "is_week_complete": is_week_complete,
+            "comparison_label": comparison_label,
+            "comparison_suffix": comparison_suffix,
+            "comparison_range_label": comparison_range_label,
+        }
+
+    def _filter_primary_insights(self, insights: List[Insight]) -> List[Insight]:
+        """Return non-attention insights for the main insights list."""
+        return [
+            insight
+            for insight in insights
+            if insight.severity not in [InsightSeverity.WARNING, InsightSeverity.CRITICAL]
+        ]
 
     async def _get_feature_manager(self) -> AIFeatureManager:
         """Get or create feature manager."""
@@ -217,22 +266,23 @@ class AIReportingService:
 
             # Gather data
             metrics = await self._gather_weekly_metrics(user_id, week_start, week_end, team_id)
-            insights = await self._generate_insights(metrics, week_start, week_end)
+            all_insights = await self._generate_insights(metrics, week_start, week_end)
+            insights = self._filter_primary_insights(all_insights)
 
             # Generate AI summary if enabled
             if include_ai and self.ai_client:
-                summary_text = await self._generate_ai_summary(metrics, insights)
+                summary_text = await self._generate_ai_summary(metrics, all_insights)
             else:
                 summary_text = self._generate_rule_based_summary(metrics)
 
             # Build highlights
-            highlights = self._extract_highlights(metrics, insights)
+            highlights = self._extract_highlights(metrics, all_insights)
 
             # Build attention items
-            attention_needed = self._extract_attention_items(insights)
+            attention_needed = self._extract_attention_items(all_insights)
 
             # Build recommendations
-            recommendations = self._generate_recommendations(metrics, insights)
+            recommendations = self._generate_recommendations(metrics, all_insights)
 
             summary = ReportSummary(
                 period_start=week_start,
@@ -536,11 +586,25 @@ class AIReportingService:
 
         metrics["total_hours"] = round(total_seconds / 3600, 1)
 
-        # Compare to last week
-        last_week_start = week_start - timedelta(days=7)
-        last_week_end = week_end - timedelta(days=7)
+        # Compare using equivalent day of week when current week is still in progress
+        comparison_context = self._build_week_comparison_context(
+            week_start=week_start,
+            week_end=week_end,
+            reference_date=datetime.now(timezone.utc).date(),
+        )
+        last_week_start = comparison_context["previous_week_start"]
+        last_week_end = comparison_context["previous_week_end"]
         last_week_start_dt = datetime.combine(last_week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
         last_week_end_dt = datetime.combine(last_week_end, datetime.max.time()).replace(tzinfo=timezone.utc)
+
+        # This week comparison window uses week start through today (or full week when complete)
+        comparison_end = comparison_context["comparison_end"]
+        comparison_end_dt = datetime.combine(comparison_end, datetime.max.time()).replace(tzinfo=timezone.utc)
+
+        current_comparison_seconds = sum(
+            self._calculate_entry_duration_for_period(e, week_start_dt, comparison_end_dt, now_utc)
+            for e in entries
+        )
 
         # Fetch entries that overlapped with last week (same logic as this week)
         last_entries_result = await self.db.execute(
@@ -565,12 +629,18 @@ class AIReportingService:
         )
 
         metrics["last_week_hours"] = round(last_week_seconds / 3600, 1)
+        metrics["comparison_period_hours"] = round(current_comparison_seconds / 3600, 1)
+        metrics["comparison_is_week_complete"] = comparison_context["is_week_complete"]
+        metrics["comparison_label"] = comparison_context["comparison_label"]
+        metrics["comparison_suffix"] = comparison_context["comparison_suffix"]
+        metrics["comparison_range_label"] = comparison_context["comparison_range_label"]
+        metrics["comparison_end"] = comparison_end.isoformat()
 
         if last_week_seconds > 0:
-            change_pct = ((total_seconds - last_week_seconds) / last_week_seconds) * 100
+            change_pct = ((current_comparison_seconds - last_week_seconds) / last_week_seconds) * 100
             metrics["hours_change_pct"] = round(change_pct, 1)
         else:
-            metrics["hours_change_pct"] = 0 if total_seconds == 0 else 100
+            metrics["hours_change_pct"] = 0 if current_comparison_seconds == 0 else 100
 
         # Projects worked on (count from entries that overlap with this week)
         projects_result = await self.db.execute(
@@ -674,9 +744,9 @@ class AIReportingService:
         metrics["entry_count"] = len(entries)
 
         # Trend indicator
-        if total_seconds > last_week_seconds:
+        if current_comparison_seconds > last_week_seconds:
             metrics["trend"] = "up"
-        elif total_seconds < last_week_seconds:
+        elif current_comparison_seconds < last_week_seconds:
             metrics["trend"] = "down"
         else:
             metrics["trend"] = "stable"
@@ -890,7 +960,7 @@ class AIReportingService:
             insights.append(Insight(
                 type=InsightType.TREND,
                 title="Hours Increased",
-                description=f"Time logged increased {change_pct:.0f}% vs last week",
+                description=f"Time logged increased {change_pct:.0f}% {metrics.get('comparison_suffix', 'vs last week')}",
                 severity=InsightSeverity.INFO,
                 metric_value=change_pct,
                 metric_label="% change"
@@ -899,7 +969,7 @@ class AIReportingService:
             insights.append(Insight(
                 type=InsightType.TREND,
                 title="Hours Decreased",
-                description=f"Time logged decreased {abs(change_pct):.0f}% vs last week",
+                description=f"Time logged decreased {abs(change_pct):.0f}% {metrics.get('comparison_suffix', 'vs last week')}",
                 severity=InsightSeverity.WARNING,
                 metric_value=change_pct,
                 metric_label="% change"
@@ -944,7 +1014,8 @@ class AIReportingService:
 
 Data:
 - Total hours: {metrics.get('total_hours', 0)}
-- Change from last week: {metrics.get('hours_change_pct', 0):.0f}%
+- Comparison window: {metrics.get('comparison_range_label', 'full week')}
+- Change over comparison window: {metrics.get('hours_change_pct', 0):.0f}% {metrics.get('comparison_suffix', 'vs last week')}
 - Projects worked on: {metrics.get('projects_count', 0)}
 - Average daily hours: {metrics.get('avg_daily_hours', 0):.1f}
 - Top project: {metrics.get('top_projects', [{}])[0].get('name', 'N/A') if metrics.get('top_projects') else 'N/A'}
@@ -952,7 +1023,8 @@ Data:
 Key observations:
 {chr(10).join(['- ' + i.description for i in insights[:3]])}
 
-Write 2-3 sentences summarizing this week's activity. Be concise and actionable."""
+Write 2-3 sentences summarizing this week's activity. Be concise and actionable.
+If the comparison window is not "full week", describe the change as a same-period comparison and avoid implying week-over-week underperformance from incomplete-week data."""
 
             response = await self.ai_client.generate(
                 system_prompt="You are a professional productivity assistant. Write clear, concise summaries.",
@@ -984,10 +1056,11 @@ Write 2-3 sentences summarizing this week's activity. Be concise and actionable.
 
         parts = [f"This week you logged {total_hours:.1f} hours across {projects} projects."]
 
+        comparison_suffix = metrics.get("comparison_suffix", "vs last week")
         if change_pct > 10:
-            parts.append(f"That's {change_pct:.0f}% more than last week.")
+            parts.append(f"That's {change_pct:.0f}% higher {comparison_suffix}.")
         elif change_pct < -10:
-            parts.append(f"That's {abs(change_pct):.0f}% less than last week.")
+            parts.append(f"That's {abs(change_pct):.0f}% lower {comparison_suffix}.")
 
         return " ".join(parts)
 
@@ -1013,7 +1086,8 @@ Write 2-3 sentences summarizing this week's activity. Be concise and actionable.
         change_pct = metrics.get("hours_change_pct", 0)
         if abs(change_pct) > 10:
             direction = "up" if change_pct > 0 else "down"
-            highlights.append(f"Productivity {direction} {abs(change_pct):.0f}% vs last week")
+            comparison_suffix = metrics.get("comparison_suffix", "vs last week")
+            highlights.append(f"Productivity {direction} {abs(change_pct):.0f}% {comparison_suffix}")
 
         return highlights[:5]
 

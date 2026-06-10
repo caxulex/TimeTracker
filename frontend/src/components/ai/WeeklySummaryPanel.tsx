@@ -198,7 +198,9 @@ const WeeklySummaryPanel: React.FC<WeeklySummaryPanelProps> = ({
                 {(summary.metrics.trend_vs_previous ?? 0) > 0 ? '+' : ''}
                 {(summary.metrics.trend_vs_previous ?? 0).toFixed(0)}%
               </p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">vs Last Week</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {summary.metrics.comparison_label ?? 'vs Last Week'}
+              </p>
             </div>
           </div>
           

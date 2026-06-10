@@ -58,6 +58,9 @@ export interface SummaryMetrics {
   projects_worked: number;
   tasks_completed: number;
   trend_vs_previous: number;  // percentage change
+  comparison_label?: string;
+  comparison_range_label?: string;
+  comparison_is_week_complete?: boolean;
   most_productive_day: string;
   top_projects: TopProject[];
   daily_breakdown: ProjectDailyHours[];
