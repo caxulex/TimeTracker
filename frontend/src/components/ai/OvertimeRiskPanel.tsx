@@ -4,7 +4,7 @@
  * Displays employees at risk of exceeding overtime thresholds.
  */
 
-import React, { useState } from 'react';
+import React from 'react';
 import { 
   Clock,
   AlertTriangle,
@@ -24,7 +24,7 @@ interface OvertimeRiskPanelProps {
 }
 
 export function OvertimeRiskPanel({ className = '', teamId }: OvertimeRiskPanelProps) {
-  const [daysAhead, setDaysAhead] = useState<number>(7);
+  const daysAhead = 7;
   
   const { data, isLoading, error } = useOvertimeRisk({
     days_ahead: daysAhead,
@@ -121,18 +121,10 @@ export function OvertimeRiskPanel({ className = '', teamId }: OvertimeRiskPanelP
           </button>
         </div>
         
-        {/* Filter */}
-        <div className="mt-3 flex items-center gap-2">
+        {/* Horizon */}
+        <div className="mt-3 flex items-center gap-2 text-sm text-gray-500">
           <Filter className="w-4 h-4 text-gray-400" />
-          <select
-            value={daysAhead}
-            onChange={(e) => setDaysAhead(Number(e.target.value))}
-            className="text-sm border rounded-md px-3 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            <option value={7}>This week</option>
-            <option value={14}>Next 2 weeks</option>
-            <option value={30}>This month</option>
-          </select>
+          <span>Forecast horizon: current week only</span>
         </div>
       </div>
 
