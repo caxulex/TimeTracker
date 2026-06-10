@@ -526,6 +526,9 @@ class SummaryMetrics(BaseModel):
     projects_worked: int = 0
     tasks_completed: int = 0
     trend_vs_previous: float = 0
+    comparison_label: str = "vs Last Week"
+    comparison_range_label: str = "full week"
+    comparison_is_week_complete: bool = True
     daily_average: float = 0
     most_productive_day: str = ""
     entry_count: int = 0
