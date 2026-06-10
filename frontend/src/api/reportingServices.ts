@@ -127,35 +127,25 @@ export interface UserInsightsRequest {
   period_days?: number;  // defaults to 30
 }
 
+// Backend reporting endpoints return flat shapes. UI components
+// consume these types directly - do NOT wrap in a nested object
+// here. If a panel needs structured data, transform in the
+// component, not in the API layer. (See
+// audit/ai-honesty-2026-06-10.md findings #3 and #4.)
 export interface UserInsightsResponse {
   success: boolean;
   enabled?: boolean;
-  insights?: {
-    user_id: number;
-    user_name: string;
-    period_start: string;
-    period_end: string;
-    ai_summary: string;
-    productivity_score: number;  // 0-100
-    patterns: Array<{
-      name: string;
-      description: string;
-      frequency: string;
-      impact: 'positive' | 'negative' | 'neutral';
-    }>;
-    achievements: string[];
-    improvement_areas: string[];
-    recommendations: string[];
-    metrics: {
-      total_hours: number;
-      average_daily_hours: number;
-      projects_contributed: number;
-      tasks_completed: number;
-      overtime_hours: number;
-      focus_time_percentage: number;
-    };
-    generated_at: string;
+  user_id?: number;
+  metrics?: {
+    user_name?: string;
+    expected_hours: number;
+    total_hours_30d: number;
+    avg_daily_hours: number;
+    active_projects: number;
+    productivity_trend: 'improving' | 'declining' | 'stable' | 'new';
   };
+  insights?: Insight[];
+  generated_at?: string;
   error?: string;
   message?: string;
 }
