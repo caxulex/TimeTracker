@@ -13,9 +13,10 @@ Uses AI (Gemini/OpenAI) to transform data into actionable insights.
 import logging
 import statistics
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.services.ai_client import AIClient, get_ai_client
 from app.ai.utils.cache_manager import AICacheManager, get_cache_manager
 from app.services.ai_feature_service import AIFeatureManager
-from app.utils.timewindow import now_utc
+from app.utils.timewindow import local_today, now_utc, range_bounds
 
 logger = logging.getLogger(__name__)
 
@@ -187,15 +188,22 @@ class AIReportingService:
         self,
         week_start: date,
         week_end: date,
-        reference_date: date,
+        reference_now: datetime,
+        tz: str,
     ) -> Dict[str, Any]:
         """Build same-day comparison context for current and previous week."""
-        comparison_end = min(reference_date, week_end)
+        zone = ZoneInfo(tz)
+        reference_now_local = reference_now.astimezone(zone)
+        comparison_end = min(reference_now_local.date(), week_end)
         if comparison_end < week_start:
             comparison_end = week_start
 
+        week_start_local = datetime.combine(week_start, time.min, tzinfo=zone)
+        comparison_cutoff_local = max(reference_now_local, week_start_local)
+
         previous_week_start = week_start - timedelta(days=7)
         previous_week_end = comparison_end - timedelta(days=7)
+        previous_comparison_cutoff_local = comparison_cutoff_local - timedelta(days=7)
         is_week_complete = comparison_end == week_end
 
         if is_week_complete:
@@ -209,6 +217,8 @@ class AIReportingService:
 
         return {
             "comparison_end": comparison_end,
+            "comparison_cutoff_utc": comparison_cutoff_local.astimezone(timezone.utc),
+            "previous_comparison_cutoff_utc": previous_comparison_cutoff_local.astimezone(timezone.utc),
             "previous_week_start": previous_week_start,
             "previous_week_end": previous_week_end,
             "is_week_complete": is_week_complete,
@@ -257,15 +267,22 @@ class AIReportingService:
                     "message": "AI report summaries are disabled"
                 }
 
-            # Calculate week boundaries in UTC for consistent timezone handling
-            # Time entries are stored in UTC, so we must use UTC dates for comparison
-            now_utc = datetime.now(timezone.utc)
-            today_utc = now_utc.date()
-            week_start = today_utc - timedelta(days=today_utc.weekday())
+            # Calculate week boundaries in tenant timezone and convert to UTC only for filtering.
+            tenant_tz = await self._resolve_tenant_timezone(user_id)
+            current_utc = now_utc()
+            today_local = local_today(tenant_tz)
+            week_start = today_local - timedelta(days=today_local.weekday())
             week_end = week_start + timedelta(days=6)
 
             # Gather data
-            metrics = await self._gather_weekly_metrics(user_id, week_start, week_end, team_id)
+            metrics = await self._gather_weekly_metrics(
+                user_id,
+                week_start,
+                week_end,
+                team_id,
+                tz=tenant_tz,
+                reference_now_utc=current_utc,
+            )
             all_insights = await self._generate_insights(metrics, week_start, week_end)
             insights = self._filter_primary_insights(all_insights)
 
@@ -317,6 +334,22 @@ class AIReportingService:
                 "success": False,
                 "error": str(e)
             }
+
+    async def _resolve_tenant_timezone(self, user_id: int) -> str:
+        """Resolve company timezone for the requesting user with UTC fallback."""
+        from app.models import Company, User
+
+        user_result = await self.db.execute(
+            select(User.company_id).where(User.id == user_id)
+        )
+        company_id = user_result.scalar_one_or_none()
+        if company_id is None:
+            return "UTC"
+
+        timezone_result = await self.db.execute(
+            select(Company.timezone).where(Company.id == company_id)
+        )
+        return timezone_result.scalar_one_or_none() or "UTC"
 
     async def generate_project_health(
         self,
@@ -525,7 +558,9 @@ class AIReportingService:
         user_id: int,
         week_start: date,
         week_end: date,
-        team_id: Optional[int] = None
+        team_id: Optional[int] = None,
+        tz: str = "UTC",
+        reference_now_utc: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """Gather metrics for weekly summary."""
 
@@ -536,10 +571,8 @@ class AIReportingService:
             "week_end": week_end.isoformat()
         }
 
-        # Convert date boundaries to UTC datetimes for proper comparison with UTC timestamps
-        # week_start at 00:00:00 UTC, week_end at 23:59:59.999999 UTC
-        week_start_dt = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
-        week_end_dt = datetime.combine(week_end, datetime.max.time()).replace(tzinfo=timezone.utc)
+        # Convert local week boundaries to UTC for proper comparison with UTC timestamps.
+        week_start_dt, week_end_dt = range_bounds(week_start, week_end, tz)
 
         # Get relevant users
         if team_id:
@@ -557,7 +590,7 @@ class AIReportingService:
         metrics["user_count"] = len(user_ids)
 
         # Current time for calculating running timer durations
-        now_utc = datetime.now(timezone.utc)
+        now_value = reference_now_utc or now_utc()
 
         # Total hours this week - fetch entries that OVERLAP with this week
         # This includes: entries that started this week, entries from before still running,
@@ -580,7 +613,7 @@ class AIReportingService:
 
         # Calculate only the portion that falls within this week
         total_seconds = sum(
-            self._calculate_entry_duration_for_period(e, week_start_dt, week_end_dt, now_utc)
+            self._calculate_entry_duration_for_period(e, week_start_dt, week_end_dt, now_value)
             for e in entries
         )
 
@@ -590,19 +623,19 @@ class AIReportingService:
         comparison_context = self._build_week_comparison_context(
             week_start=week_start,
             week_end=week_end,
-            reference_date=datetime.now(timezone.utc).date(),
+            reference_now=now_value,
+            tz=tz,
         )
         last_week_start = comparison_context["previous_week_start"]
-        last_week_end = comparison_context["previous_week_end"]
-        last_week_start_dt = datetime.combine(last_week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
-        last_week_end_dt = datetime.combine(last_week_end, datetime.max.time()).replace(tzinfo=timezone.utc)
+        last_week_start_dt, _ = range_bounds(last_week_start, last_week_start, tz)
+        last_week_end_dt = comparison_context["previous_comparison_cutoff_utc"]
 
-        # This week comparison window uses week start through today (or full week when complete)
+        # This week comparison window uses week start through the current timestamp.
         comparison_end = comparison_context["comparison_end"]
-        comparison_end_dt = datetime.combine(comparison_end, datetime.max.time()).replace(tzinfo=timezone.utc)
+        comparison_end_dt = comparison_context["comparison_cutoff_utc"]
 
         current_comparison_seconds = sum(
-            self._calculate_entry_duration_for_period(e, week_start_dt, comparison_end_dt, now_utc)
+            self._calculate_entry_duration_for_period(e, week_start_dt, comparison_end_dt, now_value)
             for e in entries
         )
 
@@ -624,12 +657,14 @@ class AIReportingService:
 
         # Calculate only the portion that fell within last week
         last_week_seconds = sum(
-            self._calculate_entry_duration_for_period(e, last_week_start_dt, last_week_end_dt, now_utc)
+            self._calculate_entry_duration_for_period(e, last_week_start_dt, last_week_end_dt, now_value)
             for e in last_entries
         )
 
         metrics["last_week_hours"] = round(last_week_seconds / 3600, 1)
         metrics["comparison_period_hours"] = round(current_comparison_seconds / 3600, 1)
+        metrics["comparison_period_seconds"] = current_comparison_seconds
+        metrics["last_week_comparison_seconds"] = last_week_seconds
         metrics["comparison_is_week_complete"] = comparison_context["is_week_complete"]
         metrics["comparison_label"] = comparison_context["comparison_label"]
         metrics["comparison_suffix"] = comparison_context["comparison_suffix"]

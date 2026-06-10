@@ -1,23 +1,36 @@
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
 from app.ai.services.reporting_service import AIReportingService
 
 
+@dataclass
+class _Entry:
+    start_time: datetime
+    end_time: datetime
+    duration_seconds: int
+    pause_seconds: int = 0
+
+
 @pytest.mark.asyncio
 async def test_same_day_of_week_comparison_mid_week():
     service = AIReportingService(db=None)
+    now = datetime(2026, 6, 10, 10, 35, tzinfo=timezone.utc)
 
     context = service._build_week_comparison_context(
         week_start=date(2026, 6, 8),   # Mon
         week_end=date(2026, 6, 14),    # Sun
-        reference_date=date(2026, 6, 10),  # Wed
+        reference_now=now,  # Wed 10:35
+        tz="UTC",
     )
 
     assert context["comparison_end"] == date(2026, 6, 10)
     assert context["previous_week_start"] == date(2026, 6, 1)
     assert context["previous_week_end"] == date(2026, 6, 3)
+    assert context["comparison_cutoff_utc"] == now
+    assert context["previous_comparison_cutoff_utc"] == now - timedelta(days=7)
     assert context["is_week_complete"] is False
     assert context["comparison_range_label"] == "Mon-Wed"
     assert context["comparison_label"] == "vs Same Period Last Week (Mon-Wed)"
@@ -26,11 +39,13 @@ async def test_same_day_of_week_comparison_mid_week():
 @pytest.mark.asyncio
 async def test_same_day_of_week_comparison_week_complete():
     service = AIReportingService(db=None)
+    now = datetime(2026, 6, 14, 18, 30, tzinfo=timezone.utc)
 
     context = service._build_week_comparison_context(
         week_start=date(2026, 6, 8),   # Mon
         week_end=date(2026, 6, 14),    # Sun
-        reference_date=date(2026, 6, 14),  # Sun
+        reference_now=now,  # Sun
+        tz="UTC",
     )
 
     assert context["comparison_end"] == date(2026, 6, 14)
@@ -39,6 +54,50 @@ async def test_same_day_of_week_comparison_week_complete():
     assert context["is_week_complete"] is True
     assert context["comparison_range_label"] == "full week"
     assert context["comparison_label"] == "vs Last Week"
+
+
+@pytest.mark.asyncio
+async def test_time_anchored_comparison_mid_day():
+    service = AIReportingService(db=None)
+    now = datetime(2026, 6, 10, 10, 35, tzinfo=timezone.utc)
+
+    context = service._build_week_comparison_context(
+        week_start=date(2026, 6, 8),
+        week_end=date(2026, 6, 14),
+        reference_now=now,
+        tz="UTC",
+    )
+
+    this_week_start = datetime(2026, 6, 8, 0, 0, tzinfo=timezone.utc)
+    this_week_cutoff = context["comparison_cutoff_utc"]
+    last_week_start = datetime(2026, 6, 1, 0, 0, tzinfo=timezone.utc)
+    last_week_cutoff = context["previous_comparison_cutoff_utc"]
+
+    this_week_entries = [
+        _Entry(datetime(2026, 6, 8, 8, 0, tzinfo=timezone.utc), datetime(2026, 6, 8, 17, 0, tzinfo=timezone.utc), 9 * 3600),
+        _Entry(datetime(2026, 6, 9, 8, 0, tzinfo=timezone.utc), datetime(2026, 6, 9, 17, 0, tzinfo=timezone.utc), 9 * 3600),
+        _Entry(datetime(2026, 6, 10, 9, 35, tzinfo=timezone.utc), datetime(2026, 6, 10, 10, 35, tzinfo=timezone.utc), 1 * 3600),
+    ]
+    last_week_entries = [
+        _Entry(datetime(2026, 6, 1, 8, 0, tzinfo=timezone.utc), datetime(2026, 6, 1, 17, 0, tzinfo=timezone.utc), 9 * 3600),
+        _Entry(datetime(2026, 6, 2, 8, 0, tzinfo=timezone.utc), datetime(2026, 6, 2, 17, 0, tzinfo=timezone.utc), 9 * 3600),
+        _Entry(datetime(2026, 6, 3, 9, 35, tzinfo=timezone.utc), datetime(2026, 6, 3, 10, 35, tzinfo=timezone.utc), 1 * 3600),
+        _Entry(datetime(2026, 6, 3, 12, 0, tzinfo=timezone.utc), datetime(2026, 6, 3, 18, 0, tzinfo=timezone.utc), 6 * 3600),
+    ]
+
+    this_week_comparison_seconds = sum(
+        service._calculate_entry_duration_for_period(entry, this_week_start, this_week_cutoff, now)
+        for entry in this_week_entries
+    )
+    last_week_comparison_seconds = sum(
+        service._calculate_entry_duration_for_period(entry, last_week_start, last_week_cutoff, now)
+        for entry in last_week_entries
+    )
+
+    assert this_week_comparison_seconds == 19 * 3600
+    assert last_week_comparison_seconds == 19 * 3600
+    delta_percentage = ((this_week_comparison_seconds - last_week_comparison_seconds) / last_week_comparison_seconds) * 100
+    assert delta_percentage == 0
 
 
 @pytest.mark.asyncio
