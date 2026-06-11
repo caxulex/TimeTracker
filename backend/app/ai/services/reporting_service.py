@@ -23,6 +23,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.services.ai_client import AIClient, get_ai_client
 from app.ai.utils.cache_manager import AICacheManager, get_cache_manager
+from app.ai.utils.tenant_time import (
+    get_tenant_today_for_user,
+    resolve_tenant_timezone_for_user,
+)
 from app.services.ai_feature_service import AIFeatureManager
 from app.utils.timewindow import local_today, now_utc, range_bounds
 
@@ -268,7 +272,7 @@ class AIReportingService:
                 }
 
             # Calculate week boundaries in tenant timezone and convert to UTC only for filtering.
-            tenant_tz = await self._resolve_tenant_timezone(user_id)
+            tenant_tz = await resolve_tenant_timezone_for_user(self.db, user_id)
             current_utc = now_utc()
             today_local = local_today(tenant_tz)
             week_start = today_local - timedelta(days=today_local.weekday())
@@ -335,22 +339,6 @@ class AIReportingService:
                 "error": str(e)
             }
 
-    async def _resolve_tenant_timezone(self, user_id: int) -> str:
-        """Resolve company timezone for the requesting user with UTC fallback."""
-        from app.models import Company, User
-
-        user_result = await self.db.execute(
-            select(User.company_id).where(User.id == user_id)
-        )
-        company_id = user_result.scalar_one_or_none()
-        if company_id is None:
-            return "UTC"
-
-        timezone_result = await self.db.execute(
-            select(Company.timezone).where(Company.id == company_id)
-        )
-        return timezone_result.scalar_one_or_none() or "UTC"
-
     async def generate_project_health(
         self,
         user_id: int,
@@ -387,7 +375,7 @@ class AIReportingService:
                 return {"success": False, "error": "Project not found"}
 
             # Gather project metrics
-            metrics = await self._gather_project_metrics(project_id)
+            metrics = await self._gather_project_metrics(project_id, user_id)
 
             # Generate health score (0-100)
             health_score = self._calculate_health_score(metrics)
@@ -788,7 +776,7 @@ class AIReportingService:
 
         return metrics
 
-    async def _gather_project_metrics(self, project_id: int) -> Dict[str, Any]:
+    async def _gather_project_metrics(self, project_id: int, user_id: int) -> Dict[str, Any]:
         """Gather metrics for project health."""
         from app.models import Task, TimeEntry
 
@@ -802,22 +790,25 @@ class AIReportingService:
         total_seconds = hours_result.scalar() or 0
         metrics["total_hours"] = round(total_seconds / 3600, 1)
 
-        # This week vs last week
-        now_utc = datetime.now(timezone.utc)
-        today_utc = now_utc.date()
-        week_start = today_utc - timedelta(days=today_utc.weekday())
+        # This week vs last week in tenant-local calendar, converted to UTC bounds.
+        tenant_tz = await resolve_tenant_timezone_for_user(self.db, user_id)
+        tenant_today = await get_tenant_today_for_user(self.db, user_id)
+        week_start = tenant_today - timedelta(days=tenant_today.weekday())
+        week_end = week_start + timedelta(days=6)
         last_week_start = week_start - timedelta(days=7)
+        last_week_end = last_week_start + timedelta(days=6)
 
-        # Convert to UTC datetimes for proper comparison
-        week_start_dt = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
-        last_week_start_dt = datetime.combine(last_week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
+        # Convert tenant-local date ranges to UTC datetimes for DB filtering.
+        week_start_dt, week_end_dt = range_bounds(week_start, week_end, tenant_tz)
+        last_week_start_dt, last_week_end_dt = range_bounds(last_week_start, last_week_end, tenant_tz)
 
         this_week_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
             .where(
                 and_(
                     TimeEntry.project_id == project_id,
-                    TimeEntry.start_time >= week_start_dt
+                    TimeEntry.start_time >= week_start_dt,
+                    TimeEntry.start_time < week_end_dt
                 )
             )
         )
@@ -829,7 +820,7 @@ class AIReportingService:
                 and_(
                     TimeEntry.project_id == project_id,
                     TimeEntry.start_time >= last_week_start_dt,
-                    TimeEntry.start_time < week_start_dt
+                    TimeEntry.start_time < last_week_end_dt
                 )
             )
         )
@@ -892,18 +883,19 @@ class AIReportingService:
             metrics["user_name"] = user.name
             metrics["expected_hours"] = user.expected_hours_per_week or 40
 
-        # Last 30 days hours - use UTC datetime for consistent timezone handling
-        now_utc = datetime.now(timezone.utc)
-        today_utc = now_utc.date()
-        thirty_days_ago = today_utc - timedelta(days=30)
-        thirty_days_ago_dt = datetime.combine(thirty_days_ago, datetime.min.time()).replace(tzinfo=timezone.utc)
+        # Last 30 days in tenant-local calendar, converted to UTC bounds.
+        tenant_tz = await resolve_tenant_timezone_for_user(self.db, user_id)
+        tenant_today = await get_tenant_today_for_user(self.db, user_id)
+        thirty_days_ago = tenant_today - timedelta(days=30)
+        thirty_days_ago_dt, tomorrow_dt = range_bounds(thirty_days_ago, tenant_today, tenant_tz)
 
         hours_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
             .where(
                 and_(
                     TimeEntry.user_id == user_id,
-                    TimeEntry.start_time >= thirty_days_ago_dt
+                    TimeEntry.start_time >= thirty_days_ago_dt,
+                    TimeEntry.start_time < tomorrow_dt
                 )
             )
         )
@@ -916,7 +908,8 @@ class AIReportingService:
             .where(
                 and_(
                     TimeEntry.user_id == user_id,
-                    TimeEntry.start_time >= thirty_days_ago_dt
+                    TimeEntry.start_time >= thirty_days_ago_dt,
+                    TimeEntry.start_time < tomorrow_dt
                 )
             )
         )
@@ -929,17 +922,18 @@ class AIReportingService:
             .where(
                 and_(
                     TimeEntry.user_id == user_id,
-                    TimeEntry.start_time >= thirty_days_ago_dt
+                    TimeEntry.start_time >= thirty_days_ago_dt,
+                    TimeEntry.start_time < tomorrow_dt
                 )
             )
         )
         metrics["active_projects"] = projects_result.scalar() or 0
 
         # Productivity trend (compare last 2 weeks)
-        two_weeks_ago = today_utc - timedelta(days=14)
-        one_week_ago = today_utc - timedelta(days=7)
-        two_weeks_ago_dt = datetime.combine(two_weeks_ago, datetime.min.time()).replace(tzinfo=timezone.utc)
-        one_week_ago_dt = datetime.combine(one_week_ago, datetime.min.time()).replace(tzinfo=timezone.utc)
+        two_weeks_ago = tenant_today - timedelta(days=14)
+        one_week_ago = tenant_today - timedelta(days=7)
+        two_weeks_ago_dt, _ = range_bounds(two_weeks_ago, two_weeks_ago, tenant_tz)
+        one_week_ago_dt, _ = range_bounds(one_week_ago, one_week_ago, tenant_tz)
 
         week1_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
@@ -958,7 +952,8 @@ class AIReportingService:
             .where(
                 and_(
                     TimeEntry.user_id == user_id,
-                    TimeEntry.start_time >= one_week_ago_dt
+                    TimeEntry.start_time >= one_week_ago_dt,
+                    TimeEntry.start_time < tomorrow_dt
                 )
             )
         )
