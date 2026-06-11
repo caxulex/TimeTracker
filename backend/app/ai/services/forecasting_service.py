@@ -22,6 +22,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.utils.cache_manager import AICacheManager, get_cache_manager
+from app.ai.utils.tenant_time import get_tenant_today, get_tenant_today_for_user
 from app.services.ai_feature_service import AIFeatureManager
 from app.utils.timewindow import now_utc
 
@@ -182,6 +183,7 @@ class ForecastingService:
         """
         try:
             # Check if feature is enabled
+            _tenant_today = await get_tenant_today_for_user(self.db, user_id)
             fm = await self._get_feature_manager()
             if not await fm.is_enabled("ai_payroll_forecast", user_id):
                 return {
@@ -468,6 +470,13 @@ class ForecastingService:
             Dict with risk assessments per user
         """
         try:
+            # Resolve the tenant civil date once and reuse it for the full user loop.
+            tenant_today = (
+                await get_tenant_today(self.db, company_id)
+                if company_id is not None
+                else await get_tenant_today_for_user(self.db, user_id)
+            )
+
             fm = await self._get_feature_manager()
             if not await fm.is_enabled("ai_payroll_forecast", user_id):
                 return {
@@ -498,7 +507,7 @@ class ForecastingService:
             logger.info(f"Assessing overtime risk for {len(users)} users (company_id={company_id})")
 
             risks = []
-            week_start = self._get_week_start()
+            week_start = self._get_week_start(tenant_today)
             week_end = week_start + timedelta(days=6)
 
             for user in users:
@@ -506,7 +515,7 @@ class ForecastingService:
                 current_hours = await self._get_user_hours(
                     user.id,
                     week_start,
-                    date.today()
+                    tenant_today
                 )
 
                 # Log significant hours for debugging
@@ -514,14 +523,14 @@ class ForecastingService:
                     logger.info(f"User {user.name} (id={user.id}) has {current_hours:.1f} hours this week")
 
                 # Get historical average daily hours
-                avg_daily = await self._get_avg_daily_hours(user.id, days=30)
+                avg_daily = await self._get_avg_daily_hours(user.id, tenant_today, days=30)
 
                 # Get overtime threshold
                 expected_weekly = float(user.expected_hours_per_week or 40)
                 overtime_threshold = expected_weekly
 
                 # Project hours for rest of week
-                days_left = (week_end - date.today()).days
+                days_left = (week_end - tenant_today).days
                 projected_additional = avg_daily * days_left
                 projected_total = current_hours + projected_additional
 
@@ -542,7 +551,7 @@ class ForecastingService:
                 # Only include medium+ risks
                 if risk_level in [RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL]:
                     # Estimate overtime cost
-                    pay_rate = await self._get_user_pay_rate(user.id)
+                    pay_rate = await self._get_user_pay_rate(user.id, tenant_today)
                     overtime_hours = max(projected_total - overtime_threshold, 0)
                     overtime_cost = Decimal(str(overtime_hours)) * pay_rate * Decimal("1.5")
 
@@ -579,9 +588,8 @@ class ForecastingService:
                 "enabled": True
             }
 
-    def _get_week_start(self) -> date:
+    def _get_week_start(self, today: date) -> date:
         """Get Monday of current week."""
-        today = date.today()
         return today - timedelta(days=today.weekday())
 
     async def _get_user_hours(
@@ -644,12 +652,13 @@ class ForecastingService:
     async def _get_avg_daily_hours(
         self,
         user_id: int,
+        today: date,
         days: int = 30
     ) -> float:
         """Get average daily hours for user."""
         from app.models import TimeEntry
 
-        start_date = date.today() - timedelta(days=days)
+        start_date = today - timedelta(days=days)
 
         result = await self.db.execute(
             select(
@@ -678,7 +687,7 @@ class ForecastingService:
 
         return statistics.mean(daily_hours)
 
-    async def _get_user_pay_rate(self, user_id: int) -> Decimal:
+    async def _get_user_pay_rate(self, user_id: int, today: date) -> Decimal:
         """Get current hourly pay rate for user."""
         from app.models import PayRate
 
@@ -690,7 +699,7 @@ class ForecastingService:
                     PayRate.is_active == True,
                     or_(
                         PayRate.effective_to == None,
-                        PayRate.effective_to >= date.today()
+                        PayRate.effective_to >= today
                     )
                 )
             )
@@ -727,6 +736,13 @@ class ForecastingService:
             Dict with budget forecasts per project
         """
         try:
+            # Resolve the tenant civil date once per request and reuse it for all projects.
+            tenant_today = (
+                await get_tenant_today(self.db, company_id)
+                if company_id is not None
+                else await get_tenant_today_for_user(self.db, user_id)
+            )
+
             fm = await self._get_feature_manager()
             if not await fm.is_enabled("ai_payroll_forecast", user_id):
                 return {
@@ -783,7 +799,7 @@ class ForecastingService:
 
             forecasts = []
             for project in projects:
-                forecast = await self._analyze_project_budget(project)
+                forecast = await self._analyze_project_budget(project, tenant_today)
                 if forecast:
                     forecasts.append(forecast.to_dict())
 
@@ -808,7 +824,8 @@ class ForecastingService:
 
     async def _analyze_project_budget(
         self,
-        project
+        project,
+        today: date,
     ) -> Optional[ProjectBudgetForecast]:
         """Analyze budget consumption for a project."""
         from app.models import TimeEntry
@@ -835,8 +852,8 @@ class ForecastingService:
                 spent_to_date=Decimal("0.00"),
                 projected_total=Decimal("0.00"),
                 burn_rate_daily=Decimal("0.00"),
-                days_remaining=365 if not project.deadline else max((project.deadline - date.today()).days, 0),
-                projected_completion=project.deadline if project.deadline else date.today() + timedelta(days=365),
+                days_remaining=365 if not project.deadline else max((project.deadline - today).days, 0),
+                projected_completion=project.deadline if project.deadline else today + timedelta(days=365),
                 risk_level=RiskLevel.LOW,
                 recommendations=["No time tracked yet - budget fully available"]
             )
@@ -850,23 +867,23 @@ class ForecastingService:
 
         # Calculate burn rate
         first_entry = min(entries, key=lambda e: e.start_time)
-        days_active = max((date.today() - first_entry.start_time.date()).days, 1)
+        days_active = max((today - first_entry.start_time.date()).days, 1)
         burn_rate_daily = spent_to_date / days_active
 
         # Calculate days remaining based on deadline or budget
         if project.deadline:
-            days_remaining = max((project.deadline - date.today()).days, 0)
+            days_remaining = max((project.deadline - today).days, 0)
             projected_completion = project.deadline
             # Project total based on burn rate until deadline
             projected_total = spent_to_date + (burn_rate_daily * days_remaining) if burn_rate_daily > 0 else spent_to_date
         elif burn_rate_daily > 0:
             remaining_budget = budget_total - spent_to_date
             days_remaining = int(remaining_budget / burn_rate_daily) if remaining_budget > 0 else 0
-            projected_completion = date.today() + timedelta(days=days_remaining)
+            projected_completion = today + timedelta(days=days_remaining)
             projected_total = spent_to_date + (burn_rate_daily * days_remaining)
         else:
             days_remaining = 365
-            projected_completion = date.today() + timedelta(days=365)
+            projected_completion = today + timedelta(days=365)
             projected_total = spent_to_date
 
         # Determine risk level
@@ -875,7 +892,7 @@ class ForecastingService:
         # Additional risk factor: deadline approaching with high utilization
         deadline_risk = False
         if project.deadline:
-            days_to_deadline = (project.deadline - date.today()).days
+            days_to_deadline = (project.deadline - today).days
             if days_to_deadline <= 7 and utilization > 75:
                 deadline_risk = True
 
@@ -938,6 +955,13 @@ class ForecastingService:
             Dict with weekly cash flow projections
         """
         try:
+            # Resolve the tenant civil date once per request and reuse it for the weekly loop.
+            tenant_today = (
+                await get_tenant_today(self.db, company_id)
+                if company_id is not None
+                else await get_tenant_today_for_user(self.db, user_id)
+            )
+
             fm = await self._get_feature_manager()
             if not await fm.is_enabled("ai_payroll_forecast", user_id):
                 return {
@@ -960,7 +984,7 @@ class ForecastingService:
 
             # Generate weekly forecast
             forecast = []
-            current_week = self._get_week_start()
+            current_week = self._get_week_start(tenant_today)
 
             for i in range(weeks_ahead):
                 week_start = current_week + timedelta(weeks=i)
