@@ -6,7 +6,7 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card } from '../common';
-import { formatDuration, formatDurationLive } from '../../utils/helpers';
+import { formatDuration } from '../../utils/helpers';
 import type { DashboardStats } from '../../types';
 
 // ---------------------------------------------------------------------------
@@ -106,7 +106,7 @@ export function YourStatsCard({
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title={t('dashboard.today')}
-          value={timerIsLive ? formatDurationLive(todayDisplaySeconds) : formatDuration(todayDisplaySeconds)}
+          value={formatDuration(todayDisplaySeconds)}
           icon={
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
