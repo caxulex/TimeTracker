@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.config import ai_settings
 from app.ai.services.ai_client import AIClient, get_ai_client
+from app.ai.utils.tenant_time import get_tenant_today_for_user
 from app.services.ai_feature_service import AIFeatureManager
 from app.utils.timewindow import now_utc
 
@@ -135,13 +136,13 @@ class NLPService:
 
     # Date patterns
     DATE_KEYWORDS = {
-        "today": lambda: date.today(),
-        "yesterday": lambda: date.today() - timedelta(days=1),
-        "tomorrow": lambda: date.today() + timedelta(days=1),
-        "last week": lambda: date.today() - timedelta(weeks=1),
-        "this morning": lambda: date.today(),
-        "this afternoon": lambda: date.today(),
-        "this evening": lambda: date.today(),
+        "today": lambda today: today,
+        "yesterday": lambda today: today - timedelta(days=1),
+        "tomorrow": lambda today: today + timedelta(days=1),
+        "last week": lambda today: today - timedelta(weeks=1),
+        "this morning": lambda today: today,
+        "this afternoon": lambda today: today,
+        "this evening": lambda today: today,
     }
 
     # Day of week patterns
@@ -211,6 +212,7 @@ class NLPService:
             # Get user's projects and tasks for matching
             projects = await self._get_user_projects(user_id)
             tasks = await self._get_user_tasks(user_id)
+            tenant_today = await get_tenant_today_for_user(self.db, user_id)
 
             # Start with rule-based parsing
             result = NLPParseResult(original_text=text)
@@ -229,7 +231,7 @@ class NLPService:
                 })
 
             # Parse date
-            date_info = self._parse_date(text, timezone)
+            date_info = self._parse_date(text, timezone, tenant_today=tenant_today)
             if date_info:
                 result.start_time = datetime.combine(date_info.date, datetime.min.time())
                 if result.duration_seconds:
@@ -242,7 +244,7 @@ class NLPService:
                 })
             else:
                 # Default to today
-                result.start_time = datetime.combine(date.today(), datetime.min.time())
+                result.start_time = datetime.combine(tenant_today, datetime.min.time())
                 if result.duration_seconds:
                     result.end_time = result.start_time + timedelta(seconds=result.duration_seconds)
 
@@ -281,7 +283,7 @@ class NLPService:
             # Use AI for enhancement if confidence is low
             if use_ai and self.ai_client and result.confidence < 0.7:
                 enhanced = await self._enhance_with_ai(
-                    text, user_id, projects, tasks, result
+                    text, user_id, projects, tasks, result, tenant_today
                 )
                 if enhanced:
                     result = enhanced
@@ -343,15 +345,21 @@ class NLPService:
 
         return None
 
-    def _parse_date(self, text: str, timezone: str = "UTC") -> Optional[ParsedDate]:
+    def _parse_date(
+        self,
+        text: str,
+        timezone: str = "UTC",
+        tenant_today: Optional[date] = None,
+    ) -> Optional[ParsedDate]:
         """Parse date from text."""
         text_lower = text.lower()
+        effective_today = tenant_today or date.today()
 
         # Check keyword dates first
         for keyword, date_func in self.DATE_KEYWORDS.items():
             if keyword in text_lower:
                 return ParsedDate(
-                    date=date_func(),
+                    date=date_func(effective_today),
                     original_text=keyword,
                     confidence=0.95
                 )
@@ -360,7 +368,7 @@ class NLPService:
         for day_name, day_num in self.DAYS_OF_WEEK.items():
             if day_name in text_lower:
                 # Find the most recent occurrence of this day
-                today = date.today()
+                today = effective_today
                 days_since = (today.weekday() - day_num) % 7
                 if days_since == 0:
                     days_since = 7  # Last week's same day
@@ -381,7 +389,7 @@ class NLPService:
             # Remove duration patterns first to avoid confusion
             clean_text = re.sub(r'\d+(?:\.\d+)?\s*(?:hours?|hrs?|h|minutes?|mins?|m)\b', '', text_lower)
             parsed = date_parser.parse(clean_text, fuzzy=True, dayfirst=False)
-            if parsed.date() != date.today():  # Only use if not defaulting to today
+            if parsed.date() != effective_today:  # Only use if not defaulting to today
                 return ParsedDate(
                     date=parsed.date(),
                     original_text="",
@@ -692,7 +700,8 @@ class NLPService:
         user_id: int,
         projects: List[Dict[str, Any]],
         tasks: List[Dict[str, Any]],
-        current_result: NLPParseResult
+        current_result: NLPParseResult,
+        tenant_today: date,
     ) -> Optional[NLPParseResult]:
         """Use AI to enhance parsing results."""
         if not self.ai_client:
@@ -712,7 +721,7 @@ Extract:
 1. Duration (in hours and minutes)
 2. Project name (must match one from the list above)
 3. Task description
-4. Date (relative to today: {date.today().isoformat()})
+4. Date (relative to today: {tenant_today.isoformat()})
 
 Return a JSON object with:
 {{
