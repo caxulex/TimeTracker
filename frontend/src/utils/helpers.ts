@@ -53,6 +53,22 @@ export function formatDuration(seconds: number): string {
 }
 
 /**
+ * Like formatDuration but always appends seconds so a live ticking value is
+ * visually distinct. Example: "7h 35m 18s", "5m 3s", "47s".
+ */
+export function formatDurationLive(totalSeconds: number): string {
+  if (totalSeconds < 0) totalSeconds = 0;
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const parts: string[] = [];
+  if (h > 0) parts.push(`${h}h`);
+  if (h > 0 || m > 0) parts.push(`${m}m`);
+  parts.push(`${s}s`);
+  return parts.join(' ');
+}
+
+/**
  * Format date to locale string
  */
 export function formatDate(date: string | Date): string {

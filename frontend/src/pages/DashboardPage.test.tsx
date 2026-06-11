@@ -10,6 +10,7 @@ import { DashboardPage } from './DashboardPage';
 import { BrandingProvider } from '../contexts/BrandingContext';
 import { NotificationProvider } from '../components/Notifications';
 import { WebSocketProvider } from '../contexts/WebSocketContext';
+import * as ReactQuery from '@tanstack/react-query';
 
 // Mock the auth hook
 vi.mock('../hooks/useAuth', () => ({
@@ -97,6 +98,13 @@ vi.mock('recharts', () => ({
   PieChart: ({ children }: { children: React.ReactNode }) => <div data-testid="pie-chart">{children}</div>,
   Pie: () => <div data-testid="pie" />,
   Cell: () => <div data-testid="cell" />,
+}));
+
+// Mock timer store (no running timer by default)
+vi.mock('../stores/timerStore', () => ({
+  useTimerStore: vi.fn((selector: (s: { isRunning: boolean; isPaused: boolean }) => unknown) =>
+    selector({ isRunning: false, isPaused: false })
+  ),
 }));
 
 // Create query client for tests
@@ -247,6 +255,30 @@ describe('DashboardPage', () => {
         const dashboard = screen.getByText('Dashboard');
         expect(dashboard).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('Stats polling', () => {
+    it('dashboard query is configured with refetchInterval of 60 000 ms', async () => {
+      const useQuerySpy = vi.spyOn(ReactQuery, 'useQuery');
+
+      render(
+        <TestWrapper>
+          <DashboardPage />
+        </TestWrapper>
+      );
+
+      // Find the call that fetched the 'dashboard' query key
+      const dashboardCall = useQuerySpy.mock.calls.find(
+        ([options]) =>
+          Array.isArray((options as { queryKey?: unknown[] }).queryKey) &&
+          (options as { queryKey?: unknown[] }).queryKey?.[0] === 'dashboard'
+      );
+
+      expect(dashboardCall).toBeDefined();
+      expect((dashboardCall![0] as { refetchInterval?: number }).refetchInterval).toBe(60_000);
+
+      useQuerySpy.mockRestore();
     });
   });
 });
