@@ -78,6 +78,34 @@ export function OvertimeRiskPanel({ className = '', teamId }: OvertimeRiskPanelP
     }).format(value);
   };
 
+  const getCostDisplay = (risk: OvertimeRiskItem) => {
+    if (risk.estimated_cost !== null) {
+      return {
+        value: formatCurrency(risk.estimated_cost),
+        helper: null,
+      };
+    }
+
+    if (risk.rate_status === 'missing_pay_rate') {
+      return {
+        value: 'Unavailable',
+        helper: 'Missing active pay rate',
+      };
+    }
+
+    if (risk.rate_status === 'unsupported_rate_type') {
+      return {
+        value: 'Unavailable',
+        helper: 'Unsupported pay rate type',
+      };
+    }
+
+    return {
+      value: 'Unavailable',
+      helper: 'Cost estimate unavailable',
+    };
+  };
+
   const getProgressColor = (current: number, threshold: number) => {
     const ratio = current / threshold;
     if (ratio >= 1) return 'bg-red-500';
@@ -172,7 +200,9 @@ export function OvertimeRiskPanel({ className = '', teamId }: OvertimeRiskPanelP
             )}
 
             {/* Risk Cards */}
-            {data?.risks.map((risk: OvertimeRiskItem) => (
+            {data?.risks.map((risk: OvertimeRiskItem) => {
+              const costDisplay = getCostDisplay(risk);
+              return (
               <div 
                 key={risk.user_id}
                 className={`border rounded-lg p-4 ${
@@ -224,11 +254,14 @@ export function OvertimeRiskPanel({ className = '', teamId }: OvertimeRiskPanelP
                   <div className="bg-white bg-opacity-60 rounded p-2">
                     <div className="flex items-center gap-1 text-sm text-gray-500">
                       <DollarSign className="w-3 h-3" />
-                      Est. Cost
+                      Estimated OT Cost
                     </div>
                     <div className="font-semibold text-red-600">
-                      {formatCurrency(risk.estimated_cost)}
+                      {costDisplay.value}
                     </div>
+                    {costDisplay.helper && (
+                      <div className="text-xs text-gray-500 mt-1">{costDisplay.helper}</div>
+                    )}
                   </div>
                 </div>
 
@@ -238,7 +271,8 @@ export function OvertimeRiskPanel({ className = '', teamId }: OvertimeRiskPanelP
                   {risk.recommendation}
                 </div>
               </div>
-            ))}
+              );
+            })}
 
             {/* Meta info */}
             {data?.period && (

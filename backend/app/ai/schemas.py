@@ -271,7 +271,8 @@ class OvertimeRiskItem(BaseModel):
     overtime_threshold: float
     risk_level: str
     projected_overtime: float
-    estimated_cost: float
+    estimated_cost: Optional[float] = None
+    rate_status: Optional[str] = None
     recommendation: str
 
 
