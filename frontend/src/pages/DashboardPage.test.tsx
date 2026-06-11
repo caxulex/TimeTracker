@@ -99,6 +99,34 @@ vi.mock('recharts', () => ({
   Cell: () => <div data-testid="cell" />,
 }));
 
+// Mock timer store (supports Zustand's full-state and selector call shapes)
+const mockTimerState = {
+  currentEntry: null,
+  isRunning: false,
+  isPaused: false,
+  elapsedSeconds: 0,
+  isLoading: false,
+  error: null,
+  lastSyncTime: null,
+  fetchTimer: vi.fn(() => Promise.resolve()),
+  startTimer: vi.fn(() => Promise.resolve()),
+  stopTimer: vi.fn(() => Promise.resolve(null)),
+  switchTimer: vi.fn(() => Promise.resolve()),
+  updateElapsed: vi.fn(),
+  clearError: vi.fn(),
+  syncWithBackend: vi.fn(() => Promise.resolve()),
+  applyServerState: vi.fn(),
+};
+
+vi.mock('../stores/timerStore', () => ({
+  useTimerStore: vi.fn().mockImplementation((selector?: (state: typeof mockTimerState) => unknown) => {
+    if (typeof selector === 'function') {
+      return selector(mockTimerState);
+    }
+    return mockTimerState;
+  }),
+}));
+
 // Create query client for tests
 const createTestQueryClient = () =>
   new QueryClient({
@@ -249,4 +277,5 @@ describe('DashboardPage', () => {
       });
     });
   });
+
 });
