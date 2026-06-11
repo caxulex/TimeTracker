@@ -24,6 +24,7 @@ from app.ai.config import ai_settings
 from app.ai.models.feature_engineering import AnomalyFeatures
 from app.ai.services.ai_client import AIClient
 from app.ai.utils.cache_manager import AICacheManager, get_cache_manager
+from app.ai.utils.tenant_time import get_tenant_today_for_user
 from app.services.ai_feature_service import AIFeatureManager
 from app.services.audit_logger import AuditAction, AuditLogger
 from app.utils.timewindow import now_utc
@@ -120,6 +121,9 @@ class AnomalyService:
             Dict with anomalies and summary
         """
         try:
+            # Resolve tenant-local today once at method entry
+            tenant_today = await get_tenant_today_for_user(self.db, user_id)
+
             # Check if feature is enabled
             fm = await self._get_feature_manager()
             if not await fm.is_enabled("ai_anomaly_alerts", user_id):
@@ -133,7 +137,7 @@ class AnomalyService:
                 }
 
             # Check cache
-            cache_date = date.today().isoformat()
+            cache_date = tenant_today.isoformat()
             if self.cache:
                 cached = await self.cache.get_anomaly_cache(
                     cache_date,
@@ -152,7 +156,7 @@ class AnomalyService:
                     return cached
 
             # Build features
-            features = await self._build_features(user_id, period_days)
+            features = await self._build_features(user_id, period_days, tenant_today)
 
             # Run detection
             anomalies = []
@@ -314,7 +318,8 @@ class AnomalyService:
     async def _build_features(
         self,
         user_id: int,
-        period_days: int
+        period_days: int,
+        tenant_today: date
     ) -> AnomalyFeatures:
         """Build anomaly features from time entries."""
         from app.models import TimeEntry, User
@@ -328,8 +333,8 @@ class AnomalyService:
         if not user:
             raise ValueError(f"User {user_id} not found")
 
-        period_start = date.today() - timedelta(days=period_days)
-        period_end = date.today()
+        period_start = tenant_today - timedelta(days=period_days)
+        period_end = tenant_today
 
         features = AnomalyFeatures(
             user_id=user_id,
