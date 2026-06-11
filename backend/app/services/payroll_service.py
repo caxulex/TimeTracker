@@ -33,6 +33,7 @@ from app.schemas.payroll import (
     PayrollPeriodUpdate,
     PeriodStatusEnum,
 )
+from app.utils.pay_rate import get_overtime_multiplier, normalize_rate_to_hourly
 from app.utils.timewindow import now_utc, range_bounds
 
 
@@ -591,8 +592,9 @@ class PayrollPeriodService:
                 gross_amount = days_worked * pay_rate.base_rate
                 regular_hours = days_worked * Decimal("8")  # Assume 8 hours/day for display
                 overtime_hours = Decimal("0")
-                regular_rate = pay_rate.base_rate / Decimal("8")  # Convert to hourly for display
-                overtime_rate = regular_rate * pay_rate.overtime_multiplier
+                regular_rate = normalize_rate_to_hourly(pay_rate.base_rate, 'daily') or Decimal("0")
+                overtime_multiplier = get_overtime_multiplier(pay_rate.overtime_multiplier)
+                overtime_rate = regular_rate * overtime_multiplier
 
             elif rate_type == 'project_based':
                 # Project-based - pay the agreed amount
@@ -630,7 +632,12 @@ class PayrollPeriodService:
                         overtime_hours += ot
 
                     regular_rate = pay_rate.base_rate
-                    overtime_rate = pay_rate.base_rate * company_multiplier
+                    overtime_multiplier = get_overtime_multiplier(
+                        pay_rate.overtime_multiplier,
+                        company_overtime_enabled=True,
+                        company_overtime_multiplier=company_multiplier,
+                    )
+                    overtime_rate = pay_rate.base_rate * overtime_multiplier
                     gross_amount = (
                         (regular_hours * regular_rate)
                         + (overtime_hours * overtime_rate)
@@ -643,7 +650,8 @@ class PayrollPeriodService:
                     overtime_hours = max(total_hours - overtime_threshold, Decimal("0"))
 
                     regular_rate = pay_rate.base_rate
-                    overtime_rate = pay_rate.base_rate * pay_rate.overtime_multiplier
+                    overtime_multiplier = get_overtime_multiplier(pay_rate.overtime_multiplier)
+                    overtime_rate = pay_rate.base_rate * overtime_multiplier
                     gross_amount = (regular_hours * regular_rate) + (overtime_hours * overtime_rate)
 
             # Round to 2 decimal places

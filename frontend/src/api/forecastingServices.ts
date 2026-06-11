@@ -60,7 +60,8 @@ export interface OvertimeRiskItem {
   overtime_threshold: number;
   risk_level: 'low' | 'medium' | 'high' | 'critical';
   projected_overtime: number;
-  estimated_cost: number;
+  estimated_cost: number | null;
+  rate_status?: 'ok' | 'missing_pay_rate' | 'unsupported_rate_type';
   recommendation: string;
 }
 

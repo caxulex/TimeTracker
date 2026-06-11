@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -99,9 +101,9 @@ async def test_assess_overtime_risk_uses_tenant_today_for_user_loop(monkeypatch:
         captures["avg"] = (user_id, today, days)
         return 2.0
 
-    async def fake_get_user_pay_rate(user_id: int, today: date):
+    async def fake_get_user_overtime_hourly_rate(user_id: int, today: date):
         captures["pay_rate"] = (user_id, today)
-        return Decimal("30.00")
+        return Decimal("30.00"), "ok"
 
     monkeypatch.setattr("app.ai.services.forecasting_service.get_tenant_today", fake_get_tenant_today)
 
@@ -109,7 +111,7 @@ async def test_assess_overtime_risk_uses_tenant_today_for_user_loop(monkeypatch:
     monkeypatch.setattr(service, "_get_feature_manager", fake_feature_manager)
     monkeypatch.setattr(service, "_get_user_hours", fake_get_user_hours)
     monkeypatch.setattr(service, "_get_avg_daily_hours", fake_get_avg_daily_hours)
-    monkeypatch.setattr(service, "_get_user_pay_rate", fake_get_user_pay_rate)
+    monkeypatch.setattr(service, "_get_user_overtime_hourly_rate", fake_get_user_overtime_hourly_rate)
 
     result = await service.assess_overtime_risk(user_id=99, company_id=1)
 
@@ -128,6 +130,8 @@ async def test_get_user_pay_rate_compares_against_tenant_today(monkeypatch: pyte
 
     class _PayRate:
         base_rate = Decimal("42.00")
+        rate_type = "hourly"
+        overtime_multiplier = Decimal("1.50")
 
     async def fake_execute(statement):
         compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
@@ -136,9 +140,10 @@ async def test_get_user_pay_rate_compares_against_tenant_today(monkeypatch: pyte
 
     service = _service(_DB(fake_execute))
 
-    result = await service._get_user_pay_rate(user_id=7, today=tenant_today)
+    result, status = await service._get_user_overtime_hourly_rate(user_id=7, today=tenant_today)
 
-    assert result == Decimal("42.00")
+    assert status == "ok"
+    assert result == Decimal("63.000")
     assert "2026-06-10" in seen["compiled"]
 
 
@@ -310,3 +315,56 @@ async def test_forecast_payroll_resolves_tenant_today_once(monkeypatch: pytest.M
 
     assert seen["calls"] == 1
     assert result["enabled"] is True
+
+@pytest.mark.asyncio
+async def test_get_user_overtime_hourly_rate_returns_missing_status_when_no_pay_rate():
+    db = AsyncMock()
+    result = Mock()
+    result.scalar_one_or_none.return_value = None
+    db.execute.return_value = result
+
+    service = ForecastingService(db=db)
+
+    rate, status = await service._get_user_overtime_hourly_rate(user_id=1, today=date(2026, 6, 10))
+
+    assert rate is None
+    assert status == "missing_pay_rate"
+
+
+@pytest.mark.asyncio
+async def test_get_user_overtime_hourly_rate_normalizes_monthly_and_applies_multiplier():
+    db = AsyncMock()
+    result = Mock()
+    result.scalar_one_or_none.return_value = SimpleNamespace(
+        base_rate=Decimal("1200.00"),
+        rate_type="monthly",
+        overtime_multiplier=Decimal("1.5"),
+    )
+    db.execute.return_value = result
+
+    service = ForecastingService(db=db)
+
+    rate, status = await service._get_user_overtime_hourly_rate(user_id=1, today=date(2026, 6, 10))
+
+    assert status == "ok"
+    assert rate is not None
+    assert rate.quantize(Decimal("0.01")) == Decimal("10.38")
+
+
+@pytest.mark.asyncio
+async def test_get_user_overtime_hourly_rate_returns_unsupported_status_for_project_based():
+    db = AsyncMock()
+    result = Mock()
+    result.scalar_one_or_none.return_value = SimpleNamespace(
+        base_rate=Decimal("500.00"),
+        rate_type="project_based",
+        overtime_multiplier=Decimal("1.5"),
+    )
+    db.execute.return_value = result
+
+    service = ForecastingService(db=db)
+
+    rate, status = await service._get_user_overtime_hourly_rate(user_id=1, today=date(2026, 6, 10))
+
+    assert rate is None
+    assert status == "unsupported_rate_type"

@@ -38,6 +38,7 @@ describe('OvertimeRiskPanel', () => {
             risk_level: 'high',
             projected_overtime: 6.2,
             estimated_cost: 186.0,
+            rate_status: 'ok',
             recommendation: 'Review workload distribution',
           },
         ],
@@ -55,5 +56,39 @@ describe('OvertimeRiskPanel', () => {
     expect(screen.getByText(/Hours this week/i)).toBeInTheDocument();
     expect(screen.queryByText(/Next 2 weeks/i)).toBeNull();
     expect(screen.queryByText(/This month/i)).toBeNull();
+  });
+
+  it('shows an honest unavailable cost state when pay rate is missing', () => {
+    useOvertimeRiskMock.mockReturnValue({
+      data: {
+        enabled: true,
+        period: '2026-06-10 to 2026-06-16',
+        users_assessed: 2,
+        users_at_risk: 1,
+        generated_at: '2026-06-10T10:30:00.000Z',
+        risks: [
+          {
+            user_id: 11,
+            user_name: 'No Rate User',
+            current_hours: 41.2,
+            projected_hours: 44.0,
+            overtime_threshold: 40,
+            risk_level: 'medium',
+            projected_overtime: 4.0,
+            estimated_cost: null,
+            rate_status: 'missing_pay_rate',
+            recommendation: 'Minor overtime expected. Monitor daily.',
+          },
+        ],
+      },
+      isLoading: false,
+      error: null,
+    });
+
+    render(<OvertimeRiskPanel />);
+
+    expect(screen.getByText('Unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Missing active pay rate')).toBeInTheDocument();
+    expect(screen.getByText(/Estimated OT Cost/i)).toBeInTheDocument();
   });
 });

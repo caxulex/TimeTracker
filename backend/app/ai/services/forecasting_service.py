@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.utils.cache_manager import AICacheManager, get_cache_manager
 from app.ai.utils.tenant_time import get_tenant_today, get_tenant_today_for_user
 from app.services.ai_feature_service import AIFeatureManager
+from app.utils.pay_rate import get_overtime_multiplier, normalize_rate_to_hourly
 from app.utils.timewindow import now_utc
 
 logger = logging.getLogger(__name__)
@@ -84,7 +85,8 @@ class OvertimeRisk:
     overtime_threshold: float
     risk_level: RiskLevel
     projected_overtime: float
-    estimated_cost: Decimal
+    estimated_cost: Optional[Decimal]
+    rate_status: str
     recommendation: str
 
     def to_dict(self) -> Dict[str, Any]:
@@ -96,7 +98,8 @@ class OvertimeRisk:
             "overtime_threshold": self.overtime_threshold,
             "risk_level": self.risk_level.value,
             "projected_overtime": round(self.projected_overtime, 2),
-            "estimated_cost": float(self.estimated_cost),
+            "estimated_cost": float(self.estimated_cost) if self.estimated_cost is not None else None,
+            "rate_status": self.rate_status,
             "recommendation": self.recommendation
         }
 
@@ -550,10 +553,22 @@ class ForecastingService:
 
                 # Only include medium+ risks
                 if risk_level in [RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL]:
-                    # Estimate overtime cost
-                    pay_rate = await self._get_user_pay_rate(user.id, tenant_today)
+                    # Estimate overtime cost only when a valid overtime hourly rate exists
+                    overtime_hourly_rate, rate_status = await self._get_user_overtime_hourly_rate(
+                        user.id,
+                        tenant_today,
+                    )
                     overtime_hours = max(projected_total - overtime_threshold, 0)
-                    overtime_cost = Decimal(str(overtime_hours)) * pay_rate * Decimal("1.5")
+                    overtime_cost = None
+                    if overtime_hourly_rate is not None:
+                        overtime_cost = (
+                            Decimal(str(overtime_hours)) * overtime_hourly_rate
+                        ).quantize(Decimal("0.01"))
+
+                    if rate_status == "missing_pay_rate":
+                        recommendation = f"{recommendation}. Cost unavailable: no active pay rate configured."
+                    elif rate_status == "unsupported_rate_type":
+                        recommendation = f"{recommendation}. Cost unavailable: unsupported pay rate type."
 
                     risks.append(OvertimeRisk(
                         user_id=user.id,
@@ -563,7 +578,8 @@ class ForecastingService:
                         overtime_threshold=overtime_threshold,
                         risk_level=risk_level,
                         projected_overtime=max(projected_total - overtime_threshold, 0),
-                        estimated_cost=overtime_cost.quantize(Decimal("0.01")),
+                        estimated_cost=overtime_cost,
+                        rate_status=rate_status,
                         recommendation=recommendation
                     ).to_dict())
 
@@ -687,8 +703,17 @@ class ForecastingService:
 
         return statistics.mean(daily_hours)
 
-    async def _get_user_pay_rate(self, user_id: int, today: date) -> Decimal:
-        """Get current hourly pay rate for user."""
+    async def _get_user_overtime_hourly_rate(
+        self,
+        user_id: int,
+        today: date,
+    ) -> Tuple[Optional[Decimal], str]:
+        """Get overtime hourly rate and quality status for user.
+
+        Returns:
+            (overtime_hourly_rate, rate_status)
+            rate_status: ok | missing_pay_rate | unsupported_rate_type
+        """
         from app.models import PayRate
 
         result = await self.db.execute(
@@ -708,9 +733,15 @@ class ForecastingService:
         )
         pay_rate = result.scalar_one_or_none()
 
-        if pay_rate:
-            return pay_rate.base_rate
-        return Decimal("25.00")  # Default rate
+        if pay_rate is None:
+            return None, "missing_pay_rate"
+
+        hourly_rate = normalize_rate_to_hourly(pay_rate.base_rate, pay_rate.rate_type)
+        if hourly_rate is None:
+            return None, "unsupported_rate_type"
+
+        overtime_multiplier = get_overtime_multiplier(pay_rate.overtime_multiplier)
+        return hourly_rate * overtime_multiplier, "ok"
 
     # ============================================
     # PROJECT BUDGET FORECASTING
