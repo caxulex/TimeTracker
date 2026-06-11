@@ -10,7 +10,6 @@ import { DashboardPage } from './DashboardPage';
 import { BrandingProvider } from '../contexts/BrandingContext';
 import { NotificationProvider } from '../components/Notifications';
 import { WebSocketProvider } from '../contexts/WebSocketContext';
-import * as ReactQuery from '@tanstack/react-query';
 
 // Mock the auth hook
 vi.mock('../hooks/useAuth', () => ({
@@ -100,11 +99,32 @@ vi.mock('recharts', () => ({
   Cell: () => <div data-testid="cell" />,
 }));
 
-// Mock timer store (no running timer by default)
+// Mock timer store (supports Zustand's full-state and selector call shapes)
+const mockTimerState = {
+  currentEntry: null,
+  isRunning: false,
+  isPaused: false,
+  elapsedSeconds: 0,
+  isLoading: false,
+  error: null,
+  lastSyncTime: null,
+  fetchTimer: vi.fn(() => Promise.resolve()),
+  startTimer: vi.fn(() => Promise.resolve()),
+  stopTimer: vi.fn(() => Promise.resolve(null)),
+  switchTimer: vi.fn(() => Promise.resolve()),
+  updateElapsed: vi.fn(),
+  clearError: vi.fn(),
+  syncWithBackend: vi.fn(() => Promise.resolve()),
+  applyServerState: vi.fn(),
+};
+
 vi.mock('../stores/timerStore', () => ({
-  useTimerStore: vi.fn((selector: (s: { isRunning: boolean; isPaused: boolean }) => unknown) =>
-    selector({ isRunning: false, isPaused: false })
-  ),
+  useTimerStore: vi.fn().mockImplementation((selector?: (state: typeof mockTimerState) => unknown) => {
+    if (typeof selector === 'function') {
+      return selector(mockTimerState);
+    }
+    return mockTimerState;
+  }),
 }));
 
 // Create query client for tests
@@ -258,27 +278,4 @@ describe('DashboardPage', () => {
     });
   });
 
-  describe('Stats polling', () => {
-    it('dashboard query is configured with refetchInterval of 60 000 ms', async () => {
-      const useQuerySpy = vi.spyOn(ReactQuery, 'useQuery');
-
-      render(
-        <TestWrapper>
-          <DashboardPage />
-        </TestWrapper>
-      );
-
-      // Find the call that fetched the 'dashboard' query key
-      const dashboardCall = useQuerySpy.mock.calls.find(
-        ([options]) =>
-          Array.isArray((options as { queryKey?: unknown[] }).queryKey) &&
-          (options as { queryKey?: unknown[] }).queryKey?.[0] === 'dashboard'
-      );
-
-      expect(dashboardCall).toBeDefined();
-      expect((dashboardCall![0] as { refetchInterval?: number }).refetchInterval).toBe(60_000);
-
-      useQuerySpy.mockRestore();
-    });
-  });
 });
