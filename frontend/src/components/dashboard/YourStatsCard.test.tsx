@@ -5,7 +5,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { YourStatsCard } from './YourStatsCard';
-import { formatDurationLive } from '../../utils/helpers';
 import type { DashboardStats } from '../../types';
 
 // ---------------------------------------------------------------------------
@@ -48,36 +47,6 @@ function renderCard(props: Partial<React.ComponentProps<typeof YourStatsCard>> =
     </MemoryRouter>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Unit: formatDurationLive
-// ---------------------------------------------------------------------------
-
-describe('formatDurationLive', () => {
-  it('formats seconds only', () => {
-    expect(formatDurationLive(45)).toBe('45s');
-  });
-
-  it('formats minutes and seconds', () => {
-    expect(formatDurationLive(125)).toBe('2m 5s');
-  });
-
-  it('formats hours, minutes and seconds', () => {
-    expect(formatDurationLive(3723)).toBe('1h 2m 3s');
-  });
-
-  it('formats hours with zero minutes when hours > 0', () => {
-    expect(formatDurationLive(3630)).toBe('1h 0m 30s');
-  });
-
-  it('returns 0s for zero seconds', () => {
-    expect(formatDurationLive(0)).toBe('0s');
-  });
-
-  it('clamps negative values to 0s', () => {
-    expect(formatDurationLive(-5)).toBe('0s');
-  });
-});
 
 // ---------------------------------------------------------------------------
 // YourStatsCard rendering
@@ -176,33 +145,36 @@ describe('YourStatsCard', () => {
         isTimerPaused: false,
         dataUpdatedAt: DATA_UPDATED_AT,
       });
-      // 3600 cached + 30 elapsed = 3630s = 1h 0m 30s
-      expect(screen.getByText('1h 0m 30s')).toBeInTheDocument();
+      // 3600 cached + 30 elapsed = 3630s => minute precision display
+      expect(screen.getByText('1h')).toBeInTheDocument();
     });
 
     it('re-renders every second when timer is running', () => {
+      // Position near minute boundary so a 1-second tick changes visible output
+      const BOUNDARY_UPDATED_AT = NOW - 59_000;
+
       renderCard({
         isTimerRunning: true,
         isTimerPaused: false,
-        dataUpdatedAt: DATA_UPDATED_AT,
+        dataUpdatedAt: BOUNDARY_UPDATED_AT,
       });
 
-      // At t=0: 3600 + 30 = 3630 → "1h 0m 30s"
-      expect(screen.getByText('1h 0m 30s')).toBeInTheDocument();
+      // At t=0: 3600 + 59 = 3659 => "1h"
+      expect(screen.getByText('1h')).toBeInTheDocument();
 
       // Advance 1 second
       act(() => {
         vi.advanceTimersByTime(1000);
       });
-      // 3600 + 31 = 3631 → "1h 0m 31s"
-      expect(screen.getByText('1h 0m 31s')).toBeInTheDocument();
+      // 3600 + 60 = 3660 => "1h 1m"
+      expect(screen.getByText('1h 1m')).toBeInTheDocument();
 
       // Advance another 2 seconds
       act(() => {
         vi.advanceTimersByTime(2000);
       });
-      // 3600 + 33 = 3633 → "1h 0m 33s"
-      expect(screen.getByText('1h 0m 33s')).toBeInTheDocument();
+      // Still within same minute bucket
+      expect(screen.getByText('1h 1m')).toBeInTheDocument();
     });
 
     it('stops ticking when timer is paused', () => {
@@ -215,8 +187,8 @@ describe('YourStatsCard', () => {
       act(() => {
         vi.advanceTimersByTime(2000);
       });
-      // 3600 + 32 = 3632 → "1h 0m 32s"
-      expect(screen.getByText('1h 0m 32s')).toBeInTheDocument();
+      // 3600 + 32 = 3632 => minute precision display
+      expect(screen.getByText('1h')).toBeInTheDocument();
 
       // Pause the timer — value should freeze, live indicator removed
       rerender(
@@ -232,13 +204,13 @@ describe('YourStatsCard', () => {
 
       expect(screen.queryByTestId('live-indicator')).not.toBeInTheDocument();
 
-      // Advance more time — the displayed value should NOT include those extra seconds
-      // (formatDuration is used, not formatDurationLive, so no 's' suffix)
+      // Advance more time — the displayed value should NOT tick forward while paused
       act(() => {
         vi.advanceTimersByTime(5000);
       });
-      // Value still uses formatDuration (no seconds suffix) and does not advance
+      // Value remains in minute precision and live indicator stays hidden
       expect(screen.queryByTestId('live-indicator')).not.toBeInTheDocument();
+      expect(screen.getByText('1h')).toBeInTheDocument();
     });
 
     it('non-Today stats show polled (cached) values unchanged', () => {
