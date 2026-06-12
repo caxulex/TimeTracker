@@ -2,6 +2,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../stores/authStore';
 import { reportsApi } from '../api/client';
+import { getAvgHoursSubtitle, getAvgHoursTooltip } from '../utils/working_days';
 import {
   ArrowLeftIcon,
   UserCircleIcon,
@@ -32,6 +33,11 @@ interface IndividualUserMetrics {
   total_entries: number;
   active_days_this_month: number;
   avg_hours_per_day: number;
+  avg_denominator_days?: number;
+  avg_denominator_type?: 'working_days_completed' | 'working_days_all' | 'days_with_entries' | 'calendar_days';
+  avg_includes_today?: boolean;
+  avg_working_days_source?: 'user' | 'company' | 'default';
+  avg_working_days_used?: number[];
   current_timer_running: boolean;
   projects: Array<{
     project_id: number;
@@ -82,6 +88,25 @@ export default function UserDetailPage() {
       </div>
     );
   }
+
+  const avgSubtitle = userData
+    ? getAvgHoursSubtitle(
+        {
+          avg_denominator_days: userData.avg_denominator_days,
+          avg_denominator_type: userData.avg_denominator_type,
+          avg_includes_today: userData.avg_includes_today,
+        },
+        userData.active_days_this_month,
+      )
+    : 'across 0 days';
+
+  const avgTooltip = userData
+    ? getAvgHoursTooltip({
+        avg_includes_today: userData.avg_includes_today,
+        avg_working_days_source: userData.avg_working_days_source,
+        avg_working_days_used: userData.avg_working_days_used,
+      })
+    : 'Excludes today (in progress) and non-working days.';
 
   if (!userData) {
     return (
@@ -197,12 +222,22 @@ export default function UserDetailPage() {
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Avg Hours/Day</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Avg Hours/Day</p>
+                  <button
+                    type="button"
+                    className="w-4 h-4 rounded-full border border-gray-300 text-[10px] text-gray-500 leading-none"
+                    title={avgTooltip}
+                    aria-label="Avg Hours/Day calculation details"
+                  >
+                    ?
+                  </button>
+                </div>
                 <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
                   {userData.avg_hours_per_day}h
                 </p>
                 <p className="text-xs text-gray-500 mt-1">
-                  {userData.active_days_this_month} active days
+                  {avgSubtitle}
                 </p>
               </div>
               <FireIcon className="h-12 w-12 text-orange-500" />

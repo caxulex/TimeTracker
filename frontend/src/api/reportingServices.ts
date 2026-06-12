@@ -144,6 +144,15 @@ export interface UserInsightsResponse {
     expected_hours: number;
     total_hours_30d: number;
     avg_daily_hours: number;
+    avg_denominator_days?: number;
+    avg_denominator_type?:
+      | 'working_days_completed'
+      | 'working_days_all'
+      | 'days_with_entries'
+      | 'calendar_days';
+    avg_includes_today?: boolean;
+    avg_working_days_source?: 'user' | 'company' | 'default';
+    avg_working_days_used?: number[];
     active_projects: number;
     productivity_trend: 'improving' | 'declining' | 'stable' | 'new';
   };

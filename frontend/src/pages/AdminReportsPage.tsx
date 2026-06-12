@@ -23,6 +23,7 @@ import {
   UserIcon,
   XMarkIcon,
 } from '../components/Icons';
+import { getAvgHoursSubtitle, getAvgHoursTooltip } from '../utils/working_days';
 import { BarChart, Bar, PieChart, Pie, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
 import { isAdminUser } from '../utils/helpers';
 
@@ -92,6 +93,11 @@ interface SelectedUserDetail {
   total_entries: number;
   active_days_this_month: number;
   avg_hours_per_day: number;
+  avg_denominator_days?: number;
+  avg_denominator_type?: 'working_days_completed' | 'working_days_all' | 'days_with_entries' | 'calendar_days';
+  avg_includes_today?: boolean;
+  avg_working_days_source?: 'user' | 'company' | 'default';
+  avg_working_days_used?: number[];
   current_timer_running: boolean;
   projects: Array<{
     project_id: number;
@@ -223,6 +229,25 @@ export default function AdminReportsPage() {
     },
     enabled: isAdminUser(user) && selectedUserId !== null,
   });
+
+  const selectedUserAvgSubtitle = selectedUserDetail
+    ? getAvgHoursSubtitle(
+        {
+          avg_denominator_days: selectedUserDetail.avg_denominator_days,
+          avg_denominator_type: selectedUserDetail.avg_denominator_type,
+          avg_includes_today: selectedUserDetail.avg_includes_today,
+        },
+        selectedUserDetail.active_days_this_month,
+      )
+    : 'across 0 days';
+
+  const selectedUserAvgTooltip = selectedUserDetail
+    ? getAvgHoursTooltip({
+        avg_includes_today: selectedUserDetail.avg_includes_today,
+        avg_working_days_source: selectedUserDetail.avg_working_days_source,
+        avg_working_days_used: selectedUserDetail.avg_working_days_used,
+      })
+    : 'Excludes today (in progress) and non-working days.';
 
   // Redirect if not admin
   if (!isAdminUser(user)) {
@@ -734,9 +759,22 @@ export default function AdminReportsPage() {
                       </p>
                     </div>
                     <div className="bg-pink-50 dark:bg-pink-900/30 rounded-lg p-4">
-                      <p className="text-sm text-pink-600 dark:text-pink-400">Avg/Day</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm text-pink-600 dark:text-pink-400">Avg/Day</p>
+                        <button
+                          type="button"
+                          className="w-4 h-4 rounded-full border border-pink-300 text-[10px] text-pink-600 leading-none"
+                          title={selectedUserAvgTooltip}
+                          aria-label="Avg/Day calculation details"
+                        >
+                          ?
+                        </button>
+                      </div>
                       <p className="text-xl font-bold text-pink-700 dark:text-pink-300">
                         {selectedUserDetail.avg_hours_per_day.toFixed(1)}h
+                      </p>
+                      <p className="text-xs text-pink-700/80 dark:text-pink-200/80 mt-1">
+                        {selectedUserAvgSubtitle}
                       </p>
                     </div>
                   </div>

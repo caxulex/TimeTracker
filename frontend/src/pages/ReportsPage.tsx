@@ -7,6 +7,7 @@ import { Card, CardHeader, LoadingOverlay, Button } from '../components/common';
 import { TeamTimesheetReport } from '../components/reports';
 import { reportsApi, exportApi } from '../api/client';
 import { formatDuration, toISODateString, getStartOfWeek, secondsToHours, isAdminUser } from '../utils/helpers';
+import { getAvgHoursSubtitle, getAvgHoursTooltip } from '../utils/working_days';
 import { useAuth } from '../hooks/useAuth';
 import { useWebSocketContext } from '../contexts/WebSocketContext';
 import { useStaffNotifications } from '../hooks/useStaffNotifications';
@@ -178,9 +179,24 @@ export function ReportsPage() {
   // Calculate totals
   const totalSeconds = weeklyData?.total_seconds || 0;
   const totalHours = secondsToHours(totalSeconds);
-  const avgHoursPerDay = dailyChartData.length > 0
+  const fallbackAvgHoursPerDay = dailyChartData.length > 0
     ? Math.round((totalHours / dailyChartData.length) * 10) / 10
     : 0;
+
+  const avgHoursPerDay = weeklyData?.avg_hours_per_day ?? fallbackAvgHoursPerDay;
+  const avgSubtitle = getAvgHoursSubtitle(
+    {
+      avg_denominator_days: weeklyData?.avg_denominator_days,
+      avg_denominator_type: weeklyData?.avg_denominator_type,
+      avg_includes_today: weeklyData?.avg_includes_today,
+    },
+    dailyChartData.length,
+  );
+  const avgTooltip = getAvgHoursTooltip({
+    avg_includes_today: weeklyData?.avg_includes_today,
+    avg_working_days_source: weeklyData?.avg_working_days_source,
+    avg_working_days_used: weeklyData?.avg_working_days_used,
+  });
 
   return (
     <div className="space-y-6">
@@ -375,9 +391,19 @@ export function ReportsPage() {
             </Card>
             <Card>
               <div className="text-center">
-                <p className="text-sm text-gray-500 mb-1">Avg Hours/Day</p>
-                <p className="text-3xl font-bold text-green-600">{avgHoursPerDay}h</p>
-                <p className="text-xs text-gray-400 mt-1">across {dailyChartData.length} days</p>
+                <div className="flex items-center justify-center gap-2 mb-1">
+                  <p className="text-sm text-gray-500">Avg Hours/Day</p>
+                  <button
+                    type="button"
+                    className="w-4 h-4 rounded-full border border-gray-300 text-[10px] text-gray-500 leading-none"
+                    title={avgTooltip}
+                    aria-label="Avg Hours/Day calculation details"
+                  >
+                    ?
+                  </button>
+                </div>
+                <p className="text-3xl font-bold text-green-600">{avgHoursPerDay.toFixed(1)}h</p>
+                <p className="text-xs text-gray-400 mt-1">{avgSubtitle}</p>
               </div>
             </Card>
             <Card>

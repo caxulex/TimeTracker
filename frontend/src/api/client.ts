@@ -700,7 +700,36 @@ export const reportsApi = {
     return response.data;
   },
 
-  getAdminUserDetail: async (userId: number) => {
+  getAdminUserDetail: async (userId: number): Promise<{
+    user_id: number;
+    user_name: string;
+    user_email: string;
+    role: string;
+    teams: string[];
+    today_seconds: number;
+    today_hours: number;
+    week_seconds: number;
+    week_hours: number;
+    month_seconds: number;
+    month_hours: number;
+    total_entries: number;
+    active_days_this_month: number;
+    avg_hours_per_day: number;
+    avg_denominator_days?: number;
+    avg_denominator_type?: 'working_days_completed' | 'working_days_all' | 'days_with_entries' | 'calendar_days';
+    avg_includes_today?: boolean;
+    avg_working_days_source?: 'user' | 'company' | 'default';
+    avg_working_days_used?: number[];
+    current_timer_running: boolean;
+    projects: Array<{
+      project_id: number;
+      project_name: string;
+      total_seconds: number;
+      total_hours: number;
+      entry_count: number;
+    }>;
+    last_activity: string | null;
+  }> => {
     const response = await api.get(`/api/reports/admin/users/${userId}`);
     return response.data;
   },

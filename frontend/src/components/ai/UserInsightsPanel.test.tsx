@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import type { UserInsightsResponse } from '../../api/reportingServices';
 
 const refetchMock = vi.fn();
 const mutateMock = vi.fn();
 
-const baseResponse = {
+const baseResponse: UserInsightsResponse = {
   success: true,
   enabled: true,
   user_id: 5,
@@ -13,6 +14,11 @@ const baseResponse = {
     expected_hours: 40,
     total_hours_30d: 152,
     avg_daily_hours: 7.6,
+    avg_denominator_days: 20,
+    avg_denominator_type: 'working_days_completed' as const,
+    avg_includes_today: false,
+    avg_working_days_source: 'user' as const,
+    avg_working_days_used: [0, 1, 2, 3, 4],
     active_projects: 4,
     productivity_trend: 'improving' as const,
   },
@@ -35,7 +41,7 @@ const baseResponse = {
   generated_at: '2026-06-10T10:30:00.000Z',
 };
 
-let mockedData: typeof baseResponse = { ...baseResponse };
+let mockedData: UserInsightsResponse = { ...baseResponse };
 
 vi.mock('../../hooks/useReportingServices', () => ({
   useAIUserInsights: () => ({
@@ -67,9 +73,13 @@ describe('UserInsightsPanel', () => {
     expect(screen.getByText(/Ana/i)).toBeInTheDocument();
     expect(screen.getByText('152h')).toBeInTheDocument();
     expect(screen.getByText('7.6h')).toBeInTheDocument();
+    expect(screen.getByText(/across 20 completed working days/i)).toBeInTheDocument();
     expect(screen.getByText('4')).toBeInTheDocument();
     expect(screen.getByText('40h')).toBeInTheDocument();
     expect(screen.getByText('Improving')).toBeInTheDocument();
+    expect(screen.getByTitle(/Excludes today \(in progress\) and non-working days\./i)).toBeInTheDocument();
+    expect(screen.getByTitle(/Working days for this user: Mon-Fri/i)).toBeInTheDocument();
+    expect(screen.getByTitle(/\(custom schedule\)/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Time logging consistency has improved/i).length).toBeGreaterThan(0);
   });
 
@@ -87,9 +97,27 @@ describe('UserInsightsPanel', () => {
     mockedData = {
       ...baseResponse,
       metrics: undefined,
-    } as unknown as typeof baseResponse;
+    } as UserInsightsResponse;
 
     const { container } = render(<UserInsightsPanel periodDays={30} />);
     expect(container.firstChild).toBeNull();
+  });
+
+  it('falls back gracefully when avg metadata is absent', () => {
+    mockedData = {
+      ...baseResponse,
+      metrics: {
+        ...baseResponse.metrics,
+        avg_denominator_days: undefined,
+        avg_denominator_type: undefined,
+        avg_includes_today: undefined,
+        avg_working_days_source: undefined,
+        avg_working_days_used: undefined,
+      },
+    } as UserInsightsResponse;
+
+    render(<UserInsightsPanel periodDays={30} />);
+
+    expect(screen.getByText(/across 30 days/i)).toBeInTheDocument();
   });
 });

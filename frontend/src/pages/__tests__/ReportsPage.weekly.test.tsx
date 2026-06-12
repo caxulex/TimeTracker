@@ -149,4 +149,51 @@ describe('ReportsPage - weekly window honors custom end date', () => {
       expect(screen.getByText(/across 15 days/i)).toBeInTheDocument();
     });
   });
+
+  it('uses backend avg_hours_per_day and shows metadata subtitle and tooltip', async () => {
+    getWeekly.mockResolvedValueOnce({
+      week_start: '2026-05-01',
+      week_end: '2026-05-07',
+      total_seconds: 36000,
+      total_hours: 10,
+      avg_hours_per_day: 6.2,
+      avg_denominator_days: 5,
+      avg_denominator_type: 'working_days_completed',
+      avg_includes_today: false,
+      avg_working_days_source: 'user',
+      avg_working_days_used: [0, 1, 2, 3, 4],
+      daily_breakdown: makeDailyBreakdown('2026-05-01', 7),
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('6.2h')).toBeInTheDocument();
+      expect(screen.getByText(/across 5 completed working days/i)).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByTitle(/Excludes today \(in progress\) and non-working days\./i),
+    ).toBeInTheDocument();
+    expect(screen.getByTitle(/Working days for this user: Mon-Fri/i)).toBeInTheDocument();
+    expect(screen.getByTitle(/\(custom schedule\)/i)).toBeInTheDocument();
+  });
+
+  it('falls back gracefully when avg metadata is absent', async () => {
+    getWeekly.mockResolvedValueOnce({
+      week_start: '2026-05-01',
+      week_end: '2026-05-07',
+      total_seconds: 36000,
+      total_hours: 10,
+      daily_breakdown: makeDailyBreakdown('2026-05-01', 7),
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      // Legacy fallback path: 10h across 7 days => 1.4h
+      expect(screen.getByText('1.4h')).toBeInTheDocument();
+      expect(screen.getByText(/across 7 days/i)).toBeInTheDocument();
+    });
+  });
 });
