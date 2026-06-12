@@ -92,6 +92,18 @@ class WorkerReport(BaseModel):
     projects_worked: int
     avg_daily_hours: float
     last_activity: Optional[datetime] = None
+    # Phase 4b: avg hours transparency metadata (optional for backward compat)
+    avg_denominator_days: Optional[int] = None
+    avg_denominator_type: Optional[str] = None
+    avg_includes_today: Optional[bool] = None
+    avg_working_days_source: Optional[str] = None
+    avg_working_days_used: Optional[List[int]] = None
+    # Phase 4b: avg hours transparency metadata (optional for backward compat)
+    avg_denominator_days: Optional[int] = None
+    avg_denominator_type: Optional[str] = None
+    avg_includes_today: Optional[bool] = None
+    avg_working_days_source: Optional[str] = None
+    avg_working_days_used: Optional[List[int]] = None
 
 
 class AdminWorkersReportResponse(BaseModel):
@@ -229,8 +241,6 @@ async def get_workers_report(
         end_date = today_local
 
     start_datetime, end_datetime = range_bounds(start_date, end_date, tz)
-    days_in_period = (end_date - start_date).days + 1
-
     # Get company filter for multi-tenant data isolation
     company_filter = get_company_filter(current_user)
 
@@ -244,6 +254,12 @@ async def get_workers_report(
 
     users_result = await db.execute(user_query)
     users = users_result.scalars().all()
+
+    from decimal import Decimal as _Decimal  # noqa: PLC0415
+
+    from app.services.avg_hours_service import (
+        compute_avg_hours as _compute_avg_hours,  # noqa: PLC0415
+    )
 
     workers = []
     total_seconds = 0
@@ -270,6 +286,16 @@ async def get_workers_report(
         user_seconds = row.total_seconds or 0
         total_seconds += user_seconds
 
+        _avg = await _compute_avg_hours(
+            db,
+            user,
+            _Decimal(str(round(user_seconds / 3600, 10))),
+            start_date,
+            end_date,
+            today=today_local,
+            exclude_today=True,
+        )
+
         workers.append(WorkerReport(
             user_id=user.id,
             user_name=user.name,
@@ -278,8 +304,13 @@ async def get_workers_report(
             total_hours=round(user_seconds / 3600, 2),
             entry_count=row.entry_count or 0,
             projects_worked=row.projects_worked or 0,
-            avg_daily_hours=round(user_seconds / 3600 / days_in_period, 2) if days_in_period > 0 else 0,
-            last_activity=row.last_activity
+            avg_daily_hours=float(_avg.value),
+            last_activity=row.last_activity,
+            avg_denominator_days=_avg.denominator_days,
+            avg_denominator_type=_avg.denominator_type,
+            avg_includes_today=_avg.includes_today,
+            avg_working_days_source=_avg.working_days_source,
+            avg_working_days_used=_avg.working_days_used,
         ))
 
     # Sort by total time descending

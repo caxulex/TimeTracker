@@ -914,7 +914,25 @@ class AIReportingService:
             )
         )
         work_days = daily_result.scalar() or 1
-        metrics["avg_daily_hours"] = round((total_seconds / 3600) / work_days, 1)
+        # Phase 4b: replace inline avg with centralized service
+        from decimal import Decimal as _Decimal
+        from app.services.avg_hours_service import compute_avg_hours as _compute_avg_hours
+
+        _avg_result = await _compute_avg_hours(
+            self.db,
+            user,
+            _Decimal(str(round(total_seconds / 3600, 10))),
+            thirty_days_ago,
+            tenant_today,
+            today=tenant_today,
+            exclude_today=True,
+            fallback_to_days_with_entries=True,
+            days_with_entries=int(work_days),
+        )
+        metrics["avg_daily_hours"] = float(_avg_result.value)
+        metrics["avg_denominator_days"] = _avg_result.denominator_days
+        metrics["avg_denominator_type"] = _avg_result.denominator_type
+        metrics["avg_working_days_source"] = _avg_result.working_days_source
 
         # Active projects
         projects_result = await self.db.execute(
