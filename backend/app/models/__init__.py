@@ -24,8 +24,16 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    mapped_column,
+    relationship,
+    validates,
+)
 from sqlalchemy.sql import func
+
+from app.utils.working_days import normalize_working_days
 
 
 class Base(DeclarativeBase):
@@ -132,6 +140,12 @@ class Company(Base):
     timezone: Mapped[str] = mapped_column(String(50), default="UTC", nullable=False)
     date_format: Mapped[str] = mapped_column(String(20), default="YYYY-MM-DD", nullable=False)
     time_format: Mapped[str] = mapped_column(String(20), default="HH:mm", nullable=False)
+    working_days: Mapped[list[int]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=[0, 1, 2, 3, 4],
+        server_default='[0,1,2,3,4]',
+    )
 
     # Email/SMTP Configuration
     smtp_server: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -161,6 +175,11 @@ class Company(Base):
     # Relationships
     white_label_config: Mapped[Optional["WhiteLabelConfig"]] = relationship("WhiteLabelConfig", back_populates="company", uselist=False)
     teams: Mapped[list["Team"]] = relationship("Team", back_populates="company")
+
+    @validates("working_days")
+    def _validate_working_days(self, _key: str, value: list[int]) -> list[int]:
+        normalized = normalize_working_days(value, allow_none=False)
+        return normalized  # type: ignore[return-value]
 
     def __repr__(self) -> str:
         return f"<Company(id={self.id}, name={self.name}, slug={self.slug})>"
@@ -254,6 +273,7 @@ class User(Base):
     employment_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)  # full_time, part_time, contractor
     start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     expected_hours_per_week: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
+    working_days: Mapped[Optional[list[int]]] = mapped_column(JSON, nullable=True, default=None)
     manager_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True, index=True)
 
     # Timestamps
@@ -269,6 +289,11 @@ class User(Base):
     manager: Mapped[Optional["User"]] = relationship("User", remote_side=[id], foreign_keys=[manager_id])
     notifications: Mapped[list["Notification"]] = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
     work_sessions: Mapped[list["WorkSession"]] = relationship("WorkSession", back_populates="user")
+
+    @validates("working_days")
+    def _validate_working_days(self, _key: str, value: Optional[list[int]]) -> Optional[list[int]]:
+        normalized = normalize_working_days(value, allow_none=True)
+        return normalized  # type: ignore[return-value]
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, email={self.email}, role={self.role}, company_id={self.company_id})>"
