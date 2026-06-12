@@ -12,8 +12,8 @@ def test_migration_040_working_days_contains_required_schema_changes():
 
     assert 'op.add_column(\n        "companies"' in text
     assert 'op.add_column(\n        "users"' in text
-    assert "server_default=sa.text(\"'[0,1,2,3,4]'::json\")" in text
+    assert "server_default=sa.text(\"'[0,1,2,3,4]'::jsonb\")" in text
     assert "UPDATE companies" in text
-    assert "SET working_days = '[0,1,2,3,4]'::json" in text
+    assert "SET working_days = '[0,1,2,3,4]'::jsonb" in text
     assert 'op.drop_column("users", "working_days")' in text
     assert 'op.drop_column("companies", "working_days")' in text

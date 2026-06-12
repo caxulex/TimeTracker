@@ -23,6 +23,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -141,7 +142,7 @@ class Company(Base):
     date_format: Mapped[str] = mapped_column(String(20), default="YYYY-MM-DD", nullable=False)
     time_format: Mapped[str] = mapped_column(String(20), default="HH:mm", nullable=False)
     working_days: Mapped[list[int]] = mapped_column(
-        JSON,
+        JSONB,
         nullable=False,
         default=[0, 1, 2, 3, 4],
         server_default='[0,1,2,3,4]',
@@ -273,7 +274,7 @@ class User(Base):
     employment_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)  # full_time, part_time, contractor
     start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     expected_hours_per_week: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
-    working_days: Mapped[Optional[list[int]]] = mapped_column(JSON, nullable=True, default=None)
+    working_days: Mapped[Optional[list[int]]] = mapped_column(JSONB, nullable=True, default=None)
     manager_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True, index=True)
 
     # Timestamps
