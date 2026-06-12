@@ -127,6 +127,22 @@ async def _truncate_tables_around_test(async_engine) -> AsyncGenerator[None, Non
                 """
             )
         )
+        await conn.execute(
+            text(
+                """
+                ALTER TABLE companies
+                ADD COLUMN IF NOT EXISTS working_days JSON NOT NULL DEFAULT '[0,1,2,3,4]'::json
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS working_days JSON NULL
+                """
+            )
+        )
 
         result = await conn.execute(
             text(
