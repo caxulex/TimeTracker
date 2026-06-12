@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -20,7 +20,8 @@ from app.dependencies import (
     get_company_timezone,
     get_current_active_user,
 )
-from app.models import Project, ProjectTeam, Task, Team, TeamMember, TimeEntry, User
+from app.models import Project, Task, Team, TeamMember, TimeEntry, User
+from app.services.avg_hours_service import compute_avg_hours
 from app.services.duration_service import calculate_entry_duration_for_period
 from app.services.email_log_utils import log_email_failed, log_email_sent
 from app.utils.timer_elapsed import compute_display_elapsed_seconds
@@ -78,6 +79,13 @@ class WeeklySummary(BaseModel):
     total_seconds: int
     total_hours: float
     daily_breakdown: List[DailySummary]
+    # Phase 4b: avg hours metadata (optional so existing clients don't break)
+    avg_hours_per_day: Optional[float] = None
+    avg_denominator_days: Optional[int] = None
+    avg_denominator_type: Optional[str] = None
+    avg_includes_today: Optional[bool] = None
+    avg_working_days_source: Optional[str] = None
+    avg_working_days_used: Optional[List[int]] = None
 
 
 class DashboardStats(BaseModel):
@@ -228,24 +236,11 @@ async def get_dashboard_stats(
     month_seconds = sum(calculate_entry_duration_for_period(e, month_start, month_end, now) for e in month_entries)
 
     # Active projects (user has access to, within company)
+    user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
     project_query = select(func.count(Project.id)).join(Team, Project.team_id == Team.id).where(
-        Project.is_archived == False,
-        Team.deleted_at.is_(None),
+        Project.team_id.in_(user_teams),
+        Project.is_archived == False
     )
-    if current_user.role not in ["super_admin", "admin", "company_admin"]:
-        user_teams = select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
-        # Visibility rule for regular users in reports: count projects
-        # visible via primary ownership OR project_teams association.
-        project_query = project_query.where(
-            or_(
-                Project.team_id.in_(user_teams),
-                Project.id.in_(
-                    select(ProjectTeam.project_id).where(
-                        ProjectTeam.team_id.in_(user_teams)
-                    )
-                ),
-            )
-        )
     if company_id is None:
         pass  # Super admin sees all
     elif company_id == FILTER_NULL_COMPANY:
@@ -364,12 +359,30 @@ async def get_weekly_summary(
             entry_count=day_count
         ))
 
+    from decimal import Decimal as _Decimal
+
+    avg_result = await compute_avg_hours(
+        db,
+        current_user,
+        _Decimal(str(round(total_seconds / 3600, 10))),
+        week_start,
+        week_end,
+        today=today_local,
+        exclude_today=True,
+    )
+
     return WeeklySummary(
         week_start=week_start,
         week_end=week_end,
         total_seconds=total_seconds,
         total_hours=round(total_seconds / 3600, 2),
-        daily_breakdown=daily_breakdown
+        daily_breakdown=daily_breakdown,
+        avg_hours_per_day=float(avg_result.value),
+        avg_denominator_days=avg_result.denominator_days,
+        avg_denominator_type=avg_result.denominator_type,
+        avg_includes_today=avg_result.includes_today,
+        avg_working_days_source=avg_result.working_days_source,
+        avg_working_days_used=avg_result.working_days_used,
     )
 
 
@@ -523,7 +536,6 @@ async def get_team_report(
     company_id = get_company_filter(current_user)
     team_query = select(Team).where(Team.id == team_id)
     team_query = apply_company_filter(team_query, Team.company_id, company_id)
-    team_query = team_query.where(Team.deleted_at.is_(None))
     team_result = await db.execute(team_query)
     team = team_result.scalar_one_or_none()
     if not team:
@@ -553,16 +565,8 @@ async def get_team_report(
     # Get team members
     team_members = select(TeamMember.user_id).where(TeamMember.team_id == team_id)
 
-    # Team report visibility includes projects where the team is primary
-    # owner and projects explicitly shared via project_teams.
-    team_projects = select(Project.id).where(
-        or_(
-            Project.team_id == team_id,
-            Project.id.in_(
-                select(ProjectTeam.project_id).where(ProjectTeam.team_id == team_id)
-            ),
-        )
-    )
+    # Get team projects
+    team_projects = select(Project.id).where(Project.team_id == team_id)
 
     # Fetch all entries that OVERLAP with the period (instead of using SQL aggregates)
     entries_query = (
@@ -804,6 +808,12 @@ class IndividualUserMetrics(BaseModel):
     projects: List[ProjectSummary]
     # Recent activity
     last_activity: Optional[datetime] = None
+    # Phase 4b: avg hours transparency metadata (optional for backward compat)
+    avg_denominator_days: Optional[int] = None
+    avg_denominator_type: Optional[str] = None
+    avg_includes_today: Optional[bool] = None
+    avg_working_days_source: Optional[str] = None
+    avg_working_days_used: Optional[List[int]] = None
 
 
 class UserAnalyticsRangeMetrics(BaseModel):
@@ -905,7 +915,6 @@ async def get_admin_dashboard(
 
     # Active projects (within company)
     project_query = select(func.count(Project.id)).join(Team, Project.team_id == Team.id).where(Project.is_archived == False)
-    project_query = project_query.where(Team.deleted_at.is_(None))
     if company_id is None:
         pass  # Super admin sees all
     elif company_id == FILTER_NULL_COMPANY:
@@ -996,7 +1005,6 @@ async def get_team_analytics(
     company_id = get_company_filter(current_user)
     teams_query = select(Team)
     teams_query = apply_company_filter(teams_query, Team.company_id, company_id)
-    teams_query = teams_query.where(Team.deleted_at.is_(None))
     teams_result = await db.execute(teams_query)
     teams = teams_result.scalars().all()
 
@@ -1444,8 +1452,22 @@ async def get_user_metrics(
     )
     active_days = active_days_result.scalar() or 0
 
-    # Average hours per day (this month)
-    avg_hours_per_day = round(month_seconds / 3600 / max(active_days, 1), 2)
+    # Average hours per day (this month) — via centralized service
+    from decimal import Decimal as _Decimal
+
+    _month_period_start = today_local.replace(day=1)
+    _avg_result = await compute_avg_hours(
+        db,
+        user,
+        _Decimal(str(round(month_seconds / 3600, 10))),
+        _month_period_start,
+        today_local,
+        today=today_local,
+        exclude_today=True,
+        fallback_to_days_with_entries=True,
+        days_with_entries=active_days,
+    )
+    avg_hours_per_day = float(_avg_result.value)
 
     # Check for running timer
     running_result = await db.execute(
@@ -1535,7 +1557,12 @@ async def get_user_metrics(
         avg_hours_per_day=avg_hours_per_day,
         current_timer_running=current_timer_running,
         projects=projects,
-        last_activity=last_activity_row
+        last_activity=last_activity_row,
+        avg_denominator_days=_avg_result.denominator_days,
+        avg_denominator_type=_avg_result.denominator_type,
+        avg_includes_today=_avg_result.includes_today,
+        avg_working_days_source=_avg_result.working_days_source,
+        avg_working_days_used=_avg_result.working_days_used,
     )
 
 
@@ -1719,7 +1746,6 @@ async def get_team_timesheet(
         # Specific team selected
         team_query = select(Team).where(Team.id == team_id)
         team_query = apply_company_filter(team_query, Team.company_id, company_id)
-        team_query = team_query.where(Team.deleted_at.is_(None))
         team_result = await db.execute(team_query)
         team = team_result.scalar_one_or_none()
         if not team:

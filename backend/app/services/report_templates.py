@@ -276,6 +276,9 @@ class ReportService:
         days: int = 30
     ) -> Dict:
         """Generate productivity analysis report"""
+        from decimal import Decimal as _Decimal
+        from app.services.avg_hours_service import compute_avg_hours as _compute_avg_hours
+
         end_date = date.today()
         start_date = end_date - timedelta(days=days)
 
@@ -296,6 +299,41 @@ class ReportService:
         total_hours = sum((row.total_seconds or 0) / 3600 for row in daily_data)
         days_worked = len([d for d in daily_data if (d.total_seconds or 0) > 0])
 
+        # Resolve user object for working-days-aware avg, or fall back to days_with_entries
+        _user_obj = None
+        if user_id is not None:
+            from app.models import User as _User
+            _user_result = await db.execute(select(_User).where(_User.id == user_id))
+            _user_obj = _user_result.scalar_one_or_none()
+
+        if _user_obj is not None:
+            _avg_result = await _compute_avg_hours(
+                db,
+                _user_obj,
+                _Decimal(str(round(total_hours, 10))),
+                start_date,
+                end_date,
+                today=end_date,
+                exclude_today=True,
+                fallback_to_days_with_entries=True,
+                days_with_entries=days_worked,
+            )
+        else:
+            # No user context — fall back to days_with_entries denominator
+            from types import SimpleNamespace as _SN
+            from app.utils.working_days import DEFAULT_WORKING_DAYS as _DWD
+            _avg_result = await _compute_avg_hours(
+                db,
+                _SN(working_days=_DWD.copy(), company_id=None),
+                _Decimal(str(round(total_hours, 10))),
+                start_date,
+                end_date,
+                today=end_date,
+                exclude_today=True,
+                fallback_to_days_with_entries=True,
+                days_with_entries=days_worked,
+            )
+
         return {
             "report_type": "productivity_analysis",
             "period": {
@@ -306,7 +344,10 @@ class ReportService:
             "data": {
                 "total_hours": round(total_hours, 2),
                 "days_worked": days_worked,
-                "avg_hours_per_day": round(total_hours / max(days_worked, 1), 2),
+                "avg_hours_per_day": float(_avg_result.value),
+                "avg_denominator_days": _avg_result.denominator_days,
+                "avg_denominator_type": _avg_result.denominator_type,
+                "avg_working_days_source": _avg_result.working_days_source,
                 "total_entries": sum(row.entry_count for row in daily_data),
                 "daily_breakdown": [
                     {
