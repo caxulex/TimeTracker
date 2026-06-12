@@ -12,6 +12,7 @@ import {
   Sparkles, ChevronRight, Minus
 } from 'lucide-react';
 import { useAIUserInsights, useAIUserInsightsMutation } from '../../hooks/useReportingServices';
+import { getAvgHoursSubtitle, getAvgHoursTooltip } from '../../utils/working_days';
 
 interface UserInsightsPanelProps {
   userId?: number;
@@ -111,6 +112,19 @@ const UserInsightsPanel: React.FC<UserInsightsPanelProps> = ({
 
   const trend = getTrendVisual(metrics.productivity_trend);
   const TrendIcon = trend.icon;
+  const avgSubtitle = getAvgHoursSubtitle(
+    {
+      avg_denominator_days: metrics.avg_denominator_days,
+      avg_denominator_type: metrics.avg_denominator_type,
+      avg_includes_today: metrics.avg_includes_today,
+    },
+    periodDays,
+  );
+  const avgTooltip = getAvgHoursTooltip({
+    avg_includes_today: metrics.avg_includes_today,
+    avg_working_days_source: metrics.avg_working_days_source,
+    avg_working_days_used: metrics.avg_working_days_used,
+  });
   
   return (
     <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden ${className}`}>
@@ -182,7 +196,18 @@ const UserInsightsPanel: React.FC<UserInsightsPanelProps> = ({
           <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">
             {metrics.avg_daily_hours.toFixed(1)}h
           </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Daily Avg</p>
+          <div className="flex items-center justify-center gap-2">
+            <p className="text-xs text-gray-500 dark:text-gray-400">Daily Avg</p>
+            <button
+              type="button"
+              className="w-4 h-4 rounded-full border border-gray-300 text-[10px] text-gray-500 leading-none"
+              title={avgTooltip}
+              aria-label="Daily Avg calculation details"
+            >
+              ?
+            </button>
+          </div>
+          <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">{avgSubtitle}</p>
         </div>
         <div className="text-center">
           <Folder className="mx-auto text-purple-500 mb-1" size={18} />

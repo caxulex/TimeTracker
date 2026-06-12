@@ -174,6 +174,11 @@ describe('AdminReportsPage', () => {
               total_entries: 3,
               active_days_this_month: 2,
               avg_hours_per_day: 2,
+              avg_denominator_days: 5,
+              avg_denominator_type: 'working_days_completed',
+              avg_includes_today: false,
+              avg_working_days_source: 'company',
+              avg_working_days_used: [0, 1, 2, 3, 4],
               current_timer_running: false,
               projects: [],
               last_activity: null,
@@ -207,5 +212,9 @@ describe('AdminReportsPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/alice johnson's performance details/i)).toBeInTheDocument();
     });
+
+    expect(screen.getByText(/across 5 completed working days/i)).toBeInTheDocument();
+    expect(screen.getByTitle(/Working days for this user: Mon-Fri/i)).toBeInTheDocument();
+    expect(screen.getByTitle(/\(company schedule\)/i)).toBeInTheDocument();
   });
 });

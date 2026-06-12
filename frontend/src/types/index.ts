@@ -320,6 +320,16 @@ export interface WeeklySummary {
   total_seconds: number;
   total_hours: number;
   daily_breakdown: DailySummary[];
+  avg_hours_per_day?: number;
+  avg_denominator_days?: number;
+  avg_denominator_type?:
+    | 'working_days_completed'
+    | 'working_days_all'
+    | 'days_with_entries'
+    | 'calendar_days';
+  avg_includes_today?: boolean;
+  avg_working_days_source?: 'user' | 'company' | 'default';
+  avg_working_days_used?: number[];
 }
 
 export interface ProjectSummary {
