@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 
 import { ProjectsPage } from '../ProjectsPage';
+import { findByRoleReliable, findByTestIdReliable, findByTextReliable, waitForReliable } from '../../test/asyncHelpers';
 
 const projectsGetAll = vi.fn();
 const projectsUpdate = vi.fn();
@@ -112,7 +113,7 @@ describe('ProjectsPage per-project actions', () => {
   };
 
   const findProjectCard = async (projectId: number) => {
-    return waitFor(() => {
+    return waitForReliable(() => {
       const card = screen.queryByTestId(`project-card-${projectId}`);
       if (!card) {
         throw new Error(`Card with id ${projectId} not found in DOM`);
@@ -254,8 +255,8 @@ describe('ProjectsPage per-project actions', () => {
     const { nameInput } = await openCreateModal(user);
     await user.type(nameInput, 'Target Project');
 
-    expect(await screen.findByTestId('similar-projects-warning')).toBeInTheDocument();
-    expect(await screen.findByTestId('similar-project-match-2')).toBeInTheDocument();
+    expect(await findByTestIdReliable('similar-projects-warning')).toBeInTheDocument();
+    expect(await findByTestIdReliable('similar-project-match-2')).toBeInTheDocument();
   });
 
   it('hides warning when similar matches are empty', async () => {
@@ -266,7 +267,7 @@ describe('ProjectsPage per-project actions', () => {
     const { nameInput } = await openCreateModal(user);
     await user.type(nameInput, 'Completely New Name');
 
-    await waitFor(() => {
+    await waitForReliable(() => {
       expect(screen.queryByTestId('similar-projects-warning')).not.toBeInTheDocument();
     });
   });
@@ -306,7 +307,7 @@ describe('ProjectsPage per-project actions', () => {
     await user.type(nameInput, 'Target Project');
     await user.click(within(dialog).getByRole('button', { name: 'Create Project' }));
 
-    expect(await screen.findByText(/Similar projects exist/i)).toBeInTheDocument();
+    expect(await findByTextReliable(/Similar projects exist/i)).toBeInTheDocument();
   });
 
   it('Create anyway submits despite warnings', async () => {
@@ -329,9 +330,9 @@ describe('ProjectsPage per-project actions', () => {
     const { dialog, nameInput } = await openCreateModal(user);
     await user.type(nameInput, 'Target Project');
     await user.click(within(dialog).getByRole('button', { name: 'Create Project' }));
-    await user.click(await screen.findByTestId('create-project-create-anyway'));
+    await user.click(await findByTestIdReliable('create-project-create-anyway'));
 
-    await waitFor(() => {
+    await waitForReliable(() => {
       expect(projectsCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           name: 'Target Project',
@@ -362,13 +363,13 @@ describe('ProjectsPage per-project actions', () => {
     const { nameInput } = await openCreateModal(user);
     await user.type(nameInput, 'Target Project');
 
-    const warning = await screen.findByTestId('similar-projects-warning');
+    const warning = await findByTestIdReliable('similar-projects-warning');
     await user.click(within(warning).getByTestId('similar-project-action-2'));
 
-    await waitFor(() => {
+    await waitForReliable(() => {
       expect(screen.queryByText('New Project')).not.toBeInTheDocument();
     });
-    expect(await screen.findByTestId('projects-search-input')).toHaveValue('Target Project');
+    expect(await findByTestIdReliable('projects-search-input')).toHaveValue('Target Project');
   });
 
   it('archive confirmation appears and archived projects expose Unarchive', async () => {
@@ -380,7 +381,7 @@ describe('ProjectsPage per-project actions', () => {
     expect(await screen.findByText(/Archive "Source Project"/i)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Archive' }));
 
-    await waitFor(() => {
+    await waitForReliable(() => {
       expect(projectsArchive).toHaveBeenCalledWith(1, true);
     });
 
@@ -425,7 +426,7 @@ describe('ProjectsPage per-project actions', () => {
     });
 
     await user.click(submit);
-    await waitFor(() => {
+    await waitForReliable(() => {
       expect(projectsDelete).toHaveBeenCalledWith(1);
     });
   });

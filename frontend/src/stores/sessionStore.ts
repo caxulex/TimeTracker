@@ -13,6 +13,7 @@ import type {
   SessionStatus,
 } from '../types';
 import { sessionsApi } from '../api/client';
+import { registerStoreReset } from '../test/storeRegistry';
 
 // WebSocket event payload types
 interface SessionWebSocketEvent {
@@ -465,6 +466,10 @@ export const useSessionStore = create<SessionState>()(
     }
   )
 );
+
+registerStoreReset(() => {
+  useSessionStore.setState(useSessionStore.getInitialState(), true);
+});
 
 // ============================================
 // HELPER HOOKS

@@ -11,6 +11,7 @@ import { TimePage } from './TimePage';
 import type { TimeEntry } from '../types';
 import { NotificationProvider } from '../components/Notifications';
 import { BrandingProvider } from '../contexts/BrandingContext';
+import { findByLabelTextReliable, findByTestIdReliable, waitForReliable } from '../test/asyncHelpers';
 
 // Mock the auth hook
 vi.mock('../hooks/useAuth', () => ({
@@ -169,7 +170,7 @@ describe('TimePage', () => {
         </TestWrapper>
       );
 
-      await waitFor(() => {
+      await waitForReliable(() => {
         expect(screen.getByText('Working on feature')).toBeInTheDocument();
       });
     });
@@ -264,29 +265,29 @@ describe('TimePage', () => {
       const addButton = screen.getAllByRole('button', { name: /manual|add/i })[0];
       await user.click(addButton);
 
-      const descriptionInput = await screen.findByLabelText(/description/i) as HTMLInputElement;
+      const descriptionInput = await findByLabelTextReliable(/description/i) as HTMLInputElement;
       expect(descriptionInput.value).toBe('');
 
       // waitFor needed: modal renders inputs in multiple passes; description appears first via findByLabelText, but project/task inputs may be a tick behind. Sync getElementById fails intermittently in CI without this wait.
-      await waitFor(() => {
+      await waitForReliable(() => {
         expect(document.getElementById('manual-entry-project')).toBeTruthy();
       });
       const projectInput = document.getElementById('manual-entry-project') as HTMLInputElement;
       await user.click(projectInput);
       await user.type(projectInput, 'Project A');
-      const projectOption = await screen.findByTestId('project-select-option-1');
+      const projectOption = await findByTestIdReliable('project-select-option-1');
       fireEvent.mouseDown(projectOption);
 
       // waitFor needed: modal renders inputs in multiple passes; description appears first via findByLabelText, but project/task inputs may be a tick behind. Sync getElementById fails intermittently in CI without this wait.
-      await waitFor(() => {
+      await waitForReliable(() => {
         expect(document.getElementById('manual-entry-task')).toBeTruthy();
       });
       const taskInput = document.getElementById('manual-entry-task') as HTMLInputElement;
       await user.click(taskInput);
-      const taskOption = await screen.findByTestId('task-select-option-101');
+      const taskOption = await findByTestIdReliable('task-select-option-101');
       fireEvent.mouseDown(taskOption);
 
-      await waitFor(() => {
+      await waitForReliable(() => {
         expect((screen.getByLabelText(/description/i) as HTMLInputElement).value).toBe('Task Alpha');
       });
     });
@@ -325,33 +326,33 @@ describe('TimePage', () => {
       );
 
       const user = userEvent.setup();
-      await waitFor(() => {
+      await waitForReliable(() => {
         expect(screen.getByText('Working on feature')).toBeInTheDocument();
       });
 
       const addButton = screen.getAllByRole('button', { name: /manual|add/i })[0];
       await user.click(addButton);
 
-      const descriptionInput = await screen.findByLabelText(/description/i) as HTMLInputElement;
+      const descriptionInput = await findByLabelTextReliable(/description/i) as HTMLInputElement;
       await user.type(descriptionInput, 'My custom text');
 
       // waitFor needed: modal renders inputs in multiple passes; description appears first via findByLabelText, but project/task inputs may be a tick behind. Sync getElementById fails intermittently in CI without this wait.
-      await waitFor(() => {
+      await waitForReliable(() => {
         expect(document.getElementById('manual-entry-project')).toBeTruthy();
       });
       const projectInput = document.getElementById('manual-entry-project') as HTMLInputElement;
       await user.click(projectInput);
       await user.type(projectInput, 'Project A');
-      const projectOption = await screen.findByTestId('project-select-option-1');
+      const projectOption = await findByTestIdReliable('project-select-option-1');
       fireEvent.mouseDown(projectOption);
 
       // waitFor needed: modal renders inputs in multiple passes; description appears first via findByLabelText, but project/task inputs may be a tick behind. Sync getElementById fails intermittently in CI without this wait.
-      await waitFor(() => {
+      await waitForReliable(() => {
         expect(document.getElementById('manual-entry-task')).toBeTruthy();
       });
       const taskInput = document.getElementById('manual-entry-task') as HTMLInputElement;
       await user.click(taskInput);
-      const taskOption = await screen.findByTestId('task-select-option-102');
+      const taskOption = await findByTestIdReliable('task-select-option-102');
       fireEvent.mouseDown(taskOption);
 
       expect(descriptionInput.value).toBe('My custom text');
@@ -542,7 +543,7 @@ describe('TimePage', () => {
         </TestWrapper>
       );
 
-      await waitFor(() => {
+      await waitForReliable(() => {
         expect(screen.getByText('Entry 1')).toBeInTheDocument();
       });
 
@@ -553,7 +554,7 @@ describe('TimePage', () => {
 
       fireEvent.click(loadMore);
 
-      await waitFor(() => {
+      await waitForReliable(() => {
         // Previously loaded entries remain (appended, not replaced).
         expect(screen.getByText('Entry 1')).toBeInTheDocument();
         expect(screen.getByText('Entry 3')).toBeInTheDocument();
@@ -561,7 +562,7 @@ describe('TimePage', () => {
       });
 
       // After loading the last page, the button is gone.
-      await waitFor(() => {
+      await waitForReliable(() => {
         expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument();
       });
 
@@ -579,7 +580,7 @@ describe('TimePage', () => {
         </TestWrapper>
       );
 
-      await waitFor(() => {
+      await waitForReliable(() => {
         expect(screen.getByText('Working on feature')).toBeInTheDocument();
       });
 
@@ -597,7 +598,7 @@ describe('TimePage', () => {
 
       fireEvent.change(dateRangeSelect!, { target: { value: 'today' } });
 
-      await waitFor(() => {
+      await waitForReliable(() => {
         const calls = vi.mocked(timeEntriesApi.getAll).mock.calls;
         expect(calls.length).toBeGreaterThan(callsBefore);
         const lastArgs = calls[calls.length - 1][0] ?? {};
@@ -616,7 +617,7 @@ describe('TimePage', () => {
         </TestWrapper>
       );
 
-      await waitFor(() => {
+      await waitForReliable(() => {
         expect(screen.getByText('Working on feature')).toBeInTheDocument();
       });
 
@@ -641,7 +642,7 @@ describe('TimePage', () => {
 
       fireEvent.change(projectSelect!, { target: { value: '1' } });
 
-      await waitFor(() => {
+      await waitForReliable(() => {
         const calls = vi.mocked(timeEntriesApi.getAll).mock.calls;
         expect(calls.length).toBeGreaterThan(callsBefore);
         const lastArgs = calls[calls.length - 1][0] ?? {};
@@ -706,7 +707,7 @@ describe('TimePage', () => {
       );
 
       // Project name appears even though it's NOT in projects list.
-      await waitFor(() => {
+      await waitForReliable(() => {
         expect(
           screen.getByText('Beyond Pagination Project')
         ).toBeInTheDocument();
@@ -758,7 +759,7 @@ describe('TimePage', () => {
         </TestWrapper>
       );
 
-      await waitFor(() => {
+      await waitForReliable(() => {
         expect(screen.getByText('Sync meeting')).toBeInTheDocument();
       });
 
