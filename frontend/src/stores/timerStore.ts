@@ -255,27 +255,55 @@ export const useTimerStore = create<TimerState>()(
         if (status?.is_running && status.current_entry) {
           const entry = status.current_entry;
           const isPaused = entry.is_paused || false;
+          const pauseSeconds = entry.pause_seconds || 0;
+          const pausedAt = entry.paused_at || null;
           const current = get();
           const isSameEntry =
             current.isRunning &&
             current.currentEntry?.id === entry.id;
 
-          if (isSameEntry) {
-            set({ isLoading: false, error: null });
-            return;
-          }
+          const computeElapsed = (startTime: string, paused: boolean, pausedAtIso: string | null, accumulatedPauseSeconds: number): number => {
+            let elapsed = calculateElapsed(startTime);
+            elapsed -= accumulatedPauseSeconds;
+            if (paused && pausedAtIso) {
+              elapsed -= calculateElapsed(pausedAtIso);
+            }
+            return Math.max(0, elapsed);
+          };
 
-          let elapsed = calculateElapsed(entry.start_time);
-          elapsed -= entry.pause_seconds || 0;
-          if (isPaused && entry.paused_at) {
-            elapsed -= calculateElapsed(entry.paused_at);
+          if (isSameEntry && current.currentEntry) {
+            const pauseFieldsChanged =
+              (current.currentEntry.is_paused || false) !== isPaused ||
+              (current.currentEntry.paused_at || null) !== pausedAt ||
+              (current.currentEntry.pause_seconds || 0) !== pauseSeconds;
+
+            if (!pauseFieldsChanged) {
+              set({ isLoading: false, error: null, lastSyncTime: Date.now() });
+              return;
+            }
+
+            set({
+              currentEntry: {
+                ...current.currentEntry,
+                is_paused: isPaused,
+                paused_at: pausedAt,
+                pause_seconds: pauseSeconds,
+              },
+              isRunning: true,
+              isPaused,
+              elapsedSeconds: computeElapsed(entry.start_time, isPaused, pausedAt, pauseSeconds),
+              isLoading: false,
+              error: null,
+              lastSyncTime: Date.now(),
+            });
+            return;
           }
 
           set({
             currentEntry: entry,
             isRunning: true,
             isPaused,
-            elapsedSeconds: Math.max(0, elapsed),
+            elapsedSeconds: computeElapsed(entry.start_time, isPaused, pausedAt, pauseSeconds),
             isLoading: false,
             error: null,
             lastSyncTime: Date.now(),

@@ -31,6 +31,9 @@ const createMockEntry = (overrides: Partial<TimeEntry> = {}): TimeEntry => ({
   duration_seconds: 0,
   description: null,
   is_running: true,
+  is_paused: false,
+  paused_at: null,
+  pause_seconds: 0,
   created_at: new Date().toISOString(),
   ...overrides,
 });
@@ -70,6 +73,7 @@ describe('Timer Store', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     mockStorage.clear();
   });
 
@@ -555,9 +559,136 @@ describe('Timer Store', () => {
       const state = useTimerStore.getState();
       expect(state.isLoading).toBe(false);
       expect(state.error).toBeNull();
-      // Entry should remain unchanged (same-entry early-return path)
+      // Entry identity should remain unchanged on no-op same-entry updates.
       expect(state.currentEntry?.id).toBe(555);
       expect(state.isRunning).toBe(true);
+    });
+
+    it('applies same-entry pause transition and freezes elapsed updates', () => {
+      const now = new Date('2026-06-15T12:00:00.000Z');
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+
+      const startTime = new Date(now.getTime() - 120_000).toISOString();
+      const pausedAt = new Date(now.getTime() - 10_000).toISOString();
+      const entry = createMockEntry({ id: 901, start_time: startTime, is_paused: false, paused_at: null, pause_seconds: 0 });
+
+      useTimerStore.setState({
+        currentEntry: entry,
+        isRunning: true,
+        isPaused: false,
+        elapsedSeconds: 0,
+        isLoading: true,
+        error: 'stale',
+      });
+
+      act(() => {
+        useTimerStore.getState().applyServerState({
+          is_running: true,
+          current_entry: createMockEntry({
+            id: 901,
+            start_time: startTime,
+            is_paused: true,
+            paused_at: pausedAt,
+            pause_seconds: 0,
+          }),
+        });
+      });
+
+      const afterPause = useTimerStore.getState();
+      expect(afterPause.isPaused).toBe(true);
+      expect(afterPause.currentEntry?.is_paused).toBe(true);
+      expect(afterPause.currentEntry?.paused_at).toBe(pausedAt);
+      expect(afterPause.currentEntry?.pause_seconds).toBe(0);
+      expect(afterPause.elapsedSeconds).toBe(110);
+      expect(afterPause.isLoading).toBe(false);
+      expect(afterPause.error).toBeNull();
+
+      vi.setSystemTime(new Date(now.getTime() + 5_000));
+      act(() => {
+        useTimerStore.getState().updateElapsed();
+      });
+
+      const afterTick = useTimerStore.getState();
+      expect(afterTick.elapsedSeconds).toBe(110);
+    });
+
+    it('applies same-entry resume transition and allows elapsed to increment again', () => {
+      const now = new Date('2026-06-15T12:00:00.000Z');
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+
+      const startTime = new Date(now.getTime() - 120_000).toISOString();
+      const pausedAt = new Date(now.getTime() - 20_000).toISOString();
+      const entry = createMockEntry({ id: 902, start_time: startTime, is_paused: true, paused_at: pausedAt, pause_seconds: 0 });
+
+      useTimerStore.setState({
+        currentEntry: entry,
+        isRunning: true,
+        isPaused: true,
+        elapsedSeconds: 100,
+      });
+
+      act(() => {
+        useTimerStore.getState().applyServerState({
+          is_running: true,
+          current_entry: createMockEntry({
+            id: 902,
+            start_time: startTime,
+            is_paused: false,
+            paused_at: null,
+            pause_seconds: 20,
+          }),
+        });
+      });
+
+      const resumed = useTimerStore.getState();
+      expect(resumed.isPaused).toBe(false);
+      expect(resumed.currentEntry?.is_paused).toBe(false);
+      expect(resumed.currentEntry?.paused_at).toBeNull();
+      expect(resumed.currentEntry?.pause_seconds).toBe(20);
+
+      const elapsedBeforeTick = resumed.elapsedSeconds;
+      vi.setSystemTime(new Date(now.getTime() + 3_000));
+      act(() => {
+        useTimerStore.getState().updateElapsed();
+      });
+      const afterTick = useTimerStore.getState();
+      expect(afterTick.elapsedSeconds).toBeGreaterThan(elapsedBeforeTick);
+    });
+
+    it('applies same-entry pause_seconds changes and recomputes elapsed correctly', () => {
+      const now = new Date('2026-06-15T12:00:00.000Z');
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+
+      const startTime = new Date(now.getTime() - 200_000).toISOString();
+      const entry = createMockEntry({ id: 903, start_time: startTime, is_paused: false, paused_at: null, pause_seconds: 0 });
+
+      useTimerStore.setState({
+        currentEntry: entry,
+        isRunning: true,
+        isPaused: false,
+        elapsedSeconds: 200,
+      });
+
+      act(() => {
+        useTimerStore.getState().applyServerState({
+          is_running: true,
+          current_entry: createMockEntry({
+            id: 903,
+            start_time: startTime,
+            is_paused: false,
+            paused_at: null,
+            pause_seconds: 45,
+          }),
+        });
+      });
+
+      const state = useTimerStore.getState();
+      expect(state.currentEntry?.pause_seconds).toBe(45);
+      expect(state.isPaused).toBe(false);
+      expect(state.elapsedSeconds).toBe(155);
     });
 
     it('visibility-triggered fetchTimer cycle clears isLoading when entry unchanged', async () => {
