@@ -377,3 +377,201 @@ async def test_rounding_to_two_decimal_places():
     # 7 / 5 = 1.40
     assert result.value == Decimal("1.40")
     assert str(result.value) in {"1.40", "1.4"}
+
+
+# ---------------------------------------------------------------------------
+# Numerator/denominator alignment — the Phase 4b regression tests
+# ---------------------------------------------------------------------------
+# These tests model the real-world case that caused the reported inflation:
+# a caller passes total_hours for the full period (including today's partial
+# hours) with exclude_today=True.  The service MUST strip today_hours from
+# the numerator so that both sides of the division exclude today.
+
+
+@pytest.mark.asyncio
+async def test_mid_week_today_numerator_aligned():
+    """Mid-week today: user has Mon-Fri hours but today (Fri) is partial.
+
+    Before fix:  42.3 / 4 = 10.575  (inflated — Joe Bello bug)
+    After fix:   35.3 / 4 =  8.825  (honest)
+    """
+    # Mon 2026-06-08 … Fri 2026-06-12 — today is Friday
+    period_start = date(2026, 6, 8)   # Monday
+    period_end = date(2026, 6, 12)    # Friday
+    today = date(2026, 6, 12)         # Friday — in range
+
+    # Mon-Thu = 35.3h, Friday partial = 7.0h, full week total = 42.3h
+    result = await compute_avg_hours(
+        _mock_db(),
+        _user(working_days=[0, 1, 2, 3, 4]),
+        Decimal("42.3"),         # full-period total (what callers compute)
+        period_start,
+        period_end,
+        today=today,
+        exclude_today=True,
+        today_hours=Decimal("7.0"),  # today's contribution
+    )
+
+    # Denominator: Mon-Thu = 4 working days (Fri excluded)
+    assert result.denominator_days == 4
+    assert result.denominator_type == "working_days_completed"
+    # Numerator: 42.3 - 7.0 = 35.3
+    assert result.numerator_hours == Decimal("35.3")
+    # Value: 35.3 / 4 = 8.83 (rounded half-up)
+    assert result.value == Decimal("8.83")
+
+
+@pytest.mark.asyncio
+async def test_mid_month_today_numerator_aligned():
+    """Mid-month today: partial day included in total_hours must be stripped.
+
+    Period: 2026-06-01 … 2026-06-15 (today = 15th, Mon-Fri schedule).
+    Simulate 14 working days logged + partial today.
+    """
+    period_start = date(2026, 6, 1)   # Monday
+    period_end = date(2026, 6, 15)    # Monday (today)
+    today = date(2026, 6, 15)         # In range
+
+    # Completed working days in Jun 1-14: Mon 1, Tue 2, Wed 3, Thu 4, Fri 5,
+    # Mon 8, Tue 9, Wed 10, Thu 11, Fri 12 = 10 days.
+    # Plus today (Mon 15) excluded from denominator.
+    total_hours = Decimal("88.5")   # 10 days × ~8.5h + 4h today
+    today_hours = Decimal("4.0")
+
+    result = await compute_avg_hours(
+        _mock_db(),
+        _user(working_days=[0, 1, 2, 3, 4]),
+        total_hours,
+        period_start,
+        period_end,
+        today=today,
+        exclude_today=True,
+        today_hours=today_hours,
+    )
+
+    # Denominator: working days in Jun 1-14 (Mon-Fri schedule) = 10
+    assert result.denominator_days == 10
+    assert result.denominator_type == "working_days_completed"
+    # Numerator: 88.5 - 4.0 = 84.5
+    assert result.numerator_hours == Decimal("84.5")
+    # Value: 84.5 / 10 = 8.45
+    assert result.value == Decimal("8.45")
+
+
+@pytest.mark.asyncio
+async def test_end_of_period_today_numerator_aligned():
+    """End-of-period today: today is the last day of the period.
+
+    Both numerator and denominator should handle the boundary consistently.
+    """
+    period_start = date(2026, 6, 8)   # Monday
+    period_end = date(2026, 6, 12)    # Friday — also today
+    today = date(2026, 6, 12)
+
+    result = await compute_avg_hours(
+        _mock_db(),
+        _user(working_days=[0, 1, 2, 3, 4]),
+        Decimal("40.0"),
+        period_start,
+        period_end,
+        today=today,
+        exclude_today=True,
+        today_hours=Decimal("8.0"),
+    )
+
+    # Denominator: Mon-Thu = 4 (Fri = today, excluded)
+    assert result.denominator_days == 4
+    assert result.denominator_type == "working_days_completed"
+    # Numerator: 40.0 - 8.0 = 32.0
+    assert result.numerator_hours == Decimal("32.0")
+    # Value: 32.0 / 4 = 8.00
+    assert result.value == Decimal("8.00")
+
+
+@pytest.mark.asyncio
+async def test_today_not_in_period_today_hours_is_noop():
+    """Today not in period: today_hours has no effect on numerator or denominator.
+
+    This covers looking at last week (period is entirely in the past).
+    """
+    period_start = date(2026, 6, 1)   # Monday
+    period_end = date(2026, 6, 5)     # Friday
+    today = date(2026, 6, 15)         # Well outside period
+
+    result = await compute_avg_hours(
+        _mock_db(),
+        _user(working_days=[0, 1, 2, 3, 4]),
+        Decimal("40.0"),
+        period_start,
+        period_end,
+        today=today,
+        exclude_today=True,
+        today_hours=Decimal("999.0"),  # Should be ignored since today not in range
+    )
+
+    # All 5 working days counted; today_hours must not affect numerator
+    assert result.denominator_days == 5
+    assert result.denominator_type == "working_days_all"
+    assert result.numerator_hours == Decimal("40.0")
+    assert result.value == Decimal("8.00")
+    assert result.includes_today is False
+
+
+@pytest.mark.asyncio
+async def test_monday_morning_only_today_in_period():
+    """Monday morning edge case: period contains only today (partial Monday).
+
+    exclude_today=True means denominator = 0.  With the fallback this returns
+    today's hours / 1 rather than dividing by zero.
+    """
+    today = date(2026, 6, 15)   # Monday
+
+    result = await compute_avg_hours(
+        _mock_db(),
+        _user(working_days=[0, 1, 2, 3, 4]),
+        Decimal("3.5"),          # partial hours so far today
+        today,                   # period_start = today
+        today,                   # period_end = today
+        today=today,
+        exclude_today=True,
+        today_hours=Decimal("3.5"),
+        fallback_to_days_with_entries=True,
+        days_with_entries=1,
+    )
+
+    # Denominator = 0 from working-days path → fallback to days_with_entries=1.
+    # Numerator: 3.5 - 3.5 = 0.0 (today stripped → honest 0 for the denominator).
+    # Result: 0.0 / 1 = 0.00 (nothing completed yet).
+    assert result.denominator_days == 1
+    assert result.denominator_type == "days_with_entries"
+    assert result.numerator_hours == Decimal("0.0")
+    assert result.value == Decimal("0.00")
+
+
+@pytest.mark.asyncio
+async def test_today_hours_none_preserves_old_behaviour():
+    """When today_hours is not provided, the service leaves the numerator unchanged.
+
+    This preserves backward compatibility for any caller that hasn't been
+    updated yet (the inflation is left to the caller to fix).
+    """
+    period_start = date(2026, 6, 8)
+    period_end = date(2026, 6, 12)
+    today = date(2026, 6, 12)         # Friday — in range
+
+    result = await compute_avg_hours(
+        _mock_db(),
+        _user(working_days=[0, 1, 2, 3, 4]),
+        Decimal("42.3"),
+        period_start,
+        period_end,
+        today=today,
+        exclude_today=True,
+        today_hours=None,            # not provided → old behaviour
+    )
+
+    # Numerator unchanged, denominator excludes today
+    assert result.numerator_hours == Decimal("42.3")
+    assert result.denominator_days == 4
+    # This IS the inflated value — 42.3/4 = 10.575 → 10.58
+    assert result.value == Decimal("10.58")

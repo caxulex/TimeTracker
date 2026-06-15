@@ -75,7 +75,13 @@ export function getAvgHoursSubtitle(metadata: AvgHoursMetadata, fallbackDays?: n
     return `across ${denominator} days with logged hours`;
   }
 
-  if (metadata.avg_includes_today) {
+  // Show "(incl. today)" only when today is actually counted in the denominator.
+  // denominator_type 'working_days_completed' means today was explicitly excluded;
+  // only 'working_days_all' (and a period that contains today) includes today.
+  if (
+    metadata.avg_includes_today &&
+    metadata.avg_denominator_type !== 'working_days_completed'
+  ) {
     return `across ${denominator} working days (incl. today)`;
   }
 
