@@ -12,6 +12,7 @@ import {
   Target, Users, Calendar, BarChart3
 } from 'lucide-react';
 import { useAIProjectHealth, useAIProjectHealthMutation } from '../../hooks/useReportingServices';
+import type { ProjectHealthResponse } from '../../api/reportingServices';
 
 interface ProjectHealthCardProps {
   projectId: number;
@@ -21,6 +22,85 @@ interface ProjectHealthCardProps {
   compact?: boolean;
 }
 
+interface NormalizedProjectHealth {
+  projectName: string;
+  healthScore: number;
+  healthStatus: 'healthy' | 'moderate' | 'at_risk' | 'critical';
+  analysis: string;
+  generatedAt?: string;
+  recommendations: string[];
+  metrics: {
+    totalHours?: number;
+    thisWeekHours?: number;
+    lastWeekHours?: number;
+    taskCompletionPct?: number;
+    contributorCount?: number;
+    activityTrend?: 'increasing' | 'decreasing' | 'stable' | 'new';
+  };
+}
+
+function normalizeProjectHealth(
+  data: ProjectHealthResponse | undefined,
+  fallbackProjectName?: string,
+): NormalizedProjectHealth | null {
+  if (!data?.success) return null;
+
+  // Preferred shape: flat backend contract.
+  if (
+    typeof data.health_score === 'number' &&
+    typeof data.health_status === 'string'
+  ) {
+    const insightDescriptions = (data.insights || []).map((insight) => insight.description).filter(Boolean);
+    const recommendations = Array.from(
+      new Set((data.insights || []).flatMap((insight) => insight.action_items || []).filter(Boolean)),
+    );
+    const rawCompletion = data.metrics?.task_completion_rate;
+    const taskCompletionPct =
+      typeof rawCompletion === 'number'
+        ? rawCompletion <= 1
+          ? rawCompletion * 100
+          : rawCompletion
+        : undefined;
+
+    return {
+      projectName: data.project_name || fallbackProjectName || 'Project',
+      healthScore: data.health_score,
+      healthStatus: data.health_status,
+      analysis:
+        insightDescriptions[0] ||
+        'Health score generated from recent project activity, completion pace, and collaboration signals.',
+      generatedAt: data.generated_at,
+      recommendations,
+      metrics: {
+        totalHours: data.metrics?.total_hours,
+        thisWeekHours: data.metrics?.this_week_hours,
+        lastWeekHours: data.metrics?.last_week_hours,
+        taskCompletionPct,
+        contributorCount: data.metrics?.contributor_count,
+        activityTrend: data.metrics?.activity_trend,
+      },
+    };
+  }
+
+  // Legacy nested shape support for rolling deploy compatibility.
+  if (data.health && typeof data.health.health_score === 'number' && typeof data.health.status === 'string') {
+    return {
+      projectName: data.health.project_name || fallbackProjectName || 'Project',
+      healthScore: data.health.health_score,
+      healthStatus: data.health.status,
+      analysis: data.health.ai_analysis || 'Project health assessment ready.',
+      generatedAt: data.health.generated_at,
+      recommendations: data.health.recommendations || [],
+      metrics: {
+        taskCompletionPct: data.health.metrics?.task_completion_rate,
+        activityTrend: data.health.metrics?.activity_trend,
+      },
+    };
+  }
+
+  return null;
+}
+
 const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
   projectId,
   projectName,
@@ -28,7 +108,7 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
   className = '',
   compact = false
 }) => {
-  const { data, isLoading, isError, error, refetch } = useAIProjectHealth(
+  const { data, isLoading, isError, refetch } = useAIProjectHealth(
     projectId,
     { enabled: projectId > 0, includeTeamMetrics }
   );
@@ -46,17 +126,11 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
     return 'text-red-500';
   };
   
-  const getHealthBgColor = (score: number) => {
-    if (score >= 80) return 'bg-green-500';
-    if (score >= 60) return 'bg-yellow-500';
-    if (score >= 40) return 'bg-orange-500';
-    return 'bg-red-500';
-  };
-  
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'healthy':
         return <CheckCircle className="text-green-500" size={24} />;
+      case 'moderate':
       case 'at_risk':
         return <AlertTriangle className="text-yellow-500" size={24} />;
       case 'critical':
@@ -132,8 +206,8 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
       </div>
     );
   }
-  
-  const health = data.health;
+
+  const health = normalizeProjectHealth(data, projectName);
   if (!health) return null;
   
   // Compact mode
@@ -142,17 +216,17 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
       <div 
         className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 ${className}`}
         role="region"
-        aria-label={`Project health for ${health.project_name || projectName}: score ${health.health_score} out of 100, status ${health.status}`}
+        aria-label={`Project health for ${health.projectName}: score ${health.healthScore} out of 100, status ${health.healthStatus}`}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            {getStatusIcon(health.status)}
+            {getStatusIcon(health.healthStatus)}
             <span className="font-medium text-gray-800 dark:text-gray-200 text-sm">
-              {health.project_name || projectName}
+              {health.projectName}
             </span>
           </div>
-          <div className={`text-xl font-bold ${getHealthColor(health.health_score)}`}>
-            {health.health_score}
+          <div className={`text-xl font-bold ${getHealthColor(health.healthScore)}`}>
+            {health.healthScore}
           </div>
         </div>
       </div>
@@ -163,29 +237,29 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
     <div 
       className={`bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden ${className}`}
       role="region"
-      aria-label={`AI Project Health Analysis for ${health.project_name || projectName}`}
+      aria-label={`AI Project Health Analysis for ${health.projectName}`}
     >
       {/* Header */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {getStatusIcon(health.status)}
+            {getStatusIcon(health.healthStatus)}
             <div>
               <h3 className="font-semibold text-gray-900 dark:text-gray-100">
-                {health.project_name || projectName}
+                {health.projectName}
               </h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 capitalize">
-                Status: {health.status.replace('_', ' ')}
+                Status: {health.healthStatus.replace('_', ' ')}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <div className="text-center" role="status" aria-live="polite">
               <div 
-                className={`text-3xl font-bold ${getHealthColor(health.health_score)}`}
-                aria-label={`Health score: ${health.health_score} out of 100`}
+                className={`text-3xl font-bold ${getHealthColor(health.healthScore)}`}
+                aria-label={`Health score: ${health.healthScore} out of 100`}
               >
-                {health.health_score}
+                {health.healthScore}
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400">Health Score</p>
             </div>
@@ -210,72 +284,49 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
       {/* AI Analysis */}
       <div className="p-4 bg-gray-50 dark:bg-gray-700/50">
         <p className="text-sm text-gray-700 dark:text-gray-300">
-          {health.ai_analysis}
+          {health.analysis}
         </p>
       </div>
       
       {/* Metrics */}
-      <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="p-4 grid grid-cols-2 md:grid-cols-5 gap-4">
         <div className="text-center">
           <Target className="mx-auto text-blue-500 mb-1" size={18} />
           <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-            {health.metrics.budget_utilization.toFixed(0)}%
+            {typeof health.metrics.totalHours === 'number' ? `${health.metrics.totalHours.toFixed(1)}h` : '—'}
           </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Budget Used</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Total Hours</p>
         </div>
         <div className="text-center">
           <Calendar className="mx-auto text-green-500 mb-1" size={18} />
           <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-            {health.metrics.schedule_adherence.toFixed(0)}%
+            {typeof health.metrics.thisWeekHours === 'number' ? `${health.metrics.thisWeekHours.toFixed(1)}h` : '—'}
           </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400">On Schedule</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">This Week</p>
+        </div>
+        <div className="text-center">
+          <BarChart3 className="mx-auto text-orange-500 mb-1" size={18} />
+          <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">
+            {typeof health.metrics.lastWeekHours === 'number' ? `${health.metrics.lastWeekHours.toFixed(1)}h` : '—'}
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Last Week</p>
+        </div>
+        <div className="text-center">
+          <Calendar className="mx-auto text-green-500 mb-1" size={18} />
+          <p className="text-lg font-semibold text-gray-800 dark:text-gray-200 flex items-center justify-center gap-1">
+            {typeof health.metrics.taskCompletionPct === 'number' ? `${health.metrics.taskCompletionPct.toFixed(0)}%` : '—'}
+            {health.metrics.activityTrend ? getTrendIcon(health.metrics.activityTrend) : null}
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Completion</p>
         </div>
         <div className="text-center">
           <Users className="mx-auto text-purple-500 mb-1" size={18} />
           <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-            {health.metrics.team_capacity.toFixed(0)}%
+            {typeof health.metrics.contributorCount === 'number' ? health.metrics.contributorCount : '—'}
           </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Team Capacity</p>
-        </div>
-        <div className="text-center">
-          <BarChart3 className="mx-auto text-orange-500 mb-1" size={18} />
-          <p className="text-lg font-semibold text-gray-800 dark:text-gray-200 flex items-center justify-center gap-1">
-            {health.metrics.task_completion_rate.toFixed(0)}%
-            {getTrendIcon(health.metrics.activity_trend)}
-          </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Completion</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Contributors</p>
         </div>
       </div>
-      
-      {/* Health Factors */}
-      {health.factors.length > 0 && (
-        <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-          <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-            Health Factors
-          </h4>
-          <div className="space-y-2">
-            {health.factors.map((factor, i) => (
-              <div key={i}>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="text-gray-600 dark:text-gray-400">{factor.name}</span>
-                  <span className={getHealthColor(factor.score)}>
-                    {factor.score}/100
-                  </span>
-                </div>
-                <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                  <div 
-                    className={`h-full rounded-full transition-all ${getHealthBgColor(factor.score)}`}
-                    style={{ width: `${factor.score}%` }}
-                  />
-                </div>
-                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                  {factor.description}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
       
       {/* Recommendations */}
       {health.recommendations.length > 0 && (
@@ -300,7 +351,7 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
       {/* Footer */}
       <div className="px-4 py-2 bg-gray-50 dark:bg-gray-700/30 
         text-xs text-gray-400 dark:text-gray-500 text-center">
-        Generated {new Date(health.generated_at).toLocaleString()}
+        Generated {health.generatedAt ? new Date(health.generatedAt).toLocaleString() : 'just now'}
       </div>
     </div>
   );
