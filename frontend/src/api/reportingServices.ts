@@ -96,31 +96,52 @@ export interface ProjectHealthRequest {
   include_team_metrics?: boolean;
 }
 
+export interface ProjectHealthMetrics {
+  total_hours: number;
+  this_week_hours: number;
+  last_week_hours: number;
+  activity_trend: 'increasing' | 'decreasing' | 'stable' | 'new';
+  total_tasks: number;
+  completed_tasks: number;
+  task_completion_rate: number;
+  contributor_count: number;
+}
+
+export interface LegacyNestedProjectHealth {
+  project_id: number;
+  project_name: string;
+  health_score: number;
+  status: 'healthy' | 'moderate' | 'at_risk' | 'critical';
+  ai_analysis?: string;
+  factors?: Array<{
+    name: string;
+    score: number;
+    weight: number;
+    description: string;
+  }>;
+  recommendations?: string[];
+  metrics?: {
+    budget_utilization?: number;
+    schedule_adherence?: number;
+    team_capacity?: number;
+    task_completion_rate?: number;
+    activity_trend?: 'increasing' | 'decreasing' | 'stable' | 'new';
+  };
+  generated_at?: string;
+}
+
 export interface ProjectHealthResponse {
   success: boolean;
   enabled?: boolean;
-  health?: {
-    project_id: number;
-    project_name: string;
-    health_score: number;  // 0-100
-    status: 'healthy' | 'at_risk' | 'critical';
-    ai_analysis: string;
-    factors: Array<{
-      name: string;
-      score: number;
-      weight: number;
-      description: string;
-    }>;
-    recommendations: string[];
-    metrics: {
-      budget_utilization: number;
-      schedule_adherence: number;
-      team_capacity: number;
-      task_completion_rate: number;
-      activity_trend: 'increasing' | 'decreasing' | 'stable';
-    };
-    generated_at: string;
-  };
+  project_id?: number;
+  project_name?: string;
+  health_score?: number;  // 0-100
+  health_status?: 'healthy' | 'moderate' | 'at_risk' | 'critical';
+  metrics?: ProjectHealthMetrics;
+  insights?: Insight[];
+  generated_at?: string;
+  // Backward compatibility during rolling deploys.
+  health?: LegacyNestedProjectHealth;
   error?: string;
   message?: string;
 }

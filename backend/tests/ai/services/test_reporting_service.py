@@ -181,3 +181,40 @@ async def test_generate_weekly_summary_uses_shared_timezone_helper(monkeypatch: 
     assert captured["tz"] == "America/Bogota"
     assert captured["metrics_tz"] == "America/Bogota"
     assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_generate_project_health_returns_flat_response_contract(monkeypatch: pytest.MonkeyPatch):
+    async def fake_execute(_statement):
+        return _Result(scalar_value=SimpleNamespace(id=77, name="Apollo"))
+
+    async def fake_feature_manager():
+        return _EnabledFeatureManager()
+
+    async def fake_project_metrics(_project_id, _user_id):
+        return {
+            "total_hours": 140.0,
+            "this_week_hours": 28.0,
+            "last_week_hours": 32.0,
+            "activity_trend": "decreasing",
+            "total_tasks": 20,
+            "completed_tasks": 15,
+            "task_completion_rate": 0.75,
+            "contributor_count": 3,
+        }
+
+    service = _service(_DB(fake_execute))
+    monkeypatch.setattr(service, "_get_feature_manager", fake_feature_manager)
+    monkeypatch.setattr(service, "_gather_project_metrics", fake_project_metrics)
+
+    result = await service.generate_project_health(user_id=11, project_id=77)
+
+    assert result["success"] is True
+    assert result["project_id"] == 77
+    assert result["project_name"] == "Apollo"
+    assert isinstance(result["health_score"], int)
+    assert result["health_status"] in {"healthy", "moderate", "at_risk", "critical"}
+    assert result["metrics"]["task_completion_rate"] == 0.75
+    assert isinstance(result["insights"], list)
+    assert "generated_at" in result
+    assert "health" not in result
