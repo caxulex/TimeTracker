@@ -10,6 +10,7 @@ import { DashboardPage } from './DashboardPage';
 import { BrandingProvider } from '../contexts/BrandingContext';
 import { NotificationProvider } from '../components/Notifications';
 import { WebSocketProvider } from '../contexts/WebSocketContext';
+import { waitForReliable } from '../test/asyncHelpers';
 
 // Mock the auth hook
 vi.mock('../hooks/useAuth', () => ({
@@ -167,7 +168,7 @@ describe('DashboardPage', () => {
         </TestWrapper>
       );
 
-      await waitFor(() => {
+      await waitForReliable(() => {
         expect(screen.getByText('Dashboard')).toBeInTheDocument();
       });
     });
@@ -190,7 +191,7 @@ describe('DashboardPage', () => {
         </TestWrapper>
       );
 
-      await waitFor(() => {
+      await waitForReliable(() => {
         expect(screen.getByText(/track your time/i)).toBeInTheDocument();
       });
     });
@@ -204,7 +205,7 @@ describe('DashboardPage', () => {
         </TestWrapper>
       );
 
-      await waitFor(() => {
+      await waitForReliable(() => {
         // Look for time-related text
         expect(screen.getByText(/today/i)).toBeInTheDocument();
       });
@@ -217,7 +218,7 @@ describe('DashboardPage', () => {
         </TestWrapper>
       );
 
-      await waitFor(() => {
+      await waitForReliable(() => {
         // Use getAllByText since "week" may appear multiple times
         const weekElements = screen.getAllByText(/week/i);
         expect(weekElements.length).toBeGreaterThan(0);
@@ -233,7 +234,7 @@ describe('DashboardPage', () => {
         </TestWrapper>
       );
 
-      await waitFor(() => {
+      await waitForReliable(() => {
         const barChart = screen.queryByTestId('bar-chart');
         expect(barChart).toBeInTheDocument();
       });
@@ -246,7 +247,7 @@ describe('DashboardPage', () => {
         </TestWrapper>
       );
 
-      await waitFor(() => {
+      await waitForReliable(() => {
         const pieChart = screen.queryByTestId('pie-chart');
         expect(pieChart).toBeInTheDocument();
       });
@@ -269,7 +270,7 @@ describe('DashboardPage', () => {
         </TestWrapper>
       );
 
-      await waitFor(() => {
+      await waitForReliable(() => {
         // The timer widget should be present
         // We look for any element that suggests timer functionality
         const dashboard = screen.getByText('Dashboard');

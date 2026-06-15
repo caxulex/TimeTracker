@@ -6,6 +6,7 @@ import { persist } from 'zustand/middleware';
 import type { User, UserLogin, UserRegister, AuthToken } from '../types';
 import { authApi } from '../api/client';
 import axios from 'axios';
+import { registerStoreReset } from '../test/storeRegistry';
 
 interface AuthState {
   user: User | null;
@@ -168,3 +169,7 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
+
+registerStoreReset(() => {
+  useAuthStore.setState(useAuthStore.getInitialState(), true);
+});

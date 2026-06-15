@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { TeamsPage } from '../TeamsPage';
+import { findByRoleReliable, findByTextReliable, waitForReliable } from '../../test/asyncHelpers';
 
 const mockNavigate = vi.fn();
 
@@ -199,25 +200,25 @@ describe('TeamsPage - projects section', () => {
     const user = userEvent.setup();
     renderPage();
 
-    const teamCard = await screen.findByText('Team 1');
+    const teamCard = await findByTextReliable('Team 1');
     await user.click(teamCard);
-    await screen.findByText('Projects (2)');
+    await findByTextReliable('Projects (2)');
 
     await user.click(screen.getByRole('button', { name: '+ Add Project' }));
     const search = screen.getByPlaceholderText('Search projects...');
     await user.type(search, 'Gamma');
 
-    await screen.findByRole('button', { name: 'Gamma Project' });
+    await findByRoleReliable('button', { name: 'Gamma Project' });
     await user.click(screen.getByRole('button', { name: 'Gamma Project' }));
-    const addDialog = await screen.findByRole('dialog', { name: /Add Project to Team 1/i });
+    const addDialog = await findByRoleReliable('dialog', { name: /Add Project to Team 1/i });
     expect(addDialog.textContent).toContain('Gamma Project');
 
     await user.click(screen.getByRole('button', { name: 'Add' }));
 
-    await waitFor(() => {
+    await waitForReliable(() => {
       expect(addTeamToProject).toHaveBeenCalled();
     });
-    expect(await screen.findByRole('heading', { name: 'Projects (3)' })).toBeInTheDocument();
+    expect(await findByRoleReliable('heading', { name: 'Projects (3)' })).toBeInTheDocument();
     expect(screen.getByText('Gamma Project')).toBeInTheDocument();
   });
 

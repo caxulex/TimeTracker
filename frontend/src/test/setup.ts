@@ -7,6 +7,7 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
+import { resetRegisteredStores } from './storeRegistry';
 
 // Initialize i18n for tests (same config as production)
 import '../i18n/config';
@@ -14,6 +15,8 @@ import '../i18n/config';
 // Cleanup after each test
 afterEach(() => {
   cleanup();
+  resetRegisteredStores();
+  vi.clearAllMocks();
 });
 
 // Mock window.matchMedia

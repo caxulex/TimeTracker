@@ -9,6 +9,7 @@ import { timeEntriesApi } from '../api/client';
 import axios from 'axios';
 import { isNoRunningTimerError } from '../utils/timerErrors';
 import type { TimerStatus } from '../types';
+import { registerStoreReset } from '../test/storeRegistry';
 
 interface TimerState {
   currentEntry: TimeEntry | null;
@@ -360,3 +361,7 @@ export const useTimerStore = create<TimerState>()(
     }
   )
 );
+
+registerStoreReset(() => {
+  useTimerStore.setState(useTimerStore.getInitialState(), true);
+});
