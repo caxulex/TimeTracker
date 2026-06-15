@@ -983,8 +983,10 @@ async def assess_burnout_risk(
             success=True,
             user_id=assessment.user_id,
             user_name=assessment.user_name,
-            risk_level=assessment.risk_level.value,
+            risk_level=assessment.risk_level.value if assessment.risk_level else None,
             risk_score=assessment.risk_score,
+            insufficient_data=assessment.insufficient_data,
+            min_work_days_threshold=assessment.min_work_days_threshold,
             factors=assessment.factors,  # type: ignore
             recommendations=assessment.recommendations,
             trend=assessment.trend,

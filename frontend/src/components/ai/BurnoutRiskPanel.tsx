@@ -39,6 +39,8 @@ interface BurnoutAssessment {
   user_name?: string;
   risk_level?: 'low' | 'moderate' | 'high' | 'critical';
   risk_score?: number;
+  insufficient_data?: boolean;
+  min_work_days_threshold?: number;
   factors?: BurnoutFactor[];
   recommendations?: string[];
   trend?: 'improving' | 'stable' | 'worsening';
@@ -137,6 +139,55 @@ export const BurnoutRiskPanel: React.FC<BurnoutRiskPanelProps> = ({
         >
           <RefreshCw className="w-3 h-3" aria-hidden="true" /> Try again
         </button>
+      </div>
+    );
+  }
+
+  const isInsufficientData = data.insufficient_data === true;
+  const minWorkDaysThreshold = data.min_work_days_threshold ?? 3;
+
+  if (isInsufficientData) {
+    if (compact) {
+      return (
+        <div
+          className="rounded-lg p-3 border border-gray-300 bg-gray-50"
+          role="region"
+          aria-label="Burnout risk assessment has insufficient data"
+        >
+          <p className="text-sm font-semibold text-gray-800">Not enough data to assess yet</p>
+          <p className="text-xs text-gray-600 mt-1">
+            Need at least {minWorkDaysThreshold} working days of logged time
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        className="bg-white rounded-lg shadow"
+        role="region"
+        aria-label="Burnout Risk Assessment Panel"
+      >
+        <div className="px-4 py-3 rounded-t-lg bg-gray-100 border-gray-300 border-b flex justify-between items-center">
+          <div className="flex items-center gap-2">
+            <Heart className="w-5 h-5 text-gray-700" aria-hidden="true" />
+            <h3 className="font-semibold text-gray-800">Burnout Risk Assessment</h3>
+          </div>
+          <button
+            onClick={handleRefresh}
+            className="p-1 rounded hover:bg-white/50 text-gray-700"
+            title="Refresh assessment"
+            aria-label="Refresh burnout risk assessment"
+          >
+            <RefreshCw className="w-4 h-4" aria-hidden="true" />
+          </button>
+        </div>
+        <div className="p-4">
+          <p className="text-xl font-semibold text-gray-800">Not enough data to assess yet</p>
+          <p className="text-sm text-gray-600 mt-1">
+            Need at least {minWorkDaysThreshold} working days of logged time
+          </p>
+        </div>
       </div>
     );
   }
