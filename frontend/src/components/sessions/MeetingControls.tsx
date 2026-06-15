@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { useSessionStore, formatDuration } from '../../stores/sessionStore';
 import { useTimerStore } from '../../stores/timerStore';
 import { useNotifications } from '../../hooks/useNotifications';
+import { useAnchoredMenuPosition } from '../../hooks/useAnchoredMenuPosition';
 import { cn } from '../../utils/helpers';
 import type { MeetingType } from '../../types';
 
@@ -25,6 +26,16 @@ export function MeetingControls() {
   const [showTitleInput, setShowTitleInput] = useState(false);
   const [meetingTitle, setMeetingTitle] = useState('');
   const [selectedType, setSelectedType] = useState<MeetingType>('internal');
+  const { triggerRef, menuRef, menuStyle } = useAnchoredMenuPosition<
+    HTMLButtonElement,
+    HTMLDivElement
+  >({
+    isOpen: showMenu,
+    mobilePlacement: 'top-end',
+    desktopPlacement: 'bottom-end',
+    viewportPadding: 8,
+    offset: 8,
+  });
 
   const handleStartMeeting = async () => {
     setShowMenu(false);
@@ -103,6 +114,8 @@ export function MeetingControls() {
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
+        data-testid="meeting-menu-trigger"
         onClick={() => setShowMenu(!showMenu)}
         disabled={isLoading}
         className={cn(
@@ -127,7 +140,12 @@ export function MeetingControls() {
           />
           
           {/* Dropdown menu */}
-          <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg z-20 py-1 border">
+          <div
+            ref={menuRef}
+            data-testid="meeting-menu"
+            style={menuStyle}
+            className="w-64 bg-white rounded-lg shadow-lg z-20 py-1 border"
+          >
             {!showTitleInput ? (
               // Meeting type selection
               <>

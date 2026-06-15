@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { useSessionStore, formatDuration } from '../../stores/sessionStore';
 import { useTimerStore } from '../../stores/timerStore';
 import { useNotifications } from '../../hooks/useNotifications';
+import { useAnchoredMenuPosition } from '../../hooks/useAnchoredMenuPosition';
 import { cn } from '../../utils/helpers';
 import type { BreakType } from '../../types';
 
@@ -22,6 +23,16 @@ export function BreakControls() {
 
   const { addNotification } = useNotifications();
   const [showMenu, setShowMenu] = useState(false);
+  const { triggerRef, menuRef, menuStyle } = useAnchoredMenuPosition<
+    HTMLButtonElement,
+    HTMLDivElement
+  >({
+    isOpen: showMenu,
+    mobilePlacement: 'top-end',
+    desktopPlacement: 'bottom-end',
+    viewportPadding: 8,
+    offset: 8,
+  });
 
   const handleStartBreak = async (breakType: BreakType) => {
     setShowMenu(false);
@@ -90,6 +101,8 @@ export function BreakControls() {
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
+        data-testid="break-menu-trigger"
         onClick={() => setShowMenu(!showMenu)}
         disabled={isLoading}
         className={cn(
@@ -110,7 +123,12 @@ export function BreakControls() {
           />
           
           {/* Dropdown menu */}
-          <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg z-20 py-1 border">
+          <div
+            ref={menuRef}
+            data-testid="break-menu"
+            style={menuStyle}
+            className="w-48 bg-white rounded-lg shadow-lg z-20 py-1 border"
+          >
             <button
               onClick={() => handleStartBreak('short')}
               className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
