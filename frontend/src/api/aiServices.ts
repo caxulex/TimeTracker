@@ -298,6 +298,8 @@ export interface BurnoutAssessmentResponse {
   user_name?: string;
   risk_level?: 'low' | 'moderate' | 'high' | 'critical';
   risk_score?: number;
+  insufficient_data?: boolean;
+  min_work_days_threshold?: number;
   factors?: BurnoutFactor[];
   recommendations?: string[];
   trend?: 'improving' | 'stable' | 'worsening';

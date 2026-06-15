@@ -117,22 +117,26 @@ class BurnoutRiskAssessment:
     """Burnout risk assessment result."""
     user_id: int
     user_name: str
-    risk_level: RiskLevel
-    risk_score: float  # 0-100
+    risk_level: Optional[RiskLevel]
+    risk_score: Optional[float]  # 0-100
     factors: List[Dict[str, Any]]
     recommendations: List[str]
-    trend: str  # "improving", "stable", "worsening"
+    trend: Optional[str]  # "improving", "stable", "worsening"
     assessed_at: datetime
+    insufficient_data: bool = False
+    min_work_days_threshold: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "user_id": self.user_id,
             "user_name": self.user_name,
-            "risk_level": self.risk_level.value,
-            "risk_score": round(self.risk_score, 1),
+            "risk_level": self.risk_level.value if self.risk_level else None,
+            "risk_score": round(self.risk_score, 1) if self.risk_score is not None else None,
             "factors": self.factors,
             "recommendations": self.recommendations,
             "trend": self.trend,
+            "insufficient_data": self.insufficient_data,
+            "min_work_days_threshold": self.min_work_days_threshold,
             "assessed_at": self.assessed_at.isoformat()
         }
 
@@ -203,6 +207,7 @@ class MLAnomalyService:
         self.min_samples_for_model = 30  # Minimum entries for ML
         self.baseline_days = 30  # Days for baseline calculation
         self.burnout_threshold = 70  # Risk score threshold
+        self.BURNOUT_MIN_WORK_DAYS_THRESHOLD = 3
 
     async def _get_feature_manager(self) -> AIFeatureManager:
         """Get feature manager instance."""
@@ -755,6 +760,25 @@ class MLAnomalyService:
             day_key = local_time.date()
             daily_entries[day_key].append(entry)
 
+        # Mirror the "new" precedent used by productivity trend: avoid confident
+        # risk claims when there is not enough data to assess meaningfully.
+        work_days_count = len(daily_entries)
+        if work_days_count < self.BURNOUT_MIN_WORK_DAYS_THRESHOLD:
+            return BurnoutRiskAssessment(
+                user_id=user_id,
+                user_name=user.name,
+                risk_level=None,
+                risk_score=None,
+                factors=[],
+                recommendations=[
+                    f"Log at least {self.BURNOUT_MIN_WORK_DAYS_THRESHOLD} working days to receive a burnout assessment"
+                ],
+                trend=None,
+                insufficient_data=True,
+                min_work_days_threshold=self.BURNOUT_MIN_WORK_DAYS_THRESHOLD,
+                assessed_at=now_utc()
+            )
+
         # Calculate risk factors
         factors = []
         risk_score = 0
@@ -899,6 +923,8 @@ class MLAnomalyService:
             factors=factors,
             recommendations=recommendations,
             trend=trend,
+            insufficient_data=False,
+            min_work_days_threshold=self.BURNOUT_MIN_WORK_DAYS_THRESHOLD,
             assessed_at=now_utc()
         )
 
@@ -938,7 +964,8 @@ class MLAnomalyService:
             try:
                 assessment = await self.assess_burnout_risk(user.id)
                 assessments.append(assessment.to_dict())
-                risk_distribution[assessment.risk_level.value] += 1
+                if assessment.risk_level is not None:
+                    risk_distribution[assessment.risk_level.value] += 1
             except Exception as e:
                 logger.error(f"Error assessing user {user.id}: {e}")
 

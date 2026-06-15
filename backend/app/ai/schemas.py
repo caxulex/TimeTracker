@@ -746,6 +746,8 @@ class BurnoutAssessmentResponse(BaseModel):
     user_name: Optional[str] = None
     risk_level: Optional[str] = None  # low, moderate, high, critical
     risk_score: Optional[float] = None  # 0-100
+    insufficient_data: Optional[bool] = None
+    min_work_days_threshold: Optional[int] = None
     factors: List[BurnoutFactor] = []
     recommendations: List[str] = []
     trend: Optional[str] = None  # improving, stable, worsening
