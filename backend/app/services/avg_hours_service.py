@@ -78,6 +78,7 @@ async def compute_avg_hours(
     *,
     today: date | None = None,
     exclude_today: bool = True,
+    today_hours: Decimal | None = None,
     fallback_to_days_with_entries: bool = False,
     days_with_entries: int | None = None,
 ) -> AvgHoursResult:
@@ -91,13 +92,21 @@ async def compute_avg_hours(
     Args:
         db: Async SQLAlchemy session (used for company working_days fallback).
         user: User model instance (must have working_days and company_id attrs).
-        total_hours: Total hours in the numerator.
+        total_hours: Total hours in the numerator (covering the full period
+            including today's partial hours if today is in the period).
         period_start: Start of the period (inclusive).
         period_end: End of the period (inclusive).
         today: Tenant-local today. Defaults to date.today().
         exclude_today: When True, exclude today from the denominator if it
             falls in the period. This is the primary behavior for
             "in-progress" periods to avoid artificially low averages.
+        today_hours: Hours logged today (within the period). When
+            exclude_today=True and today is in the period, this value is
+            subtracted from total_hours so that numerator and denominator
+            are aligned (both exclude today). Callers MUST pass this when
+            exclude_today=True and today falls in the period; omitting it
+            leaves the numerator/denominator misaligned and produces an
+            inflated average.
         fallback_to_days_with_entries: When True and denominator would be 0,
             use days_with_entries instead.
         days_with_entries: Number of distinct dates with logged hours.
@@ -119,6 +128,16 @@ async def compute_avg_hours(
 
     today_in_range = period_start <= today_resolved <= period_end
     includes_today = today_in_range
+
+    # Align the numerator: when today is excluded from the denominator,
+    # strip today's hours from the numerator so both sides exclude today.
+    if exclude_today and today_in_range and today_hours is not None:
+        aligned_numerator = total_hours - today_hours
+        # Guard against negative values from clock skew or rounding
+        if aligned_numerator < Decimal("0"):
+            aligned_numerator = Decimal("0")
+    else:
+        aligned_numerator = total_hours
 
     # Choose denominator type
     if exclude_today and today_in_range:
@@ -157,7 +176,7 @@ async def compute_avg_hours(
             # Return 0 avg rather than divide-by-zero
             return AvgHoursResult(
                 value=Decimal("0"),
-                numerator_hours=total_hours,
+                numerator_hours=aligned_numerator,
                 denominator_days=0,
                 denominator_type=denominator_type,
                 includes_today=includes_today,
@@ -166,13 +185,13 @@ async def compute_avg_hours(
                 working_days_used=working_days_used,
             )
 
-    value = (total_hours / Decimal(denominator_days)).quantize(
+    value = (aligned_numerator / Decimal(denominator_days)).quantize(
         Decimal("0.01"), rounding=ROUND_HALF_UP
     )
 
     return AvgHoursResult(
         value=value,
-        numerator_hours=total_hours,
+        numerator_hours=aligned_numerator,
         denominator_days=denominator_days,
         denominator_type=denominator_type,
         includes_today=includes_today,

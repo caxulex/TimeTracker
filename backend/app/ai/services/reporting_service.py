@@ -918,6 +918,21 @@ class AIReportingService:
         from decimal import Decimal as _Decimal
         from app.services.avg_hours_service import compute_avg_hours as _compute_avg_hours
 
+        # Query today's hours separately so the service can align the numerator
+        # with the denominator when exclude_today=True.
+        _today_start_dt, _today_end_dt = range_bounds(tenant_today, tenant_today, tenant_tz)
+        _today_hours_result = await self.db.execute(
+            select(func.sum(TimeEntry.duration_seconds))
+            .where(
+                and_(
+                    TimeEntry.user_id == user_id,
+                    TimeEntry.start_time >= _today_start_dt,
+                    TimeEntry.start_time < _today_end_dt,
+                )
+            )
+        )
+        _today_seconds = _today_hours_result.scalar() or 0
+
         _avg_result = await _compute_avg_hours(
             self.db,
             user,
@@ -926,6 +941,7 @@ class AIReportingService:
             tenant_today,
             today=tenant_today,
             exclude_today=True,
+            today_hours=_Decimal(str(round(_today_seconds / 3600, 10))),
             fallback_to_days_with_entries=True,
             days_with_entries=int(work_days),
         )

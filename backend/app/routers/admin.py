@@ -286,6 +286,20 @@ async def get_workers_report(
         user_seconds = row.total_seconds or 0
         total_seconds += user_seconds
 
+        # Query today's hours for this user so the avg service can align the
+        # numerator with the denominator when exclude_today=True.
+        _today_start_dt, _today_end_dt = day_bounds(today_local, tz)
+        _today_result = await db.execute(
+            select(func.coalesce(func.sum(TimeEntry.duration_seconds), 0).label("today_seconds"))
+            .where(
+                TimeEntry.user_id == user.id,
+                TimeEntry.start_time >= _today_start_dt,
+                TimeEntry.start_time < _today_end_dt,
+            )
+        )
+        _today_row = _today_result.first()
+        _today_user_seconds = _today_row.today_seconds if _today_row else 0
+
         _avg = await _compute_avg_hours(
             db,
             user,
@@ -294,6 +308,7 @@ async def get_workers_report(
             end_date,
             today=today_local,
             exclude_today=True,
+            today_hours=_Decimal(str(round(_today_user_seconds / 3600, 10))),
         )
 
         workers.append(WorkerReport(

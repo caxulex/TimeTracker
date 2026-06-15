@@ -361,6 +361,12 @@ async def get_weekly_summary(
 
     from decimal import Decimal as _Decimal
 
+    # Extract today's hours from the already-computed daily breakdown so the
+    # service can align the numerator when exclude_today=True.
+    _today_hours_decimal = _Decimal(str(
+        next((d.total_hours for d in daily_breakdown if d.date == today_local), 0.0)
+    ))
+
     avg_result = await compute_avg_hours(
         db,
         current_user,
@@ -369,6 +375,7 @@ async def get_weekly_summary(
         week_end,
         today=today_local,
         exclude_today=True,
+        today_hours=_today_hours_decimal,
     )
 
     return WeeklySummary(
@@ -1464,6 +1471,7 @@ async def get_user_metrics(
         today_local,
         today=today_local,
         exclude_today=True,
+        today_hours=_Decimal(str(round(today_seconds / 3600, 10))),
         fallback_to_days_with_entries=True,
         days_with_entries=active_days,
     )

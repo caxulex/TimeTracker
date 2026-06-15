@@ -299,6 +299,13 @@ class ReportService:
         total_hours = sum((row.total_seconds or 0) / 3600 for row in daily_data)
         days_worked = len([d for d in daily_data if (d.total_seconds or 0) > 0])
 
+        # Today's hours extracted from the daily data for numerator alignment.
+        _today_seconds_template = sum(
+            (row.total_seconds or 0) for row in daily_data
+            if str(row.day) == end_date.isoformat()
+        )
+        _today_hours_template = _Decimal(str(round(_today_seconds_template / 3600, 10)))
+
         # Resolve user object for working-days-aware avg, or fall back to days_with_entries
         _user_obj = None
         if user_id is not None:
@@ -315,6 +322,7 @@ class ReportService:
                 end_date,
                 today=end_date,
                 exclude_today=True,
+                today_hours=_today_hours_template,
                 fallback_to_days_with_entries=True,
                 days_with_entries=days_worked,
             )
@@ -330,6 +338,7 @@ class ReportService:
                 end_date,
                 today=end_date,
                 exclude_today=True,
+                today_hours=_today_hours_template,
                 fallback_to_days_with_entries=True,
                 days_with_entries=days_worked,
             )
