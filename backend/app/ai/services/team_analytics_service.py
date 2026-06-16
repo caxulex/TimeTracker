@@ -574,7 +574,7 @@ class TeamAnalyticsService:
             )
         else:
             insights.append(
-                f"✅ Workload is well-balanced across the team (Gini: {workload_gini:.2f})."
+                f"✅ Workload appears distributed across the team (Gini: {workload_gini:.2f})."
             )
 
         # Analyze collaboration
@@ -587,7 +587,7 @@ class TeamAnalyticsService:
             )
         elif collaboration_density > 0.7:
             insights.append(
-                "✅ Strong team collaboration. Members frequently work on shared projects."
+                "✅ Recent activity suggests collaboration is active - team members share projects."
             )
 
         # Analyze velocity trend
@@ -602,7 +602,7 @@ class TeamAnalyticsService:
                 )
             elif recent_trend == "increasing":
                 insights.append(
-                    "📈 Team velocity is increasing. Great momentum!"
+                    "📈 Recent activity indicates an upward velocity trend."
                 )
 
         # Analyze overtime
