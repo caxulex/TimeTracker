@@ -1,13 +1,17 @@
 # ============================================
 # TIME TRACKER - REPORTS API TESTS
 # ============================================
+from datetime import datetime, timedelta, timezone
+
 import pytest
 import pytest_asyncio
-from datetime import datetime, timedelta, timezone
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import User, Project, Team, TeamMember, TimeEntry
+from app.models import Project, Team, TeamMember, TimeEntry, User
+from app.routers.reports import get_team_analytics
+from app.services.team_service import soft_delete_team
 
 
 @pytest_asyncio.fixture
@@ -19,7 +23,7 @@ async def test_team(db_session: AsyncSession, test_user: User) -> Team:
     )
     db_session.add(team)
     await db_session.flush()
-    
+
     membership = TeamMember(
         team_id=team.id,
         user_id=test_user.id,
@@ -43,7 +47,7 @@ async def populated_data(db_session: AsyncSession, test_user: User, test_team: T
     db_session.add(project)
     await db_session.flush()
     await db_session.refresh(project)
-    
+
     # Create time entries for the past week
     now = datetime.now(timezone.utc)
     entries = []
@@ -59,16 +63,16 @@ async def populated_data(db_session: AsyncSession, test_user: User, test_team: T
             is_running=False,
         )
         entries.append(entry)
-    
+
     db_session.add_all(entries)
     await db_session.flush()
-    
+
     return {"project": project, "entries": entries}
 
 
 class TestDashboardReport:
     """Test dashboard stats endpoint."""
-    
+
     @pytest.mark.asyncio
     async def test_get_dashboard_stats(
         self, client: AsyncClient, auth_headers: dict, populated_data
@@ -84,7 +88,7 @@ class TestDashboardReport:
 
 class TestWeeklySummary:
     """Test weekly summary endpoint."""
-    
+
     @pytest.mark.asyncio
     async def test_get_weekly_summary(
         self, client: AsyncClient, auth_headers: dict, populated_data
@@ -154,7 +158,7 @@ class TestWeeklySummary:
 
 class TestProjectReport:
     """Test project-based report endpoint."""
-    
+
     @pytest.mark.asyncio
     async def test_get_project_report(
         self, client: AsyncClient, auth_headers: dict, populated_data
@@ -164,6 +168,109 @@ class TestProjectReport:
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
+
+
+class TestAdminTeamAnalyticsList:
+    """Test admin team analytics list filtering behavior."""
+
+    @pytest.mark.asyncio
+    async def test_admin_teams_includes_active_team(
+        self,
+        admin_user: User,
+        db_session: AsyncSession,
+    ):
+        """Active teams should be visible in /api/reports/admin/teams."""
+        active_team = Team(
+            name="Active Team",
+            owner_id=admin_user.id,
+            company_id=admin_user.company_id,
+        )
+        db_session.add(active_team)
+        await db_session.flush()
+
+        db_session.add(
+            TeamMember(team_id=active_team.id, user_id=admin_user.id, role="owner")
+        )
+
+        project = Project(
+            name="Active Team Project",
+            team_id=active_team.id,
+            color="#3B82F6",
+        )
+        db_session.add(project)
+        await db_session.flush()
+
+        now = datetime.now(timezone.utc)
+        db_session.add(
+            TimeEntry(
+                user_id=admin_user.id,
+                project_id=project.id,
+                description="active team entry",
+                start_time=now - timedelta(hours=2),
+                end_time=now - timedelta(hours=1),
+                duration_seconds=3600,
+                is_running=False,
+            )
+        )
+        await db_session.commit()
+
+        data = await get_team_analytics(db=db_session, current_user=admin_user, tz="UTC")
+        names = [item.team_name for item in data]
+        assert "Active Team" in names
+
+    @pytest.mark.asyncio
+    async def test_admin_teams_excludes_soft_deleted_team(
+        self,
+        admin_user: User,
+        db_session: AsyncSession,
+    ):
+        """Soft-deleted teams should not be visible in /api/reports/admin/teams."""
+        active_team = Team(
+            name="Visible Team",
+            owner_id=admin_user.id,
+            company_id=admin_user.company_id,
+        )
+        deleted_team = Team(
+            name="Soft Delete Test Team",
+            owner_id=admin_user.id,
+            company_id=admin_user.company_id,
+        )
+        db_session.add_all([active_team, deleted_team])
+        await db_session.flush()
+
+        db_session.add_all(
+            [
+                TeamMember(team_id=active_team.id, user_id=admin_user.id, role="owner"),
+                TeamMember(team_id=deleted_team.id, user_id=admin_user.id, role="owner"),
+            ]
+        )
+        await db_session.commit()
+
+        ok, error_code = await soft_delete_team(
+            team_id=deleted_team.id,
+            company_id=admin_user.company_id,
+            acting_user_id=admin_user.id,
+            acting_user_email=admin_user.email,
+            reason="test soft delete",
+            db=db_session,
+        )
+        assert ok is True
+        assert error_code is None
+
+        deleted_at = (
+            await db_session.execute(select(Team.deleted_at).where(Team.id == deleted_team.id))
+        ).scalar_one()
+        assert deleted_at is not None
+
+        active_ids_query = (
+            await db_session.execute(select(Team.id).where(Team.deleted_at.is_(None)))
+        ).scalars().all()
+        assert deleted_team.id not in active_ids_query
+
+        data = await get_team_analytics(db=db_session, current_user=admin_user, tz="UTC")
+        ids = [item.team_id for item in data]
+        assert active_team.id in ids
+        assert deleted_team.id not in ids
 
 
 class TestTeamTimesheetPauseAware:
@@ -220,7 +327,7 @@ class TestTeamTimesheetPauseAware:
 
 class TestExportReport:
     """Test report export endpoint."""
-    
+
     @pytest.mark.asyncio
     async def test_export_csv(
         self, client: AsyncClient, auth_headers: dict, populated_data
@@ -228,7 +335,7 @@ class TestExportReport:
         """Test exporting report as CSV."""
         start = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
         end = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        
+
         response = await client.get(
             f"/api/reports/export?start_date={start}&end_date={end}&format=csv",
             headers=auth_headers,

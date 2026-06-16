@@ -1010,7 +1010,7 @@ async def get_team_analytics(
 
     # Multi-tenancy: filter teams by company
     company_id = get_company_filter(current_user)
-    teams_query = select(Team)
+    teams_query = select(Team).where(Team.deleted_at.is_(None))
     teams_query = apply_company_filter(teams_query, Team.company_id, company_id)
     teams_result = await db.execute(teams_query)
     teams = teams_result.scalars().all()
@@ -1018,6 +1018,9 @@ async def get_team_analytics(
     team_analytics = []
 
     for team in teams:
+        if team.deleted_at is not None:
+            continue
+
         # Get team members
         members_result = await db.execute(
             select(TeamMember.user_id, User.name)
@@ -2900,3 +2903,4 @@ async def _get_team_timesheet_data(
         grand_total_seconds=grand_total,
         grand_total_formatted=format_seconds_to_hhmm(grand_total)
     )
+

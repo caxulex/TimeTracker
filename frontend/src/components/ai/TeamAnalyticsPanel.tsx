@@ -46,6 +46,7 @@ export default function TeamAnalyticsPanel({
     data,
     isLoading,
     isError,
+    error,
     refetch,
   } = useQuery({
     queryKey: ['ai-team-analytics', teamId, periodDays],
@@ -73,6 +74,16 @@ export default function TeamAnalyticsPanel({
     [data?.collaboration_edges]
   );
 
+  const resolvedErrorMessage = useMemo(() => {
+    if (data && data.success === false) {
+      return data.error || data.message || 'Failed to load AI team analytics.';
+    }
+    if (error instanceof Error && error.message) {
+      return error.message;
+    }
+    return 'Failed to load AI team analytics.';
+  }, [data, error]);
+
   if (isLoading) {
     return (
       <div className={`rounded-lg border border-gray-200 dark:border-gray-700 p-6 ${className}`} role="status">
@@ -87,7 +98,7 @@ export default function TeamAnalyticsPanel({
   if (isError || !data || !data.success) {
     return (
       <div className={`rounded-lg border border-red-200 bg-red-50 p-6 dark:border-red-800 dark:bg-red-900/20 ${className}`} role="alert">
-        <p className="font-medium text-red-800 dark:text-red-300">Failed to load AI team analytics.</p>
+        <p className="font-medium text-red-800 dark:text-red-300">{resolvedErrorMessage}</p>
         <button
           onClick={() => refetch()}
           className="mt-3 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700"

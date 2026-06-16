@@ -74,9 +74,23 @@ describe('TeamAnalyticsPanel', () => {
     renderPanel();
 
     expect(
-      await screen.findByText(/failed to load ai team analytics/i, {}, { timeout: 3000 })
+      await screen.findByText(/request failed/i, {}, { timeout: 3000 })
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+  });
+
+  it('surfaces backend error when success is false', async () => {
+    getTeamAnalyticsMock.mockResolvedValue({
+      ...baseResponse,
+      success: false,
+      error: 'Team 9999 not found. It may have been deleted.',
+    });
+
+    renderPanel();
+
+    expect(
+      await screen.findByText(/team 9999 not found\. it may have been deleted\./i)
+    ).toBeInTheDocument();
   });
 
   it('shows empty state when total members is zero', async () => {
