@@ -6,6 +6,14 @@ import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import AdminReportsPage from './AdminReportsPage';
 
+vi.mock('../components/ai/TeamAnalyticsPanel', () => ({
+  default: ({ teamId, teamName }: { teamId: number; teamName?: string }) => (
+    <div data-testid="team-analytics-panel-mock">
+      Team analytics panel for {teamName} ({teamId})
+    </div>
+  ),
+}));
+
 vi.mock('../hooks/useAIFeatures', () => ({
   useFeatureEnabled: () => ({ data: false }),
 }));
@@ -96,7 +104,22 @@ describe('AdminReportsPage', () => {
         if (url.includes('/api/reports/admin/teams')) {
           return {
             ok: true,
-            json: async () => [],
+            json: async () => ([
+              {
+                team_id: 5,
+                team_name: 'Platform',
+                member_count: 3,
+                total_today_seconds: 10800,
+                total_today_hours: 3,
+                total_week_seconds: 36000,
+                total_week_hours: 10,
+                total_month_seconds: 120000,
+                total_month_hours: 33.3,
+                active_members_today: 2,
+                running_timers: 1,
+                top_performers: [],
+              },
+            ]),
           } as Response;
         }
 
@@ -216,5 +239,17 @@ describe('AdminReportsPage', () => {
     expect(screen.getByText(/across 5 completed working days/i)).toBeInTheDocument();
     expect(screen.getByTitle(/Working days for this user: Mon-Fri/i)).toBeInTheDocument();
     expect(screen.getByTitle(/\(company schedule\)/i)).toBeInTheDocument();
+  });
+
+  it('opens AI Analytics modal from a team card', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /teams/i }));
+
+    await user.click(await screen.findByRole('button', { name: /ai analytics/i }));
+
+    expect(await screen.findByRole('dialog', { name: /ai analytics for platform/i })).toBeInTheDocument();
+    expect(screen.getByTestId('team-analytics-panel-mock')).toHaveTextContent('Team analytics panel for Platform (5)');
   });
 });

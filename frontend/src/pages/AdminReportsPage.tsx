@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { UserSelect } from '../components/users/UserSelect';
+import TeamAnalyticsPanel from '../components/ai/TeamAnalyticsPanel';
 // Use lazy-loaded AI components to reduce initial bundle size (Task 6.1)
 import {
   LazyPayrollForecastPanel as PayrollForecastPanel,
@@ -115,6 +116,7 @@ export default function AdminReportsPage() {
   const [activeTab, setActiveTab] = useState<'overview' | 'teams' | 'individuals'>('overview');
   const [userPeriod, setUserPeriod] = useState<'today' | 'week' | 'month'>('week');
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [selectedTeamForAnalytics, setSelectedTeamForAnalytics] = useState<TeamAnalytics | null>(null);
   // Task 6.2: Pagination state
   const [usersPage, setUsersPage] = useState(1);
   const usersPageSize = 50;
@@ -593,6 +595,15 @@ export default function AdminReportsPage() {
                       </span>
                     </div>
 
+                    <div className="mb-4">
+                      <button
+                        onClick={() => setSelectedTeamForAnalytics(team)}
+                        className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
+                      >
+                        AI Analytics
+                      </button>
+                    </div>
+
                     {/* Top Performers */}
                     {team.top_performers.length > 0 && (
                       <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
@@ -619,6 +630,36 @@ export default function AdminReportsPage() {
                 </div>
               ))}
             </div>
+
+            {selectedTeamForAnalytics && (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+                role="dialog"
+                aria-modal="true"
+                aria-label={`AI analytics for ${selectedTeamForAnalytics.team_name}`}
+              >
+                <div className="max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-xl bg-gray-50 p-6 dark:bg-gray-900">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                      {selectedTeamForAnalytics.team_name} AI Analytics
+                    </h2>
+                    <button
+                      onClick={() => setSelectedTeamForAnalytics(null)}
+                      className="rounded p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                      aria-label="Close team analytics"
+                    >
+                      <XMarkIcon className="h-5 w-5" />
+                    </button>
+                  </div>
+
+                  <TeamAnalyticsPanel
+                    teamId={selectedTeamForAnalytics.team_id}
+                    teamName={selectedTeamForAnalytics.team_name}
+                    periodDays={30}
+                  />
+                </div>
+              </div>
+            )}
               </>
             )}
           </div>

@@ -340,6 +340,85 @@ export interface UserBaselineResponse {
   error?: string;
 }
 
+// ============================================
+// PHASE 5: TEAM ANALYTICS API
+// ============================================
+
+export interface TeamAnalyticsRequest {
+  team_id: number;
+  period_days?: number;
+  include_ai_insights?: boolean;
+}
+
+export interface TeamMemberAnalytics {
+  user_id: number;
+  user_name: string;
+  total_hours: number;
+  avg_daily_hours: number;
+  productive_hours_ratio: number;
+  projects_worked: number;
+  tasks_completed: number;
+  consistency_score: number;
+  overtime_hours: number;
+  weekend_hours: number;
+}
+
+export interface TeamVelocityPoint {
+  period_start: string;
+  period_end: string;
+  total_hours: number;
+  hours_per_member: number;
+  tasks_completed: number;
+  projects_active: number;
+  avg_task_duration_hours: number;
+  velocity_trend: 'increasing' | 'decreasing' | 'stable';
+  change_percent: number;
+}
+
+export interface TeamCollaborationEdge {
+  user1_id: number;
+  user1_name: string;
+  user2_id: number;
+  user2_name: string;
+  shared_projects: number;
+  interaction_score: number;
+}
+
+export interface TeamContributorSummary {
+  user_id: number;
+  name: string;
+  hours: number;
+  percent_of_total?: number;
+  percent_of_average?: number;
+}
+
+export interface TeamAnalyticsResponse {
+  success: boolean;
+  enabled?: boolean;
+  team_id: number;
+  team_name: string;
+  period_days: number;
+  total_members: number;
+  active_members: number;
+  total_hours: number;
+  avg_hours_per_member: number;
+  total_projects: number;
+  total_tasks: number;
+  member_metrics?: TeamMemberAnalytics[];
+  velocity_history?: TeamVelocityPoint[];
+  current_velocity_trend: 'increasing' | 'decreasing' | 'stable' | 'unknown';
+  collaboration_edges?: TeamCollaborationEdge[];
+  collaboration_density: number;
+  workload_gini: number;
+  top_contributors?: TeamContributorSummary[];
+  underutilized_members?: TeamContributorSummary[];
+  ai_insights?: string[];
+  recommendations?: string[];
+  generated_at: string;
+  error?: string;
+  message?: string;
+}
+
 /**
  * Scan for ML-based anomalies
  */
@@ -388,6 +467,23 @@ export async function calculateUserBaseline(
   const response = await api.post<UserBaselineResponse>(
     '/api/ai/ml/baseline/calculate',
     request
+  );
+  return response.data;
+}
+
+/**
+ * Fetch AI team analytics for a single team (admin-only endpoint)
+ */
+export async function getTeamAnalytics(
+  request: TeamAnalyticsRequest
+): Promise<TeamAnalyticsResponse> {
+  const response = await api.post<TeamAnalyticsResponse>(
+    '/api/ai/analytics/team',
+    {
+      team_id: request.team_id,
+      period_days: request.period_days ?? 30,
+      include_ai_insights: request.include_ai_insights ?? true,
+    }
   );
   return response.data;
 }
