@@ -18,7 +18,18 @@ vi.mock('recharts', () => ({
   YAxis: () => <div />,
   CartesianGrid: () => <div />,
   Tooltip: () => <div />,
-  BarChart: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  BarChart: ({
+    children,
+    data,
+  }: {
+    children: ReactNode;
+    data?: Array<{ name: string; hours: number }>;
+  }) => (
+    <div>
+      <div data-testid="mock-workload-bars">{(data ?? []).map((item) => item.name).join('|')}</div>
+      {children}
+    </div>
+  ),
   Bar: () => <div />,
 }));
 
@@ -112,6 +123,7 @@ describe('TeamAnalyticsPanel', () => {
   it('renders fallback blocks for missing optional arrays', async () => {
     getTeamAnalyticsMock.mockResolvedValue({
       ...baseResponse,
+      member_metrics: [],
       velocity_history: [],
       top_contributors: [],
       collaboration_edges: [],
@@ -124,14 +136,62 @@ describe('TeamAnalyticsPanel', () => {
 
     expect(await screen.findByTestId('team-analytics-panel')).toBeInTheDocument();
     expect(screen.getByText(/no velocity history available/i)).toBeInTheDocument();
-    expect(screen.getByText(/no contributor breakdown available/i)).toBeInTheDocument();
+    expect(screen.getByText(/no member workload data available/i)).toBeInTheDocument();
     expect(screen.getByText(/no collaboration edge data available/i)).toBeInTheDocument();
     expect(screen.getByText(/no underutilization signals available/i)).toBeInTheDocument();
+  });
+
+  it('renders workload bars for all member metrics, not only top contributors', async () => {
+    getTeamAnalyticsMock.mockResolvedValue({
+      ...baseResponse,
+      member_metrics: [
+        { user_id: 1, user_name: 'Joe Bello', total_hours: 180, avg_daily_hours: 6, productive_hours_ratio: 0.9, projects_worked: 3, tasks_completed: 20, consistency_score: 88, overtime_hours: 4, weekend_hours: 2 },
+        { user_id: 2, user_name: 'Daniel', total_hours: 146, avg_daily_hours: 4.9, productive_hours_ratio: 0.88, projects_worked: 3, tasks_completed: 18, consistency_score: 86, overtime_hours: 3, weekend_hours: 1 },
+        { user_id: 3, user_name: 'Jelry', total_hours: 133, avg_daily_hours: 4.4, productive_hours_ratio: 0.87, projects_worked: 2, tasks_completed: 16, consistency_score: 84, overtime_hours: 2, weekend_hours: 1 },
+      ],
+      top_contributors: [{ user_id: 1, name: 'Joe Bello', hours: 180 }],
+      velocity_history: [],
+      underutilized_members: [],
+      collaboration_edges: [],
+      ai_insights: [],
+      recommendations: [],
+    });
+
+    renderPanel();
+
+    await screen.findByTestId('team-analytics-panel');
+    expect(screen.getByTestId('mock-workload-bars')).toHaveTextContent('Joe Bello|Daniel|Jelry');
+  });
+
+  it('renders a single workload bar for single-member teams', async () => {
+    getTeamAnalyticsMock.mockResolvedValue({
+      ...baseResponse,
+      total_members: 1,
+      active_members: 1,
+      member_metrics: [
+        { user_id: 7, user_name: 'Solo Dev', total_hours: 96, avg_daily_hours: 3.2, productive_hours_ratio: 0.92, projects_worked: 2, tasks_completed: 11, consistency_score: 90, overtime_hours: 0, weekend_hours: 0 },
+      ],
+      top_contributors: [{ user_id: 7, name: 'Solo Dev', hours: 96 }],
+      velocity_history: [],
+      underutilized_members: [],
+      collaboration_edges: [],
+      ai_insights: [],
+      recommendations: [],
+    });
+
+    renderPanel();
+
+    await screen.findByTestId('team-analytics-panel');
+    expect(screen.getByTestId('mock-workload-bars')).toHaveTextContent('Solo Dev');
   });
 
   it('renders metrics, insights, and recommendations on success', async () => {
     getTeamAnalyticsMock.mockResolvedValue({
       ...baseResponse,
+      member_metrics: [
+        { user_id: 1, user_name: 'Alice', total_hours: 42, avg_daily_hours: 1.4, productive_hours_ratio: 0.9, projects_worked: 2, tasks_completed: 10, consistency_score: 80, overtime_hours: 2, weekend_hours: 1 },
+        { user_id: 2, user_name: 'Bob', total_hours: 35, avg_daily_hours: 1.2, productive_hours_ratio: 0.88, projects_worked: 2, tasks_completed: 9, consistency_score: 78, overtime_hours: 1, weekend_hours: 0 },
+      ],
       velocity_history: [
         {
           period_start: '2026-06-01T00:00:00.000Z',
