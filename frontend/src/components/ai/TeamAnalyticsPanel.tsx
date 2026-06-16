@@ -74,6 +74,18 @@ export default function TeamAnalyticsPanel({
     [data?.collaboration_edges]
   );
 
+  const workloadDistribution = useMemo(
+    () =>
+      (data?.member_metrics ?? [])
+        .map((member) => ({
+          user_id: member.user_id,
+          name: member.user_name,
+          hours: member.total_hours,
+        }))
+        .sort((a, b) => b.hours - a.hours),
+    [data?.member_metrics]
+  );
+
   const resolvedErrorMessage = useMemo(() => {
     if (data && data.success === false) {
       return data.error || data.message || 'Failed to load AI team analytics.';
@@ -111,7 +123,6 @@ export default function TeamAnalyticsPanel({
 
   const insights = data.ai_insights ?? [];
   const recommendations = data.recommendations ?? [];
-  const topContributors = data.top_contributors ?? [];
   const underutilized = data.underutilized_members ?? [];
 
   if ((data.total_members ?? 0) === 0) {
@@ -183,9 +194,9 @@ export default function TeamAnalyticsPanel({
           <p className="mb-3 text-sm text-gray-600 dark:text-gray-300">
             Distribution index (Gini): <span className="font-semibold">{data.workload_gini.toFixed(2)}</span>
           </p>
-          {topContributors.length > 0 ? (
+          {workloadDistribution.length > 0 ? (
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={topContributors}>
+              <BarChart data={workloadDistribution}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
                 <YAxis />
@@ -194,7 +205,7 @@ export default function TeamAnalyticsPanel({
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <p className="text-sm text-gray-500">No contributor breakdown available.</p>
+            <p className="text-sm text-gray-500">No member workload data available.</p>
           )}
         </section>
       </div>
