@@ -107,6 +107,18 @@ export interface ProjectHealthMetrics {
   contributor_count: number;
 }
 
+export interface ProjectHealthThresholds {
+  min_hours: number;
+  min_tasks: number;
+  min_days: number;
+}
+
+export interface ProjectHealthThresholds {
+  min_hours: number;
+  min_tasks: number;
+  min_days: number;
+}
+
 export interface LegacyNestedProjectHealth {
   project_id: number;
   project_name: string;
@@ -135,8 +147,11 @@ export interface ProjectHealthResponse {
   enabled?: boolean;
   project_id?: number;
   project_name?: string;
-  health_score?: number;  // 0-100
-  health_status?: 'healthy' | 'moderate' | 'at_risk' | 'critical';
+  health_score?: number | null;  // 0-100
+  health_status?: 'healthy' | 'moderate' | 'at_risk' | 'critical' | null;
+  insufficient_data?: boolean;
+  data_thresholds?: ProjectHealthThresholds;
+  recommendations?: string[];
   metrics?: ProjectHealthMetrics;
   insights?: Insight[];
   generated_at?: string;

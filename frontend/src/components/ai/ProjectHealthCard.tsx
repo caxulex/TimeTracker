@@ -24,8 +24,14 @@ interface ProjectHealthCardProps {
 
 interface NormalizedProjectHealth {
   projectName: string;
-  healthScore: number;
-  healthStatus: 'healthy' | 'moderate' | 'at_risk' | 'critical';
+  healthScore: number | null;
+  healthStatus: 'healthy' | 'moderate' | 'at_risk' | 'critical' | null;
+  insufficientData: boolean;
+  dataThresholds: {
+    minHours: number;
+    minTasks: number;
+    minDays: number;
+  };
   analysis: string;
   generatedAt?: string;
   recommendations: string[];
@@ -44,6 +50,37 @@ function normalizeProjectHealth(
   fallbackProjectName?: string,
 ): NormalizedProjectHealth | null {
   if (!data?.success) return null;
+
+  if (data.insufficient_data === true) {
+    const thresholds = data.data_thresholds || {
+      min_hours: 5,
+      min_tasks: 3,
+      min_days: 3,
+    };
+
+    return {
+      projectName: data.project_name || fallbackProjectName || 'Project',
+      healthScore: null,
+      healthStatus: null,
+      insufficientData: true,
+      dataThresholds: {
+        minHours: thresholds.min_hours,
+        minTasks: thresholds.min_tasks,
+        minDays: thresholds.min_days,
+      },
+      analysis: "Project doesn't have enough activity yet to assess.",
+      generatedAt: data.generated_at,
+      recommendations: data.recommendations || [],
+      metrics: {
+        totalHours: data.metrics?.total_hours,
+        thisWeekHours: data.metrics?.this_week_hours,
+        lastWeekHours: data.metrics?.last_week_hours,
+        taskCompletionPct: data.metrics?.task_completion_rate,
+        contributorCount: data.metrics?.contributor_count,
+        activityTrend: data.metrics?.activity_trend,
+      },
+    };
+  }
 
   // Preferred shape: flat backend contract.
   if (
@@ -66,11 +103,17 @@ function normalizeProjectHealth(
       projectName: data.project_name || fallbackProjectName || 'Project',
       healthScore: data.health_score,
       healthStatus: data.health_status,
+      insufficientData: false,
+      dataThresholds: {
+        minHours: 5,
+        minTasks: 3,
+        minDays: 3,
+      },
       analysis:
         insightDescriptions[0] ||
         'Health score generated from recent project activity, completion pace, and collaboration signals.',
       generatedAt: data.generated_at,
-      recommendations,
+      recommendations: Array.from(new Set([...(data.recommendations || []), ...recommendations])),
       metrics: {
         totalHours: data.metrics?.total_hours,
         thisWeekHours: data.metrics?.this_week_hours,
@@ -88,6 +131,12 @@ function normalizeProjectHealth(
       projectName: data.health.project_name || fallbackProjectName || 'Project',
       healthScore: data.health.health_score,
       healthStatus: data.health.status,
+      insufficientData: false,
+      dataThresholds: {
+        minHours: 5,
+        minTasks: 3,
+        minDays: 3,
+      },
       analysis: data.health.ai_analysis || 'Project health assessment ready.',
       generatedAt: data.health.generated_at,
       recommendations: data.health.recommendations || [],
@@ -150,6 +199,129 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
         return <Minus className="text-gray-400" size={16} />;
     }
   };
+
+  const renderInsufficientDataState = (health: NormalizedProjectHealth) => {
+    const disclosure = `Need at least ${health.dataThresholds.minHours}h logged, ${health.dataThresholds.minTasks} tasks with activity, or ${health.dataThresholds.minDays} active days in the assessment window.`;
+
+    if (compact) {
+      return (
+        <div
+          className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 ${className}`}
+          role="region"
+          aria-label={`Project health for ${health.projectName}: not enough activity to assess yet`}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="text-amber-500 mt-0.5" size={18} aria-hidden="true" />
+              <div>
+                <p className="font-medium text-gray-900 dark:text-gray-100 text-sm">
+                  Not enough activity to assess yet
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  {disclosure}
+                </p>
+              </div>
+            </div>
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
+            {typeof health.metrics.totalHours === 'number' ? `${health.metrics.totalHours.toFixed(1)}h` : '—'} logged · {' '}
+            {typeof health.metrics.taskCompletionPct === 'number' ? `${health.metrics.taskCompletionPct.toFixed(0)}% complete` : '—'} · {' '}
+            {typeof health.metrics.contributorCount === 'number' ? `${health.metrics.contributorCount} contributors` : '—'}
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div 
+        className={`bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden ${className}`}
+        role="region"
+        aria-label={`AI Project Health Analysis for ${health.projectName}`}
+      >
+        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="text-amber-500" size={24} aria-hidden="true" />
+              <div>
+                <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+                  {health.projectName}
+                </h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Not enough activity to assess yet
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  {disclosure}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={handleRefresh}
+              disabled={refreshMutation.isPending}
+              className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300
+                hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+              title="Refresh project health analysis"
+              aria-label={refreshMutation.isPending ? 'Refreshing project health data...' : 'Refresh project health analysis'}
+            >
+              <RefreshCw 
+                size={18} 
+                className={refreshMutation.isPending ? 'animate-spin' : ''} 
+                aria-hidden="true"
+              />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-4 bg-gray-50 dark:bg-gray-700/50">
+          <p className="text-sm text-gray-700 dark:text-gray-300">
+            {health.analysis}
+          </p>
+        </div>
+
+        <div className="p-4 grid grid-cols-2 md:grid-cols-5 gap-4">
+          <div className="text-center">
+            <Target className="mx-auto text-blue-500 mb-1" size={18} />
+            <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">
+              {typeof health.metrics.totalHours === 'number' ? `${health.metrics.totalHours.toFixed(1)}h` : '—'}
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Total Hours</p>
+          </div>
+          <div className="text-center">
+            <Calendar className="mx-auto text-green-500 mb-1" size={18} />
+            <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">
+              {typeof health.metrics.thisWeekHours === 'number' ? `${health.metrics.thisWeekHours.toFixed(1)}h` : '—'}
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">This Week</p>
+          </div>
+          <div className="text-center">
+            <BarChart3 className="mx-auto text-orange-500 mb-1" size={18} />
+            <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">
+              {typeof health.metrics.lastWeekHours === 'number' ? `${health.metrics.lastWeekHours.toFixed(1)}h` : '—'}
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Last Week</p>
+          </div>
+          <div className="text-center">
+            <Calendar className="mx-auto text-green-500 mb-1" size={18} />
+            <p className="text-lg font-semibold text-gray-800 dark:text-gray-200 flex items-center justify-center gap-1">
+              {typeof health.metrics.taskCompletionPct === 'number' ? `${health.metrics.taskCompletionPct.toFixed(0)}%` : '—'}
+              {health.metrics.activityTrend ? getTrendIcon(health.metrics.activityTrend) : null}
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Completion</p>
+          </div>
+          <div className="text-center">
+            <Users className="mx-auto text-purple-500 mb-1" size={18} />
+            <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">
+              {typeof health.metrics.contributorCount === 'number' ? health.metrics.contributorCount : '—'}
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Contributors</p>
+          </div>
+        </div>
+
+        <div className="px-4 py-2 bg-gray-50 dark:bg-gray-700/30 text-xs text-gray-400 dark:text-gray-500 text-center">
+          Generated {health.generatedAt ? new Date(health.generatedAt).toLocaleString() : 'just now'}
+        </div>
+      </div>
+    );
+  };
   
   // Not enabled
   if (data && !data.enabled) {
@@ -209,6 +381,13 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
 
   const health = normalizeProjectHealth(data, projectName);
   if (!health) return null;
+
+  if (health.insufficientData) {
+    return renderInsufficientDataState(health);
+  }
+
+  const displayHealthScore = health.healthScore ?? 0;
+  const displayHealthStatus = health.healthStatus ?? 'moderate';
   
   // Compact mode
   if (compact) {
@@ -220,12 +399,12 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            {getStatusIcon(health.healthStatus)}
+            {getStatusIcon(displayHealthStatus)}
             <span className="font-medium text-gray-800 dark:text-gray-200 text-sm">
               {health.projectName}
             </span>
           </div>
-          <div className={`text-xl font-bold ${getHealthColor(health.healthScore)}`}>
+          <div className={`text-xl font-bold ${getHealthColor(displayHealthScore)}`}>
             {health.healthScore}
           </div>
         </div>
@@ -243,20 +422,20 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
       <div className="p-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {getStatusIcon(health.healthStatus)}
+            {getStatusIcon(displayHealthStatus)}
             <div>
               <h3 className="font-semibold text-gray-900 dark:text-gray-100">
                 {health.projectName}
               </h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 capitalize">
-                Status: {health.healthStatus.replace('_', ' ')}
+                Status: {displayHealthStatus.replace('_', ' ')}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <div className="text-center" role="status" aria-live="polite">
               <div 
-                className={`text-3xl font-bold ${getHealthColor(health.healthScore)}`}
+                className={`text-3xl font-bold ${getHealthColor(displayHealthScore)}`}
                 aria-label={`Health score: ${health.healthScore} out of 100`}
               >
                 {health.healthScore}

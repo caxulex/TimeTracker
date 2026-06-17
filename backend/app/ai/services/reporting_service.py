@@ -13,22 +13,17 @@ Uses AI (Gemini/OpenAI) to transform data into actionable insights.
 import logging
 import statistics
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.services.ai_client import AIClient, get_ai_client
 from app.ai.utils.cache_manager import AICacheManager, get_cache_manager
-from app.ai.utils.tenant_time import (
-    get_tenant_today_for_user,
-    resolve_tenant_timezone_for_user,
-)
 from app.services.ai_feature_service import AIFeatureManager
-from app.utils.timewindow import local_today, now_utc, range_bounds
+from app.utils.timewindow import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -141,9 +136,6 @@ class ReportSummary:
             "most_productive_day": most_productive_day,
             "entry_count": self.metrics.get("entry_count", 0),
             "trend": self.metrics.get("trend", "stable"),
-            "comparison_label": self.metrics.get("comparison_label", "vs Last Week"),
-            "comparison_range_label": self.metrics.get("comparison_range_label", "full week"),
-            "comparison_is_week_complete": self.metrics.get("comparison_is_week_complete", True),
         }
 
         return {
@@ -184,61 +176,6 @@ class AIReportingService:
         self._feature_manager: Optional[AIFeatureManager] = None
         self._last_tokens_used: int = 0  # Track tokens from last AI call
 
-    def _weekday_name(self, value: date) -> str:
-        """Return short weekday name for UI text."""
-        return value.strftime("%a")
-
-    def _build_week_comparison_context(
-        self,
-        week_start: date,
-        week_end: date,
-        reference_now: datetime,
-        tz: str,
-    ) -> Dict[str, Any]:
-        """Build same-day comparison context for current and previous week."""
-        zone = ZoneInfo(tz)
-        reference_now_local = reference_now.astimezone(zone)
-        comparison_end = min(reference_now_local.date(), week_end)
-        if comparison_end < week_start:
-            comparison_end = week_start
-
-        week_start_local = datetime.combine(week_start, time.min, tzinfo=zone)
-        comparison_cutoff_local = max(reference_now_local, week_start_local)
-
-        previous_week_start = week_start - timedelta(days=7)
-        previous_week_end = comparison_end - timedelta(days=7)
-        previous_comparison_cutoff_local = comparison_cutoff_local - timedelta(days=7)
-        is_week_complete = comparison_end == week_end
-
-        if is_week_complete:
-            comparison_label = "vs Last Week"
-            comparison_suffix = "vs last week"
-            comparison_range_label = "full week"
-        else:
-            comparison_range_label = f"{self._weekday_name(week_start)}-{self._weekday_name(comparison_end)}"
-            comparison_label = f"vs Same Period Last Week ({comparison_range_label})"
-            comparison_suffix = f"vs same period last week ({comparison_range_label})"
-
-        return {
-            "comparison_end": comparison_end,
-            "comparison_cutoff_utc": comparison_cutoff_local.astimezone(timezone.utc),
-            "previous_comparison_cutoff_utc": previous_comparison_cutoff_local.astimezone(timezone.utc),
-            "previous_week_start": previous_week_start,
-            "previous_week_end": previous_week_end,
-            "is_week_complete": is_week_complete,
-            "comparison_label": comparison_label,
-            "comparison_suffix": comparison_suffix,
-            "comparison_range_label": comparison_range_label,
-        }
-
-    def _filter_primary_insights(self, insights: List[Insight]) -> List[Insight]:
-        """Return non-attention insights for the main insights list."""
-        return [
-            insight
-            for insight in insights
-            if insight.severity not in [InsightSeverity.WARNING, InsightSeverity.CRITICAL]
-        ]
-
     async def _get_feature_manager(self) -> AIFeatureManager:
         """Get or create feature manager."""
         if self._feature_manager is None:
@@ -271,39 +208,31 @@ class AIReportingService:
                     "message": "AI report summaries are disabled"
                 }
 
-            # Calculate week boundaries in tenant timezone and convert to UTC only for filtering.
-            tenant_tz = await resolve_tenant_timezone_for_user(self.db, user_id)
-            current_utc = now_utc()
-            today_local = local_today(tenant_tz)
-            week_start = today_local - timedelta(days=today_local.weekday())
+            # Calculate week boundaries in UTC for consistent timezone handling
+            # Time entries are stored in UTC, so we must use UTC dates for comparison
+            now_utc = datetime.now(timezone.utc)
+            today_utc = now_utc.date()
+            week_start = today_utc - timedelta(days=today_utc.weekday())
             week_end = week_start + timedelta(days=6)
 
             # Gather data
-            metrics = await self._gather_weekly_metrics(
-                user_id,
-                week_start,
-                week_end,
-                team_id,
-                tz=tenant_tz,
-                reference_now_utc=current_utc,
-            )
-            all_insights = await self._generate_insights(metrics, week_start, week_end)
-            insights = self._filter_primary_insights(all_insights)
+            metrics = await self._gather_weekly_metrics(user_id, week_start, week_end, team_id)
+            insights = await self._generate_insights(metrics, week_start, week_end)
 
             # Generate AI summary if enabled
             if include_ai and self.ai_client:
-                summary_text = await self._generate_ai_summary(metrics, all_insights)
+                summary_text = await self._generate_ai_summary(metrics, insights)
             else:
                 summary_text = self._generate_rule_based_summary(metrics)
 
             # Build highlights
-            highlights = self._extract_highlights(metrics, all_insights)
+            highlights = self._extract_highlights(metrics, insights)
 
             # Build attention items
-            attention_needed = self._extract_attention_items(all_insights)
+            attention_needed = self._extract_attention_items(insights)
 
             # Build recommendations
-            recommendations = self._generate_recommendations(metrics, all_insights)
+            recommendations = self._generate_recommendations(metrics, insights)
 
             summary = ReportSummary(
                 period_start=week_start,
@@ -375,7 +304,50 @@ class AIReportingService:
                 return {"success": False, "error": "Project not found"}
 
             # Gather project metrics
-            metrics = await self._gather_project_metrics(project_id, user_id)
+            metrics = await self._gather_project_metrics(project_id)
+
+            data_thresholds = {
+                "min_hours": 5,
+                "min_tasks": 3,
+                "min_days": 3,
+            }
+
+            has_enough_activity = (
+                metrics.get("total_hours", 0) >= data_thresholds["min_hours"]
+                or metrics.get("total_tasks", 0) >= data_thresholds["min_tasks"]
+                or metrics.get("activity_days", 0) >= data_thresholds["min_days"]
+            )
+
+            if not has_enough_activity:
+                insufficient_recommendation = (
+                    f"Need at least {data_thresholds['min_hours']} hours of logged work, "
+                    f"{data_thresholds['min_tasks']} tasks with activity, or "
+                    f"{data_thresholds['min_days']} days of activity in the assessment window "
+                    "to provide a health assessment."
+                )
+
+                insufficient_insight = Insight(
+                    type=InsightType.PROJECT_HEALTH,
+                    title="Not enough activity to assess yet",
+                    description="Project doesn't have enough activity yet to assess.",
+                    severity=InsightSeverity.INFO,
+                    action_items=[insufficient_recommendation],
+                )
+
+                return {
+                    "success": True,
+                    "enabled": True,
+                    "project_id": project_id,
+                    "project_name": project.name,
+                    "health_score": None,
+                    "health_status": None,
+                    "insufficient_data": True,
+                    "data_thresholds": data_thresholds,
+                    "metrics": metrics,
+                    "insights": [insufficient_insight.to_dict()],
+                    "recommendations": [insufficient_recommendation],
+                    "generated_at": now_utc().isoformat()
+                }
 
             # Generate health score (0-100)
             health_score = self._calculate_health_score(metrics)
@@ -426,6 +398,8 @@ class AIReportingService:
                 "project_name": project.name,
                 "health_score": health_score,
                 "health_status": self._get_health_status(health_score),
+                "insufficient_data": False,
+                "data_thresholds": data_thresholds,
                 "metrics": metrics,
                 "insights": [i.to_dict() for i in insights],
                 "generated_at": now_utc().isoformat()
@@ -546,9 +520,7 @@ class AIReportingService:
         user_id: int,
         week_start: date,
         week_end: date,
-        team_id: Optional[int] = None,
-        tz: str = "UTC",
-        reference_now_utc: Optional[datetime] = None,
+        team_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """Gather metrics for weekly summary."""
 
@@ -559,8 +531,10 @@ class AIReportingService:
             "week_end": week_end.isoformat()
         }
 
-        # Convert local week boundaries to UTC for proper comparison with UTC timestamps.
-        week_start_dt, week_end_dt = range_bounds(week_start, week_end, tz)
+        # Convert date boundaries to UTC datetimes for proper comparison with UTC timestamps
+        # week_start at 00:00:00 UTC, week_end at 23:59:59.999999 UTC
+        week_start_dt = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
+        week_end_dt = datetime.combine(week_end, datetime.max.time()).replace(tzinfo=timezone.utc)
 
         # Get relevant users
         if team_id:
@@ -578,7 +552,7 @@ class AIReportingService:
         metrics["user_count"] = len(user_ids)
 
         # Current time for calculating running timer durations
-        now_value = reference_now_utc or now_utc()
+        now_utc = datetime.now(timezone.utc)
 
         # Total hours this week - fetch entries that OVERLAP with this week
         # This includes: entries that started this week, entries from before still running,
@@ -601,31 +575,17 @@ class AIReportingService:
 
         # Calculate only the portion that falls within this week
         total_seconds = sum(
-            self._calculate_entry_duration_for_period(e, week_start_dt, week_end_dt, now_value)
+            self._calculate_entry_duration_for_period(e, week_start_dt, week_end_dt, now_utc)
             for e in entries
         )
 
         metrics["total_hours"] = round(total_seconds / 3600, 1)
 
-        # Compare using equivalent day of week when current week is still in progress
-        comparison_context = self._build_week_comparison_context(
-            week_start=week_start,
-            week_end=week_end,
-            reference_now=now_value,
-            tz=tz,
-        )
-        last_week_start = comparison_context["previous_week_start"]
-        last_week_start_dt, _ = range_bounds(last_week_start, last_week_start, tz)
-        last_week_end_dt = comparison_context["previous_comparison_cutoff_utc"]
-
-        # This week comparison window uses week start through the current timestamp.
-        comparison_end = comparison_context["comparison_end"]
-        comparison_end_dt = comparison_context["comparison_cutoff_utc"]
-
-        current_comparison_seconds = sum(
-            self._calculate_entry_duration_for_period(e, week_start_dt, comparison_end_dt, now_value)
-            for e in entries
-        )
+        # Compare to last week
+        last_week_start = week_start - timedelta(days=7)
+        last_week_end = week_end - timedelta(days=7)
+        last_week_start_dt = datetime.combine(last_week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
+        last_week_end_dt = datetime.combine(last_week_end, datetime.max.time()).replace(tzinfo=timezone.utc)
 
         # Fetch entries that overlapped with last week (same logic as this week)
         last_entries_result = await self.db.execute(
@@ -645,25 +605,17 @@ class AIReportingService:
 
         # Calculate only the portion that fell within last week
         last_week_seconds = sum(
-            self._calculate_entry_duration_for_period(e, last_week_start_dt, last_week_end_dt, now_value)
+            self._calculate_entry_duration_for_period(e, last_week_start_dt, last_week_end_dt, now_utc)
             for e in last_entries
         )
 
         metrics["last_week_hours"] = round(last_week_seconds / 3600, 1)
-        metrics["comparison_period_hours"] = round(current_comparison_seconds / 3600, 1)
-        metrics["comparison_period_seconds"] = current_comparison_seconds
-        metrics["last_week_comparison_seconds"] = last_week_seconds
-        metrics["comparison_is_week_complete"] = comparison_context["is_week_complete"]
-        metrics["comparison_label"] = comparison_context["comparison_label"]
-        metrics["comparison_suffix"] = comparison_context["comparison_suffix"]
-        metrics["comparison_range_label"] = comparison_context["comparison_range_label"]
-        metrics["comparison_end"] = comparison_end.isoformat()
 
         if last_week_seconds > 0:
-            change_pct = ((current_comparison_seconds - last_week_seconds) / last_week_seconds) * 100
+            change_pct = ((total_seconds - last_week_seconds) / last_week_seconds) * 100
             metrics["hours_change_pct"] = round(change_pct, 1)
         else:
-            metrics["hours_change_pct"] = 0 if current_comparison_seconds == 0 else 100
+            metrics["hours_change_pct"] = 0 if total_seconds == 0 else 100
 
         # Projects worked on (count from entries that overlap with this week)
         projects_result = await self.db.execute(
@@ -767,16 +719,16 @@ class AIReportingService:
         metrics["entry_count"] = len(entries)
 
         # Trend indicator
-        if current_comparison_seconds > last_week_seconds:
+        if total_seconds > last_week_seconds:
             metrics["trend"] = "up"
-        elif current_comparison_seconds < last_week_seconds:
+        elif total_seconds < last_week_seconds:
             metrics["trend"] = "down"
         else:
             metrics["trend"] = "stable"
 
         return metrics
 
-    async def _gather_project_metrics(self, project_id: int, user_id: int) -> Dict[str, Any]:
+    async def _gather_project_metrics(self, project_id: int) -> Dict[str, Any]:
         """Gather metrics for project health."""
         from app.models import Task, TimeEntry
 
@@ -790,25 +742,22 @@ class AIReportingService:
         total_seconds = hours_result.scalar() or 0
         metrics["total_hours"] = round(total_seconds / 3600, 1)
 
-        # This week vs last week in tenant-local calendar, converted to UTC bounds.
-        tenant_tz = await resolve_tenant_timezone_for_user(self.db, user_id)
-        tenant_today = await get_tenant_today_for_user(self.db, user_id)
-        week_start = tenant_today - timedelta(days=tenant_today.weekday())
-        week_end = week_start + timedelta(days=6)
+        # This week vs last week
+        now_utc = datetime.now(timezone.utc)
+        today_utc = now_utc.date()
+        week_start = today_utc - timedelta(days=today_utc.weekday())
         last_week_start = week_start - timedelta(days=7)
-        last_week_end = last_week_start + timedelta(days=6)
 
-        # Convert tenant-local date ranges to UTC datetimes for DB filtering.
-        week_start_dt, week_end_dt = range_bounds(week_start, week_end, tenant_tz)
-        last_week_start_dt, last_week_end_dt = range_bounds(last_week_start, last_week_end, tenant_tz)
+        # Convert to UTC datetimes for proper comparison
+        week_start_dt = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
+        last_week_start_dt = datetime.combine(last_week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
 
         this_week_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
             .where(
                 and_(
                     TimeEntry.project_id == project_id,
-                    TimeEntry.start_time >= week_start_dt,
-                    TimeEntry.start_time < week_end_dt
+                    TimeEntry.start_time >= week_start_dt
                 )
             )
         )
@@ -820,7 +769,7 @@ class AIReportingService:
                 and_(
                     TimeEntry.project_id == project_id,
                     TimeEntry.start_time >= last_week_start_dt,
-                    TimeEntry.start_time < last_week_end_dt
+                    TimeEntry.start_time < week_start_dt
                 )
             )
         )
@@ -865,6 +814,20 @@ class AIReportingService:
         )
         metrics["contributor_count"] = contributors_result.scalar() or 0
 
+        # Activity days over the trailing 30 days to detect sparse-signal projects.
+        thirty_days_ago = now_utc - timedelta(days=30)
+        thirty_days_ago_dt = datetime.combine(thirty_days_ago.date(), datetime.min.time()).replace(tzinfo=timezone.utc)
+        activity_days_result = await self.db.execute(
+            select(func.count(func.distinct(func.date(TimeEntry.start_time))))
+            .where(
+                and_(
+                    TimeEntry.project_id == project_id,
+                    TimeEntry.start_time >= thirty_days_ago_dt,
+                )
+            )
+        )
+        metrics["activity_days"] = activity_days_result.scalar() or 0
+
         return metrics
 
     async def _gather_user_metrics(self, user_id: int) -> Dict[str, Any]:
@@ -883,19 +846,18 @@ class AIReportingService:
             metrics["user_name"] = user.name
             metrics["expected_hours"] = user.expected_hours_per_week or 40
 
-        # Last 30 days in tenant-local calendar, converted to UTC bounds.
-        tenant_tz = await resolve_tenant_timezone_for_user(self.db, user_id)
-        tenant_today = await get_tenant_today_for_user(self.db, user_id)
-        thirty_days_ago = tenant_today - timedelta(days=30)
-        thirty_days_ago_dt, tomorrow_dt = range_bounds(thirty_days_ago, tenant_today, tenant_tz)
+        # Last 30 days hours - use UTC datetime for consistent timezone handling
+        now_utc = datetime.now(timezone.utc)
+        today_utc = now_utc.date()
+        thirty_days_ago = today_utc - timedelta(days=30)
+        thirty_days_ago_dt = datetime.combine(thirty_days_ago, datetime.min.time()).replace(tzinfo=timezone.utc)
 
         hours_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
             .where(
                 and_(
                     TimeEntry.user_id == user_id,
-                    TimeEntry.start_time >= thirty_days_ago_dt,
-                    TimeEntry.start_time < tomorrow_dt
+                    TimeEntry.start_time >= thirty_days_ago_dt
                 )
             )
         )
@@ -908,47 +870,12 @@ class AIReportingService:
             .where(
                 and_(
                     TimeEntry.user_id == user_id,
-                    TimeEntry.start_time >= thirty_days_ago_dt,
-                    TimeEntry.start_time < tomorrow_dt
+                    TimeEntry.start_time >= thirty_days_ago_dt
                 )
             )
         )
         work_days = daily_result.scalar() or 1
-        # Phase 4b: replace inline avg with centralized service
-        from decimal import Decimal as _Decimal
-        from app.services.avg_hours_service import compute_avg_hours as _compute_avg_hours
-
-        # Query today's hours separately so the service can align the numerator
-        # with the denominator when exclude_today=True.
-        _today_start_dt, _today_end_dt = range_bounds(tenant_today, tenant_today, tenant_tz)
-        _today_hours_result = await self.db.execute(
-            select(func.sum(TimeEntry.duration_seconds))
-            .where(
-                and_(
-                    TimeEntry.user_id == user_id,
-                    TimeEntry.start_time >= _today_start_dt,
-                    TimeEntry.start_time < _today_end_dt,
-                )
-            )
-        )
-        _today_seconds = _today_hours_result.scalar() or 0
-
-        _avg_result = await _compute_avg_hours(
-            self.db,
-            user,
-            _Decimal(str(round(total_seconds / 3600, 10))),
-            thirty_days_ago,
-            tenant_today,
-            today=tenant_today,
-            exclude_today=True,
-            today_hours=_Decimal(str(round(_today_seconds / 3600, 10))),
-            fallback_to_days_with_entries=True,
-            days_with_entries=int(work_days),
-        )
-        metrics["avg_daily_hours"] = float(_avg_result.value)
-        metrics["avg_denominator_days"] = _avg_result.denominator_days
-        metrics["avg_denominator_type"] = _avg_result.denominator_type
-        metrics["avg_working_days_source"] = _avg_result.working_days_source
+        metrics["avg_daily_hours"] = round((total_seconds / 3600) / work_days, 1)
 
         # Active projects
         projects_result = await self.db.execute(
@@ -956,18 +883,17 @@ class AIReportingService:
             .where(
                 and_(
                     TimeEntry.user_id == user_id,
-                    TimeEntry.start_time >= thirty_days_ago_dt,
-                    TimeEntry.start_time < tomorrow_dt
+                    TimeEntry.start_time >= thirty_days_ago_dt
                 )
             )
         )
         metrics["active_projects"] = projects_result.scalar() or 0
 
         # Productivity trend (compare last 2 weeks)
-        two_weeks_ago = tenant_today - timedelta(days=14)
-        one_week_ago = tenant_today - timedelta(days=7)
-        two_weeks_ago_dt, _ = range_bounds(two_weeks_ago, two_weeks_ago, tenant_tz)
-        one_week_ago_dt, _ = range_bounds(one_week_ago, one_week_ago, tenant_tz)
+        two_weeks_ago = today_utc - timedelta(days=14)
+        one_week_ago = today_utc - timedelta(days=7)
+        two_weeks_ago_dt = datetime.combine(two_weeks_ago, datetime.min.time()).replace(tzinfo=timezone.utc)
+        one_week_ago_dt = datetime.combine(one_week_ago, datetime.min.time()).replace(tzinfo=timezone.utc)
 
         week1_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
@@ -986,8 +912,7 @@ class AIReportingService:
             .where(
                 and_(
                     TimeEntry.user_id == user_id,
-                    TimeEntry.start_time >= one_week_ago_dt,
-                    TimeEntry.start_time < tomorrow_dt
+                    TimeEntry.start_time >= one_week_ago_dt
                 )
             )
         )
@@ -1024,7 +949,7 @@ class AIReportingService:
             insights.append(Insight(
                 type=InsightType.TREND,
                 title="Hours Increased",
-                description=f"Time logged increased {change_pct:.0f}% {metrics.get('comparison_suffix', 'vs last week')}",
+                description=f"Time logged increased {change_pct:.0f}% vs last week",
                 severity=InsightSeverity.INFO,
                 metric_value=change_pct,
                 metric_label="% change"
@@ -1033,7 +958,7 @@ class AIReportingService:
             insights.append(Insight(
                 type=InsightType.TREND,
                 title="Hours Decreased",
-                description=f"Time logged decreased {abs(change_pct):.0f}% {metrics.get('comparison_suffix', 'vs last week')}",
+                description=f"Time logged decreased {abs(change_pct):.0f}% vs last week",
                 severity=InsightSeverity.WARNING,
                 metric_value=change_pct,
                 metric_label="% change"
@@ -1078,8 +1003,7 @@ class AIReportingService:
 
 Data:
 - Total hours: {metrics.get('total_hours', 0)}
-- Comparison window: {metrics.get('comparison_range_label', 'full week')}
-- Change over comparison window: {metrics.get('hours_change_pct', 0):.0f}% {metrics.get('comparison_suffix', 'vs last week')}
+- Change from last week: {metrics.get('hours_change_pct', 0):.0f}%
 - Projects worked on: {metrics.get('projects_count', 0)}
 - Average daily hours: {metrics.get('avg_daily_hours', 0):.1f}
 - Top project: {metrics.get('top_projects', [{}])[0].get('name', 'N/A') if metrics.get('top_projects') else 'N/A'}
@@ -1087,8 +1011,7 @@ Data:
 Key observations:
 {chr(10).join(['- ' + i.description for i in insights[:3]])}
 
-Write 2-3 sentences summarizing this week's activity. Be concise and actionable.
-If the comparison window is not "full week", describe the change as a same-period comparison and avoid implying week-over-week underperformance from incomplete-week data."""
+Write 2-3 sentences summarizing this week's activity. Be concise and actionable."""
 
             response = await self.ai_client.generate(
                 system_prompt="You are a professional productivity assistant. Write clear, concise summaries.",
@@ -1120,11 +1043,10 @@ If the comparison window is not "full week", describe the change as a same-perio
 
         parts = [f"This week you logged {total_hours:.1f} hours across {projects} projects."]
 
-        comparison_suffix = metrics.get("comparison_suffix", "vs last week")
         if change_pct > 10:
-            parts.append(f"That's {change_pct:.0f}% higher {comparison_suffix}.")
+            parts.append(f"That's {change_pct:.0f}% more than last week.")
         elif change_pct < -10:
-            parts.append(f"That's {abs(change_pct):.0f}% lower {comparison_suffix}.")
+            parts.append(f"That's {abs(change_pct):.0f}% less than last week.")
 
         return " ".join(parts)
 
@@ -1150,8 +1072,7 @@ If the comparison window is not "full week", describe the change as a same-perio
         change_pct = metrics.get("hours_change_pct", 0)
         if abs(change_pct) > 10:
             direction = "up" if change_pct > 0 else "down"
-            comparison_suffix = metrics.get("comparison_suffix", "vs last week")
-            highlights.append(f"Productivity {direction} {abs(change_pct):.0f}% {comparison_suffix}")
+            highlights.append(f"Productivity {direction} {abs(change_pct):.0f}% vs last week")
 
         return highlights[:5]
 
