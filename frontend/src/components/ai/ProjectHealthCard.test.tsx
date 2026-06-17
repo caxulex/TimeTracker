@@ -34,6 +34,44 @@ const baseFlatResponse: ProjectHealthResponse = {
   generated_at: '2026-06-15T10:30:00.000Z',
 };
 
+const insufficientResponse: ProjectHealthResponse = {
+  success: true,
+  enabled: true,
+  project_id: 9,
+  project_name: 'Aloha',
+  insufficient_data: true,
+  data_thresholds: {
+    min_hours: 5,
+    min_tasks: 3,
+    min_days: 3,
+  },
+  metrics: {
+    total_hours: 1.1,
+    this_week_hours: 1.1,
+    last_week_hours: 0,
+    activity_trend: 'new',
+    total_tasks: 0,
+    completed_tasks: 0,
+    task_completion_rate: 0,
+    contributor_count: 1,
+  },
+  insights: [
+    {
+      type: 'anomaly' as const,
+      severity: 'info' as const,
+      title: 'Not enough activity to assess yet',
+      description: "Project doesn't have enough activity yet to assess.",
+      action_items: [
+        'Need at least 5 hours of logged work, 3 tasks with activity, or 3 days of activity in the assessment window to provide a health assessment.',
+      ],
+    },
+  ],
+  recommendations: [
+    'Need at least 5 hours of logged work, 3 tasks with activity, or 3 days of activity in the assessment window to provide a health assessment.',
+  ],
+  generated_at: '2026-06-16T10:30:00.000Z',
+};
+
 let mockedData: ProjectHealthResponse = { ...baseFlatResponse };
 
 vi.mock('../../hooks/useReportingServices', () => ({
@@ -99,6 +137,49 @@ describe('ProjectHealthCard', () => {
     expect(screen.getByLabelText(/Health score: 64 out of 100/i)).toBeInTheDocument();
     expect(screen.getByText(/Legacy nested payload still works\./i)).toBeInTheDocument();
     expect(screen.getByText(/Legacy recommendation/i)).toBeInTheDocument();
+  });
+
+  it('renders the insufficient-activity state when the backend marks sparse data', () => {
+    mockedData = insufficientResponse;
+
+    render(<ProjectHealthCard projectId={9} />);
+
+    expect(screen.getByText(/Not enough activity to assess yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/Need at least 5h logged, 3 tasks with activity, or 3 active days in the assessment window\./i)).toBeInTheDocument();
+    expect(screen.getAllByText('1.1h')).toHaveLength(2);
+    expect(screen.getByText('0%')).toBeInTheDocument();
+    expect(screen.getByText('1')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Health score:/i)).toBeNull();
+    expect(screen.queryByText(/Recommendations/i)).toBeNull();
+  });
+
+  it('keeps the existing render path when the insufficient_data flag is missing', () => {
+    mockedData = {
+      success: true,
+      enabled: true,
+      project_id: 9,
+      project_name: 'Fallback Apollo',
+      health_score: 61,
+      health_status: 'moderate',
+      metrics: {
+        total_hours: 5,
+        this_week_hours: 2,
+        last_week_hours: 3,
+        activity_trend: 'stable',
+        total_tasks: 2,
+        completed_tasks: 1,
+        task_completion_rate: 0.5,
+        contributor_count: 2,
+      },
+      insights: [],
+      generated_at: '2026-06-16T10:30:00.000Z',
+    } as ProjectHealthResponse;
+
+    render(<ProjectHealthCard projectId={9} />);
+
+    expect(screen.getByText(/Fallback Apollo/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Health score: 61 out of 100/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Not enough activity to assess yet/i)).toBeNull();
   });
 
   it('returns null when required health fields are absent', () => {

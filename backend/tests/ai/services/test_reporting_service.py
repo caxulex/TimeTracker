@@ -191,7 +191,7 @@ async def test_generate_project_health_returns_flat_response_contract(monkeypatc
     async def fake_feature_manager():
         return _EnabledFeatureManager()
 
-    async def fake_project_metrics(_project_id, _user_id):
+    async def fake_project_metrics(*_args):
         return {
             "total_hours": 140.0,
             "this_week_hours": 28.0,
@@ -218,3 +218,160 @@ async def test_generate_project_health_returns_flat_response_contract(monkeypatc
     assert isinstance(result["insights"], list)
     assert "generated_at" in result
     assert "health" not in result
+
+
+@pytest.mark.asyncio
+async def test_generate_project_health_marks_sparse_projects_as_insufficient_data(monkeypatch: pytest.MonkeyPatch):
+    async def fake_execute(_statement):
+        return _Result(scalar_value=SimpleNamespace(id=77, name="Aloha"))
+
+    async def fake_feature_manager():
+        return _EnabledFeatureManager()
+
+    async def fake_project_metrics(*_args):
+        return {
+            "total_hours": 1.1,
+            "this_week_hours": 1.1,
+            "last_week_hours": 0,
+            "activity_trend": "new",
+            "total_tasks": 0,
+            "completed_tasks": 0,
+            "task_completion_rate": 0,
+            "contributor_count": 1,
+            "activity_days": 1,
+        }
+
+    service = _service(_DB(fake_execute))
+    monkeypatch.setattr(service, "_get_feature_manager", fake_feature_manager)
+    monkeypatch.setattr(service, "_gather_project_metrics", fake_project_metrics)
+
+    result = await service.generate_project_health(user_id=11, project_id=77)
+
+    assert result["success"] is True
+    assert result["insufficient_data"] is True
+    assert result["health_score"] is None
+    assert result["health_status"] is None
+    assert result["data_thresholds"] == {"min_hours": 5, "min_tasks": 3, "min_days": 3}
+    assert result["recommendations"] == [
+        "Need at least 5 hours of logged work, 3 tasks with activity, or 3 days of activity in the assessment window to provide a health assessment."
+    ]
+    assert result["insights"][0]["description"] == "Project doesn't have enough activity yet to assess."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("metrics", "expected_insufficient"),
+    [
+        (
+            {
+                "total_hours": 4.9,
+                "this_week_hours": 4.9,
+                "last_week_hours": 0,
+                "activity_trend": "new",
+                "total_tasks": 0,
+                "completed_tasks": 0,
+                "task_completion_rate": 0,
+                "contributor_count": 0,
+                "activity_days": 0,
+            },
+            True,
+        ),
+        (
+            {
+                "total_hours": 0,
+                "this_week_hours": 0,
+                "last_week_hours": 0,
+                "activity_trend": "new",
+                "total_tasks": 2,
+                "completed_tasks": 0,
+                "task_completion_rate": 0,
+                "contributor_count": 0,
+                "activity_days": 0,
+            },
+            True,
+        ),
+        (
+            {
+                "total_hours": 0,
+                "this_week_hours": 0,
+                "last_week_hours": 0,
+                "activity_trend": "new",
+                "total_tasks": 0,
+                "completed_tasks": 0,
+                "task_completion_rate": 0,
+                "contributor_count": 0,
+                "activity_days": 2,
+            },
+            True,
+        ),
+        (
+            {
+                "total_hours": 5.0,
+                "this_week_hours": 5.0,
+                "last_week_hours": 0,
+                "activity_trend": "new",
+                "total_tasks": 0,
+                "completed_tasks": 0,
+                "task_completion_rate": 0,
+                "contributor_count": 0,
+                "activity_days": 0,
+            },
+            False,
+        ),
+        (
+            {
+                "total_hours": 0,
+                "this_week_hours": 0,
+                "last_week_hours": 0,
+                "activity_trend": "new",
+                "total_tasks": 3,
+                "completed_tasks": 0,
+                "task_completion_rate": 0,
+                "contributor_count": 0,
+                "activity_days": 0,
+            },
+            False,
+        ),
+        (
+            {
+                "total_hours": 0,
+                "this_week_hours": 0,
+                "last_week_hours": 0,
+                "activity_trend": "new",
+                "total_tasks": 0,
+                "completed_tasks": 0,
+                "task_completion_rate": 0,
+                "contributor_count": 0,
+                "activity_days": 3,
+            },
+            False,
+        ),
+    ],
+)
+async def test_generate_project_health_threshold_boundaries(
+    monkeypatch: pytest.MonkeyPatch,
+    metrics: dict,
+    expected_insufficient: bool,
+):
+    async def fake_execute(_statement):
+        return _Result(scalar_value=SimpleNamespace(id=77, name="Boundary Project"))
+
+    async def fake_feature_manager():
+        return _EnabledFeatureManager()
+
+    async def fake_project_metrics(*_args):
+        return metrics
+
+    service = _service(_DB(fake_execute))
+    monkeypatch.setattr(service, "_get_feature_manager", fake_feature_manager)
+    monkeypatch.setattr(service, "_gather_project_metrics", fake_project_metrics)
+
+    result = await service.generate_project_health(user_id=11, project_id=77)
+
+    assert result["insufficient_data"] is expected_insufficient
+    if expected_insufficient:
+        assert result["health_score"] is None
+        assert result["health_status"] is None
+    else:
+        assert isinstance(result["health_score"], int)
+        assert result["health_status"] in {"healthy", "moderate", "at_risk", "critical"}
