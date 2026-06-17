@@ -398,6 +398,7 @@ class AIReportingService:
                 "project_name": project.name,
                 "health_score": health_score,
                 "health_status": self._get_health_status(health_score),
+                "insufficient_data": False,
                 "data_thresholds": data_thresholds,
                 "metrics": metrics,
                 "insights": [i.to_dict() for i in insights],
