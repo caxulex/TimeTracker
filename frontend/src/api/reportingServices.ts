@@ -112,13 +112,11 @@ export interface ProjectHealthMetrics {
 export interface ProjectHealthThresholds {
   min_hours: number;
   min_tasks: number;
-  min_days: number;
 }
 
 export interface ProjectHealthThresholds {
   min_hours: number;
   min_tasks: number;
-  min_days: number;
 }
 
 export interface LegacyNestedProjectHealth {

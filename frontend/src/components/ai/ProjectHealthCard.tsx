@@ -30,7 +30,6 @@ interface NormalizedProjectHealth {
   dataThresholds: {
     minHours: number;
     minTasks: number;
-    minDays: number;
   };
   analysis: string;
   generatedAt?: string;
@@ -54,8 +53,7 @@ function normalizeProjectHealth(
   if (data.insufficient_data === true) {
     const thresholds = data.data_thresholds || {
       min_hours: 5,
-      min_tasks: 3,
-      min_days: 3,
+      min_tasks: 5,
     };
 
     return {
@@ -66,7 +64,6 @@ function normalizeProjectHealth(
       dataThresholds: {
         minHours: thresholds.min_hours,
         minTasks: thresholds.min_tasks,
-        minDays: thresholds.min_days,
       },
       analysis: "Project doesn't have enough activity yet to assess.",
       generatedAt: data.generated_at,
@@ -106,8 +103,7 @@ function normalizeProjectHealth(
       insufficientData: false,
       dataThresholds: {
         minHours: 5,
-        minTasks: 3,
-        minDays: 3,
+        minTasks: 5,
       },
       analysis:
         insightDescriptions[0] ||
@@ -134,8 +130,7 @@ function normalizeProjectHealth(
       insufficientData: false,
       dataThresholds: {
         minHours: 5,
-        minTasks: 3,
-        minDays: 3,
+        minTasks: 5,
       },
       analysis: data.health.ai_analysis || 'Project health assessment ready.',
       generatedAt: data.health.generated_at,
@@ -201,7 +196,7 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
   };
 
   const renderInsufficientDataState = (health: NormalizedProjectHealth) => {
-    const disclosure = `Need at least ${health.dataThresholds.minHours}h logged, ${health.dataThresholds.minTasks} tasks with activity, or ${health.dataThresholds.minDays} active days in the assessment window.`;
+    const disclosure = `Need at least ${health.dataThresholds.minHours} hours of logged work OR ${health.dataThresholds.minTasks} defined tasks`;
 
     if (compact) {
       return (
