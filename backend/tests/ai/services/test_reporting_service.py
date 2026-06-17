@@ -254,9 +254,9 @@ async def test_generate_project_health_marks_sparse_projects_as_insufficient_dat
     assert result["insufficient_data"] is True
     assert result["health_score"] is None
     assert result["health_status"] is None
-    assert result["data_thresholds"] == {"min_hours": 5, "min_tasks": 3, "min_days": 3}
+    assert result["data_thresholds"] == {"min_hours": 5, "min_tasks": 5}
     assert result["recommendations"] == [
-        "Need at least 5 hours of logged work, 3 tasks with activity, or 3 days of activity in the assessment window to provide a health assessment."
+        "Need at least 5 hours of logged work OR 5 defined tasks to provide a health assessment."
     ]
     assert result["insights"][0]["description"] == "Project doesn't have enough activity yet to assess."
 
@@ -267,29 +267,29 @@ async def test_generate_project_health_marks_sparse_projects_as_insufficient_dat
     [
         (
             {
+                "total_hours": 1.1,
+                "this_week_hours": 1.1,
+                "last_week_hours": 0,
+                "activity_trend": "new",
+                "total_tasks": 0,
+                "completed_tasks": 0,
+                "task_completion_rate": 0,
+                "contributor_count": 1,
+                "days_with_activity": 4,
+            },
+            True,
+        ),
+        (
+            {
                 "total_hours": 4.9,
                 "this_week_hours": 4.9,
                 "last_week_hours": 0,
                 "activity_trend": "new",
-                "total_tasks": 0,
+                "total_tasks": 4,
                 "completed_tasks": 0,
                 "task_completion_rate": 0,
-                "contributor_count": 0,
-                "activity_days": 0,
-            },
-            True,
-        ),
-        (
-            {
-                "total_hours": 0,
-                "this_week_hours": 0,
-                "last_week_hours": 0,
-                "activity_trend": "new",
-                "total_tasks": 2,
-                "completed_tasks": 0,
-                "task_completion_rate": 0,
-                "contributor_count": 0,
-                "activity_days": 0,
+                "contributor_count": 1,
+                "days_with_activity": 10,
             },
             True,
         ),
@@ -303,7 +303,7 @@ async def test_generate_project_health_marks_sparse_projects_as_insufficient_dat
                 "completed_tasks": 0,
                 "task_completion_rate": 0,
                 "contributor_count": 0,
-                "activity_days": 2,
+                "days_with_activity": 0,
             },
             True,
         ),
@@ -317,7 +317,7 @@ async def test_generate_project_health_marks_sparse_projects_as_insufficient_dat
                 "completed_tasks": 0,
                 "task_completion_rate": 0,
                 "contributor_count": 0,
-                "activity_days": 0,
+                "days_with_activity": 0,
             },
             False,
         ),
@@ -327,25 +327,39 @@ async def test_generate_project_health_marks_sparse_projects_as_insufficient_dat
                 "this_week_hours": 0,
                 "last_week_hours": 0,
                 "activity_trend": "new",
-                "total_tasks": 3,
+                "total_tasks": 5,
                 "completed_tasks": 0,
                 "task_completion_rate": 0,
                 "contributor_count": 0,
-                "activity_days": 0,
+                "days_with_activity": 0,
             },
             False,
         ),
         (
             {
-                "total_hours": 0,
-                "this_week_hours": 0,
+                "total_hours": 100,
+                "this_week_hours": 20,
+                "last_week_hours": 80,
+                "activity_trend": "stable",
+                "total_tasks": 10,
+                "completed_tasks": 6,
+                "task_completion_rate": 0.6,
+                "contributor_count": 6,
+                "days_with_activity": 30,
+            },
+            False,
+        ),
+        (
+            {
+                "total_hours": 6,
+                "this_week_hours": 6,
                 "last_week_hours": 0,
-                "activity_trend": "new",
-                "total_tasks": 0,
-                "completed_tasks": 0,
-                "task_completion_rate": 0,
-                "contributor_count": 0,
-                "activity_days": 3,
+                "activity_trend": "increasing",
+                "total_tasks": 6,
+                "completed_tasks": 2,
+                "task_completion_rate": 0.33,
+                "contributor_count": 2,
+                "days_with_activity": 2,
             },
             False,
         ),
@@ -398,7 +412,7 @@ async def test_aloha_like_sparse_data(monkeypatch: pytest.MonkeyPatch):
             "completed_tasks": 0,
             "task_completion_rate": 0,
             "contributor_count": 1,
-            "days_with_activity": 0,
+            "days_with_activity": 4,
         }
 
     service = _service(_DB(fake_execute))
@@ -454,7 +468,7 @@ async def test_just_meets_tasks_threshold(monkeypatch: pytest.MonkeyPatch):
             "this_week_hours": 0.0,
             "last_week_hours": 0,
             "activity_trend": "new",
-            "total_tasks": 3,
+            "total_tasks": 5,
             "completed_tasks": 0,
             "task_completion_rate": 0,
             "contributor_count": 1,
@@ -471,7 +485,7 @@ async def test_just_meets_tasks_threshold(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.mark.asyncio
-async def test_just_meets_days_threshold(monkeypatch: pytest.MonkeyPatch):
+async def test_days_only_no_longer_counts_as_sufficient(monkeypatch: pytest.MonkeyPatch):
     async def fake_execute(_statement):
         return _Result(scalar_value=SimpleNamespace(id=77, name="Days Boundary"))
 
@@ -497,7 +511,7 @@ async def test_just_meets_days_threshold(monkeypatch: pytest.MonkeyPatch):
 
     result = await service.generate_project_health(user_id=11, project_id=77)
 
-    assert result["insufficient_data"] is False
+    assert result["insufficient_data"] is True
 
 
 @pytest.mark.asyncio
@@ -514,11 +528,11 @@ async def test_none_meet_threshold(monkeypatch: pytest.MonkeyPatch):
             "this_week_hours": 4.9,
             "last_week_hours": 0,
             "activity_trend": "new",
-            "total_tasks": 2,
+            "total_tasks": 4,
             "completed_tasks": 0,
             "task_completion_rate": 0,
             "contributor_count": 1,
-            "days_with_activity": 2,
+            "days_with_activity": 10,
         }
 
     service = _service(_DB(fake_execute))

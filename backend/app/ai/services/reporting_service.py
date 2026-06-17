@@ -17,7 +17,7 @@ from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import Integer, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.services.ai_client import AIClient, get_ai_client
@@ -308,8 +308,7 @@ class AIReportingService:
 
             data_thresholds = {
                 "min_hours": 5,
-                "min_tasks": 3,
-                "min_days": 3,
+                "min_tasks": 5,
             }
 
             # Normalize day-activity metric for threshold gating while keeping
@@ -324,15 +323,12 @@ class AIReportingService:
             has_enough_activity = (
                 metrics.get("total_hours", 0) >= data_thresholds["min_hours"]
                 or metrics.get("total_tasks", 0) >= data_thresholds["min_tasks"]
-                or days_with_activity >= data_thresholds["min_days"]
             )
 
             if not has_enough_activity:
                 insufficient_recommendation = (
-                    f"Need at least {data_thresholds['min_hours']} hours of logged work, "
-                    f"{data_thresholds['min_tasks']} tasks with activity, or "
-                    f"{data_thresholds['min_days']} days of activity in the assessment window "
-                    "to provide a health assessment."
+                    f"Need at least {data_thresholds['min_hours']} hours of logged work OR "
+                    f"{data_thresholds['min_tasks']} defined tasks to provide a health assessment."
                 )
 
                 insufficient_insight = Insight(
@@ -1154,11 +1150,6 @@ Write 2-3 sentences summarizing this week's activity. Be concise and actionable.
             return "at_risk"
         else:
             return "critical"
-
-
-# Add missing import
-from sqlalchemy import Integer
-
 
 # Factory function
 async def get_reporting_service(db: AsyncSession) -> AIReportingService:
