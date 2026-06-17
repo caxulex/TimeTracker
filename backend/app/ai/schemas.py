@@ -610,6 +610,8 @@ class ProjectHealthResponse(BaseModel):
     project_name: Optional[str] = None
     health_score: Optional[int] = None  # 0-100
     health_status: Optional[str] = None  # healthy, moderate, at_risk, critical
+    insufficient_data: Optional[bool] = None
+    data_thresholds: Optional[Dict[str, int]] = None
     metrics: Optional[ProjectHealthMetrics] = None
     insights: List[Insight] = []
     generated_at: Optional[str] = None
