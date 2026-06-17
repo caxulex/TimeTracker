@@ -58,6 +58,54 @@ async def test_project_health_endpoint_keeps_insufficient_data_fields_when_true(
 
 
 @pytest.mark.asyncio
+async def test_project_health_endpoint_sparse_round_trip_is_insufficient(
+    client: AsyncClient,
+    auth_headers: dict,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def fake_get_reporting_service(_db):
+        return _FakeReportingService(
+            {
+                "success": True,
+                "enabled": True,
+                "project_name": "Aloha",
+                "health_score": None,
+                "health_status": None,
+                "insufficient_data": True,
+                "data_thresholds": {"min_hours": 5, "min_tasks": 3, "min_days": 3},
+                "metrics": {
+                    "total_hours": 1.1,
+                    "this_week_hours": 1.1,
+                    "last_week_hours": 0,
+                    "activity_trend": "new",
+                    "total_tasks": 0,
+                    "completed_tasks": 0,
+                    "task_completion_rate": 0,
+                    "contributor_count": 1,
+                    "days_with_activity": 0,
+                },
+                "insights": [],
+                "generated_at": "2026-06-17T12:00:00+00:00",
+            }
+        )
+
+    monkeypatch.setattr("app.ai.router.get_reporting_service", fake_get_reporting_service)
+
+    response = await client.post(
+        "/api/ai/reports/project-health",
+        json={"project_id": 128},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["insufficient_data"] is True
+    assert body["metrics"]["total_hours"] == 1.1
+    assert body["metrics"]["total_tasks"] == 0
+    assert body["metrics"]["days_with_activity"] == 0
+
+
+@pytest.mark.asyncio
 async def test_project_health_endpoint_keeps_insufficient_data_field_when_false(
     client: AsyncClient,
     auth_headers: dict,

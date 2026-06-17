@@ -378,3 +378,153 @@ async def test_generate_project_health_threshold_boundaries(
     else:
         assert isinstance(result["health_score"], int)
         assert result["health_status"] in {"healthy", "moderate", "at_risk", "critical"}
+
+
+@pytest.mark.asyncio
+async def test_aloha_like_sparse_data(monkeypatch: pytest.MonkeyPatch):
+    async def fake_execute(_statement):
+        return _Result(scalar_value=SimpleNamespace(id=128, name="Aloha"))
+
+    async def fake_feature_manager():
+        return _EnabledFeatureManager()
+
+    async def fake_project_metrics(*_args):
+        return {
+            "total_hours": 1.1,
+            "this_week_hours": 1.1,
+            "last_week_hours": 0,
+            "activity_trend": "new",
+            "total_tasks": 0,
+            "completed_tasks": 0,
+            "task_completion_rate": 0,
+            "contributor_count": 1,
+            "days_with_activity": 0,
+        }
+
+    service = _service(_DB(fake_execute))
+    monkeypatch.setattr(service, "_get_feature_manager", fake_feature_manager)
+    monkeypatch.setattr(service, "_gather_project_metrics", fake_project_metrics)
+
+    result = await service.generate_project_health(user_id=11, project_id=128)
+
+    assert result["insufficient_data"] is True
+
+
+@pytest.mark.asyncio
+async def test_just_meets_hours_threshold(monkeypatch: pytest.MonkeyPatch):
+    async def fake_execute(_statement):
+        return _Result(scalar_value=SimpleNamespace(id=77, name="Hours Boundary"))
+
+    async def fake_feature_manager():
+        return _EnabledFeatureManager()
+
+    async def fake_project_metrics(*_args):
+        return {
+            "total_hours": 5.0,
+            "this_week_hours": 5.0,
+            "last_week_hours": 0,
+            "activity_trend": "new",
+            "total_tasks": 0,
+            "completed_tasks": 0,
+            "task_completion_rate": 0,
+            "contributor_count": 1,
+            "days_with_activity": 0,
+        }
+
+    service = _service(_DB(fake_execute))
+    monkeypatch.setattr(service, "_get_feature_manager", fake_feature_manager)
+    monkeypatch.setattr(service, "_gather_project_metrics", fake_project_metrics)
+
+    result = await service.generate_project_health(user_id=11, project_id=77)
+
+    assert result["insufficient_data"] is False
+
+
+@pytest.mark.asyncio
+async def test_just_meets_tasks_threshold(monkeypatch: pytest.MonkeyPatch):
+    async def fake_execute(_statement):
+        return _Result(scalar_value=SimpleNamespace(id=77, name="Tasks Boundary"))
+
+    async def fake_feature_manager():
+        return _EnabledFeatureManager()
+
+    async def fake_project_metrics(*_args):
+        return {
+            "total_hours": 0.0,
+            "this_week_hours": 0.0,
+            "last_week_hours": 0,
+            "activity_trend": "new",
+            "total_tasks": 3,
+            "completed_tasks": 0,
+            "task_completion_rate": 0,
+            "contributor_count": 1,
+            "days_with_activity": 0,
+        }
+
+    service = _service(_DB(fake_execute))
+    monkeypatch.setattr(service, "_get_feature_manager", fake_feature_manager)
+    monkeypatch.setattr(service, "_gather_project_metrics", fake_project_metrics)
+
+    result = await service.generate_project_health(user_id=11, project_id=77)
+
+    assert result["insufficient_data"] is False
+
+
+@pytest.mark.asyncio
+async def test_just_meets_days_threshold(monkeypatch: pytest.MonkeyPatch):
+    async def fake_execute(_statement):
+        return _Result(scalar_value=SimpleNamespace(id=77, name="Days Boundary"))
+
+    async def fake_feature_manager():
+        return _EnabledFeatureManager()
+
+    async def fake_project_metrics(*_args):
+        return {
+            "total_hours": 0.0,
+            "this_week_hours": 0.0,
+            "last_week_hours": 0,
+            "activity_trend": "new",
+            "total_tasks": 0,
+            "completed_tasks": 0,
+            "task_completion_rate": 0,
+            "contributor_count": 1,
+            "days_with_activity": 3,
+        }
+
+    service = _service(_DB(fake_execute))
+    monkeypatch.setattr(service, "_get_feature_manager", fake_feature_manager)
+    monkeypatch.setattr(service, "_gather_project_metrics", fake_project_metrics)
+
+    result = await service.generate_project_health(user_id=11, project_id=77)
+
+    assert result["insufficient_data"] is False
+
+
+@pytest.mark.asyncio
+async def test_none_meet_threshold(monkeypatch: pytest.MonkeyPatch):
+    async def fake_execute(_statement):
+        return _Result(scalar_value=SimpleNamespace(id=77, name="None Meet"))
+
+    async def fake_feature_manager():
+        return _EnabledFeatureManager()
+
+    async def fake_project_metrics(*_args):
+        return {
+            "total_hours": 4.9,
+            "this_week_hours": 4.9,
+            "last_week_hours": 0,
+            "activity_trend": "new",
+            "total_tasks": 2,
+            "completed_tasks": 0,
+            "task_completion_rate": 0,
+            "contributor_count": 1,
+            "days_with_activity": 2,
+        }
+
+    service = _service(_DB(fake_execute))
+    monkeypatch.setattr(service, "_get_feature_manager", fake_feature_manager)
+    monkeypatch.setattr(service, "_gather_project_metrics", fake_project_metrics)
+
+    result = await service.generate_project_health(user_id=11, project_id=77)
+
+    assert result["insufficient_data"] is True

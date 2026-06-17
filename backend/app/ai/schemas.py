@@ -600,6 +600,8 @@ class ProjectHealthMetrics(BaseModel):
     completed_tasks: int
     task_completion_rate: float
     contributor_count: int
+    days_with_activity: Optional[int] = None
+    activity_days: Optional[int] = None
 
 
 class ProjectHealthResponse(BaseModel):

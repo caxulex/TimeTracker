@@ -312,10 +312,19 @@ class AIReportingService:
                 "min_days": 3,
             }
 
+            # Normalize day-activity metric for threshold gating while keeping
+            # compatibility with older key names used in tests/callers.
+            days_with_activity = metrics.get("days_with_activity")
+            if days_with_activity is None:
+                days_with_activity = metrics.get("activity_days", 0)
+
+            metrics["days_with_activity"] = days_with_activity
+            metrics["activity_days"] = days_with_activity
+
             has_enough_activity = (
                 metrics.get("total_hours", 0) >= data_thresholds["min_hours"]
                 or metrics.get("total_tasks", 0) >= data_thresholds["min_tasks"]
-                or metrics.get("activity_days", 0) >= data_thresholds["min_days"]
+                or days_with_activity >= data_thresholds["min_days"]
             )
 
             if not has_enough_activity:
@@ -826,7 +835,8 @@ class AIReportingService:
                 )
             )
         )
-        metrics["activity_days"] = activity_days_result.scalar() or 0
+        metrics["days_with_activity"] = activity_days_result.scalar() or 0
+        metrics["activity_days"] = metrics["days_with_activity"]
 
         return metrics
 
