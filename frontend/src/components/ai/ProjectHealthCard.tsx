@@ -53,7 +53,7 @@ function normalizeProjectHealth(
 
   if (data.insufficient_data === true) {
     const thresholds = data.data_thresholds || {
-      min_hours: 5,
+      min_hours: 2,
       min_tasks: 5,
     };
 
@@ -104,7 +104,7 @@ function normalizeProjectHealth(
       healthStatus: data.health_status,
       insufficientData: false,
       dataThresholds: {
-        minHours: 5,
+        minHours: 2,
         minTasks: 5,
       },
       analysis:
@@ -132,7 +132,7 @@ function normalizeProjectHealth(
       healthStatus: data.health.status,
       insufficientData: false,
       dataThresholds: {
-        minHours: 5,
+        minHours: 2,
         minTasks: 5,
       },
       analysis: data.health.ai_analysis || 'Project health assessment ready.',
@@ -559,3 +559,4 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
 };
 
 export default ProjectHealthCard;
+
