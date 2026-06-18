@@ -377,7 +377,8 @@ class AIReportingService:
                 ))
 
             # Task completion
-            if metrics.get("task_completion_rate", 0) < 0.3:
+            completion_measured = bool(metrics.get("completion_measured", metrics.get("total_tasks", 0) > 0))
+            if completion_measured and metrics.get("task_completion_rate", 0) < 0.3:
                 insights.append(Insight(
                     type=InsightType.PROJECT_HEALTH,
                     title="Low Task Completion",
@@ -395,6 +396,22 @@ class AIReportingService:
                     severity=InsightSeverity.INFO,
                     action_items=["Consider knowledge sharing sessions"]
                 ))
+
+            if not insights:
+                if completion_measured:
+                    insights.append(Insight(
+                        type=InsightType.PROJECT_HEALTH,
+                        title="Stable Health Signals",
+                        description="No major risk signals detected from recent project activity.",
+                        severity=InsightSeverity.INFO,
+                    ))
+                else:
+                    insights.append(Insight(
+                        type=InsightType.PROJECT_HEALTH,
+                        title="Completion Not Tracked",
+                        description="Task completion is not tracked for this project yet, so activity and collaboration signals drive the score.",
+                        severity=InsightSeverity.INFO,
+                    ))
 
             return {
                 "success": True,
@@ -807,10 +824,12 @@ class AIReportingService:
             metrics["total_tasks"] = task_stats.total
             metrics["completed_tasks"] = task_stats.completed or 0
             metrics["task_completion_rate"] = round((task_stats.completed or 0) / task_stats.total, 2)
+            metrics["completion_measured"] = True
         else:
             metrics["total_tasks"] = 0
             metrics["completed_tasks"] = 0
             metrics["task_completion_rate"] = 0
+            metrics["completion_measured"] = False
 
         # Contributors
         contributors_result = await self.db.execute(
@@ -1123,8 +1142,10 @@ Write 2-3 sentences summarizing this week's activity. Be concise and actionable.
         score = 100
 
         # Task completion rate impacts score
-        completion_rate = metrics.get("task_completion_rate", 0.5)
-        score -= max(0, (0.5 - completion_rate) * 40)
+        completion_measured = bool(metrics.get("completion_measured", metrics.get("total_tasks", 0) > 0))
+        if completion_measured:
+            completion_rate = metrics.get("task_completion_rate", 0.5)
+            score -= max(0, (0.5 - completion_rate) * 40)
 
         # Activity trend
         trend = metrics.get("activity_trend", "stable")

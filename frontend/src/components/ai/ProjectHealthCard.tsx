@@ -39,6 +39,7 @@ interface NormalizedProjectHealth {
     thisWeekHours?: number;
     lastWeekHours?: number;
     taskCompletionPct?: number;
+    completionMeasured?: boolean;
     contributorCount?: number;
     activityTrend?: 'increasing' | 'decreasing' | 'stable' | 'new';
   };
@@ -73,6 +74,7 @@ function normalizeProjectHealth(
         thisWeekHours: data.metrics?.this_week_hours,
         lastWeekHours: data.metrics?.last_week_hours,
         taskCompletionPct: data.metrics?.task_completion_rate,
+        completionMeasured: data.metrics?.completion_measured,
         contributorCount: data.metrics?.contributor_count,
         activityTrend: data.metrics?.activity_trend,
       },
@@ -115,6 +117,7 @@ function normalizeProjectHealth(
         thisWeekHours: data.metrics?.this_week_hours,
         lastWeekHours: data.metrics?.last_week_hours,
         taskCompletionPct,
+        completionMeasured: data.metrics?.completion_measured,
         contributorCount: data.metrics?.contributor_count,
         activityTrend: data.metrics?.activity_trend,
       },
@@ -137,6 +140,7 @@ function normalizeProjectHealth(
       recommendations: data.health.recommendations || [],
       metrics: {
         taskCompletionPct: data.health.metrics?.task_completion_rate,
+        completionMeasured: true,
         activityTrend: data.health.metrics?.activity_trend,
       },
     };
@@ -198,6 +202,13 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
   const renderInsufficientDataState = (health: NormalizedProjectHealth) => {
     const disclosure = `Need at least ${health.dataThresholds.minHours} hours of logged work OR ${health.dataThresholds.minTasks} defined tasks`;
 
+    const completionDisplay =
+      health.metrics.completionMeasured === false
+        ? 'Not tracked'
+        : typeof health.metrics.taskCompletionPct === 'number'
+          ? `${health.metrics.taskCompletionPct.toFixed(0)}% complete`
+          : '—';
+
     if (compact) {
       return (
         <div
@@ -220,7 +231,7 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
             {typeof health.metrics.totalHours === 'number' ? `${health.metrics.totalHours.toFixed(1)}h` : '—'} logged · {' '}
-            {typeof health.metrics.taskCompletionPct === 'number' ? `${health.metrics.taskCompletionPct.toFixed(0)}% complete` : '—'} · {' '}
+            {completionDisplay} · {' '}
             {typeof health.metrics.contributorCount === 'number' ? `${health.metrics.contributorCount} contributors` : '—'}
           </p>
         </div>
@@ -297,8 +308,16 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
           <div className="text-center">
             <Calendar className="mx-auto text-green-500 mb-1" size={18} />
             <p className="text-lg font-semibold text-gray-800 dark:text-gray-200 flex items-center justify-center gap-1">
-              {typeof health.metrics.taskCompletionPct === 'number' ? `${health.metrics.taskCompletionPct.toFixed(0)}%` : '—'}
-              {health.metrics.activityTrend ? getTrendIcon(health.metrics.activityTrend) : null}
+              {health.metrics.completionMeasured === false
+                ? 'Not tracked'
+                : typeof health.metrics.taskCompletionPct === 'number'
+                  ? `${health.metrics.taskCompletionPct.toFixed(0)}%`
+                  : '—'}
+              {health.metrics.completionMeasured === false
+                ? null
+                : health.metrics.activityTrend
+                  ? getTrendIcon(health.metrics.activityTrend)
+                  : null}
             </p>
             <p className="text-xs text-gray-500 dark:text-gray-400">Completion</p>
           </div>
@@ -488,8 +507,16 @@ const ProjectHealthCard: React.FC<ProjectHealthCardProps> = ({
         <div className="text-center">
           <Calendar className="mx-auto text-green-500 mb-1" size={18} />
           <p className="text-lg font-semibold text-gray-800 dark:text-gray-200 flex items-center justify-center gap-1">
-            {typeof health.metrics.taskCompletionPct === 'number' ? `${health.metrics.taskCompletionPct.toFixed(0)}%` : '—'}
-            {health.metrics.activityTrend ? getTrendIcon(health.metrics.activityTrend) : null}
+            {health.metrics.completionMeasured === false
+              ? 'Not tracked'
+              : typeof health.metrics.taskCompletionPct === 'number'
+                ? `${health.metrics.taskCompletionPct.toFixed(0)}%`
+                : '—'}
+            {health.metrics.completionMeasured === false
+              ? null
+              : health.metrics.activityTrend
+                ? getTrendIcon(health.metrics.activityTrend)
+                : null}
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400">Completion</p>
         </div>
