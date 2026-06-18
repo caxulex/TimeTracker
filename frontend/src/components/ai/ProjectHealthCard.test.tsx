@@ -42,7 +42,7 @@ const insufficientResponse: ProjectHealthResponse = {
   project_name: 'Aloha',
   insufficient_data: true,
   data_thresholds: {
-    min_hours: 5,
+    min_hours: 2,
     min_tasks: 5,
   },
   metrics: {
@@ -63,12 +63,12 @@ const insufficientResponse: ProjectHealthResponse = {
       title: 'Not enough activity to assess yet',
       description: "Project doesn't have enough activity yet to assess.",
       action_items: [
-        'Need at least 5 hours of logged work OR 5 defined tasks to provide a health assessment.',
+        'Need at least 2 hours of logged work OR 5 defined tasks to provide a health assessment.',
       ],
     },
   ],
   recommendations: [
-    'Need at least 5 hours of logged work OR 5 defined tasks to provide a health assessment.',
+    'Need at least 2 hours of logged work OR 5 defined tasks to provide a health assessment.',
   ],
   generated_at: '2026-06-16T10:30:00.000Z',
 };
@@ -146,7 +146,7 @@ describe('ProjectHealthCard', () => {
     render(<ProjectHealthCard projectId={9} />);
 
     expect(screen.getByText(/Not enough activity to assess yet/i)).toBeInTheDocument();
-    expect(screen.getByText(/Need at least 5 hours of logged work OR 5 defined tasks/i)).toBeInTheDocument();
+    expect(screen.getByText(/Need at least 2 hours of logged work OR 5 defined tasks/i)).toBeInTheDocument();
     expect(screen.getAllByText('1.1h')).toHaveLength(2);
     expect(screen.getByText(/Not tracked/i)).toBeInTheDocument();
     expect(screen.getByText('1')).toBeInTheDocument();
@@ -211,3 +211,5 @@ describe('ProjectHealthCard', () => {
     expect(container.firstChild).toBeNull();
   });
 });
+
+

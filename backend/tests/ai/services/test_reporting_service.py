@@ -254,9 +254,9 @@ async def test_generate_project_health_marks_sparse_projects_as_insufficient_dat
     assert result["insufficient_data"] is True
     assert result["health_score"] is None
     assert result["health_status"] is None
-    assert result["data_thresholds"] == {"min_hours": 5, "min_tasks": 5}
+    assert result["data_thresholds"] == {"min_hours": 2, "min_tasks": 5}
     assert result["recommendations"] == [
-        "Need at least 5 hours of logged work OR 5 defined tasks to provide a health assessment."
+        "Need at least 2 hours of logged work OR 5 defined tasks to provide a health assessment."
     ]
     assert result["insights"][0]["description"] == "Project doesn't have enough activity yet to assess."
 
@@ -281,7 +281,7 @@ async def test_generate_project_health_marks_sparse_projects_as_insufficient_dat
         ),
         (
             {
-                "total_hours": 4.9,
+                "total_hours": 1.9,
                 "this_week_hours": 4.9,
                 "last_week_hours": 0,
                 "activity_trend": "new",
@@ -309,7 +309,7 @@ async def test_generate_project_health_marks_sparse_projects_as_insufficient_dat
         ),
         (
             {
-                "total_hours": 5.0,
+                "total_hours": 2.0,
                 "this_week_hours": 5.0,
                 "last_week_hours": 0,
                 "activity_trend": "new",
@@ -434,7 +434,7 @@ async def test_just_meets_hours_threshold(monkeypatch: pytest.MonkeyPatch):
 
     async def fake_project_metrics(*_args):
         return {
-            "total_hours": 5.0,
+            "total_hours": 2.0,
             "this_week_hours": 5.0,
             "last_week_hours": 0,
             "activity_trend": "new",
@@ -524,7 +524,7 @@ async def test_none_meet_threshold(monkeypatch: pytest.MonkeyPatch):
 
     async def fake_project_metrics(*_args):
         return {
-            "total_hours": 4.9,
+            "total_hours": 1.9,
             "this_week_hours": 4.9,
             "last_week_hours": 0,
             "activity_trend": "new",
@@ -656,3 +656,4 @@ async def test_project_health_partial_done_keeps_existing_scoring(monkeypatch: p
     assert result["insufficient_data"] is False
     assert result["health_score"] == 100
     assert all(insight["title"] != "Low Task Completion" for insight in result["insights"])
+
