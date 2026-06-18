@@ -20,6 +20,7 @@ const baseFlatResponse: ProjectHealthResponse = {
     total_tasks: 20,
     completed_tasks: 15,
     task_completion_rate: 0.75,
+    completion_measured: true,
     contributor_count: 3,
   },
   insights: [
@@ -52,6 +53,7 @@ const insufficientResponse: ProjectHealthResponse = {
     total_tasks: 0,
     completed_tasks: 0,
     task_completion_rate: 0,
+    completion_measured: false,
     contributor_count: 1,
   },
   insights: [
@@ -146,10 +148,27 @@ describe('ProjectHealthCard', () => {
     expect(screen.getByText(/Not enough activity to assess yet/i)).toBeInTheDocument();
     expect(screen.getByText(/Need at least 5 hours of logged work OR 5 defined tasks/i)).toBeInTheDocument();
     expect(screen.getAllByText('1.1h')).toHaveLength(2);
-    expect(screen.getByText('0%')).toBeInTheDocument();
+    expect(screen.getByText(/Not tracked/i)).toBeInTheDocument();
     expect(screen.getByText('1')).toBeInTheDocument();
     expect(screen.queryByLabelText(/Health score:/i)).toBeNull();
     expect(screen.queryByText(/Recommendations/i)).toBeNull();
+  });
+
+  it('renders completion as not tracked when completion_measured is false', () => {
+    mockedData = {
+      ...baseFlatResponse,
+      metrics: {
+        ...baseFlatResponse.metrics!,
+        task_completion_rate: 0,
+        completion_measured: false,
+      },
+      insights: [],
+    };
+
+    render(<ProjectHealthCard projectId={9} />);
+
+    expect(screen.getByText(/Not tracked/i)).toBeInTheDocument();
+    expect(screen.queryByText('0%')).toBeNull();
   });
 
   it('keeps the existing render path when the insufficient_data flag is missing', () => {

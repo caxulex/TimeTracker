@@ -104,6 +104,7 @@ export interface ProjectHealthMetrics {
   total_tasks: number;
   completed_tasks: number;
   task_completion_rate: number;
+  completion_measured?: boolean;
   contributor_count: number;
   days_with_activity?: number;
   activity_days?: number;

@@ -599,6 +599,7 @@ class ProjectHealthMetrics(BaseModel):
     total_tasks: int
     completed_tasks: int
     task_completion_rate: float
+    completion_measured: Optional[bool] = None
     contributor_count: int
     days_with_activity: Optional[int] = None
     activity_days: Optional[int] = None
