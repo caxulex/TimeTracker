@@ -98,9 +98,14 @@ async def _make_running_entry(
     task: Optional[Task],
     started_hours_ago: float,
     end_time: Optional[datetime] = None,
+    pause_seconds: int = 0,
+    is_paused: bool = False,
+    paused_at: Optional[datetime] = None,
     long_timer_email_sent_at: Optional[datetime] = None,
 ) -> TimeEntry:
     now = datetime.now(timezone.utc)
+    if is_paused and paused_at is None:
+        paused_at = now
     entry = TimeEntry(
         user_id=user.id,
         project_id=project.id,
@@ -108,6 +113,9 @@ async def _make_running_entry(
         start_time=now - timedelta(hours=started_hours_ago),
         end_time=end_time,
         is_running=end_time is None,
+        is_paused=is_paused,
+        paused_at=paused_at,
+        pause_seconds=pause_seconds,
         long_timer_email_sent_at=long_timer_email_sent_at,
     )
     db.add(entry)
@@ -156,6 +164,50 @@ async def test_no_email_for_timer_under_9_hours(db_session: AsyncSession) -> Non
     summary = await job.send_long_timer_warnings(db_session, svc)
 
     assert summary["candidates"] == 0
+    svc.send_email.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_no_email_for_running_timer_with_large_pause_seconds(db_session: AsyncSession) -> None:
+    """Gross elapsed over 9h must not trigger if net on-task time is below 9h."""
+    _, user, project, task = await _seed_company_user_project_task(db_session)
+    await _make_running_entry(
+        db_session,
+        user=user,
+        project=project,
+        task=task,
+        started_hours_ago=10,
+        pause_seconds=2 * 3600,
+    )
+    await db_session.commit()
+
+    svc = _make_email_service()
+    summary = await job.send_long_timer_warnings(db_session, svc)
+
+    assert summary["sent"] == 0
+    svc.send_email.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_no_email_for_actively_paused_timer_under_net_threshold(db_session: AsyncSession) -> None:
+    """A running entry frozen on pause must not trigger if the paused elapsed is under 9h."""
+    _, user, project, task = await _seed_company_user_project_task(db_session)
+    now = datetime.now(timezone.utc)
+    await _make_running_entry(
+        db_session,
+        user=user,
+        project=project,
+        task=task,
+        started_hours_ago=10,
+        is_paused=True,
+        paused_at=now - timedelta(hours=8),
+    )
+    await db_session.commit()
+
+    svc = _make_email_service()
+    summary = await job.send_long_timer_warnings(db_session, svc)
+
+    assert summary["sent"] == 0
     svc.send_email.assert_not_awaited()
 
 
