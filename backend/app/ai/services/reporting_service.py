@@ -307,7 +307,7 @@ class AIReportingService:
             metrics = await self._gather_project_metrics(project_id)
 
             data_thresholds = {
-                "min_hours": 5,
+                "min_hours": 2,
                 "min_tasks": 5,
             }
 

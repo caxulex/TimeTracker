@@ -27,7 +27,7 @@ async def test_project_health_endpoint_keeps_insufficient_data_fields_when_true(
                 "health_score": None,
                 "health_status": None,
                 "insufficient_data": True,
-                "data_thresholds": {"min_hours": 5, "min_tasks": 5},
+                "data_thresholds": {"min_hours": 2, "min_tasks": 5},
                 "metrics": {
                     "total_hours": 1.1,
                     "this_week_hours": 1.1,
@@ -54,7 +54,7 @@ async def test_project_health_endpoint_keeps_insufficient_data_fields_when_true(
     assert response.status_code == 200
     body = response.json()
     assert body["insufficient_data"] is True
-    assert body["data_thresholds"] == {"min_hours": 5, "min_tasks": 5}
+    assert body["data_thresholds"] == {"min_hours": 2, "min_tasks": 5}
 
 
 @pytest.mark.asyncio
@@ -72,7 +72,7 @@ async def test_project_health_endpoint_sparse_round_trip_is_insufficient(
                 "health_score": None,
                 "health_status": None,
                 "insufficient_data": True,
-                "data_thresholds": {"min_hours": 5, "min_tasks": 5},
+                "data_thresholds": {"min_hours": 2, "min_tasks": 5},
                 "metrics": {
                     "total_hours": 1.1,
                     "this_week_hours": 1.1,
@@ -120,7 +120,7 @@ async def test_project_health_endpoint_keeps_insufficient_data_field_when_false(
                 "health_score": 65,
                 "health_status": "moderate",
                 "insufficient_data": False,
-                "data_thresholds": {"min_hours": 5, "min_tasks": 5},
+                "data_thresholds": {"min_hours": 2, "min_tasks": 5},
                 "metrics": {
                     "total_hours": 15.0,
                     "this_week_hours": 6.0,
@@ -147,7 +147,7 @@ async def test_project_health_endpoint_keeps_insufficient_data_field_when_false(
     assert response.status_code == 200
     body = response.json()
     assert body["insufficient_data"] is False
-    assert body["data_thresholds"] == {"min_hours": 5, "min_tasks": 5}
+    assert body["data_thresholds"] == {"min_hours": 2, "min_tasks": 5}
     assert body["health_score"] == 65
     assert body["health_status"] == "moderate"
 
@@ -167,7 +167,7 @@ async def test_project_health_endpoint_serializes_completion_measured_metric(
                 "health_score": 75,
                 "health_status": "moderate",
                 "insufficient_data": False,
-                "data_thresholds": {"min_hours": 5, "min_tasks": 5},
+                "data_thresholds": {"min_hours": 2, "min_tasks": 5},
                 "metrics": {
                     "total_hours": 12.0,
                     "this_week_hours": 4.0,
@@ -196,7 +196,6 @@ async def test_project_health_endpoint_serializes_completion_measured_metric(
     body = response.json()
     assert body["metrics"]["completion_measured"] is False
 
-
 @pytest.mark.asyncio
 async def test_project_health_endpoint_serializes_confidence_cap_payload(
     client: AsyncClient,
@@ -212,7 +211,7 @@ async def test_project_health_endpoint_serializes_confidence_cap_payload(
                 "health_score": 75,
                 "health_status": "moderate",
                 "insufficient_data": False,
-                "data_thresholds": {"min_hours": 5, "min_tasks": 5},
+                "data_thresholds": {"min_hours": 2, "min_tasks": 5},
                 "metrics": {
                     "total_hours": 9.6,
                     "this_week_hours": 3.2,
