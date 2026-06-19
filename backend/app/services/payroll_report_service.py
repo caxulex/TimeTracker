@@ -227,7 +227,7 @@ class PayrollReportService:
             start_date=filters.start_date or (min(p.start_date for p in periods) if periods else date.today()),
             end_date=filters.end_date or (max(p.end_date for p in periods) if periods else date.today()),
             status=filters.status.value if filters.status else "mixed",
-            total_employees=len(set(e.user_id for e in all_entries)),
+            total_employees=len({e.user_id for e in all_entries}),
             total_regular_hours=total_regular_hours,
             total_overtime_hours=total_overtime_hours,
             total_gross_amount=total_gross,
