@@ -278,14 +278,14 @@ class TeamAnalyticsService:
             total_hours = total_seconds / 3600
 
             # Days with entries
-            work_days = len(set(e.start_time.date() for e in entries))
+            work_days = len({e.start_time.date() for e in entries})
             avg_daily = total_hours / work_days if work_days > 0 else 0
 
             # Projects worked
-            projects = set(e.project_id for e in entries if e.project_id)
+            projects = {e.project_id for e in entries if e.project_id}
 
             # Tasks completed
-            tasks = set(e.task_id for e in entries if e.task_id)
+            tasks = {e.task_id for e in entries if e.task_id}
 
             # Overtime (entries ending after 6pm)
             overtime_entries = [
@@ -430,7 +430,7 @@ class TeamAnalyticsService:
                     )
                 )
             )
-            user_projects[user_id] = set(r[0] for r in result.fetchall())
+            user_projects[user_id] = {r[0] for r in result.fetchall()}
 
         # Calculate collaboration edges
         edges = []

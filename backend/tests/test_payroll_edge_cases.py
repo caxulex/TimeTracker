@@ -606,7 +606,7 @@ class TestDailyRateCalculation:
             {"start_time": datetime(2026, 1, 8, 16, 0, tzinfo=timezone.utc)},
         ]
 
-        distinct_days = len(set(e["start_time"].date() for e in entries))
+        distinct_days = len({e["start_time"].date() for e in entries})
         assert distinct_days == 1, "Three entries on same day = 1 day worked"
 
         daily_rate = Decimal("200.00")
