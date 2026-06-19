@@ -196,3 +196,60 @@ async def test_project_health_endpoint_serializes_completion_measured_metric(
     body = response.json()
     assert body["metrics"]["completion_measured"] is False
 
+@pytest.mark.asyncio
+async def test_project_health_endpoint_serializes_confidence_cap_payload(
+    client: AsyncClient,
+    auth_headers: dict,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def fake_get_reporting_service(_db):
+        return _FakeReportingService(
+            {
+                "success": True,
+                "enabled": True,
+                "project_name": "TEEMA",
+                "health_score": 75,
+                "health_status": "moderate",
+                "insufficient_data": False,
+                "data_thresholds": {"min_hours": 2, "min_tasks": 5},
+                "metrics": {
+                    "total_hours": 9.6,
+                    "this_week_hours": 3.2,
+                    "last_week_hours": 0.0,
+                    "activity_trend": "new",
+                    "total_tasks": 0,
+                    "completed_tasks": 0,
+                    "task_completion_rate": 0,
+                    "completion_measured": False,
+                    "contributor_count": 2,
+                },
+                "insights": [
+                    {
+                        "type": "project_health",
+                        "title": "Confidence Cap Applied",
+                        "description": "Limited signal — this project has no task tracking and low recent activity, so the health score is capped. Add tasks or log more time for a full assessment.",
+                        "severity": "info",
+                        "action_items": [],
+                    }
+                ],
+                "generated_at": "2026-06-19T12:00:00+00:00",
+            }
+        )
+
+    monkeypatch.setattr("app.ai.router.get_reporting_service", fake_get_reporting_service)
+
+    response = await client.post(
+        "/api/ai/reports/project-health",
+        json={"project_id": 131},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["health_score"] == 75
+    assert body["health_status"] == "moderate"
+    assert body["insights"][0]["description"] == (
+        "Limited signal — this project has no task tracking and low recent activity, so the health score is capped. "
+        "Add tasks or log more time for a full assessment."
+    )
+    assert "confidence_capped" not in body
