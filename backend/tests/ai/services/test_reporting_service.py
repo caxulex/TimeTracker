@@ -656,3 +656,150 @@ async def test_project_health_partial_done_keeps_existing_scoring(monkeypatch: p
     assert result["insufficient_data"] is False
     assert result["health_score"] == 100
     assert all(insight["title"] != "Low Task Completion" for insight in result["insights"])
+
+
+@pytest.mark.asyncio
+async def test_project_health_low_confidence_caps_to_moderate_and_prioritizes_cap_insight(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def fake_execute(_statement):
+        return _Result(scalar_value=SimpleNamespace(id=77, name="Cap Candidate"))
+
+    async def fake_feature_manager():
+        return _EnabledFeatureManager()
+
+    async def fake_project_metrics(*_args):
+        return {
+            "total_hours": 9.6,
+            "this_week_hours": 3.2,
+            "last_week_hours": 0.0,
+            "activity_trend": "new",
+            "total_tasks": 0,
+            "completed_tasks": 0,
+            "task_completion_rate": 0,
+            "completion_measured": False,
+            "contributor_count": 2,
+            "days_with_activity": 2,
+        }
+
+    service = _service(_DB(fake_execute))
+    monkeypatch.setattr(service, "_get_feature_manager", fake_feature_manager)
+    monkeypatch.setattr(service, "_gather_project_metrics", fake_project_metrics)
+
+    result = await service.generate_project_health(user_id=11, project_id=77)
+
+    assert result["insufficient_data"] is False
+    assert result["health_score"] == 75
+    assert result["health_status"] == "moderate"
+    assert result["insights"][0]["description"] == (
+        "Limited signal — this project has no task tracking and low recent activity, so the health score is capped. "
+        "Add tasks or log more time for a full assessment."
+    )
+
+
+@pytest.mark.asyncio
+async def test_project_health_low_confidence_at_or_above_floor_is_not_capped(monkeypatch: pytest.MonkeyPatch):
+    async def fake_execute(_statement):
+        return _Result(scalar_value=SimpleNamespace(id=77, name="Floor Boundary"))
+
+    async def fake_feature_manager():
+        return _EnabledFeatureManager()
+
+    async def fake_project_metrics(*_args):
+        return {
+            "total_hours": 12.0,
+            "this_week_hours": 5.0,
+            "last_week_hours": 0.0,
+            "activity_trend": "new",
+            "total_tasks": 0,
+            "completed_tasks": 0,
+            "task_completion_rate": 0,
+            "completion_measured": False,
+            "contributor_count": 2,
+            "days_with_activity": 2,
+        }
+
+    service = _service(_DB(fake_execute))
+    monkeypatch.setattr(service, "_get_feature_manager", fake_feature_manager)
+    monkeypatch.setattr(service, "_gather_project_metrics", fake_project_metrics)
+
+    result = await service.generate_project_health(user_id=11, project_id=77)
+
+    assert result["insufficient_data"] is False
+    assert result["health_score"] == 95
+    assert result["health_status"] == "healthy"
+    assert result["insights"][0]["title"] == "Completion Not Tracked"
+
+
+@pytest.mark.asyncio
+async def test_project_health_measured_completion_with_low_recent_activity_is_not_capped(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def fake_execute(_statement):
+        return _Result(scalar_value=SimpleNamespace(id=77, name="Measured Activity"))
+
+    async def fake_feature_manager():
+        return _EnabledFeatureManager()
+
+    async def fake_project_metrics(*_args):
+        return {
+            "total_hours": 22.0,
+            "this_week_hours": 3.2,
+            "last_week_hours": 6.4,
+            "activity_trend": "decreasing",
+            "total_tasks": 8,
+            "completed_tasks": 4,
+            "task_completion_rate": 0.5,
+            "completion_measured": True,
+            "contributor_count": 2,
+            "days_with_activity": 6,
+        }
+
+    service = _service(_DB(fake_execute))
+    monkeypatch.setattr(service, "_get_feature_manager", fake_feature_manager)
+    monkeypatch.setattr(service, "_gather_project_metrics", fake_project_metrics)
+
+    result = await service.generate_project_health(user_id=11, project_id=77)
+
+    assert result["insufficient_data"] is False
+    assert result["health_score"] == 85
+    assert result["health_status"] == "healthy"
+    assert result["insights"][0]["title"] == "Decreasing Activity"
+    assert all("Limited signal" not in insight["description"] for insight in result["insights"])
+
+
+@pytest.mark.asyncio
+async def test_project_health_low_confidence_ceiling_never_raises_existing_lower_score(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def fake_execute(_statement):
+        return _Result(scalar_value=SimpleNamespace(id=77, name="Ceiling Check"))
+
+    async def fake_feature_manager():
+        return _EnabledFeatureManager()
+
+    async def fake_project_metrics(*_args):
+        return {
+            "total_hours": 12.0,
+            "this_week_hours": 3.2,
+            "last_week_hours": 0.0,
+            "activity_trend": "new",
+            "total_tasks": 0,
+            "completed_tasks": 0,
+            "task_completion_rate": 0,
+            "completion_measured": False,
+            "contributor_count": 2,
+            "days_with_activity": 2,
+        }
+
+    service = _service(_DB(fake_execute))
+    monkeypatch.setattr(service, "_get_feature_manager", fake_feature_manager)
+    monkeypatch.setattr(service, "_gather_project_metrics", fake_project_metrics)
+    monkeypatch.setattr(service, "_calculate_health_score", lambda _metrics: 60)
+
+    result = await service.generate_project_health(user_id=11, project_id=77)
+
+    assert result["insufficient_data"] is False
+    assert result["health_score"] == 60
+    assert result["health_status"] == "moderate"
+    assert result["insights"][0]["description"].startswith("Limited signal")

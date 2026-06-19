@@ -356,9 +356,20 @@ class AIReportingService:
 
             # Generate health score (0-100)
             health_score = self._calculate_health_score(metrics)
+            completion_measured = bool(metrics.get("completion_measured", metrics.get("total_tasks", 0) > 0))
+            low_confidence = (not completion_measured) and metrics.get("this_week_hours", 0) < 5
+
+            if low_confidence:
+                health_score = min(health_score, 75)
 
             # Generate insights
             insights = []
+            confidence_cap_insight = Insight(
+                type=InsightType.PROJECT_HEALTH,
+                title="Confidence Cap Applied",
+                description="Limited signal — this project has no task tracking and low recent activity, so the health score is capped. Add tasks or log more time for a full assessment.",
+                severity=InsightSeverity.INFO,
+            )
 
             # Activity trend
             if metrics.get("activity_trend") == "increasing":
@@ -377,7 +388,6 @@ class AIReportingService:
                 ))
 
             # Task completion
-            completion_measured = bool(metrics.get("completion_measured", metrics.get("total_tasks", 0) > 0))
             if completion_measured and metrics.get("task_completion_rate", 0) < 0.3:
                 insights.append(Insight(
                     type=InsightType.PROJECT_HEALTH,
@@ -397,7 +407,9 @@ class AIReportingService:
                     action_items=["Consider knowledge sharing sessions"]
                 ))
 
-            if not insights:
+            if low_confidence:
+                insights.insert(0, confidence_cap_insight)
+            elif not insights:
                 if completion_measured:
                     insights.append(Insight(
                         type=InsightType.PROJECT_HEALTH,
