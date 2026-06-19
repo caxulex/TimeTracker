@@ -54,6 +54,7 @@ from sqlalchemy.orm import selectinload
 from app.models import Project, Task, TimeEntry, User
 from app.services.email_log_utils import log_email_failed, log_email_sent
 from app.services.email_service import EmailService
+from app.utils.timer_elapsed import compute_display_elapsed_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +182,11 @@ async def _process_entry(
         else "UTC"
     )
     start_time_display = _format_start_time(entry.start_time, company_tz)
-    duration_hours = (now - entry.start_time).total_seconds() / 3600.0
+    net_elapsed_seconds = compute_display_elapsed_seconds(entry, now=now)
+    if net_elapsed_seconds < LONG_TIMER_THRESHOLD_HOURS * 3600:
+        return False
+
+    duration_hours = net_elapsed_seconds / 3600.0
 
     dashboard_url = os.getenv("APP_DASHBOARD_URL", "http://localhost:5173/dashboard")
 

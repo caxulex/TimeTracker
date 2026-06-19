@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -73,6 +73,10 @@ class _Project:
 class _Entry:
     start_time: datetime
     duration_seconds: int | None = 0
+    pause_seconds: int = 0
+    is_running: bool = True
+    is_paused: bool = False
+    paused_at: datetime | None = None
 
 
 def _service(db) -> ForecastingService:
@@ -121,6 +125,30 @@ async def test_assess_overtime_risk_uses_tenant_today_for_user_loop(monkeypatch:
     assert result["enabled"] is True
     assert result["users_assessed"] == 1
     assert result["users_at_risk"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_user_hours_uses_pause_aware_running_elapsed():
+    now = datetime.now(timezone.utc)
+    running_entry = _Entry(
+        start_time=now - timedelta(hours=10),
+        pause_seconds=2 * 3600,
+        is_running=True,
+    )
+
+    calls = {"count": 0}
+
+    async def fake_execute(_statement):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return _Result(scalar_value=0)
+        return _Result(items=[running_entry])
+
+    service = _service(_DB(fake_execute))
+
+    hours = await service._get_user_hours(user_id=7, start_date=date(2026, 6, 1), end_date=date(2026, 6, 30))
+
+    assert hours == pytest.approx(8.0, abs=0.05)
 
 
 @pytest.mark.asyncio

@@ -25,6 +25,7 @@ from app.ai.utils.cache_manager import AICacheManager, get_cache_manager
 from app.ai.utils.tenant_time import get_tenant_today, get_tenant_today_for_user
 from app.services.ai_feature_service import AIFeatureManager
 from app.utils.pay_rate import get_overtime_multiplier, normalize_rate_to_hourly
+from app.utils.timer_elapsed import compute_display_elapsed_seconds
 from app.utils.timewindow import now_utc
 
 logger = logging.getLogger(__name__)
@@ -641,7 +642,7 @@ class ForecastingService:
         # Get ALL running entries for this user (regardless of start date)
         # A running timer represents active work that should be flagged as risk
         running_result = await self.db.execute(
-            select(TimeEntry.start_time)
+            select(TimeEntry)
             .where(
                 and_(
                     TimeEntry.user_id == user_id,
@@ -649,18 +650,13 @@ class ForecastingService:
                 )
             )
         )
-        running_entries = running_result.fetchall()
+        running_entries = running_result.scalars().all()
 
         # Calculate running time (use timezone-aware datetime)
         running_seconds = 0
         now = datetime.now(timezone.utc)
         for entry in running_entries:
-            if entry.start_time:
-                entry_start = entry.start_time
-                # Handle timezone-naive datetimes from the database
-                if entry_start.tzinfo is None:
-                    entry_start = entry_start.replace(tzinfo=timezone.utc)
-                running_seconds += (now - entry_start).total_seconds()
+            running_seconds += compute_display_elapsed_seconds(entry, now=now)
 
         total_seconds = completed_seconds + running_seconds
         return total_seconds / 3600
