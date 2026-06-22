@@ -62,6 +62,7 @@ class CollaborationEdge:
     user2_name: str
     shared_projects: int
     interaction_score: float  # 0-1 based on project overlap
+    raw_interaction_score: float = 0.0  # Internal-only raw score used for density thresholding
 
 
 @dataclass
@@ -171,6 +172,31 @@ class TeamAnalyticsService:
             return "decreasing"
         return "stable"
 
+    @staticmethod
+    def _compute_raw_interaction_score(shared_projects: int, total_unique_projects: int) -> float:
+        """Compute raw (unrounded) pair interaction score for thresholding logic."""
+        if total_unique_projects <= 0:
+            return 0.0
+        return shared_projects / total_unique_projects
+
+    @staticmethod
+    def _is_collaboration_edge(raw_interaction_score: float) -> bool:
+        """Treat scores at exactly 0.30 as collaboration edges."""
+        return raw_interaction_score >= 0.3
+
+    @classmethod
+    def _compute_collaboration_density(
+        cls,
+        collaboration_edges: List[CollaborationEdge],
+        member_count: int,
+    ) -> float:
+        """Compute team collaboration density from raw interaction-score thresholding."""
+        max_edges = member_count * (member_count - 1) / 2
+        actual_edges = len([
+            e for e in collaboration_edges if cls._is_collaboration_edge(e.raw_interaction_score)
+        ])
+        return actual_edges / max_edges if max_edges > 0 else 0.0
+
     async def generate_team_report(
         self,
         team_id: int,
@@ -232,10 +258,12 @@ class TeamAnalyticsService:
         project_count = await self._get_active_project_count(team_id, period_start)
         task_count = await self._get_completed_task_count(team_id, period_start)
 
-        # Calculate collaboration density
-        max_edges = len(member_ids) * (len(member_ids) - 1) / 2
-        actual_edges = len([e for e in collaboration_edges if e.interaction_score > 0.3])
-        collaboration_density = actual_edges / max_edges if max_edges > 0 else 0
+        # Calculate collaboration density from raw interaction scores.
+        # Rounded scores are for display payloads only.
+        collaboration_density = self._compute_collaboration_density(
+            collaboration_edges=collaboration_edges,
+            member_count=len(member_ids),
+        )
 
         # Per-axis measurability flags (additive contract fields)
         (
@@ -265,6 +293,7 @@ class TeamAnalyticsService:
                 velocity_history,
                 workload_gini,
                 collaboration_density,
+                collaboration_edges=collaboration_edges,
                 velocity_measured=velocity_measured,
                 collaboration_measured=collaboration_measured,
                 workload_balance_measured=workload_balance_measured,
@@ -510,15 +539,21 @@ class TeamAnalyticsService:
                 shared = user_projects.get(user1, set()) & user_projects.get(user2, set())
                 all_projects = user_projects.get(user1, set()) | user_projects.get(user2, set())
 
-                interaction_score = len(shared) / len(all_projects) if all_projects else 0
+                shared_projects = len(shared)
+                total_unique_projects = len(all_projects)
+                raw_interaction_score = self._compute_raw_interaction_score(
+                    shared_projects=shared_projects,
+                    total_unique_projects=total_unique_projects,
+                )
 
                 edges.append(CollaborationEdge(
                     user1_id=user1,
                     user1_name=member_names.get(user1, f"User {user1}"),
                     user2_id=user2,
                     user2_name=member_names.get(user2, f"User {user2}"),
-                    shared_projects=len(shared),
-                    interaction_score=round(interaction_score, 2)
+                    shared_projects=shared_projects,
+                    interaction_score=round(raw_interaction_score, 2),
+                    raw_interaction_score=raw_interaction_score,
                 ))
 
         # Sort by interaction score
@@ -623,6 +658,7 @@ class TeamAnalyticsService:
         velocity_history: List[TeamVelocity],
         workload_gini: float,
         collaboration_density: float,
+        collaboration_edges: Optional[List[CollaborationEdge]] = None,
         *,
         velocity_measured: bool,
         collaboration_measured: bool,
@@ -650,13 +686,24 @@ class TeamAnalyticsService:
 
         # Analyze collaboration
         if collaboration_measured:
+            has_visible_pair_sharing = any(
+                edge.shared_projects >= 2 for edge in (collaboration_edges or [])
+            )
             if collaboration_density < 0.3:
-                insights.append(
-                    "🔗 Team collaboration is low. Members are working in silos."
-                )
-                recommendations.append(
-                    "Encourage pair programming or cross-project collaboration."
-                )
+                if has_visible_pair_sharing:
+                    insights.append(
+                        "🔗 Collaboration breadth is limited, but there is visible pair-level project sharing."
+                    )
+                    recommendations.append(
+                        "Expand collaboration beyond existing pairs by rotating ownership across projects."
+                    )
+                else:
+                    insights.append(
+                        "🔗 Team collaboration is low. Members are working in silos."
+                    )
+                    recommendations.append(
+                        "Encourage pair programming or cross-project collaboration."
+                    )
             elif collaboration_density > 0.7:
                 insights.append(
                     "✅ Recent activity suggests collaboration is active - team members share projects."
