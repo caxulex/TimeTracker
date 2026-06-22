@@ -85,15 +85,21 @@ class TeamAnalyticsReport:
     # Velocity data
     velocity_history: List[TeamVelocity]
     current_velocity_trend: str
+    velocity_measured: bool
 
     # Collaboration network
     collaboration_edges: List[CollaborationEdge]
     collaboration_density: float  # 0-1, how interconnected the team is
+    collaboration_measured: bool
 
     # Workload distribution
     workload_gini: float  # 0-1, lower is more equal distribution
+    workload_balance_measured: bool
     top_contributors: List[Dict[str, Any]]
     underutilized_members: List[Dict[str, Any]]
+
+    # Tracking coverage
+    task_tracking_measured: bool
 
     # AI-generated insights
     ai_insights: List[str]
@@ -121,6 +127,49 @@ class TeamAnalyticsService:
     ):
         self.db = db
         self.cache = cache_manager
+
+    @staticmethod
+    def _compute_measurability_flags(
+        velocity_history: List[TeamVelocity],
+        active_members: int,
+        task_count: int,
+    ) -> Tuple[bool, bool, bool, bool]:
+        """
+        Return per-axis measurability flags.
+
+        - velocity_measured: >=2 real weekly points (non-zero total hours)
+        - collaboration_measured: >=2 active members
+        - workload_balance_measured: >=2 active members with non-zero hours
+        - task_tracking_measured: total_tasks > 0
+        """
+        velocity_points_with_hours = len([p for p in velocity_history if p.total_hours > 0])
+        velocity_measured = velocity_points_with_hours >= 2
+        collaboration_measured = active_members >= 2
+        workload_balance_measured = active_members >= 2
+        task_tracking_measured = task_count > 0
+        return (
+            velocity_measured,
+            collaboration_measured,
+            workload_balance_measured,
+            task_tracking_measured,
+        )
+
+    @staticmethod
+    def _determine_current_velocity_trend(
+        velocity_history: List[TeamVelocity],
+        velocity_measured: bool,
+    ) -> str:
+        """Return current velocity trend label with not-measured sentinel support."""
+        if not velocity_measured or len(velocity_history) < 2:
+            return "not_measured"
+
+        recent = velocity_history[-1].total_hours
+        previous = velocity_history[-2].total_hours
+        if recent > previous * 1.1:
+            return "increasing"
+        if recent < previous * 0.9:
+            return "decreasing"
+        return "stable"
 
     async def generate_team_report(
         self,
@@ -188,15 +237,23 @@ class TeamAnalyticsService:
         actual_edges = len([e for e in collaboration_edges if e.interaction_score > 0.3])
         collaboration_density = actual_edges / max_edges if max_edges > 0 else 0
 
-        # Determine velocity trend
-        current_trend = "stable"
-        if len(velocity_history) >= 2:
-            recent = velocity_history[-1].total_hours
-            previous = velocity_history[-2].total_hours
-            if recent > previous * 1.1:
-                current_trend = "increasing"
-            elif recent < previous * 0.9:
-                current_trend = "decreasing"
+        # Per-axis measurability flags (additive contract fields)
+        (
+            velocity_measured,
+            collaboration_measured,
+            workload_balance_measured,
+            task_tracking_measured,
+        ) = self._compute_measurability_flags(
+            velocity_history=velocity_history,
+            active_members=active_members,
+            task_count=task_count,
+        )
+
+        # Determine velocity trend only when enough real weekly points exist.
+        current_trend = self._determine_current_velocity_trend(
+            velocity_history=velocity_history,
+            velocity_measured=velocity_measured,
+        )
 
         # Generate AI insights
         ai_insights = []
@@ -207,7 +264,11 @@ class TeamAnalyticsService:
                 member_metrics,
                 velocity_history,
                 workload_gini,
-                collaboration_density
+                collaboration_density,
+                velocity_measured=velocity_measured,
+                collaboration_measured=collaboration_measured,
+                workload_balance_measured=workload_balance_measured,
+                task_tracking_measured=task_tracking_measured,
             )
 
         return TeamAnalyticsReport(
@@ -223,11 +284,15 @@ class TeamAnalyticsService:
             member_metrics=member_metrics,
             velocity_history=velocity_history,
             current_velocity_trend=current_trend,
+            velocity_measured=velocity_measured,
             collaboration_edges=collaboration_edges,
             collaboration_density=round(collaboration_density, 2),
+            collaboration_measured=collaboration_measured,
             workload_gini=round(workload_gini, 2),
+            workload_balance_measured=workload_balance_measured,
             top_contributors=top_contributors,
             underutilized_members=underutilized,
+            task_tracking_measured=task_tracking_measured,
             ai_insights=ai_insights,
             recommendations=recommendations,
             generated_at=now_utc()
@@ -557,52 +622,65 @@ class TeamAnalyticsService:
         member_metrics: List[TeamMemberMetrics],
         velocity_history: List[TeamVelocity],
         workload_gini: float,
-        collaboration_density: float
+        collaboration_density: float,
+        *,
+        velocity_measured: bool,
+        collaboration_measured: bool,
+        workload_balance_measured: bool,
+        task_tracking_measured: bool,
     ) -> Tuple[List[str], List[str]]:
         """Generate AI-powered insights and recommendations."""
         insights = []
         recommendations = []
 
         # Analyze workload balance
-        if workload_gini > 0.4:
-            insights.append(
-                f"⚠️ Workload is unevenly distributed (Gini: {workload_gini:.2f}). "
-                "Some team members are carrying more than their share."
-            )
-            recommendations.append(
-                "Consider redistributing tasks to balance workload across the team."
-            )
-        else:
-            insights.append(
-                f"✅ Workload appears distributed across the team (Gini: {workload_gini:.2f})."
-            )
+        if workload_balance_measured:
+            if workload_gini > 0.4:
+                insights.append(
+                    f"⚠️ Workload is unevenly distributed (Gini: {workload_gini:.2f}). "
+                    "Some team members are carrying more than their share."
+                )
+                recommendations.append(
+                    "Consider redistributing tasks to balance workload across the team."
+                )
+            else:
+                insights.append(
+                    f"✅ Workload appears distributed across the team (Gini: {workload_gini:.2f})."
+                )
 
         # Analyze collaboration
-        if collaboration_density < 0.3:
+        if collaboration_measured:
+            if collaboration_density < 0.3:
+                insights.append(
+                    "🔗 Team collaboration is low. Members are working in silos."
+                )
+                recommendations.append(
+                    "Encourage pair programming or cross-project collaboration."
+                )
+            elif collaboration_density > 0.7:
+                insights.append(
+                    "✅ Recent activity suggests collaboration is active - team members share projects."
+                )
+
+        if not task_tracking_measured:
             insights.append(
-                "🔗 Team collaboration is low. Members are working in silos."
-            )
-            recommendations.append(
-                "Encourage pair programming or cross-project collaboration."
-            )
-        elif collaboration_density > 0.7:
-            insights.append(
-                "✅ Recent activity suggests collaboration is active - team members share projects."
+                "ℹ️ Task completion is not tracked for this period; velocity and trend signals are based on logged hours only."
             )
 
         # Analyze velocity trend
-        if velocity_history:
+        if velocity_measured and velocity_history:
             recent_trend = velocity_history[-1].velocity_trend if velocity_history else "stable"
             if recent_trend == "decreasing":
                 insights.append(
-                    "📉 Team velocity has been decreasing recently."
+                    "📉 Logged hours have been decreasing recently."
                 )
-                recommendations.append(
-                    "Review blockers and consider sprint retrospective to identify issues."
-                )
+                if task_tracking_measured:
+                    recommendations.append(
+                        "Review blockers and consider sprint retrospective to identify issues."
+                    )
             elif recent_trend == "increasing":
                 insights.append(
-                    "📈 Recent activity indicates an upward velocity trend."
+                    "📈 Logged hours show an upward recent trend."
                 )
 
         # Analyze overtime

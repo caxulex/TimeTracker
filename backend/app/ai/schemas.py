@@ -1164,9 +1164,13 @@ class TeamAnalyticsResponse(BaseModel):
     member_metrics: List[TeamMemberMetricsSchema] = []
     velocity_history: List[TeamVelocitySchema] = []
     current_velocity_trend: str
+    velocity_measured: Optional[bool] = None
     collaboration_edges: List[CollaborationEdgeSchema] = []
     collaboration_density: float
+    collaboration_measured: Optional[bool] = None
     workload_gini: float
+    workload_balance_measured: Optional[bool] = None
+    task_tracking_measured: Optional[bool] = None
     top_contributors: List[Dict[str, Any]] = []
     underutilized_members: List[Dict[str, Any]] = []
     ai_insights: List[str] = []

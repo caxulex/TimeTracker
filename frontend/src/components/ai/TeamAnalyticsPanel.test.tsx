@@ -141,6 +141,224 @@ describe('TeamAnalyticsPanel', () => {
     expect(screen.getByText(/no underutilization signals available/i)).toBeInTheDocument();
   });
 
+  it('renders neutral velocity state when velocity is not measured (<2 points)', async () => {
+    getTeamAnalyticsMock.mockResolvedValue({
+      ...baseResponse,
+      velocity_measured: false,
+      current_velocity_trend: 'not_measured',
+      velocity_history: [
+        {
+          period_start: '2026-06-01T00:00:00.000Z',
+          period_end: '2026-06-07T00:00:00.000Z',
+          total_hours: 12,
+          hours_per_member: 3,
+          tasks_completed: 0,
+          projects_active: 1,
+          avg_task_duration_hours: 0,
+          velocity_trend: 'stable',
+          change_percent: 0,
+        },
+      ],
+      member_metrics: [],
+      top_contributors: [],
+      collaboration_edges: [],
+      underutilized_members: [],
+      ai_insights: [],
+      recommendations: [],
+    });
+
+    renderPanel();
+
+    await screen.findByTestId('team-analytics-panel');
+    expect(screen.getByText(/velocity trend/i).parentElement).toHaveTextContent('Not tracked');
+    expect(screen.getByText(/not tracked: need at least 2 weekly velocity points/i)).toBeInTheDocument();
+    expect(screen.queryByText('Increasing')).not.toBeInTheDocument();
+  });
+
+  it('renders measured velocity trend label when velocity is measured', async () => {
+    getTeamAnalyticsMock.mockResolvedValue({
+      ...baseResponse,
+      velocity_measured: true,
+      current_velocity_trend: 'increasing',
+      velocity_history: [
+        {
+          period_start: '2026-05-25T00:00:00.000Z',
+          period_end: '2026-05-31T00:00:00.000Z',
+          total_hours: 20,
+          hours_per_member: 5,
+          tasks_completed: 6,
+          projects_active: 2,
+          avg_task_duration_hours: 1.5,
+          velocity_trend: 'stable',
+          change_percent: 0,
+        },
+        {
+          period_start: '2026-06-01T00:00:00.000Z',
+          period_end: '2026-06-07T00:00:00.000Z',
+          total_hours: 35,
+          hours_per_member: 8.75,
+          tasks_completed: 12,
+          projects_active: 3,
+          avg_task_duration_hours: 2.2,
+          velocity_trend: 'increasing',
+          change_percent: 75,
+        },
+      ],
+      member_metrics: [],
+      top_contributors: [],
+      collaboration_edges: [],
+      underutilized_members: [],
+      ai_insights: [],
+      recommendations: [],
+    });
+
+    renderPanel();
+
+    await screen.findByTestId('team-analytics-panel');
+    expect(screen.getByText(/velocity trend/i).parentElement).toHaveTextContent('Increasing');
+  });
+
+  it('renders neutral collaboration state when collaboration is not measured (single active member)', async () => {
+    getTeamAnalyticsMock.mockResolvedValue({
+      ...baseResponse,
+      total_members: 1,
+      active_members: 1,
+      collaboration_measured: false,
+      collaboration_density: 0,
+      member_metrics: [
+        { user_id: 7, user_name: 'Solo Dev', total_hours: 24, avg_daily_hours: 4, productive_hours_ratio: 0.9, projects_worked: 1, tasks_completed: 0, consistency_score: 80, overtime_hours: 0, weekend_hours: 0 },
+      ],
+      velocity_history: [],
+      collaboration_edges: [],
+      top_contributors: [],
+      underutilized_members: [],
+      ai_insights: [],
+      recommendations: [],
+    });
+
+    renderPanel();
+
+    await screen.findByTestId('team-analytics-panel');
+    expect(screen.getByText(/collaboration density:/i).parentElement).toHaveTextContent('Not tracked');
+    expect(screen.getByText(/not tracked: need at least 2 active members/i)).toBeInTheDocument();
+  });
+
+  it('renders measured collaboration density when collaboration is measured', async () => {
+    getTeamAnalyticsMock.mockResolvedValue({
+      ...baseResponse,
+      collaboration_measured: true,
+      collaboration_density: 0.62,
+      member_metrics: [],
+      velocity_history: [],
+      collaboration_edges: [
+        {
+          user1_id: 1,
+          user1_name: 'Alice',
+          user2_id: 2,
+          user2_name: 'Bob',
+          shared_projects: 3,
+          interaction_score: 0.8,
+        },
+      ],
+      top_contributors: [],
+      underutilized_members: [],
+      ai_insights: [],
+      recommendations: [],
+    });
+
+    renderPanel();
+
+    await screen.findByTestId('team-analytics-panel');
+    expect(screen.getByText(/collaboration density:/i).parentElement).toHaveTextContent('0.62');
+  });
+
+  it('renders neutral workload balance state when workload balance is not measured', async () => {
+    getTeamAnalyticsMock.mockResolvedValue({
+      ...baseResponse,
+      total_members: 1,
+      active_members: 1,
+      workload_balance_measured: false,
+      workload_gini: 0,
+      member_metrics: [
+        { user_id: 7, user_name: 'Solo Dev', total_hours: 24, avg_daily_hours: 4, productive_hours_ratio: 0.9, projects_worked: 1, tasks_completed: 0, consistency_score: 80, overtime_hours: 0, weekend_hours: 0 },
+      ],
+      velocity_history: [],
+      collaboration_edges: [],
+      top_contributors: [],
+      underutilized_members: [],
+      ai_insights: [],
+      recommendations: [],
+    });
+
+    renderPanel();
+
+    await screen.findByTestId('team-analytics-panel');
+    expect(screen.getByText(/distribution index \(gini\):/i).parentElement).toHaveTextContent('Not tracked');
+  });
+
+  it('renders measured workload gini when workload balance is measured', async () => {
+    getTeamAnalyticsMock.mockResolvedValue({
+      ...baseResponse,
+      workload_balance_measured: true,
+      workload_gini: 0.31,
+      member_metrics: [
+        { user_id: 1, user_name: 'Alice', total_hours: 42, avg_daily_hours: 1.4, productive_hours_ratio: 0.9, projects_worked: 2, tasks_completed: 10, consistency_score: 80, overtime_hours: 2, weekend_hours: 1 },
+        { user_id: 2, user_name: 'Bob', total_hours: 35, avg_daily_hours: 1.2, productive_hours_ratio: 0.88, projects_worked: 2, tasks_completed: 9, consistency_score: 78, overtime_hours: 1, weekend_hours: 0 },
+      ],
+      velocity_history: [],
+      collaboration_edges: [],
+      top_contributors: [],
+      underutilized_members: [],
+      ai_insights: [],
+      recommendations: [],
+    });
+
+    renderPanel();
+
+    await screen.findByTestId('team-analytics-panel');
+    expect(screen.getByText(/distribution index \(gini\):/i).parentElement).toHaveTextContent('0.31');
+  });
+
+  it('shows task-tracking disclosure when task tracking is not measured (total_tasks=0)', async () => {
+    getTeamAnalyticsMock.mockResolvedValue({
+      ...baseResponse,
+      total_tasks: 0,
+      task_tracking_measured: false,
+      member_metrics: [],
+      velocity_history: [],
+      collaboration_edges: [],
+      top_contributors: [],
+      underutilized_members: [],
+      ai_insights: [],
+      recommendations: [],
+    });
+
+    renderPanel();
+
+    await screen.findByTestId('team-analytics-panel');
+    expect(screen.getByText(/task completion not tracked: velocity and trend signals are based on logged hours only/i)).toBeInTheDocument();
+  });
+
+  it('does not show task-tracking disclosure when task tracking is measured', async () => {
+    getTeamAnalyticsMock.mockResolvedValue({
+      ...baseResponse,
+      total_tasks: 44,
+      task_tracking_measured: true,
+      member_metrics: [],
+      velocity_history: [],
+      collaboration_edges: [],
+      top_contributors: [],
+      underutilized_members: [],
+      ai_insights: [],
+      recommendations: [],
+    });
+
+    renderPanel();
+
+    await screen.findByTestId('team-analytics-panel');
+    expect(screen.queryByText(/task completion not tracked: velocity and trend signals are based on logged hours only/i)).not.toBeInTheDocument();
+  });
+
   it('renders workload bars for all member metrics, not only top contributors', async () => {
     getTeamAnalyticsMock.mockResolvedValue({
       ...baseResponse,

@@ -24,6 +24,7 @@ interface TeamAnalyticsPanelProps {
 }
 
 function formatTrendLabel(trend: TeamAnalyticsResponse['current_velocity_trend']): string {
+  if (trend === 'not_measured') return 'Not tracked';
   if (trend === 'increasing') return 'Increasing';
   if (trend === 'decreasing') return 'Decreasing';
   if (trend === 'stable') return 'Stable';
@@ -124,6 +125,10 @@ export default function TeamAnalyticsPanel({
   const insights = data.ai_insights ?? [];
   const recommendations = data.recommendations ?? [];
   const underutilized = data.underutilized_members ?? [];
+  const velocityMeasured = data.velocity_measured !== false;
+  const collaborationMeasured = data.collaboration_measured !== false;
+  const workloadBalanceMeasured = data.workload_balance_measured !== false;
+  const taskTrackingMeasured = data.task_tracking_measured !== false;
 
   if ((data.total_members ?? 0) === 0) {
     return (
@@ -167,14 +172,18 @@ export default function TeamAnalyticsPanel({
         </div>
         <div className="rounded-lg bg-white p-3 shadow dark:bg-gray-800">
           <p className="text-xs text-gray-500">Velocity Trend</p>
-          <p className="text-xl font-semibold text-gray-900 dark:text-white">{formatTrendLabel(data.current_velocity_trend)}</p>
+          <p className="text-xl font-semibold text-gray-900 dark:text-white">
+            {velocityMeasured ? formatTrendLabel(data.current_velocity_trend) : 'Not tracked'}
+          </p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <section className="rounded-lg bg-white p-4 shadow dark:bg-gray-800">
           <h4 className="mb-3 font-semibold text-gray-900 dark:text-white">Velocity</h4>
-          {velocityData.length > 0 ? (
+          {!velocityMeasured ? (
+            <p className="text-sm text-gray-500">Not tracked: need at least 2 weekly velocity points.</p>
+          ) : velocityData.length > 0 ? (
             <ResponsiveContainer width="100%" height={220}>
               <LineChart data={velocityData}>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -192,7 +201,7 @@ export default function TeamAnalyticsPanel({
         <section className="rounded-lg bg-white p-4 shadow dark:bg-gray-800">
           <h4 className="mb-3 font-semibold text-gray-900 dark:text-white">Workload</h4>
           <p className="mb-3 text-sm text-gray-600 dark:text-gray-300">
-            Distribution index (Gini): <span className="font-semibold">{data.workload_gini.toFixed(2)}</span>
+            Distribution index (Gini): <span className="font-semibold">{workloadBalanceMeasured ? data.workload_gini.toFixed(2) : 'Not tracked'}</span>
           </p>
           {workloadDistribution.length > 0 ? (
             <ResponsiveContainer width="100%" height={220}>
@@ -214,9 +223,11 @@ export default function TeamAnalyticsPanel({
         <section className="rounded-lg bg-white p-4 shadow dark:bg-gray-800">
           <h4 className="mb-2 font-semibold text-gray-900 dark:text-white">Collaboration</h4>
           <p className="mb-3 text-sm text-gray-600 dark:text-gray-300">
-            Collaboration density: <span className="font-semibold">{data.collaboration_density.toFixed(2)}</span>
+            Collaboration density: <span className="font-semibold">{collaborationMeasured ? data.collaboration_density.toFixed(2) : 'Not tracked'}</span>
           </p>
-          {topCollaborationEdges.length > 0 ? (
+          {!collaborationMeasured ? (
+            <p className="text-sm text-gray-500">Not tracked: need at least 2 active members.</p>
+          ) : topCollaborationEdges.length > 0 ? (
             <ul className="space-y-2 text-sm">
               {topCollaborationEdges.map((edge) => (
                 <li key={`${edge.user1_id}-${edge.user2_id}`} className="flex items-center justify-between rounded border border-gray-200 px-3 py-2 dark:border-gray-700">
@@ -246,6 +257,12 @@ export default function TeamAnalyticsPanel({
           )}
         </section>
       </div>
+
+      {!taskTrackingMeasured && (
+        <section className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-800/40 dark:text-gray-300">
+          Task completion not tracked: velocity and trend signals are based on logged hours only.
+        </section>
+      )}
 
       {insights.length > 0 && (
         <section className="rounded-lg bg-white p-4 shadow dark:bg-gray-800">

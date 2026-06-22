@@ -1556,6 +1556,7 @@ async def generate_team_analytics(
                 for v in report.velocity_history
             ],
             current_velocity_trend=report.current_velocity_trend,
+            velocity_measured=report.velocity_measured,
             collaboration_edges=[
                 CollaborationEdgeSchema(
                     user1_id=e.user1_id,
@@ -1568,7 +1569,10 @@ async def generate_team_analytics(
                 for e in report.collaboration_edges
             ],
             collaboration_density=report.collaboration_density,
+            collaboration_measured=report.collaboration_measured,
             workload_gini=report.workload_gini,
+            workload_balance_measured=report.workload_balance_measured,
+            task_tracking_measured=report.task_tracking_measured,
             top_contributors=report.top_contributors,
             underutilized_members=report.underutilized_members,
             ai_insights=report.ai_insights,
