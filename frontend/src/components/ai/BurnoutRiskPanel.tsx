@@ -120,7 +120,15 @@ export const BurnoutRiskPanel: React.FC<BurnoutRiskPanelProps> = ({
     );
   }
 
-  if (error || !data?.success) {
+  // Handle both HTTP errors (React Query error) and body-flag errors (success:false from 200 response)
+  const hasHttpError = !!error;
+  const hasBodyError = data && !data.success;
+  
+  if (hasHttpError || hasBodyError) {
+    const errorMessage = hasHttpError 
+      ? 'Failed to load burnout assessment. Please check your connection and try again.'
+      : (data?.error || 'Failed to retrieve burnout assessment. Please try again.');
+    
     return (
       <div 
         className="bg-white rounded-lg shadow p-4 border-l-4 border-red-400"
@@ -131,7 +139,7 @@ export const BurnoutRiskPanel: React.FC<BurnoutRiskPanelProps> = ({
           <AlertTriangle className="w-5 h-5" aria-hidden="true" />
           <span className="font-medium">Unable to load burnout assessment</span>
         </div>
-        <p className="text-sm text-gray-500 mt-1">{data?.error || 'An error occurred'}</p>
+        <p className="text-sm text-gray-500 mt-1">{errorMessage}</p>
         <button
           onClick={handleRefresh}
           aria-label="Retry loading burnout assessment"
