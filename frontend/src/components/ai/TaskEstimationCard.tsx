@@ -86,6 +86,16 @@ export const TaskEstimationCard: React.FC<TaskEstimationCardProps> = ({
     onSuccess: (data) => {
       setResult(data);
       onEstimate?.(data);
+    },
+    onError: (error) => {
+      // HTTP error (e.g., 503, 500, 422, etc.) — set error result so UI can display it
+      // This ensures both HTTP errors and body-flag errors are visible to user
+      setResult({
+        success: false,
+        error: error instanceof Error 
+          ? error.message 
+          : 'Failed to estimate duration. Please try again.'
+      });
     }
   });
 
