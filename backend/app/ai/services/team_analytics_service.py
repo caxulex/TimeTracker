@@ -508,7 +508,7 @@ class TeamAnalyticsService:
         team_id: int
     ) -> List[CollaborationEdge]:
         """Calculate collaboration between team members."""
-        from app.models import TimeEntry
+        from app.models import Project, TimeEntry
 
         # Get projects each user worked on
         user_projects: Dict[int, set] = {}
@@ -516,11 +516,13 @@ class TeamAnalyticsService:
         for user_id in member_ids:
             result = await self.db.execute(
                 select(TimeEntry.project_id.distinct())
+                .join(Project, Project.id == TimeEntry.project_id)
                 .where(
                     and_(
                         TimeEntry.user_id == user_id,
                         TimeEntry.start_time >= period_start,
-                        TimeEntry.project_id.isnot(None)
+                        TimeEntry.project_id.isnot(None),
+                        Project.team_id == team_id,
                     )
                 )
             )

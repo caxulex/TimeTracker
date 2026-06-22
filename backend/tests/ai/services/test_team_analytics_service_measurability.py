@@ -1,8 +1,11 @@
-from datetime import date
+from datetime import date, timedelta
+import uuid
 
 import pytest
 
 from app.ai.services.team_analytics_service import CollaborationEdge, TeamAnalyticsService, TeamVelocity
+from app.models import Project, Team, TeamMember, TimeEntry, User
+from app.utils.timewindow import now_utc
 
 
 def _velocity_point(total_hours: float) -> TeamVelocity:
@@ -238,3 +241,152 @@ async def test_generate_ai_insights_keeps_silos_claim_when_no_meaningful_pair_sh
     combined = " ".join(insights + recommendations).lower()
     assert "working in silos" in combined
     assert "encourage pair programming" in combined
+
+
+def _compute_old_unscoped_density(project_sets: dict[int, set[str]]) -> float:
+    member_ids = sorted(project_sets.keys())
+    max_edges = len(member_ids) * (len(member_ids) - 1) / 2
+    if max_edges == 0:
+        return 0.0
+
+    qualifying_edges = 0
+    for i, user1 in enumerate(member_ids):
+        for user2 in member_ids[i + 1:]:
+            shared = project_sets[user1] & project_sets[user2]
+            union = project_sets[user1] | project_sets[user2]
+            raw_score = TeamAnalyticsService._compute_raw_interaction_score(
+                shared_projects=len(shared),
+                total_unique_projects=len(union),
+            )
+            if TeamAnalyticsService._is_collaboration_edge(raw_score):
+                qualifying_edges += 1
+    return qualifying_edges / max_edges
+
+
+@pytest.mark.asyncio
+async def test_generate_team_report_scopes_collaboration_to_report_team(db_session) -> None:
+    service = TeamAnalyticsService(db=db_session)
+
+    users = []
+    for idx in range(4):
+        user = User(
+            email=f"collab-team-scope-{idx}-{uuid.uuid4().hex[:8]}@example.com",
+            password_hash="test-hash",
+            name=f"Member {idx + 1}",
+            role="regular_user",
+            is_active=True,
+        )
+        db_session.add(user)
+        users.append(user)
+
+    await db_session.flush()
+
+    report_team = Team(name="Development", owner_id=users[0].id)
+    other_team = Team(name="Other Team", owner_id=users[0].id)
+    db_session.add_all([report_team, other_team])
+    await db_session.flush()
+
+    db_session.add_all(
+        [
+            TeamMember(team_id=report_team.id, user_id=user.id, role="member")
+            for user in users
+        ]
+    )
+    await db_session.flush()
+
+    report_projects = {}
+    for idx in range(1, 12):
+        project = Project(team_id=report_team.id, name=f"report-p{idx}")
+        db_session.add(project)
+        report_projects[f"r{idx}"] = project
+
+    other_projects = {}
+    for idx in range(1, 27):
+        project = Project(team_id=other_team.id, name=f"other-p{idx}")
+        db_session.add(project)
+        other_projects[f"o{idx}"] = project
+
+    await db_session.flush()
+
+    period_time = now_utc() - timedelta(days=2)
+
+    user_report_project_keys = {
+        users[0].id: {"r1", "r2", "r3", "r4", "r5", "r6"},
+        users[1].id: {"r1", "r2", "r3", "r4", "r5", "r6"},
+        users[2].id: {"r7", "r8"},
+        users[3].id: {"r7", "r8", "r9", "r10", "r11"},
+    }
+
+    user_other_project_keys = {
+        users[0].id: {"o1", "o2", "o3", "o4", "o5", "o6", "o7", "o8", "o9", "o10", "o11", "o23", "o24"},
+        users[1].id: {"o12", "o13", "o14", "o15", "o16", "o17", "o18", "o19", "o20", "o21", "o22"},
+        users[2].id: {"o23", "o24", "o25", "o26"},
+        users[3].id: {"o19", "o20"},
+    }
+
+    for user in users:
+        for project_key in user_report_project_keys[user.id]:
+            project = report_projects[project_key]
+            db_session.add(
+                TimeEntry(
+                    user_id=user.id,
+                    project_id=project.id,
+                    start_time=period_time,
+                    end_time=period_time + timedelta(hours=1),
+                    duration_seconds=3600,
+                    description=f"report:{project_key}",
+                    is_running=False,
+                )
+            )
+        for project_key in user_other_project_keys[user.id]:
+            project = other_projects[project_key]
+            db_session.add(
+                TimeEntry(
+                    user_id=user.id,
+                    project_id=project.id,
+                    start_time=period_time,
+                    end_time=period_time + timedelta(hours=1),
+                    duration_seconds=3600,
+                    description=f"other:{project_key}",
+                    is_running=False,
+                )
+            )
+
+    await db_session.commit()
+
+    old_unscoped_sets = {
+        user.id: user_report_project_keys[user.id] | user_other_project_keys[user.id]
+        for user in users
+    }
+    old_unscoped_density = _compute_old_unscoped_density(old_unscoped_sets)
+    assert old_unscoped_density == pytest.approx(0.0)
+
+    report = await service.generate_team_report(
+        team_id=report_team.id,
+        period_days=30,
+        include_ai_insights=True,
+    )
+
+    assert report.collaboration_density == pytest.approx(0.33, abs=0.01)
+    assert report.collaboration_density > 0
+
+    qualifying_edges = [
+        edge for edge in report.collaboration_edges
+        if TeamAnalyticsService._is_collaboration_edge(edge.raw_interaction_score)
+    ]
+    assert len(qualifying_edges) == 2
+    assert any(edge.raw_interaction_score < 0.3 for edge in report.collaboration_edges)
+
+    user1_id = users[0].id
+    user3_id = users[2].id
+    cross_team_only_pair = next(
+        edge
+        for edge in report.collaboration_edges
+        if {edge.user1_id, edge.user2_id} == {user1_id, user3_id}
+    )
+    assert cross_team_only_pair.shared_projects == 0
+    assert cross_team_only_pair.raw_interaction_score == pytest.approx(0.0)
+
+    combined = " ".join(report.ai_insights + report.recommendations).lower()
+    assert "working in silos" not in combined
+    assert "encourage pair programming" not in combined
