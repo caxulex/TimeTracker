@@ -406,10 +406,14 @@ export interface TeamAnalyticsResponse {
   total_tasks: number;
   member_metrics?: TeamMemberAnalytics[];
   velocity_history?: TeamVelocityPoint[];
-  current_velocity_trend: 'increasing' | 'decreasing' | 'stable' | 'unknown';
+  current_velocity_trend: 'increasing' | 'decreasing' | 'stable' | 'unknown' | 'not_measured';
+  velocity_measured?: boolean;
   collaboration_edges?: TeamCollaborationEdge[];
   collaboration_density: number;
+  collaboration_measured?: boolean;
   workload_gini: number;
+  workload_balance_measured?: boolean;
+  task_tracking_measured?: boolean;
   top_contributors?: TeamContributorSummary[];
   underutilized_members?: TeamContributorSummary[];
   ai_insights?: string[];
