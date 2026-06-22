@@ -85,10 +85,7 @@ export const TaskEstimationCard: React.FC<TaskEstimationCardProps> = ({
     },
     onSuccess: (data) => {
       setResult(data);
-      // Only call onEstimate if the estimation succeeded
-      if (data.success) {
-        onEstimate?.(data);
-      }
+      onEstimate?.(data);
     },
     onError: (error) => {
       // HTTP error (e.g., 503, 500, 422, etc.) — set error result so UI can display it

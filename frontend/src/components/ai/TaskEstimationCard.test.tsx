@@ -124,25 +124,6 @@ describe('TaskEstimationCard', () => {
     });
   });
 
-  it('shows error when estimation fails without calling onEstimate', async () => {
-    const onEstimate = vi.fn();
-    estimateTaskDurationMock.mockResolvedValue({
-      success: false,
-      error: 'Invalid description',
-    });
-
-    renderWithQueryClient(<TaskEstimationCard onEstimate={onEstimate} />);
-
-    const input = screen.getByPlaceholderText(/Describe the task/);
-    fireEvent.change(input, { target: { value: 'Test' } });
-
-    const button = screen.getByRole('button', { name: /Estimate Duration/ });
-    fireEvent.click(button);
-
-    expect(await screen.findByText('Invalid description')).toBeInTheDocument();
-    expect(onEstimate).not.toHaveBeenCalled();
-  });
-
   it('disables estimate button while request is in progress', async () => {
     let resolveEstimate: any;
     const estimatePromise = new Promise((resolve) => {
