@@ -151,6 +151,23 @@ export const BurnoutRiskPanel: React.FC<BurnoutRiskPanelProps> = ({
     );
   }
 
+  // After error handling, ensure data is defined for the rest of the component
+  if (!data) {
+    return (
+      <div 
+        className="bg-white rounded-lg shadow p-4"
+        role="alert"
+        aria-label="Burnout assessment unavailable"
+      >
+        <div className="flex items-center gap-2 text-amber-600">
+          <AlertTriangle className="w-5 h-5" aria-hidden="true" />
+          <span className="font-medium">Assessment data unavailable</span>
+        </div>
+        <p className="text-sm text-gray-500 mt-1">Please try again later.</p>
+      </div>
+    );
+  }
+
   const isInsufficientData = data.insufficient_data === true;
   const minWorkDaysThreshold = data.min_work_days_threshold ?? 3;
 
