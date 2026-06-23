@@ -934,9 +934,9 @@ async def scan_ml_anomalies(
         raise
     except Exception as e:
         logger.error(f"Error scanning ML anomalies: {e}")
-        return MLAnomalyScanResponse(
-            success=False,
-            error=str(e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ML anomaly scan service unavailable"
         )
 
 
@@ -996,9 +996,9 @@ async def assess_burnout_risk(
         raise
     except Exception as e:
         logger.error(f"Error assessing burnout: {e}")
-        return BurnoutAssessmentResponse(
-            success=False,
-            error=str(e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Burnout assessment service unavailable"
         )
 
 
@@ -1038,11 +1038,13 @@ async def scan_team_burnout(
             high_risk_count=result["high_risk_count"],
             assessed_at=result["assessed_at"]
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error scanning team burnout: {e}")
-        return TeamBurnoutResponse(
-            success=False,
-            error=str(e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Team burnout scan service unavailable"
         )
 
 
@@ -1100,9 +1102,9 @@ async def calculate_user_baseline(
         raise
     except Exception as e:
         logger.error(f"Error calculating baseline: {e}")
-        return UserBaselineResponse(
-            success=False,
-            error=str(e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="User baseline service unavailable"
         )
 
 
