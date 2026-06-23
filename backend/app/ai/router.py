@@ -1430,15 +1430,13 @@ async def search_similar_tasks(
             search_time_ms=result.search_time_ms,
             method=result.method
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Semantic search error: {e}")
-        return SemanticSearchResponse(
-            success=False,
-            query=request.query,
-            results=[],
-            search_time_ms=0,
-            method="error",
-            error=str(e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Semantic search service unavailable"
         )
 
 
@@ -1487,15 +1485,13 @@ async def get_time_suggestions(
             search_time_ms=0,
             method="time_pattern"
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Time suggestions error: {e}")
-        return SemanticSearchResponse(
-            success=False,
-            query="",
-            results=[],
-            search_time_ms=0,
-            method="error",
-            error=str(e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Time suggestions service unavailable"
         )
 
 
@@ -1604,42 +1600,18 @@ async def generate_team_analytics(
             recommendations=report.recommendations,
             generated_at=report.generated_at
         )
+    except HTTPException:
+        raise
     except ValueError as ve:
-        return TeamAnalyticsResponse(
-            success=False,
-            team_id=request.team_id,
-            team_name="Unknown",
-            period_days=request.period_days,
-            total_members=0,
-            active_members=0,
-            total_hours=0,
-            avg_hours_per_member=0,
-            total_projects=0,
-            total_tasks=0,
-            current_velocity_trend="unknown",
-            collaboration_density=0,
-            workload_gini=0,
-            generated_at=now_utc(),
-            error=str(ve)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
         )
     except Exception as e:
         logger.error(f"Team analytics error: {e}")
-        return TeamAnalyticsResponse(
-            success=False,
-            team_id=request.team_id,
-            team_name="Unknown",
-            period_days=request.period_days,
-            total_members=0,
-            active_members=0,
-            total_hours=0,
-            avg_hours_per_member=0,
-            total_projects=0,
-            total_tasks=0,
-            current_velocity_trend="unknown",
-            collaboration_density=0,
-            workload_gini=0,
-            generated_at=now_utc(),
-            error=str(e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Team analytics service unavailable"
         )
 
 
@@ -1671,13 +1643,11 @@ async def compare_teams(
             comparisons=comparison["comparisons"],
             generated_at=comparison["generated_at"]
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Team comparison error: {e}")
-        return TeamComparisonResponse(
-            success=False,
-            period_days=request.period_days,
-            teams_compared=0,
-            comparisons=[],
-            generated_at=now_utc().isoformat(),
-            error=str(e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Team comparison service unavailable"
         )
