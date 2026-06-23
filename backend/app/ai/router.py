@@ -1153,11 +1153,13 @@ async def estimate_task_duration(
             similar_tasks=estimate.similar_tasks,  # type: ignore
             recommendation=estimate.recommendation
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error estimating duration: {e}")
-        return TaskEstimationResponse(
-            success=False,
-            error=str(e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Task estimation service unavailable"
         )
 
 
@@ -1211,11 +1213,13 @@ async def estimate_batch_tasks(
             total_minutes=total_minutes,
             total_hours=total_minutes / 60
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in batch estimation: {e}")
-        return BatchTaskEstimationResponse(
-            success=False,
-            error=str(e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Batch estimation service unavailable"
         )
 
 
@@ -1252,15 +1256,33 @@ async def train_estimation_model(
                 trained_at=result.get("trained_at")
             )
         else:
-            return ModelTrainingResponse(
-                success=False,
-                error=result.get("error")
-            )
+            # Map service-layer semantic failures to proper HTTP status codes
+            error_msg = result.get("error", "Training failed")
+            if "not installed" in error_msg.lower():
+                # ML libraries unavailable
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="ML libraries not available for model training"
+                )
+            elif "insufficient data" in error_msg.lower():
+                # Not enough training samples - request valid, but precondition not met
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=error_msg
+                )
+            else:
+                # Generic service error
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Model training service error"
+                )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error training model: {e}")
-        return ModelTrainingResponse(
-            success=False,
-            error=str(e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Model training service unavailable"
         )
 
 
@@ -1309,9 +1331,9 @@ async def get_user_performance_profile(
         raise
     except Exception as e:
         logger.error(f"Error getting profile: {e}")
-        return UserPerformanceProfileResponse(
-            success=False,
-            error=str(e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Profile service unavailable"
         )
 
 
@@ -1338,12 +1360,13 @@ async def get_estimation_stats(
             min_samples_required=stats.get("min_samples_required", 50),
             tfidf_features=stats.get("tfidf_features", 0)
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting stats: {e}")
-        return EstimationStatsResponse(
-            success=False,
-            model_trained=False,
-            ml_available=False
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stats service unavailable"
         )
 
 
