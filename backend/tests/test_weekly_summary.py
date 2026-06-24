@@ -6,58 +6,6 @@ import pytest
 from app.ai.services.reporting_service import AIReportingService
 
 
-@dataclass
-class _Entry:
-    start_time: datetime
-    end_time: datetime
-    duration_seconds: int
-    pause_seconds: int = 0
-
-
-@pytest.mark.asyncio
-@pytest.mark.skip(reason="Phase 2e internalized week-comparison helper; no public _build_week_comparison_context surface remains")
-async def test_same_day_of_week_comparison_mid_week():
-    service = AIReportingService(db=None)
-    now = datetime(2026, 6, 10, 10, 35, tzinfo=timezone.utc)
-
-    context = service._build_week_comparison_context(
-        week_start=date(2026, 6, 8),   # Mon
-        week_end=date(2026, 6, 14),    # Sun
-        reference_now=now,  # Wed 10:35
-        tz="UTC",
-    )
-
-    assert context["comparison_end"] == date(2026, 6, 10)
-    assert context["previous_week_start"] == date(2026, 6, 1)
-    assert context["previous_week_end"] == date(2026, 6, 3)
-    assert context["comparison_cutoff_utc"] == now
-    assert context["previous_comparison_cutoff_utc"] == now - timedelta(days=7)
-    assert context["is_week_complete"] is False
-    assert context["comparison_range_label"] == "Mon-Wed"
-    assert context["comparison_label"] == "vs Same Period Last Week (Mon-Wed)"
-
-
-@pytest.mark.asyncio
-@pytest.mark.skip(reason="Phase 2e internalized week-comparison helper; no public _build_week_comparison_context surface remains")
-async def test_same_day_of_week_comparison_week_complete():
-    service = AIReportingService(db=None)
-    now = datetime(2026, 6, 14, 18, 30, tzinfo=timezone.utc)
-
-    context = service._build_week_comparison_context(
-        week_start=date(2026, 6, 8),   # Mon
-        week_end=date(2026, 6, 14),    # Sun
-        reference_now=now,  # Sun
-        tz="UTC",
-    )
-
-    assert context["comparison_end"] == date(2026, 6, 14)
-    assert context["previous_week_start"] == date(2026, 6, 1)
-    assert context["previous_week_end"] == date(2026, 6, 7)
-    assert context["is_week_complete"] is True
-    assert context["comparison_range_label"] == "full week"
-    assert context["comparison_label"] == "vs Last Week"
-
-
 @pytest.mark.asyncio
 @pytest.mark.skip(reason="Phase 2e internalized week-comparison helper; no public _build_week_comparison_context surface remains")
 async def test_time_anchored_comparison_mid_day():
