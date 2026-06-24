@@ -22,8 +22,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.services.ai_client import AIClient, get_ai_client
 from app.ai.utils.cache_manager import AICacheManager, get_cache_manager
+from app.ai.utils.tenant_time import resolve_tenant_timezone_for_user
 from app.services.ai_feature_service import AIFeatureManager
-from app.utils.timewindow import now_utc
+from app.utils.timewindow import local_today, now_utc, range_bounds
 
 logger = logging.getLogger(__name__)
 
@@ -208,15 +209,15 @@ class AIReportingService:
                     "message": "AI report summaries are disabled"
                 }
 
-            # Calculate week boundaries in UTC for consistent timezone handling
-            # Time entries are stored in UTC, so we must use UTC dates for comparison
-            now_utc = datetime.now(timezone.utc)
-            today_utc = now_utc.date()
-            week_start = today_utc - timedelta(days=today_utc.weekday())
+            # Build week boundaries in tenant-local calendar, then convert
+            # local dates to UTC query instants inside _gather_weekly_metrics.
+            tenant_tz = await resolve_tenant_timezone_for_user(self.db, user_id)
+            today_local = local_today(tenant_tz)
+            week_start = today_local - timedelta(days=today_local.weekday())
             week_end = week_start + timedelta(days=6)
 
             # Gather data
-            metrics = await self._gather_weekly_metrics(user_id, week_start, week_end, team_id)
+            metrics = await self._gather_weekly_metrics(user_id, week_start, week_end, team_id, tenant_tz)
             insights = await self._generate_insights(metrics, week_start, week_end)
 
             # Generate AI summary if enabled
@@ -554,7 +555,8 @@ class AIReportingService:
         user_id: int,
         week_start: date,
         week_end: date,
-        team_id: Optional[int] = None
+        team_id: Optional[int] = None,
+        tz: str = "UTC",
     ) -> Dict[str, Any]:
         """Gather metrics for weekly summary."""
 
@@ -565,10 +567,8 @@ class AIReportingService:
             "week_end": week_end.isoformat()
         }
 
-        # Convert date boundaries to UTC datetimes for proper comparison with UTC timestamps
-        # week_start at 00:00:00 UTC, week_end at 23:59:59.999999 UTC
-        week_start_dt = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
-        week_end_dt = datetime.combine(week_end, datetime.max.time()).replace(tzinfo=timezone.utc)
+        # Convert tenant-local date boundaries to UTC instants for filtering.
+        week_start_dt, week_end_dt = range_bounds(week_start, week_end, tz)
 
         # Get relevant users
         if team_id:
@@ -618,8 +618,7 @@ class AIReportingService:
         # Compare to last week
         last_week_start = week_start - timedelta(days=7)
         last_week_end = week_end - timedelta(days=7)
-        last_week_start_dt = datetime.combine(last_week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
-        last_week_end_dt = datetime.combine(last_week_end, datetime.max.time()).replace(tzinfo=timezone.utc)
+        last_week_start_dt, last_week_end_dt = range_bounds(last_week_start, last_week_end, tz)
 
         # Fetch entries that overlapped with last week (same logic as this week)
         last_entries_result = await self.db.execute(
