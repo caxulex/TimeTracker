@@ -122,7 +122,7 @@ class ReportSummary:
             "user_count": self.metrics.get("user_count", 1),
             "total_hours": self.metrics.get("total_hours", 0),
             "last_week_hours": self.metrics.get("last_week_hours", 0),
-            "hours_change_pct": self.metrics.get("hours_change_pct", 0),
+            "hours_change_pct": self.metrics.get("hours_change_pct"),
             "projects_count": self.metrics.get("projects_count", 0),
             "top_projects": formatted_top_projects,
             "daily_hours": daily_hours,
@@ -132,7 +132,7 @@ class ReportSummary:
             # Frontend compatibility aliases
             "projects_worked": self.metrics.get("projects_count", 0),
             "tasks_completed": self.metrics.get("tasks_completed", 0),
-            "trend_vs_previous": self.metrics.get("hours_change_pct", 0),
+            "trend_vs_previous": self.metrics.get("hours_change_pct", 0) or 0,
             "daily_average": self.metrics.get("avg_daily_hours", 0),
             "most_productive_day": most_productive_day,
             "entry_count": self.metrics.get("entry_count", 0),
@@ -615,10 +615,18 @@ class AIReportingService:
 
         metrics["total_hours"] = round(total_seconds / 3600, 1)
 
-        # Compare to last week
+        # Compare this week's elapsed window against the same elapsed window last week.
+        this_cutoff_utc = min(max(now_utc, week_start_dt), week_end_dt)
+        elapsed_since_week_start = this_cutoff_utc - week_start_dt
         last_week_start = week_start - timedelta(days=7)
         last_week_end = week_end - timedelta(days=7)
         last_week_start_dt, last_week_end_dt = range_bounds(last_week_start, last_week_end, tz)
+        last_cutoff_utc = min(last_week_start_dt + elapsed_since_week_start, last_week_end_dt)
+
+        this_through_now_seconds = sum(
+            self._calculate_entry_duration_for_period(e, week_start_dt, this_cutoff_utc, now_utc)
+            for e in entries
+        )
 
         # Fetch entries that overlapped with last week (same logic as this week)
         last_entries_result = await self.db.execute(
@@ -642,13 +650,18 @@ class AIReportingService:
             for e in last_entries
         )
 
+        last_through_cutoff_seconds = sum(
+            self._calculate_entry_duration_for_period(e, last_week_start_dt, last_cutoff_utc, now_utc)
+            for e in last_entries
+        )
+
         metrics["last_week_hours"] = round(last_week_seconds / 3600, 1)
 
-        if last_week_seconds > 0:
-            change_pct = ((total_seconds - last_week_seconds) / last_week_seconds) * 100
+        if last_through_cutoff_seconds > 0:
+            change_pct = ((this_through_now_seconds - last_through_cutoff_seconds) / last_through_cutoff_seconds) * 100
             metrics["hours_change_pct"] = round(change_pct, 1)
         else:
-            metrics["hours_change_pct"] = 0 if total_seconds == 0 else 100
+            metrics["hours_change_pct"] = None
 
         # Projects worked on (count from entries that overlap with this week)
         projects_result = await self.db.execute(
@@ -752,9 +765,11 @@ class AIReportingService:
         metrics["entry_count"] = len(entries)
 
         # Trend indicator
-        if total_seconds > last_week_seconds:
+        if metrics["hours_change_pct"] is None:
+            metrics["trend"] = "stable"
+        elif this_through_now_seconds > last_through_cutoff_seconds:
             metrics["trend"] = "up"
-        elif total_seconds < last_week_seconds:
+        elif this_through_now_seconds < last_through_cutoff_seconds:
             metrics["trend"] = "down"
         else:
             metrics["trend"] = "stable"
@@ -980,7 +995,10 @@ class AIReportingService:
         insights = []
 
         # Hours trend
-        change_pct = metrics.get("hours_change_pct", 0)
+        change_pct = metrics.get("hours_change_pct")
+        if change_pct is None:
+            return insights
+
         if change_pct > 20:
             insights.append(Insight(
                 type=InsightType.TREND,
@@ -1039,7 +1057,7 @@ class AIReportingService:
 
 Data:
 - Total hours: {metrics.get('total_hours', 0)}
-- Change from last week: {metrics.get('hours_change_pct', 0):.0f}%
+- Change from last week: {f"{metrics.get('hours_change_pct', 0):.0f}%" if metrics.get('hours_change_pct') is not None else "no comparable prior period"}
 - Projects worked on: {metrics.get('projects_count', 0)}
 - Average daily hours: {metrics.get('avg_daily_hours', 0):.1f}
 - Top project: {metrics.get('top_projects', [{}])[0].get('name', 'N/A') if metrics.get('top_projects') else 'N/A'}
@@ -1074,10 +1092,13 @@ Write 2-3 sentences summarizing this week's activity. Be concise and actionable.
     def _generate_rule_based_summary(self, metrics: Dict[str, Any]) -> str:
         """Generate summary without AI."""
         total_hours = metrics.get("total_hours", 0)
-        change_pct = metrics.get("hours_change_pct", 0)
+        change_pct = metrics.get("hours_change_pct")
         projects = metrics.get("projects_count", 0)
 
         parts = [f"This week you logged {total_hours:.1f} hours across {projects} projects."]
+
+        if change_pct is None:
+            return " ".join(parts)
 
         if change_pct > 10:
             parts.append(f"That's {change_pct:.0f}% more than last week.")
@@ -1105,8 +1126,8 @@ Write 2-3 sentences summarizing this week's activity. Be concise and actionable.
             project_name = top.get('project_name', top.get('name', 'Unknown'))
             highlights.append(f"Most time on: {project_name} ({top.get('hours', 0):.1f}h)")
 
-        change_pct = metrics.get("hours_change_pct", 0)
-        if abs(change_pct) > 10:
+        change_pct = metrics.get("hours_change_pct")
+        if change_pct is not None and abs(change_pct) > 10:
             direction = "up" if change_pct > 0 else "down"
             highlights.append(f"Productivity {direction} {abs(change_pct):.0f}% vs last week")
 
