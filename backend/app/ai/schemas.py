@@ -503,8 +503,11 @@ class ProjectDailyHours(BaseModel):
 
 class TopProject(BaseModel):
     """Top project by hours."""
-    name: str
+    project_id: Optional[int] = None
+    project_name: str
+    name: Optional[str] = None
     hours: float
+    percentage: float = 0
 
     model_config = {"extra": "allow"}
 

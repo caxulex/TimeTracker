@@ -86,12 +86,16 @@ class ReportSummary:
     generated_at: datetime = field(default_factory=datetime.now)
 
     def to_dict(self) -> Dict[str, Any]:
-        # Format top_projects to match TopProject schema (name, hours)
+        # Preserve canonical project fields for frontend contracts.
+        # Include both project_name and name aliases for compatibility.
         raw_top_projects = self.metrics.get("top_projects", [])
         formatted_top_projects = [
             {
+                "project_id": p.get("project_id"),
+                "project_name": p.get("project_name", p.get("name", "Unknown")),
                 "name": p.get("project_name", p.get("name", "Unknown")),
-                "hours": p.get("hours", 0)
+                "hours": p.get("hours", 0),
+                "percentage": p.get("percentage", 0),
             }
             for p in raw_top_projects
         ]
@@ -182,6 +186,18 @@ class AIReportingService:
         if self._feature_manager is None:
             self._feature_manager = AIFeatureManager(self.db)
         return self._feature_manager
+
+    @staticmethod
+    def _top_real_project(metrics: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Return highest-hours non-meeting project row, if any."""
+        top_projects = metrics.get("top_projects", []) or []
+        real_projects = [
+            p for p in top_projects
+            if p.get("project_id") not in (None, 0)
+        ]
+        if not real_projects:
+            return None
+        return max(real_projects, key=lambda p: float(p.get("hours", 0) or 0))
 
     async def generate_weekly_summary(
         self,
@@ -701,30 +717,43 @@ class AIReportingService:
             metrics["tasks_completed"] = 0
 
         # Top projects by hours - calculate in Python for accuracy
-        project_hours: Dict[int, Dict] = {}
+        project_hours: Dict[int, Dict[str, Any]] = {}
         for entry in entries:
-            if entry.project_id:
-                if entry.project_id not in project_hours:
-                    project_hours[entry.project_id] = {"id": entry.project_id, "seconds": 0}
+            project_bucket_id = entry.project_id or 0
+            if project_bucket_id not in project_hours:
+                project_hours[project_bucket_id] = {
+                    "id": project_bucket_id,
+                    "seconds": 0,
+                    "project_name": "Meeting" if entry.project_id is None else "Unknown",
+                }
 
-                if entry.duration_seconds:
-                    project_hours[entry.project_id]["seconds"] += entry.duration_seconds
-                elif entry.end_time and entry.start_time:
-                    project_hours[entry.project_id]["seconds"] += int((entry.end_time - entry.start_time).total_seconds())
+            if entry.duration_seconds:
+                project_hours[project_bucket_id]["seconds"] += entry.duration_seconds
+            elif entry.end_time and entry.start_time:
+                project_hours[project_bucket_id]["seconds"] += int((entry.end_time - entry.start_time).total_seconds())
 
         # Get project names
         if project_hours:
-            proj_result = await self.db.execute(
-                select(Project.id, Project.name)
-                .where(Project.id.in_(list(project_hours.keys())))
-            )
-            proj_names = {r.id: r.name for r in proj_result.fetchall()}
+            real_project_ids = [pid for pid in project_hours.keys() if pid != 0]
+            proj_names: Dict[int, str] = {}
+            if real_project_ids:
+                proj_result = await self.db.execute(
+                    select(Project.id, Project.name)
+                    .where(Project.id.in_(real_project_ids))
+                )
+                proj_names = {r.id: r.name for r in proj_result.fetchall()}
+
+            for pid, bucket in project_hours.items():
+                if pid == 0:
+                    bucket["project_name"] = "Meeting"
+                else:
+                    bucket["project_name"] = proj_names.get(pid, "Unknown")
 
             top_projects = sorted(project_hours.values(), key=lambda x: x["seconds"], reverse=True)[:5]
             metrics["top_projects"] = [
                 {
                     "project_id": p["id"],
-                    "project_name": proj_names.get(p["id"], "Unknown"),
+                    "project_name": p["project_name"],
                     "hours": round(p["seconds"] / 3600, 1),
                     "percentage": round((p["seconds"] / total_seconds * 100) if total_seconds > 0 else 0, 1)
                 }
@@ -1052,6 +1081,11 @@ class AIReportingService:
             return self._generate_rule_based_summary(metrics)
 
         try:
+            top_real = self._top_real_project(metrics)
+            top_real_name = "N/A"
+            if top_real is not None:
+                top_real_name = top_real.get("project_name", top_real.get("name", "Unknown"))
+
             # Build prompt
             prompt = f"""Generate a brief, professional weekly summary for a time tracking application.
 
@@ -1060,7 +1094,7 @@ Data:
 - Change from last week: {f"{metrics.get('hours_change_pct', 0):.0f}%" if metrics.get('hours_change_pct') is not None else "no comparable prior period"}
 - Projects worked on: {metrics.get('projects_count', 0)}
 - Average daily hours: {metrics.get('avg_daily_hours', 0):.1f}
-- Top project: {metrics.get('top_projects', [{}])[0].get('name', 'N/A') if metrics.get('top_projects') else 'N/A'}
+- Top project: {top_real_name}
 
 Key observations:
 {chr(10).join(['- ' + i.description for i in insights[:3]])}
@@ -1119,12 +1153,10 @@ Write 2-3 sentences summarizing this week's activity. Be concise and actionable.
         if total_hours > 0:
             highlights.append(f"Logged {total_hours:.1f} hours this week")
 
-        top_projects = metrics.get("top_projects", [])
-        if top_projects:
-            top = top_projects[0]
-            # Use project_name (from metrics) or name (from formatted output)
-            project_name = top.get('project_name', top.get('name', 'Unknown'))
-            highlights.append(f"Most time on: {project_name} ({top.get('hours', 0):.1f}h)")
+        top_real = self._top_real_project(metrics)
+        if top_real is not None:
+            project_name = top_real.get("project_name", top_real.get("name", "Unknown"))
+            highlights.append(f"Most time on: {project_name} ({top_real.get('hours', 0):.1f}h)")
 
         change_pct = metrics.get("hours_change_pct")
         if change_pct is not None and abs(change_pct) > 10:
