@@ -55,65 +55,6 @@ def _service(db) -> AIReportingService:
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Phase 2e removed module-level tenant timezone helper patch points; coverage moved to integration-level weekly summary behavior")
-async def test_generate_weekly_summary_uses_shared_timezone_helper(monkeypatch: pytest.MonkeyPatch):
-    captured = {}
-
-    async def fake_resolve_tz(_db, _user_id):
-        return "America/Bogota"
-
-    def fake_local_today(tz: str):
-        captured["tz"] = tz
-        return date(2026, 6, 10)
-
-    async def fake_feature_manager():
-        return _EnabledFeatureManager()
-
-    async def fake_weekly_metrics(_user_id, week_start, week_end, _team_id, tz, reference_now_utc):
-        captured["metrics_tz"] = tz
-        return {
-            "week_start": week_start.isoformat(),
-            "week_end": week_end.isoformat(),
-            "total_hours": 0,
-            "hours_change_pct": 0,
-            "projects_count": 0,
-            "top_projects": [],
-            "daily_hours": [],
-            "avg_daily_hours": 0,
-            "max_daily_hours": 0,
-            "min_daily_hours": 0,
-            "tasks_completed": 0,
-            "entry_count": 0,
-            "trend": "stable",
-            "comparison_label": "vs Last Week",
-            "comparison_suffix": "vs last week",
-            "comparison_range_label": "full week",
-            "comparison_is_week_complete": True,
-        }
-
-    async def fake_generate_insights(*_args, **_kwargs):
-        return []
-
-    monkeypatch.setattr("app.ai.services.reporting_service.resolve_tenant_timezone_for_user", fake_resolve_tz)
-    monkeypatch.setattr("app.ai.services.reporting_service.local_today", fake_local_today)
-
-    async def fake_execute(_statement):
-        return _Result(scalar_value=None)
-
-    service = _service(_DB(fake_execute))
-    monkeypatch.setattr(service, "_get_feature_manager", fake_feature_manager)
-    monkeypatch.setattr(service, "_gather_weekly_metrics", fake_weekly_metrics)
-    monkeypatch.setattr(service, "_generate_insights", fake_generate_insights)
-
-    result = await service.generate_weekly_summary(user_id=99, include_ai=False)
-
-    assert not hasattr(service, "_resolve_tenant_timezone")
-    assert captured["tz"] == "America/Bogota"
-    assert captured["metrics_tz"] == "America/Bogota"
-    assert result["success"] is True
-
-
-@pytest.mark.asyncio
 async def test_generate_project_health_returns_flat_response_contract(monkeypatch: pytest.MonkeyPatch):
     async def fake_execute(_statement):
         return _Result(scalar_value=SimpleNamespace(id=77, name="Apollo"))
