@@ -516,7 +516,7 @@ class SummaryMetrics(BaseModel):
     user_count: int = 1
     total_hours: float = 0
     last_week_hours: float = 0
-    hours_change_pct: float = 0
+    hours_change_pct: Optional[float] = None
     projects_count: int = 0
     top_projects: List[TopProject] = []
     daily_hours: List[ProjectDailyHours] = []
