@@ -566,6 +566,32 @@ class AIReportingService:
         )
         return calculate_entry_duration_for_period(entry, period_start, period_end, now)
 
+    @staticmethod
+    def _build_week_comparison_cutoffs(
+        week_start: date,
+        week_end: date,
+        reference_now: datetime,
+        tz: str = "UTC",
+    ) -> Dict[str, datetime]:
+        """Build aligned current/prior week cutoff windows for fair comparison."""
+        week_start_dt, week_end_dt = range_bounds(week_start, week_end, tz)
+        this_cutoff_utc = min(max(reference_now, week_start_dt), week_end_dt)
+        elapsed_since_week_start = this_cutoff_utc - week_start_dt
+
+        last_week_start = week_start - timedelta(days=7)
+        last_week_end = week_end - timedelta(days=7)
+        last_week_start_dt, last_week_end_dt = range_bounds(last_week_start, last_week_end, tz)
+        last_cutoff_utc = min(last_week_start_dt + elapsed_since_week_start, last_week_end_dt)
+
+        return {
+            "week_start_dt": week_start_dt,
+            "week_end_dt": week_end_dt,
+            "this_cutoff_utc": this_cutoff_utc,
+            "last_week_start_dt": last_week_start_dt,
+            "last_week_end_dt": last_week_end_dt,
+            "last_cutoff_utc": last_cutoff_utc,
+        }
+
     async def _gather_weekly_metrics(
         self,
         user_id: int,
@@ -632,12 +658,16 @@ class AIReportingService:
         metrics["total_hours"] = round(total_seconds / 3600, 1)
 
         # Compare this week's elapsed window against the same elapsed window last week.
-        this_cutoff_utc = min(max(now_utc, week_start_dt), week_end_dt)
-        elapsed_since_week_start = this_cutoff_utc - week_start_dt
-        last_week_start = week_start - timedelta(days=7)
-        last_week_end = week_end - timedelta(days=7)
-        last_week_start_dt, last_week_end_dt = range_bounds(last_week_start, last_week_end, tz)
-        last_cutoff_utc = min(last_week_start_dt + elapsed_since_week_start, last_week_end_dt)
+        comparison_cutoffs = self._build_week_comparison_cutoffs(
+            week_start=week_start,
+            week_end=week_end,
+            reference_now=now_utc,
+            tz=tz,
+        )
+        this_cutoff_utc = comparison_cutoffs["this_cutoff_utc"]
+        last_week_start_dt = comparison_cutoffs["last_week_start_dt"]
+        last_week_end_dt = comparison_cutoffs["last_week_end_dt"]
+        last_cutoff_utc = comparison_cutoffs["last_cutoff_utc"]
 
         this_through_now_seconds = sum(
             self._calculate_entry_duration_for_period(e, week_start_dt, this_cutoff_utc, now_utc)
@@ -823,11 +853,22 @@ class AIReportingService:
         now_utc = datetime.now(timezone.utc)
         today_utc = now_utc.date()
         week_start = today_utc - timedelta(days=today_utc.weekday())
-        last_week_start = week_start - timedelta(days=7)
+        week_end = week_start + timedelta(days=6)
+
+        comparison_cutoffs = self._build_week_comparison_cutoffs(
+            week_start=week_start,
+            week_end=week_end,
+            reference_now=now_utc,
+            tz="UTC",
+        )
 
         # Convert to UTC datetimes for proper comparison
-        week_start_dt = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
-        last_week_start_dt = datetime.combine(last_week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
+        week_start_dt = comparison_cutoffs["week_start_dt"]
+        week_end_dt = comparison_cutoffs["week_end_dt"]
+        this_cutoff_utc = comparison_cutoffs["this_cutoff_utc"]
+        last_week_start_dt = comparison_cutoffs["last_week_start_dt"]
+        last_week_end_dt = comparison_cutoffs["last_week_end_dt"]
+        last_cutoff_utc = comparison_cutoffs["last_cutoff_utc"]
 
         this_week_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
@@ -839,6 +880,18 @@ class AIReportingService:
             )
         )
         this_week = this_week_result.scalar() or 0
+
+        this_week_through_cutoff_result = await self.db.execute(
+            select(func.sum(TimeEntry.duration_seconds))
+            .where(
+                and_(
+                    TimeEntry.project_id == project_id,
+                    TimeEntry.start_time >= week_start_dt,
+                    TimeEntry.start_time < this_cutoff_utc,
+                )
+            )
+        )
+        this_week_through_cutoff = this_week_through_cutoff_result.scalar() or 0
 
         last_week_result = await self.db.execute(
             select(func.sum(TimeEntry.duration_seconds))
@@ -852,13 +905,25 @@ class AIReportingService:
         )
         last_week = last_week_result.scalar() or 0
 
+        last_week_through_cutoff_result = await self.db.execute(
+            select(func.sum(TimeEntry.duration_seconds))
+            .where(
+                and_(
+                    TimeEntry.project_id == project_id,
+                    TimeEntry.start_time >= last_week_start_dt,
+                    TimeEntry.start_time < last_cutoff_utc,
+                )
+            )
+        )
+        last_week_through_cutoff = last_week_through_cutoff_result.scalar() or 0
+
         metrics["this_week_hours"] = round(this_week / 3600, 1)
         metrics["last_week_hours"] = round(last_week / 3600, 1)
 
-        if last_week > 0:
-            if this_week > last_week * 1.1:
+        if last_week_through_cutoff > 0:
+            if this_week_through_cutoff > last_week_through_cutoff * 1.1:
                 metrics["activity_trend"] = "increasing"
-            elif this_week < last_week * 0.9:
+            elif this_week_through_cutoff < last_week_through_cutoff * 0.9:
                 metrics["activity_trend"] = "decreasing"
             else:
                 metrics["activity_trend"] = "stable"
