@@ -132,6 +132,8 @@ class Company(Base):
     status: Mapped[str] = mapped_column(String(50), default="trial", nullable=False)
     trial_ends_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     subscription_ends_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    stripe_customer_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    stripe_subscription_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
 
     # Limits (based on tier)
     max_users: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
