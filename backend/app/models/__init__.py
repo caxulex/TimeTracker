@@ -97,9 +97,8 @@ class AdjustmentType(str, enum.Enum):
 class SubscriptionTier(str, enum.Enum):
     """Company subscription tier enumeration"""
     FREE = "free"
-    STARTER = "starter"
-    PROFESSIONAL = "professional"
-    ENTERPRISE = "enterprise"
+    STANDARD = "standard"
+    UNLIMITED = "unlimited"
 
 
 class CompanyStatus(str, enum.Enum):
@@ -128,7 +127,7 @@ class Company(Base):
     phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     # Subscription
-    subscription_tier: Mapped[str] = mapped_column(String(50), default="trial", nullable=False)
+    subscription_tier: Mapped[str] = mapped_column(String(50), default="free", nullable=False)
     status: Mapped[str] = mapped_column(String(50), default="trial", nullable=False)
     trial_ends_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     subscription_ends_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -61,7 +61,7 @@ async def migrate_null_company_data():
                     slug="timetracker-default",
                     email="admin@timetracker.com",
                     phone=None,
-                    subscription_tier="enterprise",  # Main platform gets enterprise
+                    subscription_tier="free",  # Main platform defaults to free
                     status="active",
                     trial_ends_at=None,  # No trial for main company
                     subscription_ends_at=None,
