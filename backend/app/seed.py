@@ -53,7 +53,7 @@ def seed_database():
             name="TimeTracker",
             slug="timetracker",
             email="admin@timetracker.com",
-            subscription_tier="enterprise",
+            subscription_tier="free",
             status="active",
             max_users=100,
             max_projects=100,

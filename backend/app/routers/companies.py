@@ -270,7 +270,7 @@ async def register_company(
         email=data.admin_email,
         phone=data.phone,
         timezone=data.timezone,
-        subscription_tier="trial",
+        subscription_tier="free",
         status="trial",
         trial_ends_at=trial_end,
         max_users=10,  # Trial limits

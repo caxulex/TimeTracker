@@ -95,7 +95,7 @@ async def seed_xyz_corp():
                 slug="xyz-corp",
                 email="shaeadam@gmail.com",
                 phone="+1-555-XYZ-CORP",
-                subscription_tier="professional",  # Professional tier for testing
+                subscription_tier="standard",  # Paid-tier test fixture
                 status="active",
                 trial_ends_at=datetime.now(timezone.utc) + timedelta(days=365),  # Extended trial
                 max_users=100,
