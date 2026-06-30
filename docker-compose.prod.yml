@@ -62,6 +62,9 @@ services:
       BASECAMP_CLIENT_ID: ${BASECAMP_CLIENT_ID:-}
       BASECAMP_CLIENT_SECRET: ${BASECAMP_CLIENT_SECRET:-}
       BASECAMP_REDIRECT_URI: ${BASECAMP_REDIRECT_URI:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-https://timetracker.shaemarcus.com}
       # Production domain for CORS + TrustedHostMiddleware
       # NOTE: backend reads ALLOWED_ORIGINS / ALLOWED_HOSTS from env (see backend/app/config.py).
@@ -198,6 +201,9 @@ services:
       BASECAMP_CLIENT_ID: ${BASECAMP_CLIENT_ID:-}
       BASECAMP_CLIENT_SECRET: ${BASECAMP_CLIENT_SECRET:-}
       BASECAMP_REDIRECT_URI: ${BASECAMP_REDIRECT_URI:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-https://timetracker.shaemarcus.com}
     entrypoint: ["/bin/sh", "-c"]
     command:
