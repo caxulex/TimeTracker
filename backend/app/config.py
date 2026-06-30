@@ -182,6 +182,9 @@ class Settings(BaseSettings):
     BASECAMP_REDIRECT_URI: str = (
         "https://timetracker.shaemarcus.com/api/integrations/basecamp/callback"
     )
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_PUBLISHABLE_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
     WEBHOOK_BASE_URL: str = "https://timetracker.shaemarcus.com"
 
     # AI Provider Settings
