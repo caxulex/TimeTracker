@@ -20,6 +20,7 @@ from app.models import User
 from app.schemas.auth import Message, UserResponse
 from app.services.audit_logger import AuditAction, AuditLogger
 from app.services.auth_service import auth_service
+from app.services.billing_service import can_company_add_worker
 from app.services.email_service import email_service
 from app.utils.password_validator import validate_password_strength
 
@@ -186,6 +187,21 @@ async def create_user(
     result = await db.execute(select(User).where(User.email == user_data.email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+
+    # Platform super_admins have no company and are not billed/limited by seats.
+    # The seat guard only applies when the creator is company-scoped.
+    if current_user.company_id is not None:
+        decision = await can_company_add_worker(db, current_user.company_id)
+        if not decision.allowed:
+            if decision.reason_code == "blocked_free_limit":
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail=decision.message,
+                )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=decision.message,
+            )
 
     # Parse start_date if provided
     parsed_start_date = None
