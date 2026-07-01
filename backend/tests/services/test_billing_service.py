@@ -12,6 +12,7 @@ from app.models import Company, User
 from app.services.billing_service import (
     CreateSubscriptionStatus,
     PricingSummary,
+    can_company_add_worker,
     calculate_monthly_pricing,
     create_standard_subscription,
     count_company_billable_workers,
@@ -144,6 +145,113 @@ async def test_count_company_billable_workers_is_tenant_isolated(db_session: Asy
 
     assert count_a == 2
     assert count_b == 3
+
+
+@pytest.mark.asyncio
+async def test_can_company_add_worker_free_with_two_workers_allowed(db_session: AsyncSession):
+    company = await _mk_company(db_session, "GuardFreeTwo")
+    await _mk_workers(db_session, company_id=company.id, count=2)
+
+    decision = await can_company_add_worker(db_session, company.id)
+
+    assert decision.allowed is True
+    assert decision.reason_code == "allowed"
+    assert decision.worker_count == 2
+    assert decision.free_limit == 3
+    assert decision.subscription_tier == "free"
+    assert decision.has_subscription is False
+
+
+@pytest.mark.asyncio
+async def test_can_company_add_worker_free_with_three_workers_blocked(db_session: AsyncSession):
+    company = await _mk_company(db_session, "GuardFreeThree")
+    await _mk_workers(db_session, company_id=company.id, count=3)
+
+    decision = await can_company_add_worker(db_session, company.id)
+
+    assert decision.allowed is False
+    assert decision.reason_code == "blocked_free_limit"
+    assert decision.worker_count == 3
+    assert "Deactivated users still count" in decision.message
+    assert "DELETED to reclaim a slot" in decision.message
+    assert "upgrade to a paid plan" in decision.message
+
+
+@pytest.mark.asyncio
+async def test_can_company_add_worker_inactive_users_still_block(db_session: AsyncSession):
+    company = await _mk_company(db_session, "GuardInactiveCounts")
+    await _mk_user(db_session, email_prefix="active-a", company_id=company.id, is_active=True)
+    await _mk_user(db_session, email_prefix="active-b", company_id=company.id, is_active=True)
+    await _mk_user(db_session, email_prefix="inactive", company_id=company.id, is_active=False)
+
+    decision = await can_company_add_worker(db_session, company.id)
+
+    assert decision.allowed is False
+    assert decision.reason_code == "blocked_free_limit"
+    assert decision.worker_count == 3
+
+
+@pytest.mark.asyncio
+async def test_can_company_add_worker_subscribed_company_allowed(db_session: AsyncSession):
+    company = await _mk_company(db_session, "GuardSubscribed")
+    company.subscription_tier = "standard"
+    company.stripe_subscription_id = "sub_guard_standard"
+    await db_session.flush()
+    await _mk_workers(db_session, company_id=company.id, count=5)
+
+    decision = await can_company_add_worker(db_session, company.id)
+
+    assert decision.allowed is True
+    assert decision.reason_code == "allowed"
+    assert decision.worker_count == 5
+    assert decision.subscription_tier == "standard"
+    assert decision.has_subscription is True
+
+
+@pytest.mark.asyncio
+async def test_can_company_add_worker_unlimited_tier_allowed(db_session: AsyncSession):
+    company = await _mk_company(db_session, "GuardUnlimited")
+    company.subscription_tier = "unlimited"
+    await db_session.flush()
+    await _mk_workers(db_session, company_id=company.id, count=25)
+
+    decision = await can_company_add_worker(db_session, company.id)
+
+    assert decision.allowed is True
+    assert decision.reason_code == "allowed"
+    assert decision.worker_count == 25
+    assert decision.subscription_tier == "unlimited"
+
+
+@pytest.mark.asyncio
+async def test_can_company_add_worker_company_not_found(db_session: AsyncSession):
+    decision = await can_company_add_worker(db_session, 999999)
+
+    assert decision.allowed is False
+    assert decision.reason_code == "company_not_found"
+    assert decision.worker_count == 0
+    assert decision.free_limit == 3
+    assert decision.has_subscription is False
+
+
+@pytest.mark.asyncio
+async def test_can_company_add_worker_free_boundary_third_allowed_fourth_blocked(
+    db_session: AsyncSession,
+):
+    company = await _mk_company(db_session, "GuardBoundary")
+    await _mk_workers(db_session, company_id=company.id, count=2)
+
+    third_decision = await can_company_add_worker(db_session, company.id)
+    assert third_decision.allowed is True
+    assert third_decision.reason_code == "allowed"
+    assert third_decision.worker_count == 2
+
+    await _mk_user(db_session, email_prefix="third", company_id=company.id, is_active=True)
+
+    fourth_decision = await can_company_add_worker(db_session, company.id)
+    assert fourth_decision.allowed is False
+    assert fourth_decision.reason_code == "blocked_free_limit"
+    assert fourth_decision.worker_count == 3
 
 
 def _assert_pricing(
