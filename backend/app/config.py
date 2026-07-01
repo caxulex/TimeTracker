@@ -185,6 +185,8 @@ class Settings(BaseSettings):
     STRIPE_SECRET_KEY: str = ""
     STRIPE_PUBLISHABLE_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_PRICE_PER_SEAT_MONTHLY_ID: str = ""
+    STRIPE_PRICE_UNLIMITED_MONTHLY_ID: str = ""
     WEBHOOK_BASE_URL: str = "https://timetracker.shaemarcus.com"
 
     # AI Provider Settings
