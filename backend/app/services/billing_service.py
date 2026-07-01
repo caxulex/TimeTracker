@@ -56,6 +56,17 @@ class CreateSubscriptionResult:
     message: str | None = None
 
 
+@dataclass(frozen=True)
+class AddWorkerDecision:
+    allowed: bool
+    reason_code: str
+    worker_count: int
+    free_limit: int
+    subscription_tier: str
+    has_subscription: bool
+    message: str
+
+
 async def _get_company_for_update(db: AsyncSession, company_id: int) -> Company | None:
     result = await db.execute(
         select(Company).where(Company.id == company_id).with_for_update()
@@ -79,6 +90,67 @@ async def count_company_billable_workers(db: AsyncSession, company_id: int) -> i
         select(func.count(User.id)).where(User.company_id == company_id)
     )
     return int(result.scalar_one())
+
+
+async def can_company_add_worker(db: AsyncSession, company_id: int) -> AddWorkerDecision:
+    """Return whether one more worker may be attached to a company.
+
+    This is a pre-check only (no mutation and no locking).
+
+    Current enforcement note:
+    - The staff-create-user path in users.py is the only existing path that
+      attaches a user to an existing company and must call this guard.
+    - If invitations.py is later fixed to attach invited users to a company,
+      that accept-invite path must also call this guard to avoid a bypass.
+    """
+
+    if company_id <= 0:
+        raise ValueError("company_id must be a positive integer")
+
+    result = await db.execute(select(Company).where(Company.id == company_id))
+    company = result.scalar_one_or_none()
+
+    if company is None:
+        return AddWorkerDecision(
+            allowed=False,
+            reason_code="company_not_found",
+            worker_count=0,
+            free_limit=FREE_WORKER_LIMIT,
+            subscription_tier="unknown",
+            has_subscription=False,
+            message="Company not found.",
+        )
+
+    worker_count = await count_company_billable_workers(db, company_id)
+    has_subscription = bool(company.stripe_subscription_id)
+    is_free_unsubscribed = (
+        company.stripe_subscription_id is None and company.subscription_tier == "free"
+    )
+
+    if is_free_unsubscribed and (worker_count + 1 > FREE_WORKER_LIMIT):
+        return AddWorkerDecision(
+            allowed=False,
+            reason_code="blocked_free_limit",
+            worker_count=worker_count,
+            free_limit=FREE_WORKER_LIMIT,
+            subscription_tier=company.subscription_tier,
+            has_subscription=has_subscription,
+            message=(
+                "You are at the free limit of 3 workers. Deactivated users still "
+                "count toward this limit and can be DELETED to reclaim a slot, "
+                "or you can upgrade to a paid plan."
+            ),
+        )
+
+    return AddWorkerDecision(
+        allowed=True,
+        reason_code="allowed",
+        worker_count=worker_count,
+        free_limit=FREE_WORKER_LIMIT,
+        subscription_tier=company.subscription_tier,
+        has_subscription=has_subscription,
+        message="OK to add worker.",
+    )
 
 
 def calculate_monthly_pricing(worker_count: int) -> PricingSummary:
