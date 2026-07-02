@@ -16,9 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from zoneinfo import available_timezones
 
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_admin_user, get_current_user
 from app.models import Company, User, WhiteLabelConfig
 from app.services.auth_service import AuthService
+from app.services.billing_service import (
+    FREE_WORKER_LIMIT,
+    calculate_monthly_pricing,
+    count_company_billable_workers,
+)
 from app.services.email_service import email_service
 from app.utils.password_validator import validate_password_strength
 
@@ -88,6 +93,20 @@ class CompanyResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class CompanyBillingStatusResponse(BaseModel):
+    """Read-only billing status for the current admin user's company."""
+
+    worker_count: int
+    free_limit: int
+    seats_over_free: int
+    per_seat_monthly_cost_dollars: int
+    should_recommend_unlimited: bool
+    subscription_tier: str
+    has_subscription: bool
+    is_at_or_over_free_limit: bool
+    would_block_next_add: bool
 
 
 class CompanyUpdate(BaseModel):
@@ -423,6 +442,50 @@ async def get_my_company(
         )
 
     return company
+
+
+@router.get("/my-company/billing/status", response_model=CompanyBillingStatusResponse)
+async def get_my_company_billing_status(
+    current_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get current billing status for the caller's company (admin only)."""
+    if not current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User is not associated with a company"
+        )
+
+    result = await db.execute(
+        select(Company).where(Company.id == current_user.company_id)
+    )
+    company = result.scalar_one_or_none()
+
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company not found"
+        )
+
+    worker_count = await count_company_billable_workers(db, company.id)
+    pricing = calculate_monthly_pricing(worker_count)
+    has_subscription = bool(company.stripe_subscription_id)
+
+    return CompanyBillingStatusResponse(
+        worker_count=worker_count,
+        free_limit=FREE_WORKER_LIMIT,
+        seats_over_free=pricing.seats_over_free,
+        per_seat_monthly_cost_dollars=pricing.per_seat_monthly_cost_dollars,
+        should_recommend_unlimited=pricing.should_recommend_unlimited,
+        subscription_tier=company.subscription_tier,
+        has_subscription=has_subscription,
+        is_at_or_over_free_limit=worker_count >= FREE_WORKER_LIMIT,
+        would_block_next_add=(
+            company.subscription_tier == "free"
+            and not has_subscription
+            and (worker_count + 1 > FREE_WORKER_LIMIT)
+        ),
+    )
 
 
 @router.put("/my-company", response_model=CompanyResponse)
