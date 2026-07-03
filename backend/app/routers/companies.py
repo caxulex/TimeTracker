@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +23,7 @@ from app.services.billing_service import (
     FREE_WORKER_LIMIT,
     calculate_monthly_pricing,
     count_company_billable_workers,
+    _get_company_for_update,
 )
 from app.services.email_service import email_service
 from app.utils.password_validator import validate_password_strength
@@ -107,6 +108,19 @@ class CompanyBillingStatusResponse(BaseModel):
     has_subscription: bool
     is_at_or_over_free_limit: bool
     would_block_next_add: bool
+
+
+class CompanyBillingUpgradeResponse(BaseModel):
+    """Response payload for explicit upgrade attempts."""
+
+    success: bool
+    status: str
+    company_id: int
+    subscription_tier: str
+    stripe_customer_id: Optional[str] = None
+    stripe_subscription_id: Optional[str] = None
+    requires_payment_action: bool = False
+    message: Optional[str] = None
 
 
 class CompanyUpdate(BaseModel):
@@ -484,6 +498,97 @@ async def get_my_company_billing_status(
             company.subscription_tier == "free"
             and not has_subscription
             and (worker_count + 1 > FREE_WORKER_LIMIT)
+        ),
+    )
+
+
+@router.post("/my-company/billing/upgrade", response_model=CompanyBillingUpgradeResponse)
+async def upgrade_my_company_billing(
+    response: Response,
+    current_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upgrade the current company's billing tier without touching Stripe."""
+    if not current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User is not associated with a company"
+        )
+
+    result = await db.execute(
+        select(Company).where(Company.id == current_user.company_id)
+    )
+    company = result.scalar_one_or_none()
+
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company not found"
+        )
+
+    worker_count = await count_company_billable_workers(db, company.id)
+    billable_seats_over_free = max(0, worker_count - FREE_WORKER_LIMIT)
+
+    if company.subscription_tier != "free":
+        return CompanyBillingUpgradeResponse(
+            success=True,
+            status="already_upgraded",
+            company_id=company.id,
+            subscription_tier=company.subscription_tier,
+            stripe_customer_id=company.stripe_customer_id,
+            stripe_subscription_id=company.stripe_subscription_id,
+            message="already on a paid tier",
+        )
+
+    if billable_seats_over_free == 0:
+        locked_company = await _get_company_for_update(db, company.id)
+        if not locked_company:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Company not found"
+            )
+
+        if locked_company.subscription_tier != "free":
+            return CompanyBillingUpgradeResponse(
+                success=True,
+                status="already_upgraded",
+                company_id=locked_company.id,
+                subscription_tier=locked_company.subscription_tier,
+                stripe_customer_id=locked_company.stripe_customer_id,
+                stripe_subscription_id=locked_company.stripe_subscription_id,
+                message="already on a paid tier",
+            )
+
+        locked_company.subscription_tier = "standard"
+        await db.commit()
+
+        return CompanyBillingUpgradeResponse(
+            success=True,
+            status="upgraded",
+            company_id=locked_company.id,
+            subscription_tier=locked_company.subscription_tier,
+            stripe_customer_id=locked_company.stripe_customer_id,
+            stripe_subscription_id=locked_company.stripe_subscription_id,
+            message=(
+                "you can now add workers beyond the free limit; $5/month per "
+                "worker beyond 3, billed when you add them"
+            ),
+        )
+
+    # 3d seat-sync will replace this guard by lazily creating the subscription
+    # for existing over-limit seats.
+    response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+    return CompanyBillingUpgradeResponse(
+        success=False,
+        status="unexpected_state",
+        company_id=company.id,
+        subscription_tier=company.subscription_tier,
+        stripe_customer_id=company.stripe_customer_id,
+        stripe_subscription_id=company.stripe_subscription_id,
+        message=(
+            "Company has more workers than the free tier allows without an "
+            "active subscription; seat-based billing is required (not yet "
+            "available)."
         ),
     )
 
