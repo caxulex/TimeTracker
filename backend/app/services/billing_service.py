@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import logging
 
 import stripe
 from sqlalchemy import func, select
@@ -22,6 +23,9 @@ from app.models import Company, User
 FREE_WORKER_LIMIT = 3
 PER_SEAT_MONTHLY_PRICE_DOLLARS = 5
 UNLIMITED_MONTHLY_PRICE_DOLLARS = 50
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -53,6 +57,27 @@ class CreateSubscriptionResult:
     stripe_customer_id: str | None = None
     stripe_subscription_id: str | None = None
     stripe_subscription_status: str | None = None
+    message: str | None = None
+
+
+class SyncStatus(str, Enum):
+    COMPANY_NOT_FOUND = "company_not_found"
+    NOOP_NOT_STANDARD = "noop_not_standard"
+    NOOP_NOTHING_TO_DO = "noop_nothing_to_do"
+    NOOP_ZERO_WITH_SUBSCRIPTION = "noop_zero_with_subscription"
+    CREATED = "created"
+    UPDATED = "updated"
+    REQUIRES_PAYMENT_ACTION = "requires_payment_action"
+    RETRIABLE_ERROR = "retriable_error"
+    CONFIG_ERROR = "config_error"
+
+
+@dataclass(frozen=True)
+class SyncResult:
+    status: SyncStatus
+    company_id: int
+    target_quantity: int
+    stripe_subscription_id: str | None = None
     message: str | None = None
 
 
@@ -324,3 +349,155 @@ async def create_standard_subscription(
         stripe_subscription_id=subscription_id,
         stripe_subscription_status=subscription_status,
     )
+
+
+async def sync_company_subscription_quantity(
+    db: AsyncSession,
+    company_id: int,
+) -> SyncResult:
+    """Synchronize a standard-tier company subscription quantity to billable seats."""
+
+    if company_id <= 0:
+        raise ValueError("company_id must be a positive integer")
+
+    # Transaction A: lock row, read stable state, compute target, release lock.
+    try:
+        company = await _get_company_for_update(db, company_id)
+        if company is None:
+            await db.commit()
+            return SyncResult(
+                status=SyncStatus.COMPANY_NOT_FOUND,
+                company_id=company_id,
+                target_quantity=0,
+                message="Company not found.",
+            )
+
+        subscription_tier = company.subscription_tier
+        stripe_subscription_id = company.stripe_subscription_id
+        worker_count = await count_company_billable_workers(db, company_id)
+        target_quantity = max(0, worker_count - FREE_WORKER_LIMIT)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+    if subscription_tier != "standard":
+        return SyncResult(
+            status=SyncStatus.NOOP_NOT_STANDARD,
+            company_id=company_id,
+            target_quantity=target_quantity,
+            stripe_subscription_id=stripe_subscription_id,
+            message="Company tier is not standard; no per-seat sync required.",
+        )
+
+    stripe_secret_key = settings.STRIPE_SECRET_KEY.strip()
+    stripe_price_per_seat_monthly_id = (
+        getattr(settings, "STRIPE_PRICE_PER_SEAT_MONTHLY_ID", "").strip()
+    )
+    if not stripe_secret_key or not stripe_price_per_seat_monthly_id:
+        return SyncResult(
+            status=SyncStatus.CONFIG_ERROR,
+            company_id=company_id,
+            target_quantity=target_quantity,
+            stripe_subscription_id=stripe_subscription_id,
+            message=(
+                "Stripe configuration missing: STRIPE_SECRET_KEY and "
+                "STRIPE_PRICE_PER_SEAT_MONTHLY_ID are required"
+            ),
+        )
+
+    if target_quantity >= 1 and not stripe_subscription_id:
+        create_result = await create_standard_subscription(db, company_id)
+        status_map = {
+            CreateSubscriptionStatus.CREATED: SyncStatus.CREATED,
+            CreateSubscriptionStatus.REQUIRES_PAYMENT_ACTION: SyncStatus.REQUIRES_PAYMENT_ACTION,
+            CreateSubscriptionStatus.RETRIABLE_ERROR: SyncStatus.RETRIABLE_ERROR,
+            CreateSubscriptionStatus.CONFIG_ERROR: SyncStatus.CONFIG_ERROR,
+            CreateSubscriptionStatus.NOOP_ZERO_SEATS: SyncStatus.NOOP_NOTHING_TO_DO,
+            CreateSubscriptionStatus.NOOP_ALREADY_SUBSCRIBED: SyncStatus.UPDATED,
+        }
+        return SyncResult(
+            status=status_map[create_result.status],
+            company_id=company_id,
+            target_quantity=target_quantity,
+            stripe_subscription_id=create_result.stripe_subscription_id,
+            message=create_result.message,
+        )
+
+    if target_quantity >= 1 and stripe_subscription_id:
+        modify_key = f"subscription-sync-company-{company_id}-qty-{target_quantity}"
+        try:
+            subscription = stripe.Subscription.retrieve(
+                stripe_subscription_id,
+                api_key=stripe_secret_key,
+            )
+            subscription_items = getattr(getattr(subscription, "items", None), "data", [])
+            if not subscription_items:
+                return SyncResult(
+                    status=SyncStatus.RETRIABLE_ERROR,
+                    company_id=company_id,
+                    target_quantity=target_quantity,
+                    stripe_subscription_id=stripe_subscription_id,
+                    message="Stripe subscription has no items to update.",
+                )
+
+            item_id = subscription_items[0].id
+            stripe.Subscription.modify(
+                stripe_subscription_id,
+                items=[{"id": item_id, "quantity": target_quantity}],
+                idempotency_key=modify_key,
+                api_key=stripe_secret_key,
+            )
+        except (TimeoutError, stripe.error.StripeError) as exc:
+            return SyncResult(
+                status=SyncStatus.RETRIABLE_ERROR,
+                company_id=company_id,
+                target_quantity=target_quantity,
+                stripe_subscription_id=stripe_subscription_id,
+                message=str(exc),
+            )
+
+        return SyncResult(
+            status=SyncStatus.UPDATED,
+            company_id=company_id,
+            target_quantity=target_quantity,
+            stripe_subscription_id=stripe_subscription_id,
+        )
+
+    if target_quantity == 0 and stripe_subscription_id:
+        logger.warning(
+            "Seat sync no-op for company %s: target quantity is zero but subscription %s exists",
+            company_id,
+            stripe_subscription_id,
+        )
+        return SyncResult(
+            status=SyncStatus.NOOP_ZERO_WITH_SUBSCRIPTION,
+            company_id=company_id,
+            target_quantity=0,
+            stripe_subscription_id=stripe_subscription_id,
+            message="Target quantity is zero while subscription exists; deferred decision.",
+        )
+
+    return SyncResult(
+        status=SyncStatus.NOOP_NOTHING_TO_DO,
+        company_id=company_id,
+        target_quantity=0,
+        stripe_subscription_id=stripe_subscription_id,
+    )
+
+
+async def reconcile_all_standard_subscriptions(db: AsyncSession) -> list[SyncResult]:
+    """Run seat-sync reconciliation for every standard-tier company."""
+
+    result = await db.execute(
+        select(Company.id)
+        .where(Company.subscription_tier == "standard")
+        .order_by(Company.id.asc())
+    )
+    company_ids = [int(company_id) for company_id in result.scalars().all()]
+
+    sync_results: list[SyncResult] = []
+    for company_id in company_ids:
+        sync_results.append(await sync_company_subscription_quantity(db, company_id))
+
+    return sync_results
