@@ -15,6 +15,7 @@ from app.services.billing_service import (
     SyncResult,
     SyncStatus,
     PricingSummary,
+    _sync_subscription_to_target,
     can_company_add_worker,
     calculate_monthly_pricing,
     create_standard_subscription,
@@ -644,21 +645,24 @@ async def test_sync_company_subscription_quantity_standard_target_one_no_subscri
         stripe_price_per_seat_monthly_id="price_standard",
     )
 
-    create_mock = AsyncMock(
-        return_value=SimpleNamespace(
-            status=CreateSubscriptionStatus.CREATED,
-            stripe_subscription_id="sub_created_sync",
-            message=None,
-        )
-    )
-    monkeypatch.setattr("app.services.billing_service.create_standard_subscription", create_mock)
+    customer_create_mock = MagicMock(return_value=_stripe_customer("cus_created_sync"))
+    subscription_create_mock = MagicMock(return_value=_stripe_subscription("sub_created_sync", "active"))
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
 
     result = await sync_company_subscription_quantity(db_session, company.id)
+    await db_session.refresh(company)
 
     assert result.status == SyncStatus.CREATED
     assert result.target_quantity == 1
     assert result.stripe_subscription_id == "sub_created_sync"
-    create_mock.assert_awaited_once_with(db_session, company.id)
+    subscription_create_mock.assert_called_once_with(
+        customer="cus_created_sync",
+        items=[{"price": "price_standard", "quantity": 1}],
+        idempotency_key=f"subscription-create-company-{company.id}",
+        api_key="sk_test_abc",
+    )
+    assert company.stripe_subscription_id == "sub_created_sync"
 
 
 @pytest.mark.asyncio
@@ -817,17 +821,20 @@ async def test_sync_company_subscription_quantity_missing_config_before_stripe_c
         stripe_price_per_seat_monthly_id="",
     )
 
-    create_mock = AsyncMock()
+    customer_create_mock = MagicMock()
+    subscription_create_mock = MagicMock()
     retrieve_mock = MagicMock()
     modify_mock = MagicMock()
-    monkeypatch.setattr("app.services.billing_service.create_standard_subscription", create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
 
     result = await sync_company_subscription_quantity(db_session, company.id)
 
     assert result.status == SyncStatus.CONFIG_ERROR
-    create_mock.assert_not_awaited()
+    customer_create_mock.assert_not_called()
+    subscription_create_mock.assert_not_called()
     retrieve_mock.assert_not_called()
     modify_mock.assert_not_called()
 
@@ -941,18 +948,14 @@ async def test_reconcile_all_standard_subscriptions_three_standard_companies(
         stripe_price_per_seat_monthly_id="price_standard",
     )
 
-    create_mock = AsyncMock(
-        return_value=SimpleNamespace(
-            status=CreateSubscriptionStatus.CREATED,
-            stripe_subscription_id="sub_recon_created",
-            message=None,
-        )
-    )
+    customer_create_mock = MagicMock(return_value=_stripe_customer("cus_recon_created"))
+    subscription_create_mock = MagicMock(return_value=_stripe_subscription("sub_recon_created", "active"))
     retrieve_mock = MagicMock(
         return_value=SimpleNamespace(items=SimpleNamespace(data=[SimpleNamespace(id="si_recon")]))
     )
     modify_mock = MagicMock()
-    monkeypatch.setattr("app.services.billing_service.create_standard_subscription", create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
 
@@ -1008,3 +1011,194 @@ async def test_reconcile_all_standard_subscriptions_only_standard_tier_processed
     assert results[0].status == SyncStatus.UPDATED
     retrieve_mock.assert_called_once()
     modify_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_sync_subscription_to_target_explicit_one_standard_no_subscription_created(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "HelperCreate")
+    company.subscription_tier = "standard"
+    await db_session.flush()
+    await _mk_workers(db_session, company_id=company.id, count=4)
+
+    _set_billing_settings(
+        monkeypatch,
+        stripe_secret_key="sk_test_abc",
+        stripe_price_per_seat_monthly_id="price_standard",
+    )
+
+    customer_create_mock = MagicMock(return_value=_stripe_customer("cus_helper_created"))
+    subscription_create_mock = MagicMock(return_value=_stripe_subscription("sub_helper_created", "active"))
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
+
+    result = await _sync_subscription_to_target(db_session, company.id, 1)
+    await db_session.refresh(company)
+
+    assert result.status == SyncStatus.CREATED
+    assert result.target_quantity == 1
+    subscription_create_mock.assert_called_once_with(
+        customer="cus_helper_created",
+        items=[{"price": "price_standard", "quantity": 1}],
+        idempotency_key=f"subscription-create-company-{company.id}",
+        api_key="sk_test_abc",
+    )
+    assert company.stripe_subscription_id == "sub_helper_created"
+
+
+@pytest.mark.asyncio
+async def test_sync_subscription_to_target_explicit_two_standard_with_subscription_updated(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "HelperUpdate")
+    company.subscription_tier = "standard"
+    company.stripe_subscription_id = "sub_helper_update"
+    await db_session.flush()
+
+    _set_billing_settings(
+        monkeypatch,
+        stripe_secret_key="sk_test_abc",
+        stripe_price_per_seat_monthly_id="price_standard",
+    )
+
+    retrieve_mock = MagicMock(
+        return_value=SimpleNamespace(items=SimpleNamespace(data=[SimpleNamespace(id="si_helper")]))
+    )
+    modify_mock = MagicMock()
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
+
+    result = await _sync_subscription_to_target(db_session, company.id, 2)
+
+    assert result.status == SyncStatus.UPDATED
+    assert result.target_quantity == 2
+    modify_mock.assert_called_once_with(
+        "sub_helper_update",
+        items=[{"id": "si_helper", "quantity": 2}],
+        idempotency_key=f"subscription-sync-company-{company.id}-qty-2",
+        api_key="sk_test_abc",
+    )
+
+
+@pytest.mark.asyncio
+async def test_sync_subscription_to_target_uses_explicit_target_not_live_count(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "HelperDecoupled")
+    company.subscription_tier = "standard"
+    await db_session.flush()
+    await _mk_workers(db_session, company_id=company.id, count=3)
+
+    _set_billing_settings(
+        monkeypatch,
+        stripe_secret_key="sk_test_abc",
+        stripe_price_per_seat_monthly_id="price_standard",
+    )
+
+    customer_create_mock = MagicMock(return_value=_stripe_customer("cus_helper_decoupled"))
+    subscription_create_mock = MagicMock(return_value=_stripe_subscription("sub_helper_decoupled", "active"))
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
+
+    result = await _sync_subscription_to_target(db_session, company.id, 1)
+    await db_session.refresh(company)
+
+    assert result.status == SyncStatus.CREATED
+    assert result.target_quantity == 1
+    subscription_create_mock.assert_called_once_with(
+        customer="cus_helper_decoupled",
+        items=[{"price": "price_standard", "quantity": 1}],
+        idempotency_key=f"subscription-create-company-{company.id}",
+        api_key="sk_test_abc",
+    )
+    assert company.stripe_subscription_id == "sub_helper_decoupled"
+
+
+@pytest.mark.asyncio
+async def test_sync_subscription_to_target_zero_with_subscription_noop(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "HelperZeroWithSub")
+    company.subscription_tier = "standard"
+    company.stripe_subscription_id = "sub_helper_zero"
+    await db_session.flush()
+
+    _set_billing_settings(
+        monkeypatch,
+        stripe_secret_key="sk_test_abc",
+        stripe_price_per_seat_monthly_id="price_standard",
+    )
+
+    result = await _sync_subscription_to_target(db_session, company.id, 0)
+
+    assert result.status == SyncStatus.NOOP_ZERO_WITH_SUBSCRIPTION
+    assert result.target_quantity == 0
+
+
+@pytest.mark.asyncio
+async def test_sync_subscription_to_target_non_standard_tier_noop(
+    db_session: AsyncSession,
+):
+    company = await _mk_company(db_session, "HelperFreeNoop")
+    await db_session.flush()
+
+    result = await _sync_subscription_to_target(db_session, company.id, 2)
+
+    assert result.status == SyncStatus.NOOP_NOT_STANDARD
+    assert result.target_quantity == 2
+
+
+@pytest.mark.asyncio
+async def test_sync_subscription_to_target_stripe_error_returns_retriable(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "HelperStripeError")
+    company.subscription_tier = "standard"
+    company.stripe_subscription_id = "sub_helper_error"
+    await db_session.flush()
+
+    _set_billing_settings(
+        monkeypatch,
+        stripe_secret_key="sk_test_abc",
+        stripe_price_per_seat_monthly_id="price_standard",
+    )
+
+    retrieve_mock = MagicMock(
+        return_value=SimpleNamespace(items=SimpleNamespace(data=[SimpleNamespace(id="si_error")]))
+    )
+    modify_mock = MagicMock(side_effect=stripe.error.StripeError("modify failed"))
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
+
+    result = await _sync_subscription_to_target(db_session, company.id, 2)
+    await db_session.refresh(company)
+
+    assert result.status == SyncStatus.RETRIABLE_ERROR
+    assert company.stripe_subscription_id == "sub_helper_error"
+
+
+@pytest.mark.asyncio
+async def test_sync_subscription_to_target_missing_config_returns_config_error(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "HelperConfig")
+    company.subscription_tier = "standard"
+    company.stripe_subscription_id = "sub_helper_config"
+    await db_session.flush()
+
+    _set_billing_settings(
+        monkeypatch,
+        stripe_secret_key="",
+        stripe_price_per_seat_monthly_id="",
+    )
+
+    result = await _sync_subscription_to_target(db_session, company.id, 2)
+
+    assert result.status == SyncStatus.CONFIG_ERROR
