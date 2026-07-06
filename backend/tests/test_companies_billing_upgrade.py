@@ -1,5 +1,6 @@
 import uuid
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -158,6 +159,7 @@ async def test_upgrade_e2e_loop_unblocks_third_add_after_flip(
     db_session: AsyncSession,
     free_company: Company,
     free_company_admin: User,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     await _add_workers(db_session, company_id=free_company.id, count=2)
     await db_session.commit()
@@ -183,6 +185,23 @@ async def test_upgrade_e2e_loop_unblocks_third_add_after_flip(
         assert upgrade_response.json()["subscription_tier"] == "standard"
         assert upgrade_response.json()["stripe_subscription_id"] is None
 
+        monkeypatch.setattr(
+            "app.services.billing_service.settings",
+            SimpleNamespace(
+                STRIPE_SECRET_KEY="sk_test_abc",
+                STRIPE_PRICE_PER_SEAT_MONTHLY_ID="price_standard",
+            ),
+        )
+        customer_create_mock = MagicMock(return_value=SimpleNamespace(id="cus_e2e"))
+        subscription_create_mock = MagicMock(
+            return_value=SimpleNamespace(id="sub_e2e", status="active")
+        )
+        monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+        monkeypatch.setattr(
+            "app.services.billing_service.stripe.Subscription.create",
+            subscription_create_mock,
+        )
+
         allowed_email = f"allowed-{uuid.uuid4().hex[:8]}@example.com"
         with patch("app.routers.users.email_service.send_welcome_email", new_callable=AsyncMock):
             create_response = await client.post(
@@ -202,7 +221,7 @@ async def test_upgrade_e2e_loop_unblocks_third_add_after_flip(
     result = await db_session.execute(select(Company).where(Company.id == free_company.id))
     company = result.scalar_one()
     assert company.subscription_tier == "standard"
-    assert company.stripe_subscription_id is None
+    assert company.stripe_subscription_id == "sub_e2e"
 
     result = await db_session.execute(
         select(User).where(User.email.in_([blocked_email, allowed_email]))
