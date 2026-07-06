@@ -1,5 +1,6 @@
 import uuid
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -225,9 +226,24 @@ async def test_create_user_subscribed_company_allows_over_limit(
     db_session: AsyncSession,
     subscribed_company_admin_user: User,
     subscribed_company: Company,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     await _add_users(db_session, company_id=subscribed_company.id, count=5)
     await db_session.commit()
+
+    monkeypatch.setattr(
+        "app.services.billing_service.settings",
+        SimpleNamespace(
+            STRIPE_SECRET_KEY="sk_test_abc",
+            STRIPE_PRICE_PER_SEAT_MONTHLY_ID="price_standard",
+        ),
+    )
+    retrieve_mock = MagicMock(
+        return_value=SimpleNamespace(items=SimpleNamespace(data=[SimpleNamespace(id="si_subscribed")]))
+    )
+    modify_mock = MagicMock()
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
 
     app.dependency_overrides[get_current_admin_user] = lambda: subscribed_company_admin_user
     new_email = f"subscribed-{uuid.uuid4().hex[:8]}@example.com"

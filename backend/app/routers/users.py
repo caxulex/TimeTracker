@@ -20,7 +20,12 @@ from app.models import User
 from app.schemas.auth import Message, UserResponse
 from app.services.audit_logger import AuditAction, AuditLogger
 from app.services.auth_service import auth_service
-from app.services.billing_service import can_company_add_worker
+from app.services.billing_service import (
+    FREE_WORKER_LIMIT,
+    SyncStatus,
+    _sync_subscription_to_target,
+    can_company_add_worker,
+)
 from app.services.email_service import email_service
 from app.utils.password_validator import validate_password_strength
 
@@ -202,6 +207,37 @@ async def create_user(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=decision.message,
             )
+
+        if decision.subscription_tier == "standard" and (decision.worker_count + 1 > FREE_WORKER_LIMIT):
+            target = (decision.worker_count + 1) - FREE_WORKER_LIMIT
+            sync_result = await _sync_subscription_to_target(db, current_user.company_id, target)
+
+            # This path intentionally fails closed on billing-sync uncertainty.
+            # _sync_subscription_to_target commits internally before user insert;
+            # if user creation later fails, reconciliation self-heals temporary overbilling.
+            if sync_result.status not in (SyncStatus.CREATED, SyncStatus.UPDATED):
+                if sync_result.status == SyncStatus.RETRIABLE_ERROR:
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="Billing update is temporarily unavailable. Please try again shortly.",
+                    )
+                if sync_result.status == SyncStatus.CONFIG_ERROR:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Billing is not configured. Please contact support.",
+                    )
+                if sync_result.status == SyncStatus.REQUIRES_PAYMENT_ACTION:
+                    raise HTTPException(
+                        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                        detail={
+                            "reason": "payment_action_required",
+                            "message": "This subscription needs payment completed before adding more workers.",
+                        },
+                    )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Unexpected billing state; user not created.",
+                )
 
     # Parse start_date if provided
     parsed_start_date = None
