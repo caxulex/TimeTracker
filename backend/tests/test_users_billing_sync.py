@@ -499,3 +499,284 @@ async def test_create_user_standard_over_limit_sync_update_target_three(
 
     result = await db_session.execute(select(User).where(User.email == new_email))
     assert result.scalar_one_or_none() is not None
+
+
+async def _get_first_regular_user(db_session: AsyncSession, company_id: int) -> User:
+    result = await db_session.execute(
+        select(User)
+        .where(User.company_id == company_id, User.role == "regular_user")
+        .order_by(User.id.asc())
+    )
+    user = result.scalars().first()
+    assert user is not None
+    return user
+
+
+@pytest.mark.asyncio
+async def test_permanent_delete_standard_company_with_subscription_syncs_quantity_down_and_deletes_user(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    standard_company_with_subscription: Company,
+    standard_admin_user_with_subscription: User,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _set_billing_settings(monkeypatch)
+    await _add_users(db_session, company_id=standard_company_with_subscription.id, count=4)
+    await db_session.commit()
+
+    worker = await _get_first_regular_user(db_session, standard_company_with_subscription.id)
+
+    retrieve_mock = MagicMock(
+        return_value=SimpleNamespace(items=SimpleNamespace(data=[SimpleNamespace(id="si_delete_target")]))
+    )
+    modify_mock = MagicMock()
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
+
+    app.dependency_overrides[get_current_admin_user] = lambda: standard_admin_user_with_subscription
+    try:
+        response = await client.delete(f"/api/users/{worker.id}/permanent")
+    finally:
+        app.dependency_overrides.pop(get_current_admin_user, None)
+
+    assert response.status_code == 200, response.text
+    modify_mock.assert_called_once_with(
+        standard_company_with_subscription.stripe_subscription_id,
+        items=[{"id": "si_delete_target", "quantity": 1}],
+        idempotency_key=f"subscription-sync-company-{standard_company_with_subscription.id}-qty-1",
+        api_key="sk_test_abc",
+    )
+
+    result = await db_session.execute(select(User).where(User.id == worker.id))
+    assert result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_permanent_delete_standard_company_with_subscription_fail_open_on_stripe_error(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    standard_company_with_subscription: Company,
+    standard_admin_user_with_subscription: User,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _set_billing_settings(monkeypatch)
+    await _add_users(db_session, company_id=standard_company_with_subscription.id, count=4)
+    await db_session.commit()
+
+    worker = await _get_first_regular_user(db_session, standard_company_with_subscription.id)
+
+    class DummyStripeError(Exception):
+        pass
+
+    monkeypatch.setattr("app.services.billing_service.stripe.error.StripeError", DummyStripeError)
+    retrieve_mock = MagicMock(
+        return_value=SimpleNamespace(items=SimpleNamespace(data=[SimpleNamespace(id="si_delete_fail")]))
+    )
+    modify_mock = MagicMock(side_effect=DummyStripeError("temporary stripe outage"))
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
+
+    app.dependency_overrides[get_current_admin_user] = lambda: standard_admin_user_with_subscription
+    try:
+        response = await client.delete(f"/api/users/{worker.id}/permanent")
+    finally:
+        app.dependency_overrides.pop(get_current_admin_user, None)
+
+    assert response.status_code == 200, response.text
+    modify_mock.assert_called_once()
+
+    result = await db_session.execute(select(User).where(User.id == worker.id))
+    assert result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_deactivate_user_does_not_touch_billing(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    standard_company_with_subscription: Company,
+    standard_admin_user_with_subscription: User,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    await _add_users(db_session, company_id=standard_company_with_subscription.id, count=2)
+    await db_session.commit()
+
+    worker = await _get_first_regular_user(db_session, standard_company_with_subscription.id)
+
+    customer_create_mock = MagicMock()
+    subscription_create_mock = MagicMock()
+    retrieve_mock = MagicMock()
+    modify_mock = MagicMock()
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
+
+    app.dependency_overrides[get_current_admin_user] = lambda: standard_admin_user_with_subscription
+    try:
+        response = await client.delete(f"/api/users/{worker.id}")
+    finally:
+        app.dependency_overrides.pop(get_current_admin_user, None)
+
+    assert response.status_code == 200, response.text
+    customer_create_mock.assert_not_called()
+    subscription_create_mock.assert_not_called()
+    retrieve_mock.assert_not_called()
+    modify_mock.assert_not_called()
+
+    result = await db_session.execute(select(User).where(User.id == worker.id))
+    deactivated_user = result.scalar_one_or_none()
+    assert deactivated_user is not None
+    assert deactivated_user.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_permanent_delete_free_company_skips_billing_sync(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    free_company: Company,
+    free_admin_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    await _add_users(db_session, company_id=free_company.id, count=2)
+    await db_session.commit()
+
+    worker = await _get_first_regular_user(db_session, free_company.id)
+
+    customer_create_mock = MagicMock()
+    subscription_create_mock = MagicMock()
+    retrieve_mock = MagicMock()
+    modify_mock = MagicMock()
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
+
+    app.dependency_overrides[get_current_admin_user] = lambda: free_admin_user
+    try:
+        response = await client.delete(f"/api/users/{worker.id}/permanent")
+    finally:
+        app.dependency_overrides.pop(get_current_admin_user, None)
+
+    assert response.status_code == 200, response.text
+    customer_create_mock.assert_not_called()
+    subscription_create_mock.assert_not_called()
+    retrieve_mock.assert_not_called()
+    modify_mock.assert_not_called()
+
+    result = await db_session.execute(select(User).where(User.id == worker.id))
+    assert result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_permanent_delete_unlimited_company_skips_billing_sync(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    unlimited_company: Company,
+    unlimited_admin_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    await _add_users(db_session, company_id=unlimited_company.id, count=2)
+    await db_session.commit()
+
+    worker = await _get_first_regular_user(db_session, unlimited_company.id)
+
+    customer_create_mock = MagicMock()
+    subscription_create_mock = MagicMock()
+    retrieve_mock = MagicMock()
+    modify_mock = MagicMock()
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
+
+    app.dependency_overrides[get_current_admin_user] = lambda: unlimited_admin_user
+    try:
+        response = await client.delete(f"/api/users/{worker.id}/permanent")
+    finally:
+        app.dependency_overrides.pop(get_current_admin_user, None)
+
+    assert response.status_code == 200, response.text
+    customer_create_mock.assert_not_called()
+    subscription_create_mock.assert_not_called()
+    retrieve_mock.assert_not_called()
+    modify_mock.assert_not_called()
+
+    result = await db_session.execute(select(User).where(User.id == worker.id))
+    assert result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_permanent_delete_standard_company_drops_to_zero_noop_zero_with_subscription(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    standard_company_with_subscription: Company,
+    standard_admin_user_with_subscription: User,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _set_billing_settings(monkeypatch)
+    await _add_users(db_session, company_id=standard_company_with_subscription.id, count=3)
+    await db_session.commit()
+
+    worker = await _get_first_regular_user(db_session, standard_company_with_subscription.id)
+
+    customer_create_mock = MagicMock()
+    subscription_create_mock = MagicMock()
+    retrieve_mock = MagicMock()
+    modify_mock = MagicMock()
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
+
+    app.dependency_overrides[get_current_admin_user] = lambda: standard_admin_user_with_subscription
+    try:
+        response = await client.delete(f"/api/users/{worker.id}/permanent")
+    finally:
+        app.dependency_overrides.pop(get_current_admin_user, None)
+
+    assert response.status_code == 200, response.text
+    customer_create_mock.assert_not_called()
+    subscription_create_mock.assert_not_called()
+    retrieve_mock.assert_not_called()
+    modify_mock.assert_not_called()
+
+    result = await db_session.execute(select(User).where(User.id == worker.id))
+    assert result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_permanent_delete_standard_company_without_subscription_skips_billing_sync(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    standard_company: Company,
+    standard_admin_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    await _add_users(db_session, company_id=standard_company.id, count=2)
+    await db_session.commit()
+
+    worker = await _get_first_regular_user(db_session, standard_company.id)
+
+    customer_create_mock = MagicMock()
+    subscription_create_mock = MagicMock()
+    retrieve_mock = MagicMock()
+    modify_mock = MagicMock()
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
+
+    app.dependency_overrides[get_current_admin_user] = lambda: standard_admin_user
+    try:
+        response = await client.delete(f"/api/users/{worker.id}/permanent")
+    finally:
+        app.dependency_overrides.pop(get_current_admin_user, None)
+
+    assert response.status_code == 200, response.text
+    customer_create_mock.assert_not_called()
+    subscription_create_mock.assert_not_called()
+    retrieve_mock.assert_not_called()
+    modify_mock.assert_not_called()
+
+    result = await db_session.execute(select(User).where(User.id == worker.id))
+    assert result.scalar_one_or_none() is None

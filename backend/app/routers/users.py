@@ -16,15 +16,16 @@ from app.dependencies import (
     get_company_filter,
     get_current_admin_user,
 )
-from app.models import User
+from app.models import Company, User
 from app.schemas.auth import Message, UserResponse
 from app.services.audit_logger import AuditAction, AuditLogger
 from app.services.auth_service import auth_service
 from app.services.billing_service import (
     FREE_WORKER_LIMIT,
     SyncStatus,
-    _sync_subscription_to_target,
     can_company_add_worker,
+    _sync_subscription_to_target,
+    sync_company_subscription_quantity,
 )
 from app.services.email_service import email_service
 from app.utils.password_validator import validate_password_strength
@@ -545,6 +546,7 @@ async def permanently_delete_user(
         )
 
     user_email = user.email
+    deleted_user_company_id = user.company_id
 
     # Delete associated records in correct order (foreign key constraints)
     from sqlalchemy import delete, update
@@ -603,6 +605,34 @@ async def permanently_delete_user(
     await db.delete(user)
 
     await db.commit()
+
+    # Sync subscription quantity DOWN after a permanent delete (fail-open).
+    # Only for standard companies that already have a subscription - never CREATE here.
+    # A failed sync-down is temporary overbilling that reconcile heals; do NOT roll back the delete.
+    if deleted_user_company_id is not None:
+        company_result = await db.execute(select(Company).where(Company.id == deleted_user_company_id))
+        company = company_result.scalar_one_or_none()
+        if company and company.subscription_tier == "standard" and company.stripe_subscription_id is not None:
+            try:
+                sync_result = await sync_company_subscription_quantity(db, deleted_user_company_id)
+                if sync_result.status not in (
+                    SyncStatus.UPDATED,
+                    SyncStatus.NOOP_ZERO_WITH_SUBSCRIPTION,
+                    SyncStatus.NOOP_NOTHING_TO_DO,
+                ):
+                    logger.warning(
+                        "Seat sync-down after delete returned %s for company %s (user %s); reconcile will correct.",
+                        sync_result.status,
+                        deleted_user_company_id,
+                        user_id,
+                    )
+            except Exception as exc:
+                logger.error(
+                    "Seat sync-down after delete failed for company %s (user %s): %s; reconcile will correct.",
+                    deleted_user_company_id,
+                    user_id,
+                    exc,
+                )
 
     return {"message": f"User {user_email} permanently deleted"}
 
