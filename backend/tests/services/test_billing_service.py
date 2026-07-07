@@ -15,12 +15,14 @@ from app.services.billing_service import (
     SyncResult,
     SyncStatus,
     PricingSummary,
+    SwitchStatus,
     _sync_subscription_to_target,
     can_company_add_worker,
     calculate_monthly_pricing,
     create_standard_subscription,
     count_company_billable_workers,
     reconcile_all_standard_subscriptions,
+    switch_company_to_unlimited,
     sync_company_subscription_quantity,
     _get_company_for_update,
 )
@@ -84,17 +86,27 @@ def _stripe_subscription(subscription_id: str, status: str) -> SimpleNamespace:
     return SimpleNamespace(id=subscription_id, status=status)
 
 
+def _stripe_subscription_with_item(subscription_id: str, status: str, item_id: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=subscription_id,
+        status=status,
+        items=SimpleNamespace(data=[SimpleNamespace(id=item_id)]),
+    )
+
+
 def _set_billing_settings(
     monkeypatch: pytest.MonkeyPatch,
     *,
     stripe_secret_key: str,
     stripe_price_per_seat_monthly_id: str,
+    stripe_price_unlimited_monthly_id: str = "",
 ) -> None:
     monkeypatch.setattr(
         "app.services.billing_service.settings",
         SimpleNamespace(
             STRIPE_SECRET_KEY=stripe_secret_key,
             STRIPE_PRICE_PER_SEAT_MONTHLY_ID=stripe_price_per_seat_monthly_id,
+            STRIPE_PRICE_UNLIMITED_MONTHLY_ID=stripe_price_unlimited_monthly_id,
         ),
     )
 
@@ -1204,3 +1216,372 @@ async def test_sync_subscription_to_target_missing_config_returns_config_error(
     result = await _sync_subscription_to_target(db_session, company.id, 2)
 
     assert result.status == SyncStatus.CONFIG_ERROR
+
+
+@pytest.mark.asyncio
+async def test_switch_company_to_unlimited_standard_with_subscription_swaps_price_and_flips_tier(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "SwitchStandard")
+    company.subscription_tier = "standard"
+    company.stripe_customer_id = "cus_standard"
+    company.stripe_subscription_id = "sub_standard"
+    await db_session.flush()
+    await _mk_workers(db_session, company_id=company.id, count=6)
+
+    _set_billing_settings(
+        monkeypatch,
+        stripe_secret_key="sk_test_abc",
+        stripe_price_per_seat_monthly_id="price_standard",
+        stripe_price_unlimited_monthly_id="price_unlimited",
+    )
+
+    retrieve_mock = MagicMock(
+        return_value=_stripe_subscription_with_item("sub_standard", "active", "si_standard")
+    )
+    modify_mock = MagicMock(
+        return_value=_stripe_subscription_with_item("sub_standard", "active", "si_standard")
+    )
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
+
+    result = await switch_company_to_unlimited(db_session, company.id)
+    await db_session.refresh(company)
+
+    assert result.status == SwitchStatus.SWITCHED
+    assert result.stripe_subscription_id == "sub_standard"
+    assert company.subscription_tier == "unlimited"
+    assert company.stripe_customer_id == "cus_standard"
+    assert company.stripe_subscription_id == "sub_standard"
+    retrieve_mock.assert_called_once_with("sub_standard", api_key="sk_test_abc")
+    modify_mock.assert_called_once_with(
+        "sub_standard",
+        items=[
+            {
+                "id": "si_standard",
+                "price": "price_unlimited",
+                "quantity": 1,
+            }
+        ],
+        proration_behavior="create_prorations",
+        idempotency_key=f"subscription-switch-unlimited-company-{company.id}",
+        api_key="sk_test_abc",
+    )
+
+
+@pytest.mark.asyncio
+async def test_switch_company_to_unlimited_standard_with_subscription_modify_error_returns_retriable_and_stays_standard(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "SwitchModifyError")
+    company.subscription_tier = "standard"
+    company.stripe_customer_id = "cus_standard"
+    company.stripe_subscription_id = "sub_standard"
+    await db_session.flush()
+
+    _set_billing_settings(
+        monkeypatch,
+        stripe_secret_key="sk_test_abc",
+        stripe_price_per_seat_monthly_id="price_standard",
+        stripe_price_unlimited_monthly_id="price_unlimited",
+    )
+
+    retrieve_mock = MagicMock(
+        return_value=_stripe_subscription_with_item("sub_standard", "active", "si_standard")
+    )
+    modify_mock = MagicMock(side_effect=stripe.error.StripeError("modify failed"))
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
+
+    before_state = (
+        company.subscription_tier,
+        company.stripe_customer_id,
+        company.stripe_subscription_id,
+    )
+
+    result = await switch_company_to_unlimited(db_session, company.id)
+    await db_session.refresh(company)
+
+    after_state = (
+        company.subscription_tier,
+        company.stripe_customer_id,
+        company.stripe_subscription_id,
+    )
+
+    assert result.status == SwitchStatus.RETRIABLE_ERROR
+    assert before_state == after_state
+    retrieve_mock.assert_called_once()
+    modify_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("subscription_status", ["incomplete", "past_due"])
+async def test_switch_company_to_unlimited_standard_with_subscription_requires_payment_action(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    subscription_status: str,
+):
+    company = await _mk_company(db_session, "SwitchNeedsAction")
+    company.subscription_tier = "standard"
+    company.stripe_customer_id = "cus_standard"
+    company.stripe_subscription_id = "sub_standard"
+    await db_session.flush()
+
+    _set_billing_settings(
+        monkeypatch,
+        stripe_secret_key="sk_test_abc",
+        stripe_price_per_seat_monthly_id="price_standard",
+        stripe_price_unlimited_monthly_id="price_unlimited",
+    )
+
+    retrieve_mock = MagicMock(
+        return_value=_stripe_subscription_with_item("sub_standard", subscription_status, "si_standard")
+    )
+    modify_mock = MagicMock(
+        return_value=_stripe_subscription_with_item("sub_standard", subscription_status, "si_standard")
+    )
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
+
+    result = await switch_company_to_unlimited(db_session, company.id)
+    await db_session.refresh(company)
+
+    assert result.status == SwitchStatus.REQUIRES_PAYMENT_ACTION
+    assert result.stripe_subscription_id == "sub_standard"
+    assert company.subscription_tier == "standard"
+    assert company.stripe_customer_id == "cus_standard"
+    assert company.stripe_subscription_id == "sub_standard"
+
+
+@pytest.mark.asyncio
+async def test_switch_company_to_unlimited_standard_without_subscription_is_comped(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "SwitchCompedStandard")
+    company.subscription_tier = "standard"
+    await db_session.flush()
+    await _mk_workers(db_session, company_id=company.id, count=2)
+
+    customer_create_mock = MagicMock()
+    subscription_create_mock = MagicMock()
+    retrieve_mock = MagicMock()
+    modify_mock = MagicMock()
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
+
+    result = await switch_company_to_unlimited(db_session, company.id)
+    await db_session.refresh(company)
+
+    assert result.status == SwitchStatus.SWITCHED_COMPED
+    assert company.subscription_tier == "unlimited"
+    assert company.stripe_subscription_id is None
+    customer_create_mock.assert_not_called()
+    subscription_create_mock.assert_not_called()
+    retrieve_mock.assert_not_called()
+    modify_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_switch_company_to_unlimited_free_with_workers_creates_unlimited_subscription(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "SwitchFreeCreate")
+    await db_session.flush()
+    await _mk_workers(db_session, company_id=company.id, count=4)
+
+    _set_billing_settings(
+        monkeypatch,
+        stripe_secret_key="sk_test_abc",
+        stripe_price_per_seat_monthly_id="price_standard",
+        stripe_price_unlimited_monthly_id="price_unlimited",
+    )
+
+    customer_create_mock = MagicMock(return_value=_stripe_customer("cus_unlimited"))
+    subscription_create_mock = MagicMock(
+        return_value=_stripe_subscription("sub_unlimited", "active")
+    )
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
+
+    result = await switch_company_to_unlimited(db_session, company.id)
+    await db_session.refresh(company)
+
+    assert result.status == SwitchStatus.SWITCHED
+    assert result.stripe_subscription_id == "sub_unlimited"
+    assert company.subscription_tier == "unlimited"
+    assert company.stripe_customer_id == "cus_unlimited"
+    assert company.stripe_subscription_id == "sub_unlimited"
+    customer_create_mock.assert_called_once_with(
+        name=company.name,
+        email=company.email,
+        metadata={"company_id": str(company.id)},
+        idempotency_key=f"customer-create-company-{company.id}",
+        api_key="sk_test_abc",
+    )
+    subscription_create_mock.assert_called_once_with(
+        customer="cus_unlimited",
+        items=[{"price": "price_unlimited", "quantity": 1}],
+        idempotency_key=f"subscription-create-company-{company.id}",
+        api_key="sk_test_abc",
+    )
+
+
+@pytest.mark.asyncio
+async def test_switch_company_to_unlimited_free_with_zero_workers_is_comped(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "SwitchFreeZero")
+    await db_session.flush()
+
+    customer_create_mock = MagicMock()
+    subscription_create_mock = MagicMock()
+    retrieve_mock = MagicMock()
+    modify_mock = MagicMock()
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
+
+    result = await switch_company_to_unlimited(db_session, company.id)
+    await db_session.refresh(company)
+
+    assert result.status == SwitchStatus.SWITCHED_COMPED
+    assert company.subscription_tier == "unlimited"
+    assert company.stripe_customer_id is None
+    assert company.stripe_subscription_id is None
+    customer_create_mock.assert_not_called()
+    subscription_create_mock.assert_not_called()
+    retrieve_mock.assert_not_called()
+    modify_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_switch_company_to_unlimited_already_unlimited_is_noop(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "SwitchAlreadyUnlimited")
+    company.subscription_tier = "unlimited"
+    company.stripe_customer_id = "cus_unlimited"
+    company.stripe_subscription_id = "sub_unlimited"
+    await db_session.flush()
+
+    customer_create_mock = MagicMock()
+    subscription_create_mock = MagicMock()
+    retrieve_mock = MagicMock()
+    modify_mock = MagicMock()
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
+
+    result = await switch_company_to_unlimited(db_session, company.id)
+    await db_session.refresh(company)
+
+    assert result.status == SwitchStatus.NOOP_ALREADY_UNLIMITED
+    assert company.subscription_tier == "unlimited"
+    assert company.stripe_customer_id == "cus_unlimited"
+    assert company.stripe_subscription_id == "sub_unlimited"
+    customer_create_mock.assert_not_called()
+    subscription_create_mock.assert_not_called()
+    retrieve_mock.assert_not_called()
+    modify_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_switch_company_to_unlimited_company_not_found(db_session: AsyncSession):
+    result = await switch_company_to_unlimited(db_session, 999999)
+
+    assert result.status == SwitchStatus.COMPANY_NOT_FOUND
+    assert result.company_id == 999999
+
+
+@pytest.mark.asyncio
+async def test_switch_company_to_unlimited_missing_config_before_stripe_calls(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "SwitchMissingConfig")
+    company.subscription_tier = "standard"
+    company.stripe_customer_id = "cus_standard"
+    company.stripe_subscription_id = "sub_standard"
+    await db_session.flush()
+
+    _set_billing_settings(
+        monkeypatch,
+        stripe_secret_key="",
+        stripe_price_per_seat_monthly_id="",
+        stripe_price_unlimited_monthly_id="",
+    )
+
+    customer_create_mock = MagicMock()
+    subscription_create_mock = MagicMock()
+    retrieve_mock = MagicMock()
+    modify_mock = MagicMock()
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
+
+    result = await switch_company_to_unlimited(db_session, company.id)
+    await db_session.refresh(company)
+
+    assert result.status == SwitchStatus.CONFIG_ERROR
+    assert company.subscription_tier == "standard"
+    assert company.stripe_customer_id == "cus_standard"
+    assert company.stripe_subscription_id == "sub_standard"
+    customer_create_mock.assert_not_called()
+    subscription_create_mock.assert_not_called()
+    retrieve_mock.assert_not_called()
+    modify_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_switch_company_to_unlimited_idempotency_key_stability_same_target(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "SwitchStableKey")
+    company.subscription_tier = "standard"
+    company.stripe_customer_id = "cus_stable"
+    company.stripe_subscription_id = "sub_stable"
+    await db_session.flush()
+
+    _set_billing_settings(
+        monkeypatch,
+        stripe_secret_key="sk_test_abc",
+        stripe_price_per_seat_monthly_id="price_standard",
+        stripe_price_unlimited_monthly_id="price_unlimited",
+    )
+
+    retrieve_mock = MagicMock(
+        return_value=_stripe_subscription_with_item("sub_stable", "active", "si_stable")
+    )
+    modify_mock = MagicMock(
+        return_value=_stripe_subscription_with_item("sub_stable", "active", "si_stable")
+    )
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
+
+    first = await switch_company_to_unlimited(db_session, company.id)
+    assert first.status == SwitchStatus.SWITCHED
+
+    company.subscription_tier = "standard"
+    await db_session.commit()
+
+    second = await switch_company_to_unlimited(db_session, company.id)
+    assert second.status == SwitchStatus.SWITCHED
+
+    assert modify_mock.call_count == 2
+    keys = [call.kwargs["idempotency_key"] for call in modify_mock.call_args_list]
+    assert keys == [
+        f"subscription-switch-unlimited-company-{company.id}",
+        f"subscription-switch-unlimited-company-{company.id}",
+    ]
