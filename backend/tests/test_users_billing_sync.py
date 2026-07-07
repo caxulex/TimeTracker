@@ -493,6 +493,7 @@ async def test_create_user_standard_over_limit_sync_update_target_three(
     modify_mock.assert_called_once_with(
         standard_company_with_subscription.stripe_subscription_id,
         items=[{"id": "si_target", "quantity": 3}],
+        proration_behavior="create_prorations",
         idempotency_key=f"subscription-sync-company-{standard_company_with_subscription.id}-qty-3",
         api_key="sk_test_abc",
     )
@@ -543,6 +544,7 @@ async def test_permanent_delete_standard_company_with_subscription_syncs_quantit
     modify_mock.assert_called_once_with(
         standard_company_with_subscription.stripe_subscription_id,
         items=[{"id": "si_delete_target", "quantity": 1}],
+        proration_behavior="create_prorations",
         idempotency_key=f"subscription-sync-company-{standard_company_with_subscription.id}-qty-1",
         api_key="sk_test_abc",
     )
