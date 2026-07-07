@@ -698,6 +698,7 @@ async def test_sync_company_subscription_quantity_standard_target_two_has_subscr
     modify_mock.assert_called_once_with(
         "sub_sync_update",
         items=[{"id": "si_sync", "quantity": 2}],
+        proration_behavior="create_prorations",
         idempotency_key=f"subscription-sync-company-{company.id}-qty-2",
         api_key="sk_test_abc",
     )
@@ -1078,6 +1079,7 @@ async def test_sync_subscription_to_target_explicit_two_standard_with_subscripti
     modify_mock.assert_called_once_with(
         "sub_helper_update",
         items=[{"id": "si_helper", "quantity": 2}],
+        proration_behavior="create_prorations",
         idempotency_key=f"subscription-sync-company-{company.id}-qty-2",
         api_key="sk_test_abc",
     )

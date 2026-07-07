@@ -516,6 +516,7 @@ async def _sync_subscription_to_target(
             stripe.Subscription.modify(
                 stripe_subscription_id,
                 items=[{"id": item_id, "quantity": target_quantity}],
+                proration_behavior="create_prorations",
                 idempotency_key=modify_key,
                 api_key=stripe_secret_key,
             )
