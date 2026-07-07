@@ -21,8 +21,10 @@ from app.models import Company, User, WhiteLabelConfig
 from app.services.auth_service import AuthService
 from app.services.billing_service import (
     FREE_WORKER_LIMIT,
+    SwitchStatus,
     calculate_monthly_pricing,
     count_company_billable_workers,
+    switch_company_to_unlimited,
     _get_company_for_update,
 )
 from app.services.email_service import email_service
@@ -118,6 +120,18 @@ class CompanyBillingUpgradeResponse(BaseModel):
     company_id: int
     subscription_tier: str
     stripe_customer_id: Optional[str] = None
+    stripe_subscription_id: Optional[str] = None
+    requires_payment_action: bool = False
+    message: Optional[str] = None
+
+
+class CompanyBillingSwitchResponse(BaseModel):
+    """Response payload for explicit unlimited-plan switch attempts."""
+
+    success: bool
+    status: str
+    company_id: int
+    subscription_tier: str
     stripe_subscription_id: Optional[str] = None
     requires_payment_action: bool = False
     message: Optional[str] = None
@@ -590,6 +604,86 @@ async def upgrade_my_company_billing(
             "active subscription; seat-based billing is required (not yet "
             "available)."
         ),
+    )
+
+
+@router.post(
+    "/my-company/billing/switch-to-unlimited",
+    response_model=CompanyBillingSwitchResponse,
+)
+async def switch_my_company_to_unlimited(
+    current_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Switch the current company's billing tier to unlimited (admin only)."""
+    if not current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User is not associated with a company"
+        )
+
+    result = await switch_company_to_unlimited(db, current_user.company_id)
+
+    if result.status == SwitchStatus.SWITCHED:
+        return CompanyBillingSwitchResponse(
+            success=True,
+            status="switched",
+            company_id=result.company_id,
+            subscription_tier="unlimited",
+            stripe_subscription_id=result.stripe_subscription_id,
+            message=result.message,
+        )
+
+    if result.status == SwitchStatus.SWITCHED_COMPED:
+        return CompanyBillingSwitchResponse(
+            success=True,
+            status="switched_comped",
+            company_id=result.company_id,
+            subscription_tier="unlimited",
+            stripe_subscription_id=result.stripe_subscription_id,
+            message=result.message,
+        )
+
+    if result.status == SwitchStatus.NOOP_ALREADY_UNLIMITED:
+        return CompanyBillingSwitchResponse(
+            success=True,
+            status="already_unlimited",
+            company_id=result.company_id,
+            subscription_tier="unlimited",
+            stripe_subscription_id=result.stripe_subscription_id,
+            message=result.message,
+        )
+
+    if result.status == SwitchStatus.REQUIRES_PAYMENT_ACTION:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "reason": "payment_action_required",
+                "message": result.message or "This subscription requires payment action.",
+            },
+        )
+
+    if result.status == SwitchStatus.RETRIABLE_ERROR:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=result.message or "Billing switch is temporarily unavailable.",
+        )
+
+    if result.status == SwitchStatus.CONFIG_ERROR:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=result.message or "Billing is not configured. Please contact support.",
+        )
+
+    if result.status == SwitchStatus.COMPANY_NOT_FOUND:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company not found",
+        )
+
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Unexpected billing switch state.",
     )
 
 
