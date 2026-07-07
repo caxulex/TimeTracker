@@ -81,6 +81,24 @@ class SyncResult:
     message: str | None = None
 
 
+class SwitchStatus(str, Enum):
+    COMPANY_NOT_FOUND = "company_not_found"
+    NOOP_ALREADY_UNLIMITED = "noop_already_unlimited"
+    SWITCHED = "switched"
+    SWITCHED_COMPED = "switched_comped"
+    REQUIRES_PAYMENT_ACTION = "requires_payment_action"
+    RETRIABLE_ERROR = "retriable_error"
+    CONFIG_ERROR = "config_error"
+
+
+@dataclass(frozen=True)
+class SwitchResult:
+    status: SwitchStatus
+    company_id: int
+    stripe_subscription_id: str | None = None
+    message: str | None = None
+
+
 @dataclass(frozen=True)
 class AddWorkerDecision:
     allowed: bool
@@ -555,6 +573,318 @@ async def _sync_subscription_to_target(
         company_id=company_id,
         target_quantity=0,
         stripe_subscription_id=stripe_subscription_id,
+    )
+
+
+async def switch_company_to_unlimited(
+    db: AsyncSession,
+    company_id: int,
+) -> SwitchResult:
+    """Switch a company to the unlimited monthly plan."""
+
+    if company_id <= 0:
+        raise ValueError("company_id must be a positive integer")
+
+    stripe_secret_key = settings.STRIPE_SECRET_KEY.strip()
+    stripe_price_unlimited_monthly_id = (
+        getattr(settings, "STRIPE_PRICE_UNLIMITED_MONTHLY_ID", "").strip()
+    )
+
+    company_tier = ""
+    stripe_subscription_id: str | None = None
+    stripe_customer_id: str | None = None
+    company_name = ""
+    company_email = ""
+    billable_workers = 0
+
+    try:
+        company = await _get_company_for_update(db, company_id)
+        if company is None:
+            await db.commit()
+            return SwitchResult(
+                status=SwitchStatus.COMPANY_NOT_FOUND,
+                company_id=company_id,
+                message="Company not found.",
+            )
+
+        company_tier = company.subscription_tier
+        stripe_subscription_id = company.stripe_subscription_id
+        stripe_customer_id = company.stripe_customer_id
+        company_name = company.name
+        company_email = company.email
+        billable_workers = await count_company_billable_workers(db, company_id)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+    if company_tier == "unlimited":
+        return SwitchResult(
+            status=SwitchStatus.NOOP_ALREADY_UNLIMITED,
+            company_id=company_id,
+            stripe_subscription_id=stripe_subscription_id,
+            message="Company is already on the unlimited tier.",
+        )
+
+    if company_tier == "standard" and not stripe_subscription_id:
+        try:
+            company = await _get_company_for_update(db, company_id)
+            if company is None:
+                await db.commit()
+                return SwitchResult(
+                    status=SwitchStatus.COMPANY_NOT_FOUND,
+                    company_id=company_id,
+                    message="Company not found.",
+                )
+
+            if company.subscription_tier == "unlimited":
+                await db.commit()
+                return SwitchResult(
+                    status=SwitchStatus.NOOP_ALREADY_UNLIMITED,
+                    company_id=company_id,
+                    stripe_subscription_id=company.stripe_subscription_id,
+                    message="Company is already on the unlimited tier.",
+                )
+
+            company.subscription_tier = "unlimited"
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+
+        return SwitchResult(
+            status=SwitchStatus.SWITCHED_COMPED,
+            company_id=company_id,
+            stripe_subscription_id=stripe_subscription_id,
+            message="Company had no Stripe subscription to swap; marked unlimited.",
+        )
+
+    if company_tier == "free" and billable_workers == 0:
+        try:
+            company = await _get_company_for_update(db, company_id)
+            if company is None:
+                await db.commit()
+                return SwitchResult(
+                    status=SwitchStatus.COMPANY_NOT_FOUND,
+                    company_id=company_id,
+                    message="Company not found.",
+                )
+
+            if company.subscription_tier == "unlimited":
+                await db.commit()
+                return SwitchResult(
+                    status=SwitchStatus.NOOP_ALREADY_UNLIMITED,
+                    company_id=company_id,
+                    stripe_subscription_id=company.stripe_subscription_id,
+                    message="Company is already on the unlimited tier.",
+                )
+
+            company.subscription_tier = "unlimited"
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+
+        return SwitchResult(
+            status=SwitchStatus.SWITCHED_COMPED,
+            company_id=company_id,
+            stripe_subscription_id=stripe_subscription_id,
+            message="Company had no billable workers and was marked unlimited without Stripe.",
+        )
+
+    if not stripe_secret_key or not stripe_price_unlimited_monthly_id:
+        return SwitchResult(
+            status=SwitchStatus.CONFIG_ERROR,
+            company_id=company_id,
+            stripe_subscription_id=stripe_subscription_id,
+            message=(
+                "Stripe configuration missing: STRIPE_SECRET_KEY and "
+                "STRIPE_PRICE_UNLIMITED_MONTHLY_ID are required"
+            ),
+        )
+
+    if company_tier == "standard" and stripe_subscription_id:
+        switch_key = f"subscription-switch-unlimited-company-{company_id}"
+        try:
+            subscription = stripe.Subscription.retrieve(
+                stripe_subscription_id,
+                api_key=stripe_secret_key,
+            )
+            subscription_items = getattr(getattr(subscription, "items", None), "data", [])
+            if not subscription_items:
+                return SwitchResult(
+                    status=SwitchStatus.RETRIABLE_ERROR,
+                    company_id=company_id,
+                    stripe_subscription_id=stripe_subscription_id,
+                    message="Stripe subscription has no items to update.",
+                )
+
+            item_id = subscription_items[0].id
+            subscription = stripe.Subscription.modify(
+                stripe_subscription_id,
+                items=[
+                    {
+                        "id": item_id,
+                        "price": stripe_price_unlimited_monthly_id,
+                        "quantity": 1,
+                    }
+                ],
+                proration_behavior="create_prorations",
+                idempotency_key=switch_key,
+                api_key=stripe_secret_key,
+            )
+        except (TimeoutError, stripe.error.StripeError) as exc:
+            return SwitchResult(
+                status=SwitchStatus.RETRIABLE_ERROR,
+                company_id=company_id,
+                stripe_subscription_id=stripe_subscription_id,
+                message=str(exc),
+            )
+
+        subscription_status = getattr(subscription, "status", None)
+        if subscription_status in {"incomplete", "past_due"}:
+            return SwitchResult(
+                status=SwitchStatus.REQUIRES_PAYMENT_ACTION,
+                company_id=company_id,
+                stripe_subscription_id=stripe_subscription_id,
+                message="Stripe subscription requires payment action.",
+            )
+
+        try:
+            company = await _get_company_for_update(db, company_id)
+            if company is None:
+                await db.commit()
+                return SwitchResult(
+                    status=SwitchStatus.COMPANY_NOT_FOUND,
+                    company_id=company_id,
+                    stripe_subscription_id=stripe_subscription_id,
+                    message="Company not found.",
+                )
+
+            if company.subscription_tier == "unlimited":
+                await db.commit()
+                return SwitchResult(
+                    status=SwitchStatus.NOOP_ALREADY_UNLIMITED,
+                    company_id=company_id,
+                    stripe_subscription_id=company.stripe_subscription_id,
+                    message="Company is already on the unlimited tier.",
+                )
+
+            company.subscription_tier = "unlimited"
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+
+        return SwitchResult(
+            status=SwitchStatus.SWITCHED,
+            company_id=company_id,
+            stripe_subscription_id=stripe_subscription_id,
+            message="Company subscription switched to unlimited.",
+        )
+
+    if company_tier == "free" and billable_workers >= 1:
+        customer_create_key = f"customer-create-company-{company_id}"
+        subscription_create_key = f"subscription-create-company-{company_id}"
+
+        try:
+            if stripe_customer_id:
+                resolved_customer_id = stripe_customer_id
+            else:
+                customer = stripe.Customer.create(
+                    name=company_name,
+                    email=company_email,
+                    metadata={"company_id": str(company_id)},
+                    idempotency_key=customer_create_key,
+                    api_key=stripe_secret_key,
+                )
+                resolved_customer_id = customer.id
+
+            subscription = stripe.Subscription.create(
+                customer=resolved_customer_id,
+                items=[
+                    {
+                        "price": stripe_price_unlimited_monthly_id,
+                        "quantity": 1,
+                    }
+                ],
+                idempotency_key=subscription_create_key,
+                api_key=stripe_secret_key,
+            )
+        except (TimeoutError, stripe.error.StripeError) as exc:
+            return SwitchResult(
+                status=SwitchStatus.RETRIABLE_ERROR,
+                company_id=company_id,
+                message=str(exc),
+            )
+
+        subscription_status = getattr(subscription, "status", None)
+        if subscription_status in {"incomplete", "past_due"}:
+            try:
+                company = await _get_company_for_update(db, company_id)
+                if company is None:
+                    await db.commit()
+                    return SwitchResult(
+                        status=SwitchStatus.COMPANY_NOT_FOUND,
+                        company_id=company_id,
+                        stripe_subscription_id=subscription.id,
+                        message="Company not found.",
+                    )
+
+                company.stripe_customer_id = resolved_customer_id
+                company.stripe_subscription_id = subscription.id
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
+
+            return SwitchResult(
+                status=SwitchStatus.REQUIRES_PAYMENT_ACTION,
+                company_id=company_id,
+                stripe_subscription_id=subscription.id,
+                message="Stripe subscription requires payment action.",
+            )
+
+        try:
+            company = await _get_company_for_update(db, company_id)
+            if company is None:
+                await db.commit()
+                return SwitchResult(
+                    status=SwitchStatus.COMPANY_NOT_FOUND,
+                    company_id=company_id,
+                    stripe_subscription_id=subscription.id,
+                    message="Company not found.",
+                )
+
+            if company.subscription_tier == "unlimited":
+                await db.commit()
+                return SwitchResult(
+                    status=SwitchStatus.NOOP_ALREADY_UNLIMITED,
+                    company_id=company_id,
+                    stripe_subscription_id=company.stripe_subscription_id,
+                    message="Company is already on the unlimited tier.",
+                )
+
+            company.stripe_customer_id = resolved_customer_id
+            company.stripe_subscription_id = subscription.id
+            company.subscription_tier = "unlimited"
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+
+        return SwitchResult(
+            status=SwitchStatus.SWITCHED,
+            company_id=company_id,
+            stripe_subscription_id=subscription.id,
+            message="Company subscription created for unlimited billing.",
+        )
+
+    return SwitchResult(
+        status=SwitchStatus.RETRIABLE_ERROR,
+        company_id=company_id,
+        stripe_subscription_id=stripe_subscription_id,
+        message="Unsupported billing state for unlimited switch.",
     )
 
 
