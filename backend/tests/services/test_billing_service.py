@@ -16,6 +16,7 @@ from app.services.billing_service import (
     SyncStatus,
     PricingSummary,
     SwitchStatus,
+    downgrade_company_to_free,
     _sync_subscription_to_target,
     can_company_add_worker,
     calculate_monthly_pricing,
@@ -1090,6 +1091,73 @@ async def test_reconcile_company_subscription_uses_same_sync_call_as_reconcile_a
     assert single.status == SyncStatus.NOOP_NOTHING_TO_DO
     assert [result.company_id for result in all_results] == [company.id]
     assert seen_company_ids == [company.id, company.id]
+
+
+@pytest.mark.asyncio
+async def test_downgrade_company_to_free_standard_clears_subscription_keeps_customer(
+    db_session: AsyncSession,
+):
+    company = await _mk_company(db_session, "DowngradeStandard")
+    company.subscription_tier = "standard"
+    company.stripe_customer_id = "cus_keep"
+    company.stripe_subscription_id = "sub_clear"
+    await db_session.flush()
+
+    result = await downgrade_company_to_free(db_session, company.id)
+    await db_session.refresh(company)
+
+    assert result.status == SwitchStatus.DOWNGRADED_TO_FREE
+    assert company.subscription_tier == "free"
+    assert company.stripe_subscription_id is None
+    assert company.stripe_customer_id == "cus_keep"
+
+
+@pytest.mark.asyncio
+async def test_downgrade_company_to_free_already_free_noop_no_mutation(
+    db_session: AsyncSession,
+):
+    company = await _mk_company(db_session, "DowngradeAlreadyFree")
+    company.subscription_tier = "free"
+    company.stripe_customer_id = "cus_free"
+    company.stripe_subscription_id = None
+    await db_session.flush()
+
+    result = await downgrade_company_to_free(db_session, company.id)
+    await db_session.refresh(company)
+
+    assert result.status == SwitchStatus.NOOP_ALREADY_FREE
+    assert company.subscription_tier == "free"
+    assert company.stripe_subscription_id is None
+    assert company.stripe_customer_id == "cus_free"
+
+
+@pytest.mark.asyncio
+async def test_downgrade_company_to_free_not_found(
+    db_session: AsyncSession,
+):
+    result = await downgrade_company_to_free(db_session, 999999)
+
+    assert result.status == SwitchStatus.COMPANY_NOT_FOUND
+    assert result.company_id == 999999
+
+
+@pytest.mark.asyncio
+async def test_downgrade_company_to_free_unlimited_downgrades_and_clears_subscription(
+    db_session: AsyncSession,
+):
+    company = await _mk_company(db_session, "DowngradeUnlimited")
+    company.subscription_tier = "unlimited"
+    company.stripe_customer_id = "cus_unlimited"
+    company.stripe_subscription_id = "sub_unlimited"
+    await db_session.flush()
+
+    result = await downgrade_company_to_free(db_session, company.id)
+    await db_session.refresh(company)
+
+    assert result.status == SwitchStatus.DOWNGRADED_TO_FREE
+    assert company.subscription_tier == "free"
+    assert company.stripe_subscription_id is None
+    assert company.stripe_customer_id == "cus_unlimited"
 
 
 @pytest.mark.asyncio

@@ -83,8 +83,10 @@ class SyncResult:
 
 class SwitchStatus(str, Enum):
     COMPANY_NOT_FOUND = "company_not_found"
+    NOOP_ALREADY_FREE = "noop_already_free"
     NOOP_ALREADY_UNLIMITED = "noop_already_unlimited"
     SWITCHED = "switched"
+    DOWNGRADED_TO_FREE = "downgraded_to_free"
     SWITCHED_COMPED = "switched_comped"
     REQUIRES_PAYMENT_ACTION = "requires_payment_action"
     RETRIABLE_ERROR = "retriable_error"
@@ -925,3 +927,51 @@ async def reconcile_company_subscription(
         )
 
     return await sync_company_subscription_quantity(db, company_id)
+
+
+async def downgrade_company_to_free(
+    db: AsyncSession,
+    company_id: int,
+) -> SwitchResult:
+    """Downgrade a company to free after subscription termination."""
+
+    if company_id <= 0:
+        raise ValueError("company_id must be a positive integer")
+
+    try:
+        company = await _get_company_for_update(db, company_id)
+        if company is None:
+            await db.commit()
+            return SwitchResult(
+                status=SwitchStatus.COMPANY_NOT_FOUND,
+                company_id=company_id,
+                message="Company not found.",
+            )
+
+        if company.subscription_tier == "free":
+            existing_subscription_id = company.stripe_subscription_id
+            await db.commit()
+            return SwitchResult(
+                status=SwitchStatus.NOOP_ALREADY_FREE,
+                company_id=company_id,
+                stripe_subscription_id=existing_subscription_id,
+                message="Company is already on the free tier.",
+            )
+
+        company.subscription_tier = "free"
+        company.stripe_subscription_id = None
+        kept_customer_id = company.stripe_customer_id
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+    return SwitchResult(
+        status=SwitchStatus.DOWNGRADED_TO_FREE,
+        company_id=company_id,
+        stripe_subscription_id=None,
+        message=(
+            "Company downgraded to free tier; subscription cleared and customer retained "
+            f"({kept_customer_id})."
+        ),
+    )

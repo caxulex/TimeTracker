@@ -16,7 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models import Company, StripeWebhookEvent
-from app.services.billing_service import reconcile_company_subscription
+from app.services.billing_service import (
+    downgrade_company_to_free,
+    reconcile_company_subscription,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +105,70 @@ async def _dispatch_stripe_event(db: AsyncSession, event: object) -> None:
         customer_id = _resolve_customer_id(_event_field(event_object, "customer"))
         logger.info(
             "stripe.webhook.invoice.payment_succeeded event_id=%s customer=%s",
+            _event_field(event, "id"),
+            customer_id,
+        )
+        return
+
+    if event_type == "customer.subscription.deleted":
+        event_data = _event_field(event, "data")
+        event_object = _event_field(event_data, "object")
+        subscription_id = _event_field(event_object, "id")
+        if not isinstance(subscription_id, str):
+            subscription_id = None
+        customer_id = _resolve_customer_id(_event_field(event_object, "customer"))
+
+        filters = []
+        if subscription_id:
+            filters.append(Company.stripe_subscription_id == subscription_id)
+        if customer_id:
+            filters.append(Company.stripe_customer_id == customer_id)
+
+        if not filters:
+            logger.warning(
+                "stripe.webhook.subscription_deleted.no_identifiers event_id=%s",
+                _event_field(event, "id"),
+            )
+            return
+
+        company_result = await db.execute(
+            select(Company)
+            .where(or_(*filters))
+            .order_by(Company.id.asc())
+            .limit(1)
+        )
+        company = company_result.scalar_one_or_none()
+        if company is None:
+            logger.warning(
+                (
+                    "stripe.webhook.subscription_deleted.company_not_found "
+                    "event_id=%s stripe_subscription_id=%s stripe_customer_id=%s"
+                ),
+                _event_field(event, "id"),
+                subscription_id,
+                customer_id,
+            )
+            return
+
+        downgrade_result = await downgrade_company_to_free(db, company.id)
+        logger.info(
+            (
+                "stripe.webhook.subscription_deleted.downgrade "
+                "event_id=%s company_id=%s status=%s"
+            ),
+            _event_field(event, "id"),
+            company.id,
+            downgrade_result.status,
+        )
+        return
+
+    if event_type == "invoice.payment_failed":
+        event_data = _event_field(event, "data")
+        event_object = _event_field(event_data, "object")
+        customer_id = _resolve_customer_id(_event_field(event_object, "customer"))
+        # Access policy is deferred to a later step (spec section 13).
+        logger.warning(
+            "stripe.webhook.invoice.payment_failed event_id=%s customer=%s",
             _event_field(event, "id"),
             customer_id,
         )
