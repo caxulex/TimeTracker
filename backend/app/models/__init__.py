@@ -1507,3 +1507,15 @@ class BasecampProcessedEvent(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )
 
+
+class StripeWebhookEvent(Base):
+    """Idempotency stamp for Stripe webhook events."""
+
+    __tablename__ = "stripe_webhook_events"
+
+    event_id: Mapped[str] = mapped_column(String(64), primary_key=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    processed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+
