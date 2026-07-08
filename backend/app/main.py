@@ -476,6 +476,10 @@ app.include_router(work_sessions.router, tags=["Work Sessions"])
 from app.routers.integrations import basecamp as basecamp_integration  # noqa: E402
 app.include_router(basecamp_integration.router, prefix="/api", tags=["Integrations: Basecamp"])
 
+# Webhooks: Stripe (public signature-authenticated inbound events)
+from app.routers.webhooks import stripe as stripe_webhook  # noqa: E402
+app.include_router(stripe_webhook.router, prefix="/api", tags=["Webhooks: Stripe"])
+
 
 # SEC-010: Custom exception handler for AppException
 @app.exception_handler(AppException)
