@@ -12,7 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models import Company, StripeWebhookEvent
-from app.services.billing_service import SyncResult, SyncStatus
+from app.services.billing_service import (
+    SwitchResult,
+    SwitchStatus,
+    SyncResult,
+    SyncStatus,
+)
 
 
 def _fake_event(
@@ -439,3 +444,273 @@ class TestStripeWebhook:
         assert response.status_code == 200
         assert response.json() == {"status": "duplicate_ignored"}
         reconcile_mock.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_subscription_deleted_known_company_records_and_downgrades(
+        self,
+        client,
+        db_session: AsyncSession,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_test_secret")
+        company = await _mk_company(db_session, "WebhookDeleteKnown")
+        company.subscription_tier = "standard"
+        company.stripe_customer_id = "cus_delete_known"
+        company.stripe_subscription_id = "sub_delete_known"
+        await db_session.commit()
+
+        raw_body = b'{"id":"evt_sub_deleted_known","type":"customer.subscription.deleted"}'
+        fake_event = _fake_event(
+            "evt_sub_deleted_known",
+            "customer.subscription.deleted",
+            data_object={"id": "sub_delete_known", "customer": "cus_delete_known"},
+        )
+
+        downgrade_mock = AsyncMock(
+            return_value=SwitchResult(
+                status=SwitchStatus.DOWNGRADED_TO_FREE,
+                company_id=company.id,
+                stripe_subscription_id=None,
+            )
+        )
+        with patch(
+            "app.routers.webhooks.stripe.stripe.Webhook.construct_event",
+            return_value=fake_event,
+        ), patch(
+            "app.routers.webhooks.stripe.downgrade_company_to_free",
+            downgrade_mock,
+        ):
+            response = await client.post(
+                "/api/webhooks/stripe",
+                content=raw_body,
+                headers={"Stripe-Signature": "t=1,v1=test"},
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "recorded", "event_type": "customer.subscription.deleted"}
+        downgrade_mock.assert_awaited_once_with(db_session, company.id)
+
+        rows = await db_session.execute(
+            select(StripeWebhookEvent).where(StripeWebhookEvent.event_id == "evt_sub_deleted_known")
+        )
+        assert rows.scalar_one_or_none() is not None
+
+    @pytest.mark.asyncio
+    async def test_subscription_deleted_unknown_company_records_without_downgrade(
+        self,
+        client,
+        db_session: AsyncSession,
+        monkeypatch,
+        caplog,
+    ):
+        monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_test_secret")
+        raw_body = b'{"id":"evt_sub_deleted_unknown","type":"customer.subscription.deleted"}'
+        fake_event = _fake_event(
+            "evt_sub_deleted_unknown",
+            "customer.subscription.deleted",
+            data_object={"id": "sub_deleted_unknown", "customer": "cus_deleted_unknown"},
+        )
+
+        downgrade_mock = AsyncMock()
+        caplog.set_level(logging.WARNING)
+        with patch(
+            "app.routers.webhooks.stripe.stripe.Webhook.construct_event",
+            return_value=fake_event,
+        ), patch(
+            "app.routers.webhooks.stripe.downgrade_company_to_free",
+            downgrade_mock,
+        ):
+            response = await client.post(
+                "/api/webhooks/stripe",
+                content=raw_body,
+                headers={"Stripe-Signature": "t=1,v1=test"},
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "recorded", "event_type": "customer.subscription.deleted"}
+        downgrade_mock.assert_not_called()
+        assert "subscription_deleted.company_not_found" in caplog.text
+
+        rows = await db_session.execute(
+            select(StripeWebhookEvent).where(StripeWebhookEvent.event_id == "evt_sub_deleted_unknown")
+        )
+        assert rows.scalar_one_or_none() is not None
+
+    @pytest.mark.asyncio
+    async def test_subscription_deleted_dispatch_error_is_swallowed_and_record_persists(
+        self,
+        client,
+        db_session: AsyncSession,
+        monkeypatch,
+        caplog,
+    ):
+        monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_test_secret")
+        company = await _mk_company(db_session, "WebhookDeleteDispatchFail")
+        company.subscription_tier = "standard"
+        company.stripe_customer_id = "cus_delete_dispatch"
+        company.stripe_subscription_id = "sub_delete_dispatch"
+        await db_session.commit()
+
+        raw_body = b'{"id":"evt_sub_deleted_dispatch","type":"customer.subscription.deleted"}'
+        fake_event = _fake_event(
+            "evt_sub_deleted_dispatch",
+            "customer.subscription.deleted",
+            data_object={"id": "sub_delete_dispatch", "customer": "cus_delete_dispatch"},
+        )
+
+        caplog.set_level(logging.ERROR)
+        with patch(
+            "app.routers.webhooks.stripe.stripe.Webhook.construct_event",
+            return_value=fake_event,
+        ), patch(
+            "app.routers.webhooks.stripe.downgrade_company_to_free",
+            AsyncMock(side_effect=RuntimeError("downgrade failed")),
+        ):
+            response = await client.post(
+                "/api/webhooks/stripe",
+                content=raw_body,
+                headers={"Stripe-Signature": "t=1,v1=test"},
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "recorded", "event_type": "customer.subscription.deleted"}
+        assert "stripe.webhook.dispatch_failed" in caplog.text
+
+        rows = await db_session.execute(
+            select(StripeWebhookEvent).where(StripeWebhookEvent.event_id == "evt_sub_deleted_dispatch")
+        )
+        assert rows.scalar_one_or_none() is not None
+
+    @pytest.mark.asyncio
+    async def test_subscription_deleted_scopes_to_matching_company_only(
+        self,
+        client,
+        db_session: AsyncSession,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_test_secret")
+
+        company_a = await _mk_company(db_session, "WebhookDeleteScopeA")
+        company_a.subscription_tier = "standard"
+        company_a.stripe_customer_id = "cus_scope_a"
+        company_a.stripe_subscription_id = "sub_scope_a"
+
+        company_b = await _mk_company(db_session, "WebhookDeleteScopeB")
+        company_b.subscription_tier = "unlimited"
+        company_b.stripe_customer_id = "cus_scope_b"
+        company_b.stripe_subscription_id = "sub_scope_b"
+        await db_session.commit()
+
+        raw_body = b'{"id":"evt_sub_deleted_scope","type":"customer.subscription.deleted"}'
+        fake_event = _fake_event(
+            "evt_sub_deleted_scope",
+            "customer.subscription.deleted",
+            data_object={"id": "sub_scope_a", "customer": "cus_scope_a"},
+        )
+
+        with patch(
+            "app.routers.webhooks.stripe.stripe.Webhook.construct_event",
+            return_value=fake_event,
+        ):
+            response = await client.post(
+                "/api/webhooks/stripe",
+                content=raw_body,
+                headers={"Stripe-Signature": "t=1,v1=test"},
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "recorded", "event_type": "customer.subscription.deleted"}
+
+        await db_session.refresh(company_a)
+        await db_session.refresh(company_b)
+        assert company_a.subscription_tier == "free"
+        assert company_a.stripe_subscription_id is None
+        assert company_a.stripe_customer_id == "cus_scope_a"
+
+        assert company_b.subscription_tier == "unlimited"
+        assert company_b.stripe_subscription_id == "sub_scope_b"
+
+    @pytest.mark.asyncio
+    async def test_invoice_payment_failed_recorded_warning_logged_no_tier_mutation(
+        self,
+        client,
+        db_session: AsyncSession,
+        monkeypatch,
+        caplog,
+    ):
+        monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_test_secret")
+        company = await _mk_company(db_session, "WebhookPaymentFailed")
+        company.subscription_tier = "standard"
+        company.stripe_customer_id = "cus_fail"
+        company.stripe_subscription_id = "sub_fail"
+        await db_session.commit()
+
+        raw_body = b'{"id":"evt_payment_failed","type":"invoice.payment_failed"}'
+        fake_event = _fake_event(
+            "evt_payment_failed",
+            "invoice.payment_failed",
+            data_object={"id": "in_fail", "customer": "cus_fail"},
+        )
+
+        caplog.set_level(logging.WARNING)
+        with patch(
+            "app.routers.webhooks.stripe.stripe.Webhook.construct_event",
+            return_value=fake_event,
+        ):
+            response = await client.post(
+                "/api/webhooks/stripe",
+                content=raw_body,
+                headers={"Stripe-Signature": "t=1,v1=test"},
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "recorded", "event_type": "invoice.payment_failed"}
+        assert "invoice.payment_failed" in caplog.text
+
+        await db_session.refresh(company)
+        assert company.subscription_tier == "standard"
+        assert company.stripe_subscription_id == "sub_fail"
+        assert company.stripe_customer_id == "cus_fail"
+
+        rows = await db_session.execute(
+            select(StripeWebhookEvent).where(StripeWebhookEvent.event_id == "evt_payment_failed")
+        )
+        assert rows.scalar_one_or_none() is not None
+
+    @pytest.mark.asyncio
+    async def test_duplicate_subscription_deleted_short_circuits_before_dispatch(
+        self,
+        client,
+        db_session: AsyncSession,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_test_secret")
+        db_session.add(
+            StripeWebhookEvent(event_id="evt_dup_sub_deleted", event_type="customer.subscription.deleted")
+        )
+        await db_session.commit()
+
+        raw_body = b'{"id":"evt_dup_sub_deleted","type":"customer.subscription.deleted"}'
+        fake_event = _fake_event(
+            "evt_dup_sub_deleted",
+            "customer.subscription.deleted",
+            data_object={"id": "sub_dup_deleted", "customer": "cus_dup_deleted"},
+        )
+
+        downgrade_mock = AsyncMock()
+        with patch(
+            "app.routers.webhooks.stripe.stripe.Webhook.construct_event",
+            return_value=fake_event,
+        ), patch(
+            "app.routers.webhooks.stripe.downgrade_company_to_free",
+            downgrade_mock,
+        ):
+            response = await client.post(
+                "/api/webhooks/stripe",
+                content=raw_body,
+                headers={"Stripe-Signature": "t=1,v1=test"},
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "duplicate_ignored"}
+        downgrade_mock.assert_not_called()
