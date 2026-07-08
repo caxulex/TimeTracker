@@ -21,6 +21,7 @@ from app.services.billing_service import (
     calculate_monthly_pricing,
     create_standard_subscription,
     count_company_billable_workers,
+    reconcile_company_subscription,
     reconcile_all_standard_subscriptions,
     switch_company_to_unlimited,
     sync_company_subscription_quantity,
@@ -1024,6 +1025,71 @@ async def test_reconcile_all_standard_subscriptions_only_standard_tier_processed
     assert results[0].status == SyncStatus.UPDATED
     retrieve_mock.assert_called_once()
     modify_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_company_subscription_known_standard_delegates_to_sync_path(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "ReconSingleDelegates")
+    company.subscription_tier = "standard"
+    await db_session.flush()
+
+    expected = SyncResult(
+        status=SyncStatus.UPDATED,
+        company_id=company.id,
+        target_quantity=2,
+        stripe_subscription_id="sub_single_delegate",
+    )
+
+    sync_mock = AsyncMock(return_value=expected)
+    monkeypatch.setattr("app.services.billing_service.sync_company_subscription_quantity", sync_mock)
+
+    result = await reconcile_company_subscription(db_session, company.id)
+
+    assert result == expected
+    sync_mock.assert_awaited_once_with(db_session, company.id)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_company_subscription_company_not_found_returns_not_found(
+    db_session: AsyncSession,
+):
+    result = await reconcile_company_subscription(db_session, 999999)
+
+    assert result.status == SyncStatus.COMPANY_NOT_FOUND
+    assert result.company_id == 999999
+    assert result.target_quantity == 0
+
+
+@pytest.mark.asyncio
+async def test_reconcile_company_subscription_uses_same_sync_call_as_reconcile_all(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "ReconSingleSamePath")
+    company.subscription_tier = "standard"
+    await db_session.flush()
+
+    seen_company_ids: list[int] = []
+
+    async def _fake_sync(_db: AsyncSession, company_id: int) -> SyncResult:
+        seen_company_ids.append(company_id)
+        return SyncResult(
+            status=SyncStatus.NOOP_NOTHING_TO_DO,
+            company_id=company_id,
+            target_quantity=0,
+        )
+
+    monkeypatch.setattr("app.services.billing_service.sync_company_subscription_quantity", _fake_sync)
+
+    single = await reconcile_company_subscription(db_session, company.id)
+    all_results = await reconcile_all_standard_subscriptions(db_session)
+
+    assert single.status == SyncStatus.NOOP_NOTHING_TO_DO
+    assert [result.company_id for result in all_results] == [company.id]
+    assert seen_company_ids == [company.id, company.id]
 
 
 @pytest.mark.asyncio

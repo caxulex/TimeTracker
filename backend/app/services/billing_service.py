@@ -903,3 +903,25 @@ async def reconcile_all_standard_subscriptions(db: AsyncSession) -> list[SyncRes
         sync_results.append(await sync_company_subscription_quantity(db, company_id))
 
     return sync_results
+
+
+async def reconcile_company_subscription(
+    db: AsyncSession,
+    company_id: int,
+) -> SyncResult:
+    """Run seat-sync reconciliation for one company via the shared sync path."""
+
+    if company_id <= 0:
+        raise ValueError("company_id must be a positive integer")
+
+    result = await db.execute(select(Company.id).where(Company.id == company_id))
+    existing_company_id = result.scalar_one_or_none()
+    if existing_company_id is None:
+        return SyncResult(
+            status=SyncStatus.COMPANY_NOT_FOUND,
+            company_id=company_id,
+            target_quantity=0,
+            message="Company not found.",
+        )
+
+    return await sync_company_subscription_quantity(db, company_id)
