@@ -953,6 +953,22 @@ export interface BillingStatus {
   would_block_next_add: boolean;
 }
 
+interface CompanyBillingActionResponseBase {
+  success: boolean;
+  status: string;
+  company_id: number;
+  subscription_tier: 'free' | 'standard' | 'unlimited';
+  stripe_subscription_id?: string | null;
+  requires_payment_action?: boolean;
+  message?: string | null;
+}
+
+export interface CompanyBillingUpgradeResponse extends CompanyBillingActionResponseBase {
+  stripe_customer_id?: string | null;
+}
+
+export interface CompanyBillingSwitchResponse extends CompanyBillingActionResponseBase {}
+
 // Email Settings Types
 export interface EmailSettings {
   email_enabled: boolean;
@@ -1025,6 +1041,16 @@ export const companiesApi = {
 
   getBillingStatus: async (): Promise<BillingStatus> => {
     const response = await api.get('/api/companies/my-company/billing/status');
+    return response.data;
+  },
+
+  upgradeBilling: async (): Promise<CompanyBillingUpgradeResponse> => {
+    const response = await api.post('/api/companies/my-company/billing/upgrade');
+    return response.data;
+  },
+
+  switchToUnlimited: async (): Promise<CompanyBillingSwitchResponse> => {
+    const response = await api.post('/api/companies/my-company/billing/switch-to-unlimited');
     return response.data;
   },
 
