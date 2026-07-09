@@ -941,6 +941,18 @@ export interface CompanyUpdate {
   timezone?: string;
 }
 
+export interface BillingStatus {
+  worker_count: number;
+  free_limit: number;
+  seats_over_free: number;
+  per_seat_monthly_cost_dollars: number;
+  should_recommend_unlimited: boolean;
+  subscription_tier: 'free' | 'standard' | 'unlimited';
+  has_subscription: boolean;
+  is_at_or_over_free_limit: boolean;
+  would_block_next_add: boolean;
+}
+
 // Email Settings Types
 export interface EmailSettings {
   email_enabled: boolean;
@@ -1008,6 +1020,11 @@ export interface EmailReportResponse {
 export const companiesApi = {
   getMyCompany: async (): Promise<Company> => {
     const response = await api.get('/api/companies/my-company');
+    return response.data;
+  },
+
+  getBillingStatus: async (): Promise<BillingStatus> => {
+    const response = await api.get('/api/companies/my-company/billing/status');
     return response.data;
   },
 
