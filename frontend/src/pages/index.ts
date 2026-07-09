@@ -15,6 +15,7 @@ export { ReportsPage } from './ReportsPage';
 export { SettingsPage } from './SettingsPage';
 export { AdminPage } from './AdminPage';
 export { AdminSettingsPage } from './AdminSettingsPage';
+export { BillingPage } from './BillingPage';
 export { UsersPage } from './UsersPage';
 export { StaffPage } from './StaffPage';
 export { AccountRequestsPage } from './AccountRequestsPage';
