@@ -1,10 +1,10 @@
 // ============================================
 // TIME TRACKER - BILLING PAGE (READ-ONLY)
 // ============================================
-import { useEffect, useMemo, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
-import { Card, CardHeader, LoadingOverlay } from '../components/common';
+import { Button, Card, CardHeader, LoadingOverlay, Modal } from '../components/common';
 import { companiesApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import { useNotifications } from '../hooks/useNotifications';
@@ -19,8 +19,11 @@ function planLabel(tier: 'free' | 'standard' | 'unlimited'): string {
 export function BillingPage() {
   const { user } = useAuthStore();
   const { addNotification } = useNotifications();
+  const queryClient = useQueryClient();
   const isAdmin = isAdminUser(user);
   const hasNotifiedError = useRef(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [showUnlimitedModal, setShowUnlimitedModal] = useState(false);
 
   const {
     data: billing,
@@ -31,6 +34,57 @@ export function BillingPage() {
     queryKey: ['billing-status'],
     queryFn: () => companiesApi.getBillingStatus(),
     enabled: isAdmin,
+  });
+
+  const upgradeMutation = useMutation({
+    mutationFn: () => companiesApi.upgradeBilling(),
+    onSuccess: () => {
+      setShowUpgradeModal(false);
+      queryClient.invalidateQueries({ queryKey: ['billing-status'] });
+      addNotification({
+        type: 'success',
+        title: 'Plan updated',
+        message: "You're now on the Standard plan.",
+      });
+    },
+    onError: () => {
+      addNotification({
+        type: 'error',
+        title: 'Upgrade failed',
+        message: "Couldn't complete the upgrade. Please try again or contact support.",
+      });
+    },
+  });
+
+  const switchMutation = useMutation({
+    mutationFn: () => companiesApi.switchToUnlimited(),
+    onSuccess: () => {
+      setShowUnlimitedModal(false);
+      queryClient.invalidateQueries({ queryKey: ['billing-status'] });
+      addNotification({
+        type: 'success',
+        title: 'Plan updated',
+        message: "You're now on the Unlimited plan.",
+      });
+    },
+    onError: (mutationError: unknown) => {
+      const status = axios.isAxiosError(mutationError) ? mutationError.response?.status : undefined;
+
+      let message = 'Could not switch to Unlimited. Please try again or contact support.';
+      if (status === 402) {
+        message = "This change needs a payment step we can't complete automatically yet. Please contact support to finish switching to Unlimited.";
+      } else if (status === 503) {
+        message = 'Billing is temporarily unavailable. Please try again in a moment.';
+      } else if (status === 500) {
+        message = 'Something went wrong on our end. Please contact support.';
+      }
+
+      addNotification({
+        type: 'error',
+        title: 'Switch failed',
+        message,
+      });
+    },
   });
 
   const errorMessage = useMemo(() => {
@@ -59,6 +113,25 @@ export function BillingPage() {
       message: errorMessage,
     });
   }, [isError, errorMessage, addNotification]);
+
+  const isMutating = upgradeMutation.isPending || switchMutation.isPending;
+
+  const canUpgradeToStandard = billing?.subscription_tier === 'free';
+  const canSwitchToUnlimited = billing?.subscription_tier === 'free' || billing?.subscription_tier === 'standard';
+
+  const handleConfirmUpgrade = () => {
+    if (isMutating || upgradeMutation.isPending) {
+      return;
+    }
+    upgradeMutation.mutate();
+  };
+
+  const handleConfirmUnlimited = () => {
+    if (isMutating || switchMutation.isPending) {
+      return;
+    }
+    switchMutation.mutate();
+  };
 
   if (!isAdmin) {
     return (
@@ -104,7 +177,7 @@ export function BillingPage() {
 
       {!isLoading && !isError && billing && (
         <Card>
-          <CardHeader title="Current plan" subtitle="Read-only billing summary" />
+          <CardHeader title="Current plan" subtitle="Billing summary" />
 
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -169,18 +242,119 @@ export function BillingPage() {
             </div>
           )}
 
-          {billing.would_block_next_add && (
+          {billing.subscription_tier === 'free' && (billing.would_block_next_add || billing.is_at_or_over_free_limit) && (
             <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
-              <p className="text-sm text-amber-800">Adding another worker will require a plan upgrade.</p>
+              <p className="text-sm text-amber-800">
+                You are at the free-seat limit. Upgrade to Standard to add more workers. You pay $0 today and
+                $5/month only for each worker above {billing.free_limit}.
+              </p>
             </div>
           )}
 
-          {billing.is_at_or_over_free_limit && billing.subscription_tier === 'free' && (
-            <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
-              <p className="text-sm text-gray-700">You are at the included free-seat limit for the Free plan.</p>
+          {(canUpgradeToStandard || canSwitchToUnlimited) && (
+            <div className="mt-5 flex flex-wrap gap-3">
+              {canUpgradeToStandard && (
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={() => setShowUpgradeModal(true)}
+                  disabled={isMutating}
+                >
+                  Upgrade to Standard
+                </Button>
+              )}
+              {canSwitchToUnlimited && (
+                <Button
+                  type="button"
+                  variant={canUpgradeToStandard ? 'secondary' : 'primary'}
+                  onClick={() => setShowUnlimitedModal(true)}
+                  disabled={isMutating}
+                >
+                  Switch to Unlimited
+                </Button>
+              )}
             </div>
           )}
         </Card>
+      )}
+
+      {billing && (
+        <>
+          <Modal
+            isOpen={showUpgradeModal}
+            onClose={() => {
+              if (!isMutating) setShowUpgradeModal(false);
+            }}
+            title="Upgrade to Standard"
+            size="md"
+          >
+            <div className="space-y-4">
+              <p className="text-sm text-gray-700">
+                Upgrading to Standard enables adding workers beyond the {billing.free_limit} free seats.
+              </p>
+              <p className="text-sm text-gray-700">
+                You pay $0 now. As you add workers above {billing.free_limit}, pricing is $5/month per additional
+                worker. There is no charge today.
+              </p>
+              <div className="flex justify-end gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setShowUpgradeModal(false)}
+                  disabled={isMutating}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={handleConfirmUpgrade}
+                  isLoading={upgradeMutation.isPending}
+                  disabled={isMutating}
+                >
+                  Upgrade
+                </Button>
+              </div>
+            </div>
+          </Modal>
+
+          <Modal
+            isOpen={showUnlimitedModal}
+            onClose={() => {
+              if (!isMutating) setShowUnlimitedModal(false);
+            }}
+            title="Switch to Unlimited"
+            size="md"
+          >
+            <div className="space-y-4">
+              <p className="text-sm text-gray-700">
+                This will change your plan to Unlimited at $50/month flat and replace per-seat billing.
+              </p>
+              <p className="text-sm text-gray-700">
+                The change takes effect now, with proration applied on your next invoice.
+              </p>
+              <div className="flex justify-end gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setShowUnlimitedModal(false)}
+                  disabled={isMutating}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={handleConfirmUnlimited}
+                  isLoading={switchMutation.isPending}
+                  disabled={isMutating}
+                >
+                  Switch to Unlimited
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        </>
       )}
     </div>
   );
