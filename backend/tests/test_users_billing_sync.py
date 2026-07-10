@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
+import stripe
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +14,32 @@ from app.main import app
 from app.models import Company, User
 from app.services.auth_service import AuthService
 from app.services.billing_service import count_company_billable_workers
+
+
+def _stripe_subscription_object_with_item(
+    *,
+    subscription_id: str,
+    status: str,
+    item_id: str,
+) -> stripe.stripe_object.StripeObject:
+    return stripe.util.convert_to_stripe_object(
+        {
+            "id": subscription_id,
+            "object": "subscription",
+            "status": status,
+            "items": {
+                "object": "list",
+                "data": [
+                    {
+                        "id": item_id,
+                        "object": "subscription_item",
+                        "quantity": 1,
+                    }
+                ],
+            },
+        },
+        api_key="sk_test_abc",
+    )
 
 
 def _set_billing_settings(
@@ -468,7 +495,13 @@ async def test_create_user_standard_over_limit_sync_update_target_three(
     await _add_users(db_session, company_id=standard_company_with_subscription.id, count=4)
     await db_session.commit()
 
-    retrieve_mock = MagicMock(return_value=SimpleNamespace(items=SimpleNamespace(data=[SimpleNamespace(id="si_target")])) )
+    retrieve_mock = MagicMock(
+        return_value=_stripe_subscription_object_with_item(
+            subscription_id=standard_company_with_subscription.stripe_subscription_id,
+            status="active",
+            item_id="si_target",
+        )
+    )
     modify_mock = MagicMock()
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
@@ -528,7 +561,11 @@ async def test_permanent_delete_standard_company_with_subscription_syncs_quantit
     worker = await _get_first_regular_user(db_session, standard_company_with_subscription.id)
 
     retrieve_mock = MagicMock(
-        return_value=SimpleNamespace(items=SimpleNamespace(data=[SimpleNamespace(id="si_delete_target")]))
+        return_value=_stripe_subscription_object_with_item(
+            subscription_id=standard_company_with_subscription.stripe_subscription_id,
+            status="active",
+            item_id="si_delete_target",
+        )
     )
     modify_mock = MagicMock()
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
@@ -572,7 +609,11 @@ async def test_permanent_delete_standard_company_with_subscription_fail_open_on_
 
     monkeypatch.setattr("app.services.billing_service.stripe.error.StripeError", DummyStripeError)
     retrieve_mock = MagicMock(
-        return_value=SimpleNamespace(items=SimpleNamespace(data=[SimpleNamespace(id="si_delete_fail")]))
+        return_value=_stripe_subscription_object_with_item(
+            subscription_id=standard_company_with_subscription.stripe_subscription_id,
+            status="active",
+            item_id="si_delete_fail",
+        )
     )
     modify_mock = MagicMock(side_effect=DummyStripeError("temporary stripe outage"))
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)

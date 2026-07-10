@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
+import stripe
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +13,32 @@ from app.main import app
 from app.dependencies import get_current_admin_user
 from app.models import Company, User
 from app.services.auth_service import AuthService
+
+
+def _stripe_subscription_object_with_item(
+    *,
+    subscription_id: str,
+    status: str,
+    item_id: str,
+) -> stripe.stripe_object.StripeObject:
+    return stripe.util.convert_to_stripe_object(
+        {
+            "id": subscription_id,
+            "object": "subscription",
+            "status": status,
+            "items": {
+                "object": "list",
+                "data": [
+                    {
+                        "id": item_id,
+                        "object": "subscription_item",
+                        "quantity": 1,
+                    }
+                ],
+            },
+        },
+        api_key="sk_test_abc",
+    )
 
 
 @pytest_asyncio.fixture
@@ -239,7 +266,11 @@ async def test_create_user_subscribed_company_allows_over_limit(
         ),
     )
     retrieve_mock = MagicMock(
-        return_value=SimpleNamespace(items=SimpleNamespace(data=[SimpleNamespace(id="si_subscribed")]))
+        return_value=_stripe_subscription_object_with_item(
+            subscription_id=subscribed_company.stripe_subscription_id,
+            status="active",
+            item_id="si_subscribed",
+        )
     )
     modify_mock = MagicMock()
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
