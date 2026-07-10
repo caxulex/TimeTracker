@@ -119,6 +119,55 @@ async def _get_company_for_update(db: AsyncSession, company_id: int) -> Company 
     return result.scalar_one_or_none()
 
 
+async def _resolve_or_create_stripe_customer(
+    *,
+    company_id: int,
+    company_name: str,
+    company_email: str,
+    existing_customer_id: str | None,
+    customer_create_key: str,
+    stripe_secret_key: str,
+) -> str:
+    """Resolve or create the Stripe customer with optional default payment method."""
+
+    default_pm = getattr(settings, "STRIPE_DEFAULT_TEST_PAYMENT_METHOD", "").strip()
+
+    if existing_customer_id:
+        customer_id = existing_customer_id
+        if default_pm:
+            try:
+                stripe.PaymentMethod.attach(
+                    default_pm,
+                    customer=customer_id,
+                    api_key=stripe_secret_key,
+                )
+            except stripe.error.InvalidRequestError as exc:
+                if "already attached" not in str(exc).lower():
+                    raise
+
+            stripe.Customer.modify(
+                customer_id,
+                invoice_settings={"default_payment_method": default_pm},
+                api_key=stripe_secret_key,
+            )
+
+        return customer_id
+
+    create_kwargs = dict(
+        name=company_name,
+        email=company_email,
+        metadata={"company_id": str(company_id)},
+        idempotency_key=customer_create_key,
+        api_key=stripe_secret_key,
+    )
+    if default_pm:
+        create_kwargs["payment_method"] = default_pm
+        create_kwargs["invoice_settings"] = {"default_payment_method": default_pm}
+
+    customer = stripe.Customer.create(**create_kwargs)
+    return customer.id
+
+
 async def count_company_billable_workers(db: AsyncSession, company_id: int) -> int:
     """Count billable workers attached to a company.
 
@@ -296,17 +345,14 @@ async def create_standard_subscription(
 
     # Stripe calls (outside DB lock)
     try:
-        if existing_customer_id:
-            stripe_customer_id = existing_customer_id
-        else:
-            customer = stripe.Customer.create(
-                name=company_name,
-                email=company_email,
-                metadata={"company_id": str(company_id)},
-                idempotency_key=customer_create_key,
-                api_key=stripe_secret_key,
-            )
-            stripe_customer_id = customer.id
+        stripe_customer_id = await _resolve_or_create_stripe_customer(
+            company_id=company_id,
+            company_name=company_name,
+            company_email=company_email,
+            existing_customer_id=existing_customer_id,
+            customer_create_key=customer_create_key,
+            stripe_secret_key=stripe_secret_key,
+        )
 
         subscription = stripe.Subscription.create(
             customer=stripe_customer_id,
@@ -448,17 +494,14 @@ async def _sync_subscription_to_target(
         customer_create_key = f"customer-create-company-{company_id}"
         subscription_create_key = f"subscription-create-company-{company_id}"
         try:
-            if stripe_customer_id:
-                resolved_customer_id = stripe_customer_id
-            else:
-                customer = stripe.Customer.create(
-                    name=company_name,
-                    email=company_email,
-                    metadata={"company_id": str(company_id)},
-                    idempotency_key=customer_create_key,
-                    api_key=stripe_secret_key,
-                )
-                resolved_customer_id = customer.id
+            resolved_customer_id = await _resolve_or_create_stripe_customer(
+                company_id=company_id,
+                company_name=company_name,
+                company_email=company_email,
+                existing_customer_id=stripe_customer_id,
+                customer_create_key=customer_create_key,
+                stripe_secret_key=stripe_secret_key,
+            )
 
             subscription = stripe.Subscription.create(
                 customer=resolved_customer_id,
@@ -790,17 +833,14 @@ async def switch_company_to_unlimited(
         subscription_create_key = f"subscription-create-company-{company_id}"
 
         try:
-            if stripe_customer_id:
-                resolved_customer_id = stripe_customer_id
-            else:
-                customer = stripe.Customer.create(
-                    name=company_name,
-                    email=company_email,
-                    metadata={"company_id": str(company_id)},
-                    idempotency_key=customer_create_key,
-                    api_key=stripe_secret_key,
-                )
-                resolved_customer_id = customer.id
+            resolved_customer_id = await _resolve_or_create_stripe_customer(
+                company_id=company_id,
+                company_name=company_name,
+                company_email=company_email,
+                existing_customer_id=stripe_customer_id,
+                customer_create_key=customer_create_key,
+                stripe_secret_key=stripe_secret_key,
+            )
 
             subscription = stripe.Subscription.create(
                 customer=resolved_customer_id,
