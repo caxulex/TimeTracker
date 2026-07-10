@@ -15,6 +15,32 @@ from app.models import Company, User
 from app.services.auth_service import AuthService
 
 
+def _stripe_subscription_object_with_item(
+    *,
+    subscription_id: str,
+    status: str,
+    item_id: str,
+) -> stripe.stripe_object.StripeObject:
+    return stripe.util.convert_to_stripe_object(
+        {
+            "id": subscription_id,
+            "object": "subscription",
+            "status": status,
+            "items": {
+                "object": "list",
+                "data": [
+                    {
+                        "id": item_id,
+                        "object": "subscription_item",
+                        "quantity": 1,
+                    }
+                ],
+            },
+        },
+        api_key="sk_test_abc",
+    )
+
+
 async def _add_workers(
     db_session: AsyncSession,
     *,
@@ -139,17 +165,17 @@ async def test_switch_endpoint_standard_with_subscription_swaps_to_unlimited(
     )
 
     retrieve_mock = MagicMock(
-        return_value=SimpleNamespace(
-            id="sub_standard",
+        return_value=_stripe_subscription_object_with_item(
+            subscription_id="sub_standard",
             status="active",
-            items=SimpleNamespace(data=[SimpleNamespace(id="si_standard")]),
+            item_id="si_standard",
         )
     )
     modify_mock = MagicMock(
-        return_value=SimpleNamespace(
-            id="sub_standard",
+        return_value=_stripe_subscription_object_with_item(
+            subscription_id="sub_standard",
             status="active",
-            items=SimpleNamespace(data=[SimpleNamespace(id="si_standard")]),
+            item_id="si_standard",
         )
     )
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
@@ -203,10 +229,10 @@ async def test_switch_endpoint_standard_with_subscription_stripe_failure_returns
     )
 
     retrieve_mock = MagicMock(
-        return_value=SimpleNamespace(
-            id="sub_standard",
+        return_value=_stripe_subscription_object_with_item(
+            subscription_id="sub_standard",
             status="active",
-            items=SimpleNamespace(data=[SimpleNamespace(id="si_standard")]),
+            item_id="si_standard",
         )
     )
     modify_mock = MagicMock(side_effect=stripe.error.StripeError("modify failed"))
@@ -248,17 +274,17 @@ async def test_switch_endpoint_standard_with_subscription_requires_payment_actio
     )
 
     retrieve_mock = MagicMock(
-        return_value=SimpleNamespace(
-            id="sub_standard",
+        return_value=_stripe_subscription_object_with_item(
+            subscription_id="sub_standard",
             status="incomplete",
-            items=SimpleNamespace(data=[SimpleNamespace(id="si_standard")]),
+            item_id="si_standard",
         )
     )
     modify_mock = MagicMock(
-        return_value=SimpleNamespace(
-            id="sub_standard",
+        return_value=_stripe_subscription_object_with_item(
+            subscription_id="sub_standard",
             status="incomplete",
-            items=SimpleNamespace(data=[SimpleNamespace(id="si_standard")]),
+            item_id="si_standard",
         )
     )
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)

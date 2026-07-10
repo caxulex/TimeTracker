@@ -563,9 +563,10 @@ async def _sync_subscription_to_target(
         try:
             subscription = stripe.Subscription.retrieve(
                 stripe_subscription_id,
+                expand=["items"],
                 api_key=stripe_secret_key,
             )
-            subscription_items = getattr(getattr(subscription, "items", None), "data", [])
+            subscription_items = subscription["items"]["data"]
             if not subscription_items:
                 return SyncResult(
                     status=SyncStatus.RETRIABLE_ERROR,
@@ -575,7 +576,7 @@ async def _sync_subscription_to_target(
                     message="Stripe subscription has no items to update.",
                 )
 
-            item_id = subscription_items[0].id
+            item_id = subscription_items[0]["id"]
             stripe.Subscription.modify(
                 stripe_subscription_id,
                 items=[{"id": item_id, "quantity": target_quantity}],
@@ -753,9 +754,10 @@ async def switch_company_to_unlimited(
         try:
             subscription = stripe.Subscription.retrieve(
                 stripe_subscription_id,
+                expand=["items"],
                 api_key=stripe_secret_key,
             )
-            subscription_items = getattr(getattr(subscription, "items", None), "data", [])
+            subscription_items = subscription["items"]["data"]
             if not subscription_items:
                 return SwitchResult(
                     status=SwitchStatus.RETRIABLE_ERROR,
@@ -764,7 +766,7 @@ async def switch_company_to_unlimited(
                     message="Stripe subscription has no items to update.",
                 )
 
-            item_id = subscription_items[0].id
+            item_id = subscription_items[0]["id"]
             subscription = stripe.Subscription.modify(
                 stripe_subscription_id,
                 items=[

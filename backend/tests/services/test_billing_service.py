@@ -89,11 +89,54 @@ def _stripe_subscription(subscription_id: str, status: str) -> SimpleNamespace:
     return SimpleNamespace(id=subscription_id, status=status)
 
 
-def _stripe_subscription_with_item(subscription_id: str, status: str, item_id: str) -> SimpleNamespace:
-    return SimpleNamespace(
-        id=subscription_id,
-        status=status,
-        items=SimpleNamespace(data=[SimpleNamespace(id=item_id)]),
+def _stripe_subscription_with_item(
+    subscription_id: str,
+    status: str,
+    item_id: str,
+) -> stripe.stripe_object.StripeObject:
+    return stripe.util.convert_to_stripe_object(
+        {
+            "id": subscription_id,
+            "object": "subscription",
+            "status": status,
+            "items": {
+                "object": "list",
+                "data": [
+                    {
+                        "id": item_id,
+                        "object": "subscription_item",
+                        "quantity": 1,
+                    }
+                ],
+            },
+        },
+        api_key="sk_test_abc",
+    )
+
+
+def _stripe_subscription_object_with_item(
+    *,
+    subscription_id: str,
+    status: str,
+    item_id: str,
+) -> stripe.stripe_object.StripeObject:
+    return stripe.util.convert_to_stripe_object(
+        {
+            "id": subscription_id,
+            "object": "subscription",
+            "status": status,
+            "items": {
+                "object": "list",
+                "data": [
+                    {
+                        "id": item_id,
+                        "object": "subscription_item",
+                        "quantity": 1,
+                    }
+                ],
+            },
+        },
+        api_key="sk_test_abc",
     )
 
 
@@ -858,7 +901,11 @@ async def test_sync_company_subscription_quantity_standard_target_two_has_subscr
     )
 
     retrieve_mock = MagicMock(
-        return_value=SimpleNamespace(items=SimpleNamespace(data=[SimpleNamespace(id="si_sync")]))
+        return_value=_stripe_subscription_object_with_item(
+            subscription_id="sub_sync_update",
+            status="active",
+            item_id="si_sync",
+        )
     )
     modify_mock = MagicMock()
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
@@ -869,10 +916,57 @@ async def test_sync_company_subscription_quantity_standard_target_two_has_subscr
     assert result.status == SyncStatus.UPDATED
     assert result.target_quantity == 2
     assert result.stripe_subscription_id == "sub_sync_update"
-    retrieve_mock.assert_called_once_with("sub_sync_update", api_key="sk_test_abc")
+    retrieve_mock.assert_called_once_with(
+        "sub_sync_update",
+        expand=["items"],
+        api_key="sk_test_abc",
+    )
     modify_mock.assert_called_once_with(
         "sub_sync_update",
         items=[{"id": "si_sync", "quantity": 2}],
+        proration_behavior="create_prorations",
+        idempotency_key=f"subscription-sync-company-{company.id}-qty-2",
+        api_key="sk_test_abc",
+    )
+
+
+@pytest.mark.asyncio
+async def test_sync_subscription_to_target_update_uses_dict_access_for_real_stripe_object_items(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "HelperUpdateStripeObject")
+    company.subscription_tier = "standard"
+    company.stripe_subscription_id = "sub_helper_update_obj"
+    await db_session.flush()
+
+    _set_billing_settings(
+        monkeypatch,
+        stripe_secret_key="sk_test_abc",
+        stripe_price_per_seat_monthly_id="price_standard",
+    )
+
+    subscription_obj = _stripe_subscription_object_with_item(
+        subscription_id="sub_helper_update_obj",
+        status="active",
+        item_id="si_test",
+    )
+    retrieve_mock = MagicMock(return_value=subscription_obj)
+    modify_mock = MagicMock()
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
+
+    result = await _sync_subscription_to_target(db_session, company.id, 2)
+
+    assert result.status == SyncStatus.UPDATED
+    retrieve_mock.assert_called_once_with(
+        "sub_helper_update_obj",
+        expand=["items"],
+        api_key="sk_test_abc",
+    )
+    modify_mock.assert_called_once_with(
+        "sub_helper_update_obj",
+        items=[{"id": "si_test", "quantity": 2}],
         proration_behavior="create_prorations",
         idempotency_key=f"subscription-sync-company-{company.id}-qty-2",
         api_key="sk_test_abc",
@@ -1035,7 +1129,11 @@ async def test_sync_company_subscription_quantity_stripe_error_on_modify_returns
     )
 
     retrieve_mock = MagicMock(
-        return_value=SimpleNamespace(items=SimpleNamespace(data=[SimpleNamespace(id="si_keep")]))
+        return_value=_stripe_subscription_object_with_item(
+            subscription_id="sub_keep",
+            status="active",
+            item_id="si_keep",
+        )
     )
     modify_mock = MagicMock(side_effect=stripe.error.StripeError("modify failed"))
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
@@ -1078,7 +1176,11 @@ async def test_sync_company_subscription_quantity_idempotency_key_stability_same
     )
 
     retrieve_mock = MagicMock(
-        return_value=SimpleNamespace(items=SimpleNamespace(data=[SimpleNamespace(id="si_stable")]))
+        return_value=_stripe_subscription_object_with_item(
+            subscription_id="sub_stable",
+            status="active",
+            item_id="si_stable",
+        )
     )
     modify_mock = MagicMock()
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
@@ -1127,7 +1229,11 @@ async def test_reconcile_all_standard_subscriptions_three_standard_companies(
     customer_create_mock = MagicMock(return_value=_stripe_customer("cus_recon_created"))
     subscription_create_mock = MagicMock(return_value=_stripe_subscription("sub_recon_created", "active"))
     retrieve_mock = MagicMock(
-        return_value=SimpleNamespace(items=SimpleNamespace(data=[SimpleNamespace(id="si_recon")]))
+        return_value=_stripe_subscription_object_with_item(
+            subscription_id="sub_recon_update",
+            status="active",
+            item_id="si_recon",
+        )
     )
     modify_mock = MagicMock()
     monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
@@ -1174,7 +1280,11 @@ async def test_reconcile_all_standard_subscriptions_only_standard_tier_processed
     )
 
     retrieve_mock = MagicMock(
-        return_value=SimpleNamespace(items=SimpleNamespace(data=[SimpleNamespace(id="si_only")]))
+        return_value=_stripe_subscription_object_with_item(
+            subscription_id="sub_only_standard",
+            status="active",
+            item_id="si_only",
+        )
     )
     modify_mock = MagicMock()
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
@@ -1416,7 +1526,11 @@ async def test_sync_subscription_to_target_explicit_two_standard_with_subscripti
     )
 
     retrieve_mock = MagicMock(
-        return_value=SimpleNamespace(items=SimpleNamespace(data=[SimpleNamespace(id="si_helper")]))
+        return_value=_stripe_subscription_object_with_item(
+            subscription_id="sub_helper_update",
+            status="active",
+            item_id="si_helper",
+        )
     )
     modify_mock = MagicMock()
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
@@ -1522,7 +1636,11 @@ async def test_sync_subscription_to_target_stripe_error_returns_retriable(
     )
 
     retrieve_mock = MagicMock(
-        return_value=SimpleNamespace(items=SimpleNamespace(data=[SimpleNamespace(id="si_error")]))
+        return_value=_stripe_subscription_object_with_item(
+            subscription_id="sub_helper_error",
+            status="active",
+            item_id="si_error",
+        )
     )
     modify_mock = MagicMock(side_effect=stripe.error.StripeError("modify failed"))
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
@@ -1576,7 +1694,11 @@ async def test_switch_company_to_unlimited_standard_with_subscription_swaps_pric
     )
 
     retrieve_mock = MagicMock(
-        return_value=_stripe_subscription_with_item("sub_standard", "active", "si_standard")
+        return_value=_stripe_subscription_object_with_item(
+            subscription_id="sub_standard",
+            status="active",
+            item_id="si_standard",
+        )
     )
     modify_mock = MagicMock(
         return_value=_stripe_subscription_with_item("sub_standard", "active", "si_standard")
@@ -1592,7 +1714,11 @@ async def test_switch_company_to_unlimited_standard_with_subscription_swaps_pric
     assert company.subscription_tier == "unlimited"
     assert company.stripe_customer_id == "cus_standard"
     assert company.stripe_subscription_id == "sub_standard"
-    retrieve_mock.assert_called_once_with("sub_standard", api_key="sk_test_abc")
+    retrieve_mock.assert_called_once_with(
+        "sub_standard",
+        expand=["items"],
+        api_key="sk_test_abc",
+    )
     modify_mock.assert_called_once_with(
         "sub_standard",
         items=[
@@ -1606,6 +1732,21 @@ async def test_switch_company_to_unlimited_standard_with_subscription_swaps_pric
         idempotency_key=f"subscription-switch-unlimited-company-{company.id}",
         api_key="sk_test_abc",
     )
+
+
+def test_stripe_subscription_items_attr_collision_regression_guard_real_stripe_object():
+    subscription_obj = _stripe_subscription_object_with_item(
+        subscription_id="sub_guard",
+        status="active",
+        item_id="si_guard",
+    )
+
+    attr_items = getattr(subscription_obj, "items", None)
+    old_attr_path_items = getattr(attr_items, "data", [])
+    dict_path_items = subscription_obj["items"]["data"]
+
+    assert old_attr_path_items == []
+    assert dict_path_items[0]["id"] == "si_guard"
 
 
 @pytest.mark.asyncio
