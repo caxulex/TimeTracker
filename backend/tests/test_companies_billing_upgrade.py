@@ -196,7 +196,17 @@ async def test_upgrade_e2e_loop_unblocks_third_add_after_flip(
         subscription_create_mock = MagicMock(
             return_value=SimpleNamespace(id="sub_e2e", status="active")
         )
+        # C1: create path introspects PM. Mock a chargeable card so this exercises direct-create.
+        customer_retrieve_mock = MagicMock(
+            return_value=SimpleNamespace(
+                id="cus_e2e",
+                invoice_settings=SimpleNamespace(
+                    default_payment_method=SimpleNamespace(id="pm_x", type="card")
+                ),
+            )
+        )
         monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+        monkeypatch.setattr("app.services.billing_service.stripe.Customer.retrieve", customer_retrieve_mock)
         monkeypatch.setattr(
             "app.services.billing_service.stripe.Subscription.create",
             subscription_create_mock,
