@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import stripe
 import pytest
@@ -18,6 +18,7 @@ from app.services.billing_service import (
     SyncResult,
     SyncStatus,
 )
+from app.utils.timewindow import now_utc
 
 
 def _fake_event(
@@ -79,7 +80,11 @@ class TestStripeWebhook:
     async def test_duplicate_event_is_ignored(self, client, db_session: AsyncSession, monkeypatch):
         monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_test_secret")
         db_session.add(
-            StripeWebhookEvent(event_id="evt_dup", event_type="customer.subscription.updated")
+            StripeWebhookEvent(
+                event_id="evt_dup",
+                event_type="customer.subscription.updated",
+                processed_at=now_utc(),
+            )
         )
         await db_session.commit()
 
@@ -416,7 +421,11 @@ class TestStripeWebhook:
     ):
         monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_test_secret")
         db_session.add(
-            StripeWebhookEvent(event_id="evt_dup_sub_updated", event_type="customer.subscription.updated")
+            StripeWebhookEvent(
+                event_id="evt_dup_sub_updated",
+                event_type="customer.subscription.updated",
+                processed_at=now_utc(),
+            )
         )
         await db_session.commit()
 
@@ -686,7 +695,11 @@ class TestStripeWebhook:
     ):
         monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_test_secret")
         db_session.add(
-            StripeWebhookEvent(event_id="evt_dup_sub_deleted", event_type="customer.subscription.deleted")
+            StripeWebhookEvent(
+                event_id="evt_dup_sub_deleted",
+                event_type="customer.subscription.deleted",
+                processed_at=now_utc(),
+            )
         )
         await db_session.commit()
 
@@ -714,3 +727,269 @@ class TestStripeWebhook:
         assert response.status_code == 200
         assert response.json() == {"status": "duplicate_ignored"}
         downgrade_mock.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_checkout_completed_persists_and_reconciles(
+        self,
+        client,
+        db_session: AsyncSession,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_test_secret")
+        monkeypatch.setattr(settings, "STRIPE_SECRET_KEY", "sk_test_abc")
+
+        company = await _mk_company(db_session, "WebhookCheckoutPersist")
+        company.subscription_tier = "standard"
+        await db_session.commit()
+
+        event_id = "evt_checkout_completed_persist"
+        raw_body = b'{"id":"evt_checkout_completed_persist","type":"checkout.session.completed"}'
+        fake_event = _fake_event(
+            event_id,
+            "checkout.session.completed",
+            data_object={
+                "id": "cs_test_1",
+                "customer": "cus_checkout_new",
+                "subscription": "sub_checkout_new",
+                "metadata": {"company_id": str(company.id)},
+            },
+        )
+
+        retrieve_mock = MagicMock(
+            return_value=stripe.util.convert_to_stripe_object(
+                {
+                    "id": "sub_checkout_new",
+                    "object": "subscription",
+                    "status": "active",
+                    "items": {
+                        "object": "list",
+                        "data": [{"id": "si_checkout_new", "object": "subscription_item", "quantity": 1}],
+                    },
+                },
+                api_key="sk_test_abc",
+            )
+        )
+        reconcile_mock = AsyncMock(
+            return_value=SyncResult(
+                status=SyncStatus.UPDATED,
+                company_id=company.id,
+                target_quantity=1,
+                stripe_subscription_id="sub_checkout_new",
+            )
+        )
+
+        with patch(
+            "app.routers.webhooks.stripe.stripe.Webhook.construct_event",
+            return_value=fake_event,
+        ), patch(
+            "app.routers.webhooks.stripe.stripe.Subscription.retrieve",
+            retrieve_mock,
+        ), patch(
+            "app.routers.webhooks.stripe.reconcile_company_subscription",
+            reconcile_mock,
+        ):
+            response = await client.post(
+                "/api/webhooks/stripe",
+                content=raw_body,
+                headers={"Stripe-Signature": "t=1,v1=test"},
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "recorded", "event_type": "checkout.session.completed"}
+
+        await db_session.refresh(company)
+        assert company.stripe_customer_id == "cus_checkout_new"
+        assert company.stripe_subscription_id == "sub_checkout_new"
+        assert company.subscription_tier == "standard"
+        reconcile_mock.assert_awaited_once_with(db_session, company.id)
+
+        row = (
+            await db_session.execute(
+                select(StripeWebhookEvent).where(StripeWebhookEvent.event_id == event_id)
+            )
+        ).scalar_one_or_none()
+        assert row is not None
+        assert row.processed_at is not None
+
+    @pytest.mark.asyncio
+    async def test_checkout_completed_idempotent_after_processed_at_set(
+        self,
+        client,
+        db_session: AsyncSession,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_test_secret")
+        monkeypatch.setattr(settings, "STRIPE_SECRET_KEY", "sk_test_abc")
+
+        company = await _mk_company(db_session, "WebhookCheckoutIdem")
+        company.subscription_tier = "standard"
+        await db_session.commit()
+
+        event_id = "evt_checkout_completed_idem"
+        raw_body = b'{"id":"evt_checkout_completed_idem","type":"checkout.session.completed"}'
+        fake_event = _fake_event(
+            event_id,
+            "checkout.session.completed",
+            data_object={
+                "id": "cs_test_2",
+                "customer": "cus_checkout_idem",
+                "subscription": "sub_checkout_idem",
+                "metadata": {"company_id": str(company.id)},
+            },
+        )
+
+        retrieve_mock = MagicMock(
+            return_value=stripe.util.convert_to_stripe_object(
+                {
+                    "id": "sub_checkout_idem",
+                    "object": "subscription",
+                    "status": "active",
+                    "items": {
+                        "object": "list",
+                        "data": [{"id": "si_checkout_idem", "object": "subscription_item", "quantity": 1}],
+                    },
+                },
+                api_key="sk_test_abc",
+            )
+        )
+        reconcile_mock = AsyncMock(
+            return_value=SyncResult(
+                status=SyncStatus.UPDATED,
+                company_id=company.id,
+                target_quantity=1,
+                stripe_subscription_id="sub_checkout_idem",
+            )
+        )
+
+        with patch(
+            "app.routers.webhooks.stripe.stripe.Webhook.construct_event",
+            return_value=fake_event,
+        ), patch(
+            "app.routers.webhooks.stripe.stripe.Subscription.retrieve",
+            retrieve_mock,
+        ), patch(
+            "app.routers.webhooks.stripe.reconcile_company_subscription",
+            reconcile_mock,
+        ):
+            first = await client.post(
+                "/api/webhooks/stripe",
+                content=raw_body,
+                headers={"Stripe-Signature": "t=1,v1=test"},
+            )
+            second = await client.post(
+                "/api/webhooks/stripe",
+                content=raw_body,
+                headers={"Stripe-Signature": "t=1,v1=test"},
+            )
+
+        assert first.status_code == 200
+        assert first.json() == {"status": "recorded", "event_type": "checkout.session.completed"}
+        assert second.status_code == 200
+        assert second.json() == {"status": "duplicate_ignored"}
+        assert retrieve_mock.call_count == 1
+        reconcile_mock.assert_awaited_once_with(db_session, company.id)
+
+    @pytest.mark.asyncio
+    async def test_checkout_completed_retries_when_dispatch_failed(
+        self,
+        client,
+        db_session: AsyncSession,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_test_secret")
+        monkeypatch.setattr(settings, "STRIPE_SECRET_KEY", "sk_test_abc")
+
+        company = await _mk_company(db_session, "WebhookCheckoutRetry")
+        company.subscription_tier = "standard"
+        await db_session.commit()
+
+        event_id = "evt_checkout_completed_retry"
+        raw_body = b'{"id":"evt_checkout_completed_retry","type":"checkout.session.completed"}'
+        fake_event = _fake_event(
+            event_id,
+            "checkout.session.completed",
+            data_object={
+                "id": "cs_test_retry",
+                "customer": "cus_checkout_retry",
+                "subscription": "sub_checkout_retry",
+                "metadata": {"company_id": str(company.id)},
+            },
+        )
+
+        retrieve_failure_mock = MagicMock(side_effect=RuntimeError("subscription retrieve failed"))
+        with patch(
+            "app.routers.webhooks.stripe.stripe.Webhook.construct_event",
+            return_value=fake_event,
+        ), patch(
+            "app.routers.webhooks.stripe.stripe.Subscription.retrieve",
+            retrieve_failure_mock,
+        ):
+            first = await client.post(
+                "/api/webhooks/stripe",
+                content=raw_body,
+                headers={"Stripe-Signature": "t=1,v1=test"},
+            )
+
+        assert first.status_code == 500
+        row_after_first = (
+            await db_session.execute(
+                select(StripeWebhookEvent).where(StripeWebhookEvent.event_id == event_id)
+            )
+        ).scalar_one_or_none()
+        assert row_after_first is not None
+        # Critical retry guarantee: a failed dispatch MUST leave processed_at
+        # NULL so Stripe's redelivery re-attempts. Test DB is on migrated 044
+        # (nullable, no server default), so this is the meaningful assertion.
+        await db_session.refresh(row_after_first)
+        assert row_after_first.processed_at is None
+
+        retrieve_success_mock = MagicMock(
+            return_value=stripe.util.convert_to_stripe_object(
+                {
+                    "id": "sub_checkout_retry",
+                    "object": "subscription",
+                    "status": "active",
+                    "items": {
+                        "object": "list",
+                        "data": [{"id": "si_checkout_retry", "object": "subscription_item", "quantity": 1}],
+                    },
+                },
+                api_key="sk_test_abc",
+            )
+        )
+        reconcile_mock = AsyncMock(
+            return_value=SyncResult(
+                status=SyncStatus.UPDATED,
+                company_id=company.id,
+                target_quantity=1,
+                stripe_subscription_id="sub_checkout_retry",
+            )
+        )
+
+        with patch(
+            "app.routers.webhooks.stripe.stripe.Webhook.construct_event",
+            return_value=fake_event,
+        ), patch(
+            "app.routers.webhooks.stripe.stripe.Subscription.retrieve",
+            retrieve_success_mock,
+        ), patch(
+            "app.routers.webhooks.stripe.reconcile_company_subscription",
+            reconcile_mock,
+        ):
+            second = await client.post(
+                "/api/webhooks/stripe",
+                content=raw_body,
+                headers={"Stripe-Signature": "t=1,v1=test"},
+            )
+
+        assert second.status_code == 200
+        assert second.json() == {"status": "recorded", "event_type": "checkout.session.completed"}
+        reconcile_mock.assert_awaited_once_with(db_session, company.id)
+
+        row_after_second = (
+            await db_session.execute(
+                select(StripeWebhookEvent).where(StripeWebhookEvent.event_id == event_id)
+            )
+        ).scalar_one_or_none()
+        assert row_after_second is not None
+        assert row_after_second.processed_at is not None

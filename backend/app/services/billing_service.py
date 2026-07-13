@@ -67,6 +67,7 @@ class SyncStatus(str, Enum):
     NOOP_ZERO_WITH_SUBSCRIPTION = "noop_zero_with_subscription"
     CREATED = "created"
     UPDATED = "updated"
+    CHECKOUT_REQUIRED = "checkout_required"
     REQUIRES_PAYMENT_ACTION = "requires_payment_action"
     RETRIABLE_ERROR = "retriable_error"
     CONFIG_ERROR = "config_error"
@@ -78,6 +79,7 @@ class SyncResult:
     company_id: int
     target_quantity: int
     stripe_subscription_id: str | None = None
+    checkout_url: str | None = None
     message: str | None = None
 
 
@@ -117,6 +119,41 @@ async def _get_company_for_update(db: AsyncSession, company_id: int) -> Company 
         select(Company).where(Company.id == company_id).with_for_update()
     )
     return result.scalar_one_or_none()
+
+
+async def _persist_created_subscription(
+    db: AsyncSession,
+    company_id: int,
+    resolved_customer_id: str,
+    subscription: stripe.Subscription,
+) -> tuple[SyncStatus, str, str | None]:
+    """Persist a newly created Stripe subscription under company row lock.
+
+    Returns:
+        (status, stripe_subscription_id, message)
+    """
+    company = await _get_company_for_update(db, company_id)
+    if company is None:
+        raise ValueError(f"Company {company_id} not found")
+
+    if company.stripe_subscription_id:
+        await db.commit()
+        return (
+            SyncStatus.UPDATED,
+            company.stripe_subscription_id,
+            "Company already subscribed during sync persistence.",
+        )
+
+    company.stripe_customer_id = resolved_customer_id
+    company.stripe_subscription_id = subscription.id
+    if subscription.status in {"active", "trialing"}:
+        company.subscription_tier = "standard"
+        status = SyncStatus.CREATED
+    else:
+        status = SyncStatus.REQUIRES_PAYMENT_ACTION
+
+    await db.commit()
+    return (status, subscription.id, None)
 
 
 async def _resolve_or_create_stripe_customer(
@@ -166,6 +203,87 @@ async def _resolve_or_create_stripe_customer(
 
     customer = stripe.Customer.create(**create_kwargs)
     return customer.id
+
+
+def _stripe_field(obj: object, field: str):
+    if isinstance(obj, dict):
+        return obj.get(field)
+    return getattr(obj, field, None)
+
+
+def _customer_has_chargeable_card_payment_method(
+    customer_id: str,
+    stripe_secret_key: str,
+) -> bool:
+    """Return whether a customer has a chargeable card payment method."""
+    try:
+        customer = stripe.Customer.retrieve(
+            customer_id,
+            expand=["invoice_settings.default_payment_method"],
+            api_key=stripe_secret_key,
+        )
+        invoice_settings = _stripe_field(customer, "invoice_settings")
+        default_pm = _stripe_field(invoice_settings, "default_payment_method")
+        if default_pm:
+            default_pm_type = _stripe_field(default_pm, "type")
+            if default_pm_type is None:
+                # Expanded default PMs are usually objects; if Stripe returns an id
+                # string here, treat it as present and chargeable.
+                return True
+            if default_pm_type == "card":
+                return True
+
+        payment_methods = stripe.PaymentMethod.list(
+            customer=customer_id,
+            type="card",
+            limit=1,
+            api_key=stripe_secret_key,
+        )
+        pm_data = _stripe_field(payment_methods, "data") or []
+        return len(pm_data) > 0
+    except (TimeoutError, stripe.error.StripeError) as exc:
+        # Fail TOWARD Checkout: if we cannot confirm a chargeable PM, route the
+        # customer through Checkout (which safely collects a card). Returning
+        # True here would send a possibly-cardless customer to Subscription.create,
+        # producing a stuck "incomplete" subscription -- the exact failure Checkout
+        # exists to prevent. Checkout is safe even when a card already exists.
+        logger.warning(
+            "Stripe payment-method inspection failed for customer %s; "
+            "routing to Checkout: %s",
+            customer_id,
+            exc,
+        )
+        return False
+
+
+def _create_checkout_session_for_standard_subscription(
+    *,
+    company_id: int,
+    resolved_customer_id: str,
+    price_id: str,
+    quantity: int,
+    stripe_secret_key: str,
+):
+    checkout_success_url = (
+        getattr(settings, "STRIPE_CHECKOUT_SUCCESS_URL", "").strip()
+        or "https://timetracker.shaemarcus.com/billing"
+    )
+    checkout_cancel_url = (
+        getattr(settings, "STRIPE_CHECKOUT_CANCEL_URL", "").strip()
+        or "https://timetracker.shaemarcus.com/billing"
+    )
+
+    return stripe.checkout.Session.create(
+        mode="subscription",
+        customer=resolved_customer_id,
+        line_items=[{"price": price_id, "quantity": quantity}],
+        metadata={"company_id": str(company_id)},
+        subscription_data={"metadata": {"company_id": str(company_id)}},
+        success_url=checkout_success_url,
+        cancel_url=checkout_cancel_url,
+        idempotency_key=f"checkout-session-company-{company_id}",
+        api_key=stripe_secret_key,
+    )
 
 
 async def count_company_billable_workers(db: AsyncSession, company_id: int) -> int:
@@ -503,6 +621,27 @@ async def _sync_subscription_to_target(
                 stripe_secret_key=stripe_secret_key,
             )
 
+            has_chargeable_pm = _customer_has_chargeable_card_payment_method(
+                resolved_customer_id,
+                stripe_secret_key,
+            )
+
+            if not has_chargeable_pm:
+                checkout_session = _create_checkout_session_for_standard_subscription(
+                    company_id=company_id,
+                    resolved_customer_id=resolved_customer_id,
+                    price_id=stripe_price_per_seat_monthly_id,
+                    quantity=target_quantity,
+                    stripe_secret_key=stripe_secret_key,
+                )
+                return SyncResult(
+                    status=SyncStatus.CHECKOUT_REQUIRED,
+                    company_id=company_id,
+                    target_quantity=target_quantity,
+                    checkout_url=_stripe_field(checkout_session, "url"),
+                    message="Checkout required to collect a valid payment method.",
+                )
+
             subscription = stripe.Subscription.create(
                 customer=resolved_customer_id,
                 items=[
@@ -522,31 +661,15 @@ async def _sync_subscription_to_target(
                 message=str(exc),
             )
 
-        final_status = SyncStatus.CREATED
         try:
-            company = await _get_company_for_update(db, company_id)
-            if company is None:
-                raise ValueError(f"Company {company_id} not found")
-
-            if company.stripe_subscription_id:
-                result = SyncResult(
-                    status=SyncStatus.UPDATED,
-                    company_id=company_id,
-                    target_quantity=target_quantity,
-                    stripe_subscription_id=company.stripe_subscription_id,
-                    message="Company already subscribed during sync persistence.",
+            final_status, persisted_subscription_id, persist_message = (
+                await _persist_created_subscription(
+                    db,
+                    company_id,
+                    resolved_customer_id,
+                    subscription,
                 )
-                await db.commit()
-                return result
-
-            company.stripe_customer_id = resolved_customer_id
-            company.stripe_subscription_id = subscription.id
-            if subscription.status in {"active", "trialing"}:
-                company.subscription_tier = "standard"
-            else:
-                final_status = SyncStatus.REQUIRES_PAYMENT_ACTION
-
-            await db.commit()
+            )
         except Exception:
             await db.rollback()
             raise
@@ -555,7 +678,8 @@ async def _sync_subscription_to_target(
             status=final_status,
             company_id=company_id,
             target_quantity=target_quantity,
-            stripe_subscription_id=subscription.id,
+            stripe_subscription_id=persisted_subscription_id,
+            message=persist_message,
         )
 
     if target_quantity >= 1 and stripe_subscription_id:

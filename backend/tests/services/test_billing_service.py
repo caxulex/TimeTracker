@@ -147,6 +147,8 @@ def _set_billing_settings(
     stripe_price_per_seat_monthly_id: str,
     stripe_price_unlimited_monthly_id: str = "",
     stripe_default_test_payment_method: str = "",
+    stripe_checkout_success_url: str = "https://timetracker.shaemarcus.com/billing",
+    stripe_checkout_cancel_url: str = "https://timetracker.shaemarcus.com/billing",
 ) -> None:
     monkeypatch.setattr(
         "app.services.billing_service.settings",
@@ -155,6 +157,8 @@ def _set_billing_settings(
             STRIPE_PRICE_PER_SEAT_MONTHLY_ID=stripe_price_per_seat_monthly_id,
             STRIPE_PRICE_UNLIMITED_MONTHLY_ID=stripe_price_unlimited_monthly_id,
             STRIPE_DEFAULT_TEST_PAYMENT_METHOD=stripe_default_test_payment_method,
+            STRIPE_CHECKOUT_SUCCESS_URL=stripe_checkout_success_url,
+            STRIPE_CHECKOUT_CANCEL_URL=stripe_checkout_cancel_url,
         ),
     )
 
@@ -865,7 +869,16 @@ async def test_sync_company_subscription_quantity_standard_target_one_no_subscri
 
     customer_create_mock = MagicMock(return_value=_stripe_customer("cus_created_sync"))
     subscription_create_mock = MagicMock(return_value=_stripe_subscription("sub_created_sync", "active"))
+    # C1: the create path now introspects the customer's payment method. Mock a
+    # chargeable card present so this test exercises the direct-create path it asserts.
+    customer_retrieve_mock = MagicMock(
+        return_value=stripe.util.convert_to_stripe_object(
+            {"id": "cus_created_sync", "invoice_settings": {"default_payment_method": {"id": "pm_x", "type": "card"}}},
+            api_key="sk_test_abc",
+        )
+    )
     monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.retrieve", customer_retrieve_mock)
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
 
     result = await sync_company_subscription_quantity(db_session, company.id)
@@ -881,6 +894,181 @@ async def test_sync_company_subscription_quantity_standard_target_one_no_subscri
         api_key="sk_test_abc",
     )
     assert company.stripe_subscription_id == "sub_created_sync"
+
+
+@pytest.mark.asyncio
+async def test_sync_subscription_create_branch_no_pm_returns_checkout_required(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "SyncCheckoutNoPM")
+    company.subscription_tier = "standard"
+    await db_session.flush()
+    await _mk_workers(db_session, company_id=company.id, count=4)
+
+    _set_billing_settings(
+        monkeypatch,
+        stripe_secret_key="sk_test_abc",
+        stripe_price_per_seat_monthly_id="price_standard",
+        stripe_default_test_payment_method="",  # Disable PR#159 crutch for this path.
+        stripe_checkout_success_url="https://example.test/billing?checkout=success",
+        stripe_checkout_cancel_url="https://example.test/billing?checkout=cancel",
+    )
+
+    customer_create_mock = MagicMock(return_value=_stripe_customer("cus_checkout"))
+    customer_retrieve_mock = MagicMock(
+        return_value=stripe.util.convert_to_stripe_object(
+            {
+                "id": "cus_checkout",
+                "invoice_settings": {"default_payment_method": None},
+            },
+            api_key="sk_test_abc",
+        )
+    )
+    payment_method_list_mock = MagicMock(return_value={"data": []})
+    checkout_create_mock = MagicMock(
+        return_value=stripe.util.convert_to_stripe_object(
+            {"id": "cs_test_1", "url": "https://checkout.stripe.test/session/cs_test_1"},
+            api_key="sk_test_abc",
+        )
+    )
+    subscription_create_mock = MagicMock()
+
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.retrieve", customer_retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.PaymentMethod.list", payment_method_list_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.checkout.Session.create", checkout_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
+
+    result = await sync_company_subscription_quantity(db_session, company.id)
+    await db_session.refresh(company)
+
+    assert result.status == SyncStatus.CHECKOUT_REQUIRED
+    assert result.target_quantity == 1
+    assert result.checkout_url == "https://checkout.stripe.test/session/cs_test_1"
+    subscription_create_mock.assert_not_called()
+    checkout_create_mock.assert_called_once_with(
+        mode="subscription",
+        customer="cus_checkout",
+        line_items=[{"price": "price_standard", "quantity": 1}],
+        metadata={"company_id": str(company.id)},
+        subscription_data={"metadata": {"company_id": str(company.id)}},
+        success_url="https://example.test/billing?checkout=success",
+        cancel_url="https://example.test/billing?checkout=cancel",
+        idempotency_key=f"checkout-session-company-{company.id}",
+        api_key="sk_test_abc",
+    )
+    assert company.stripe_subscription_id is None
+
+
+@pytest.mark.asyncio
+async def test_sync_subscription_create_branch_pm_lookup_failure_routes_to_checkout(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Safety: if PM introspection fails (transient Stripe error), fail TOWARD
+    # Checkout, never toward Subscription.create. Creating a subscription for a
+    # possibly-cardless customer produces a stuck "incomplete" subscription.
+    company = await _mk_company(db_session, "SyncCheckoutPMLookupFail")
+    company.subscription_tier = "standard"
+    await db_session.flush()
+    await _mk_workers(db_session, company_id=company.id, count=4)
+
+    _set_billing_settings(
+        monkeypatch,
+        stripe_secret_key="sk_test_abc",
+        stripe_price_per_seat_monthly_id="price_standard",
+        stripe_default_test_payment_method="",
+        stripe_checkout_success_url="https://example.test/billing?checkout=success",
+        stripe_checkout_cancel_url="https://example.test/billing?checkout=cancel",
+    )
+
+    customer_create_mock = MagicMock(return_value=_stripe_customer("cus_lookupfail"))
+    customer_retrieve_mock = MagicMock(
+        side_effect=stripe.error.APIConnectionError("network blip")
+    )
+    checkout_create_mock = MagicMock(
+        return_value=stripe.util.convert_to_stripe_object(
+            {"id": "cs_test_fail", "url": "https://checkout.stripe.test/session/cs_test_fail"},
+            api_key="sk_test_abc",
+        )
+    )
+    # Give a valid return so that IF the code wrongly calls Subscription.create
+    # (the fail-open regression), the test fails CLEANLY on the assertions below
+    # rather than on a downstream DB error from persisting a MagicMock id.
+    subscription_create_mock = MagicMock(
+        return_value=_stripe_subscription("sub_should_not_be_used", "active")
+    )
+
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.retrieve", customer_retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.checkout.Session.create", checkout_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
+
+    result = await sync_company_subscription_quantity(db_session, company.id)
+    await db_session.refresh(company)
+
+    assert result.status == SyncStatus.CHECKOUT_REQUIRED
+    assert result.checkout_url == "https://checkout.stripe.test/session/cs_test_fail"
+    subscription_create_mock.assert_not_called()
+    assert company.stripe_subscription_id is None
+
+
+@pytest.mark.asyncio
+async def test_sync_subscription_create_branch_pm_present_uses_direct_subscription_create(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "SyncCheckoutPMPresent")
+    company.subscription_tier = "standard"
+    await db_session.flush()
+    await _mk_workers(db_session, company_id=company.id, count=4)
+
+    _set_billing_settings(
+        monkeypatch,
+        stripe_secret_key="sk_test_abc",
+        stripe_price_per_seat_monthly_id="price_standard",
+    )
+
+    customer_create_mock = MagicMock(return_value=_stripe_customer("cus_pm_present"))
+    customer_retrieve_mock = MagicMock(
+        return_value=stripe.util.convert_to_stripe_object(
+            {
+                "id": "cus_pm_present",
+                "invoice_settings": {
+                    "default_payment_method": {
+                        "id": "pm_card_present",
+                        "type": "card",
+                    }
+                },
+            },
+            api_key="sk_test_abc",
+        )
+    )
+    payment_method_list_mock = MagicMock(return_value={"data": []})
+    checkout_create_mock = MagicMock()
+    subscription_create_mock = MagicMock(return_value=_stripe_subscription("sub_pm_present", "active"))
+
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.retrieve", customer_retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.PaymentMethod.list", payment_method_list_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.checkout.Session.create", checkout_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
+
+    result = await sync_company_subscription_quantity(db_session, company.id)
+    await db_session.refresh(company)
+
+    assert result.status == SyncStatus.CREATED
+    assert result.target_quantity == 1
+    assert result.stripe_subscription_id == "sub_pm_present"
+    checkout_create_mock.assert_not_called()
+    subscription_create_mock.assert_called_once_with(
+        customer="cus_pm_present",
+        items=[{"price": "price_standard", "quantity": 1}],
+        idempotency_key=f"subscription-create-company-{company.id}",
+        api_key="sk_test_abc",
+    )
+    assert company.stripe_subscription_id == "sub_pm_present"
 
 
 @pytest.mark.asyncio
@@ -1236,7 +1424,16 @@ async def test_reconcile_all_standard_subscriptions_three_standard_companies(
         )
     )
     modify_mock = MagicMock()
+    # C1: created company's create path introspects the PM. Mock a chargeable card
+    # so it takes direct-create (update company uses Subscription.retrieve, unaffected).
+    customer_retrieve_mock = MagicMock(
+        return_value=stripe.util.convert_to_stripe_object(
+            {"id": "cus_recon_created", "invoice_settings": {"default_payment_method": {"id": "pm_x", "type": "card"}}},
+            api_key="sk_test_abc",
+        )
+    )
     monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.retrieve", customer_retrieve_mock)
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.retrieve", retrieve_mock)
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.modify", modify_mock)
@@ -1449,7 +1646,14 @@ async def test_sync_subscription_to_target_explicit_one_standard_no_subscription
 
     customer_create_mock = MagicMock(return_value=_stripe_customer("cus_helper_created"))
     subscription_create_mock = MagicMock(return_value=_stripe_subscription("sub_helper_created", "active"))
+    customer_retrieve_mock = MagicMock(
+        return_value=stripe.util.convert_to_stripe_object(
+            {"id": "cus_helper_created", "invoice_settings": {"default_payment_method": {"id": "pm_x", "type": "card"}}},
+            api_key="sk_test_abc",
+        )
+    )
     monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.retrieve", customer_retrieve_mock)
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
 
     result = await _sync_subscription_to_target(db_session, company.id, 1)
@@ -1486,7 +1690,14 @@ async def test_sync_subscription_to_target_add_path_with_default_pm_creates_subs
     subscription_create_mock = MagicMock(return_value=_stripe_subscription("sub_helper_default_pm", "active"))
     payment_method_attach = MagicMock()
     customer_modify = MagicMock()
+    customer_retrieve_mock = MagicMock(
+        return_value=stripe.util.convert_to_stripe_object(
+            {"id": "cus_helper_default_pm", "invoice_settings": {"default_payment_method": {"id": "pm_x", "type": "card"}}},
+            api_key="sk_test_abc",
+        )
+    )
     monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.retrieve", customer_retrieve_mock)
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
     monkeypatch.setattr("app.services.billing_service.stripe.PaymentMethod.attach", payment_method_attach)
     monkeypatch.setattr("app.services.billing_service.stripe.Customer.modify", customer_modify)
@@ -1567,7 +1778,14 @@ async def test_sync_subscription_to_target_uses_explicit_target_not_live_count(
 
     customer_create_mock = MagicMock(return_value=_stripe_customer("cus_helper_decoupled"))
     subscription_create_mock = MagicMock(return_value=_stripe_subscription("sub_helper_decoupled", "active"))
+    customer_retrieve_mock = MagicMock(
+        return_value=stripe.util.convert_to_stripe_object(
+            {"id": "cus_helper_decoupled", "invoice_settings": {"default_payment_method": {"id": "pm_x", "type": "card"}}},
+            api_key="sk_test_abc",
+        )
+    )
     monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.retrieve", customer_retrieve_mock)
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
 
     result = await _sync_subscription_to_target(db_session, company.id, 1)

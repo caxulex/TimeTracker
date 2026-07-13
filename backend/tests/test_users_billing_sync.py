@@ -13,7 +13,7 @@ from app.dependencies import get_current_admin_user
 from app.main import app
 from app.models import Company, User
 from app.services.auth_service import AuthService
-from app.services.billing_service import count_company_billable_workers
+from app.services.billing_service import SyncResult, SyncStatus, count_company_billable_workers
 
 
 def _stripe_subscription_object_with_item(
@@ -237,7 +237,15 @@ async def test_create_user_standard_at_three_sync_create_success(
 
     customer_create_mock = MagicMock(return_value=SimpleNamespace(id="cus_created"))
     subscription_create_mock = MagicMock(return_value=SimpleNamespace(id="sub_created", status="active"))
+    # C1: create path introspects PM. Mock a chargeable card so this exercises direct-create.
+    customer_retrieve_mock = MagicMock(
+        return_value=stripe.util.convert_to_stripe_object(
+            {"id": "cus_created", "invoice_settings": {"default_payment_method": {"id": "pm_x", "type": "card"}}},
+            api_key="sk_test_abc",
+        )
+    )
     monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.retrieve", customer_retrieve_mock)
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
 
     new_email = f"sync-created-{uuid.uuid4().hex[:8]}@example.com"
@@ -329,7 +337,15 @@ async def test_create_user_standard_at_three_sync_requires_payment_action_fails_
 
     customer_create_mock = MagicMock(return_value=SimpleNamespace(id="cus_incomplete"))
     subscription_create_mock = MagicMock(return_value=SimpleNamespace(id="sub_incomplete", status="incomplete"))
+    # C1: card present so direct-create runs; subscription comes back incomplete -> 402 fail-closed.
+    customer_retrieve_mock = MagicMock(
+        return_value=stripe.util.convert_to_stripe_object(
+            {"id": "cus_incomplete", "invoice_settings": {"default_payment_method": {"id": "pm_x", "type": "card"}}},
+            api_key="sk_test_abc",
+        )
+    )
     monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.retrieve", customer_retrieve_mock)
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
 
     new_email = f"sync-payment-required-{uuid.uuid4().hex[:8]}@example.com"
@@ -352,6 +368,58 @@ async def test_create_user_standard_at_three_sync_requires_payment_action_fails_
     assert response.json()["detail"] == {
         "reason": "payment_action_required",
         "message": "This subscription needs payment completed before adding more workers.",
+    }
+
+    result = await db_session.execute(select(User).where(User.email == new_email))
+    assert result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_create_user_standard_at_three_sync_checkout_required_fails_closed(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    standard_company: Company,
+    standard_admin_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _set_billing_settings(monkeypatch)
+    await _add_users(db_session, company_id=standard_company.id, count=2)
+    await db_session.commit()
+
+    checkout_url = "https://checkout.stripe.test/session/cs_checkout_required"
+    checkout_result = SyncResult(
+        status=SyncStatus.CHECKOUT_REQUIRED,
+        company_id=standard_company.id,
+        target_quantity=1,
+        checkout_url=checkout_url,
+        message="Checkout required to collect a valid payment method.",
+    )
+    monkeypatch.setattr(
+        "app.routers.users._sync_subscription_to_target",
+        AsyncMock(return_value=checkout_result),
+    )
+
+    new_email = f"sync-checkout-required-{uuid.uuid4().hex[:8]}@example.com"
+    app.dependency_overrides[get_current_admin_user] = lambda: standard_admin_user
+    try:
+        with patch("app.routers.users.email_service.send_welcome_email", new_callable=AsyncMock):
+            response = await client.post(
+                "/api/users",
+                json={
+                    "email": new_email,
+                    "password": "ValidPass123!",
+                    "name": "Sync Checkout Required",
+                    "role": "regular_user",
+                },
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_admin_user, None)
+
+    assert response.status_code == 402, response.text
+    assert response.json()["detail"] == {
+        "reason": "checkout_required",
+        "checkout_url": checkout_url,
+        "message": "Checkout required to collect a valid payment method.",
     }
 
     result = await db_session.execute(select(User).where(User.email == new_email))
