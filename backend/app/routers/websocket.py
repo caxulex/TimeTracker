@@ -25,14 +25,16 @@ WebSocket lifecycle (per connection):
 """
 
 import asyncio
+import json
 import logging
 import os
 import uuid
 from collections import deque
 from datetime import datetime, timedelta
-from typing import Deque, Dict, Optional, Set
+from typing import Any, Deque, Dict, Optional, Set
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+import redis.asyncio as redis
 
 try:  # websockets is a transitive dep of starlette/uvicorn
     from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
@@ -74,6 +76,8 @@ def _env_int(name: str, default: int) -> int:
 
 HEARTBEAT_INTERVAL_SEC = _env_int("WS_HEARTBEAT_INTERVAL_SEC", 30)
 HEARTBEAT_TIMEOUT_SEC = _env_int("WS_HEARTBEAT_TIMEOUT_SEC", 60)
+PRESENCE_STALE_THRESHOLD_SEC = HEARTBEAT_INTERVAL_SEC * 3
+PRESENCE_KEY_PREFIX = "presence:timers:"
 
 # Distinct close code/reason for heartbeat timeouts so the frontend can
 # log them and ops can correlate disconnects with silent dead links.
@@ -105,6 +109,66 @@ class ConnectionManager:
         # Stores timestamps of recent heartbeat-timeout disconnects so we
         # can derive a sliding 1-hour count without a Redis dep.
         self.heartbeat_timeout_events: Deque[datetime] = deque()
+        self._redis: Optional[redis.Redis] = None
+
+    async def get_redis(self) -> Optional[redis.Redis]:
+        """Get or create Redis connection for presence cache (best-effort)."""
+        if self._redis is None:
+            try:
+                from app.config import settings
+
+                self._redis = redis.from_url(
+                    settings.REDIS_URL,
+                    encoding="utf-8",
+                    decode_responses=True,
+                )
+                await self._redis.ping()
+            except Exception as e:
+                logger.warning("Presence Redis unavailable: %s", e)
+                return None
+        return self._redis
+
+    @staticmethod
+    def _company_token(company_id: Optional[int]) -> str:
+        return "none" if company_id is None else str(company_id)
+
+    def _presence_key(self, company_id: Optional[int]) -> str:
+        return f"{PRESENCE_KEY_PREFIX}{self._company_token(company_id)}"
+
+    async def _resolve_company_id(
+        self, user_id: int, company_id: Optional[int] = None
+    ) -> Optional[int]:
+        if company_id is not None:
+            return company_id
+        if user_id in self.user_companies:
+            return self.user_companies[user_id]
+
+        return None
+
+    async def _scan_presence_keys(self, redis_client: redis.Redis) -> list[str]:
+        cursor = 0
+        keys: list[str] = []
+        while True:
+            cursor, batch = await redis_client.scan(
+                cursor=cursor,
+                match=f"{PRESENCE_KEY_PREFIX}*",
+                count=100,
+            )
+            keys.extend(batch)
+            if cursor == 0:
+                break
+        return keys
+
+    @staticmethod
+    def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
+        if not ts:
+            return None
+        try:
+            if ts.endswith("Z"):
+                ts = ts[:-1] + "+00:00"
+            return datetime.fromisoformat(ts)
+        except Exception:
+            return None
 
     async def connect(self, websocket: WebSocket, user_id: int, team_ids: list[int] = None, company_id: int = None) -> str:
         """Accept a new WebSocket connection.
@@ -248,20 +312,144 @@ class ConnectionManager:
             if user_id != exclude_user:
                 await self.send_personal_message(message, user_id)
 
-    def set_active_timer(self, user_id: int, timer_info: dict):
-        """Set active timer for a user"""
-        self.active_timers[user_id] = {
-            **timer_info,
-            "user_id": user_id,
-            "updated_at": now_utc().isoformat()
-        }
+    async def set_active_timer(self, user_id: int, timer_info: dict):
+        """Set active timer for a user in shared Redis presence cache."""
+        try:
+            redis_client = await self.get_redis()
+            if redis_client is None:
+                return
 
-    def clear_active_timer(self, user_id: int):
-        """Clear active timer for a user"""
-        if user_id in self.active_timers:
-            del self.active_timers[user_id]
+            now_iso = now_utc().isoformat()
+            entry = {
+                **timer_info,
+                "user_id": user_id,
+                "updated_at": now_iso,
+                "heartbeat_at": now_iso,
+            }
+            company_id = await self._resolve_company_id(
+                user_id, timer_info.get("company_id")
+            )
+            key = self._presence_key(company_id)
+            await redis_client.hset(key, str(user_id), json.dumps(entry))
+        except Exception as e:
+            logger.warning("Presence set_active_timer failed user_id=%s: %s", user_id, e)
 
-    def get_active_timers(self, team_id: int = None, company_filter = None) -> list[dict]:
+    async def clear_active_timer(self, user_id: int, company_id: Optional[int] = None):
+        """Clear active timer for a user from shared Redis presence cache."""
+        try:
+            redis_client = await self.get_redis()
+            if redis_client is None:
+                return
+
+            resolved_company = await self._resolve_company_id(user_id, company_id)
+            if company_id is not None or resolved_company is not None:
+                key = self._presence_key(resolved_company)
+                await redis_client.hdel(key, str(user_id))
+                return
+
+            keys = await self._scan_presence_keys(redis_client)
+            for key in keys:
+                await redis_client.hdel(key, str(user_id))
+        except Exception as e:
+            logger.warning("Presence clear_active_timer failed user_id=%s: %s", user_id, e)
+
+    async def update_active_timer_fields(
+        self,
+        user_id: int,
+        company_id: Optional[int],
+        fields: Dict[str, Any],
+    ) -> None:
+        """Read-modify-write partial field updates for a user's presence entry."""
+        try:
+            redis_client = await self.get_redis()
+            if redis_client is None:
+                return
+
+            key = self._presence_key(company_id)
+            field = str(user_id)
+            raw = await redis_client.hget(key, field)
+            if raw is None:
+                return
+
+            payload = json.loads(raw)
+            payload.update(fields)
+            payload["updated_at"] = now_utc().isoformat()
+            await redis_client.hset(key, field, json.dumps(payload))
+        except Exception as e:
+            logger.warning(
+                "Presence update_active_timer_fields failed user_id=%s: %s",
+                user_id,
+                e,
+            )
+
+    async def refresh_presence_heartbeat(
+        self, user_id: int, company_id: Optional[int]
+    ) -> None:
+        """Refresh heartbeat timestamp for an active presence entry."""
+        now_iso = now_utc().isoformat()
+        await self.update_active_timer_fields(
+            user_id,
+            company_id,
+            {"heartbeat_at": now_iso},
+        )
+
+    async def reconcile_company_presence(
+        self, company_id: Optional[int], active_user_ids: set[int]
+    ) -> None:
+        """Evict stale cached users for a specific company key."""
+        try:
+            redis_client = await self.get_redis()
+            if redis_client is None:
+                return
+
+            key = self._presence_key(company_id)
+            existing_fields = await redis_client.hkeys(key)
+            stale_fields = []
+            for field in existing_fields:
+                try:
+                    if int(field) not in active_user_ids:
+                        stale_fields.append(field)
+                except ValueError:
+                    stale_fields.append(field)
+            if stale_fields:
+                await redis_client.hdel(key, *stale_fields)
+        except Exception as e:
+            logger.warning(
+                "Presence reconcile_company_presence failed company_id=%s: %s",
+                company_id,
+                e,
+            )
+
+    async def rebuild_presence_global(self, entries: Dict[int, dict]) -> None:
+        """Rebuild all presence hashes from a full global running-timer snapshot."""
+        try:
+            redis_client = await self.get_redis()
+            if redis_client is None:
+                return
+
+            now_iso = now_utc().isoformat()
+            grouped: Dict[str, Dict[str, str]] = {}
+            for user_id, info in entries.items():
+                payload = {
+                    **info,
+                    "user_id": user_id,
+                    "updated_at": now_iso,
+                    "heartbeat_at": now_iso,
+                }
+                key = self._presence_key(info.get("company_id"))
+                grouped.setdefault(key, {})[str(user_id)] = json.dumps(payload)
+
+            existing_keys = await self._scan_presence_keys(redis_client)
+            if existing_keys:
+                await redis_client.delete(*existing_keys)
+
+            for key, mapping in grouped.items():
+                if mapping:
+                    await redis_client.hset(key, mapping=mapping)
+        except Exception as e:
+            logger.warning("Presence rebuild_presence_global failed: %s", e)
+
+    async def get_active_timers(self, team_id: int = None, company_filter=None) -> list[dict]:
         """Get all active timers, optionally filtered by team or company
 
         Args:
@@ -271,17 +459,42 @@ class ConnectionManager:
                 - FILTER_NULL_COMPANY: platform users see only NULL company_id
                 - int: company-scoped users see only their company
         """
-        timers = list(self.active_timers.values())
+        try:
+            redis_client = await self.get_redis()
+            if redis_client is None:
+                return []
 
-        # Filter by company for multi-tenant isolation
-        if company_filter is not None:
-            if company_filter == FILTER_NULL_COMPANY:
-                # Platform users without company see only NULL company_id timers
-                timers = [t for t in timers if t.get("company_id") is None]
+            if company_filter is None:
+                keys = await self._scan_presence_keys(redis_client)
+            elif company_filter == FILTER_NULL_COMPANY:
+                keys = [self._presence_key(None)]
             else:
-                # Company-scoped users see only their company's timers
-                timers = [t for t in timers if t.get("company_id") == company_filter]
-        # If company_filter is None (super_admin), return all timers
+                keys = [self._presence_key(company_filter)]
+
+            timers: list[dict] = []
+            cutoff = now_utc() - timedelta(seconds=PRESENCE_STALE_THRESHOLD_SEC)
+            for key in keys:
+                raw_map = await redis_client.hgetall(key)
+                stale_fields: list[str] = []
+                for field, raw in raw_map.items():
+                    try:
+                        timer = json.loads(raw)
+                    except Exception:
+                        stale_fields.append(field)
+                        continue
+
+                    heartbeat_at = self._parse_iso(timer.get("heartbeat_at"))
+                    if heartbeat_at is None or heartbeat_at < cutoff:
+                        stale_fields.append(field)
+                        continue
+
+                    timers.append(timer)
+
+                if stale_fields:
+                    await redis_client.hdel(key, *stale_fields)
+        except Exception as e:
+            logger.warning("Presence get_active_timers failed: %s", e)
+            return []
 
         # Filter by team if specified
         if team_id and team_id in self.team_members:
@@ -524,9 +737,13 @@ async def load_active_timers_from_db(company_id: Optional[int] = None) -> int:
                     "meeting_title": info.get("meeting_title"),
                 }
 
-            # Merge — never replace the entire cache. Entries for tenants
-            # not in this query keep their existing values.
-            manager.active_timers.update(new_entries)
+            if company_id is None:
+                # Startup/global warm: rebuild full presence state from DB snapshot.
+                await manager.rebuild_presence_global(new_entries)
+            else:
+                for user_id, timer_info in new_entries.items():
+                    await manager.set_active_timer(user_id, timer_info)
+                await manager.reconcile_company_presence(company_id, set(new_entries.keys()))
             logger.info(
                 "Loaded %d active timers from database (company_id=%s)",
                 len(rows),
@@ -669,7 +886,7 @@ async def websocket_endpoint(
         company_filter = get_company_filter(user)
         await websocket.send_json({
             "type": "snapshot",
-            "active_timers": manager.get_active_timers(company_filter=company_filter),
+            "active_timers": await manager.get_active_timers(company_filter=company_filter),
             "online_users": manager.get_online_users(),
             "server_time": now_utc().isoformat(),
         })
@@ -700,6 +917,7 @@ async def websocket_endpoint(
             # propagate to the broadcast surface.
             if isinstance(data, dict) and data.get("type") == "pong":
                 manager.record_pong(websocket)
+                await manager.refresh_presence_heartbeat(user.id, user.company_id)
                 continue
 
             try:
@@ -779,7 +997,7 @@ async def handle_message(websocket: WebSocket, user: User, data: dict):
             "description": data.get("description"),
             "start_time": data.get("start_time", now_utc().isoformat())
         }
-        manager.set_active_timer(user.id, timer_info)
+        await manager.set_active_timer(user.id, timer_info)
 
         # Broadcast to SAME COMPANY ONLY (multi-tenant isolation)
         await manager.broadcast_to_company({
@@ -797,7 +1015,7 @@ async def handle_message(websocket: WebSocket, user: User, data: dict):
 
     elif msg_type == "timer_stop":
         # User stopped a timer
-        manager.clear_active_timer(user.id)
+        await manager.clear_active_timer(user.id, company_id=user.company_id)
 
         # Broadcast to SAME COMPANY ONLY (multi-tenant isolation)
         await manager.broadcast_to_company({
@@ -816,15 +1034,18 @@ async def handle_message(websocket: WebSocket, user: User, data: dict):
 
     elif msg_type == "timer_update":
         # Periodic timer duration update
-        if user.id in manager.active_timers:
-            manager.active_timers[user.id]["elapsed_seconds"] = data.get("elapsed_seconds", 0)
+        await manager.update_active_timer_fields(
+            user_id=user.id,
+            company_id=user.company_id,
+            fields={"elapsed_seconds": data.get("elapsed_seconds", 0)},
+        )
 
     elif msg_type == "get_active_timers":
         # Request list of active timers with company filtering
         team_id = data.get("team_id")
         # Apply company filter for multi-tenant isolation using proper helper
         company_filter = get_company_filter(user)
-        active_timers = manager.get_active_timers(team_id, company_filter)
+        active_timers = await manager.get_active_timers(team_id, company_filter)
         await websocket.send_json({
             "type": "active_timers",
             "timers": active_timers
@@ -856,7 +1077,7 @@ async def get_active_timers(
     """Get list of currently active timers with company filtering"""
     # Apply company filter for multi-tenant isolation using proper helper
     company_filter = get_company_filter(current_user)
-    timers = manager.get_active_timers(team_id, company_filter)
+    timers = await manager.get_active_timers(team_id, company_filter)
     return {
         "timers": timers,
         "count": len(timers)

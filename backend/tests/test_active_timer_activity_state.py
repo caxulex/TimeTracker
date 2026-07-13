@@ -11,12 +11,13 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
+import fakeredis
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_current_active_user, get_current_user
+from app.dependencies import get_company_filter, get_current_active_user, get_current_user
 from app.main import app
 from app.models import Project, Team, TeamMember, TimeEntry, User, WorkSession
 from app.routers.websocket import manager as ws_manager
@@ -79,16 +80,20 @@ async def _running_entry(
 
 
 @pytest_asyncio.fixture(autouse=True)
-def _isolate_ws_manager():
+async def _isolate_ws_manager():
     """Reset and stub ws_manager broadcasts so tests don't touch sockets."""
-    ws_manager.active_timers.clear()
+    fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    ws_manager._redis = fake_redis
+    ws_manager.user_companies.clear()
     ws_manager.broadcast_to_company = AsyncMock()
     ws_manager.broadcast_timer_updated = AsyncMock(wraps=ws_manager.broadcast_timer_updated)  # type: ignore[assignment]
     # Wrapping needs the real coroutine to still work; re-wrap with a clean
     # AsyncMock so call counts are reliable.
     ws_manager.broadcast_timer_updated = AsyncMock()
     yield
-    ws_manager.active_timers.clear()
+    await fake_redis.flushdb()
+    await fake_redis.aclose()
+    ws_manager._redis = None
 
 
 class TestActiveTimersEndpointShape:
@@ -176,7 +181,7 @@ class TestCacheTransitions:
             headers=auth_headers,
         )
         assert r.status_code == 200, r.text
-        cached = ws_manager.active_timers[test_user.id]
+        cached = (await ws_manager.get_active_timers(company_filter=get_company_filter(test_user)))[0]
         assert cached["activity_state"] == "break"
         assert cached["break_type"] == "short"
         ws_manager.broadcast_timer_updated.assert_awaited()
@@ -200,7 +205,7 @@ class TestCacheTransitions:
             headers=auth_headers,
         )
         assert r2.status_code == 200, r2.text
-        cached = ws_manager.active_timers[test_user.id]
+        cached = (await ws_manager.get_active_timers(company_filter=get_company_filter(test_user)))[0]
         assert cached["activity_state"] == "working"
         assert cached["break_type"] is None
 
@@ -218,7 +223,7 @@ class TestCacheTransitions:
             headers=auth_headers,
         )
         assert r.status_code == 200, r.text
-        cached = ws_manager.active_timers[test_user.id]
+        cached = (await ws_manager.get_active_timers(company_filter=get_company_filter(test_user)))[0]
         assert cached["activity_state"] == "meeting"
         assert cached["meeting_type"] == "internal"
         assert cached["meeting_title"] == "Standup"
@@ -245,7 +250,7 @@ class TestCacheTransitions:
             headers=auth_headers,
         )
         assert r2.status_code == 200, r2.text
-        cached = ws_manager.active_timers[test_user.id]
+        cached = (await ws_manager.get_active_timers(company_filter=get_company_filter(test_user)))[0]
         assert cached["activity_state"] == "working"
         assert cached["meeting_type"] is None
         assert cached["meeting_title"] is None
@@ -348,7 +353,7 @@ class TestElapsedSecondsFreezesDuringBreak:
         assert r.status_code == 200, r.text
 
         # The cache snapshot taken at break-start is what gets broadcast.
-        cached = ws_manager.active_timers[test_user.id]
+        cached = (await ws_manager.get_active_timers(company_filter=get_company_filter(test_user)))[0]
         cached_elapsed = cached["elapsed_seconds"]
 
         # Wait and re-hit the HTTP endpoint — it must agree with the
@@ -542,7 +547,7 @@ class TestStateAnchoredElapsed:
             headers=auth_headers,
         )
         assert r.status_code == 200, r.text
-        cached = ws_manager.active_timers[test_user.id]
+        cached = (await ws_manager.get_active_timers(company_filter=get_company_filter(test_user)))[0]
         # Cache snapshot the broadcast uses must include the anchor fields.
         assert "state_started_at" in cached
         assert "state_elapsed_seconds" in cached

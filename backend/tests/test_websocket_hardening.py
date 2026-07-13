@@ -18,6 +18,7 @@ import os
 from datetime import timedelta
 from unittest.mock import AsyncMock
 
+import fakeredis
 import pytest
 import pytest_asyncio
 
@@ -41,6 +42,17 @@ skip_without_db = pytest.mark.skipif(
     not _database_available(),
     reason="PostgreSQL database not available",
 )
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _patch_presence_redis():
+    fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    manager._redis = fake_redis
+    manager.user_companies.clear()
+    yield
+    await fake_redis.flushdb()
+    await fake_redis.aclose()
+    manager._redis = None
 
 
 # --------------------------------------------------------------------------- #
@@ -145,7 +157,7 @@ class TestTeamScopedBroadcast:
 
 class TestCrossTenantCacheIsolation:
     """A WS connect for tenant A must not write tenant B entries into
-    ``manager.active_timers``."""
+    tenant A's presence key."""
 
     @pytest.mark.asyncio
     @skip_without_db
@@ -195,26 +207,16 @@ class TestCrossTenantCacheIsolation:
         db_session.add_all([entry_a, entry_b])
         await db_session.commit()
 
-        # Reset cache so the assertion is clean.
-        manager.active_timers.clear()
-
         # Simulate tenant A's WS connect: company-scoped warm.
         loaded = await load_active_timers_from_db(company_id=company_a.id)
 
-        try:
-            assert loaded == 1, (
-                "expected exactly 1 row for tenant A; got "
-                f"{loaded}. cache={manager.active_timers!r}"
-            )
-            # User A must be in the cache; user B must NOT be added by
-            # this tenant-A connection.
-            assert user_a.id in manager.active_timers
-            assert user_b.id not in manager.active_timers
-            assert (
-                manager.active_timers[user_a.id]["company_id"] == company_a.id
-            )
-        finally:
-            manager.active_timers.clear()
+        assert loaded == 1
+        company_a_timers = await manager.get_active_timers(company_filter=company_a.id)
+        company_b_timers = await manager.get_active_timers(company_filter=company_b.id)
+
+        assert {t["user_id"] for t in company_a_timers} == {user_a.id}
+        assert all(t["company_id"] == company_a.id for t in company_a_timers)
+        assert company_b_timers == []
 
     @pytest.mark.asyncio
     @skip_without_db
@@ -252,23 +254,24 @@ class TestCrossTenantCacheIsolation:
         )
         await db_session.commit()
 
-        manager.active_timers.clear()
         # Pre-seed an entry for tenant B as if its user were already
         # connected.
-        manager.active_timers[9999] = {
-            "user_id": 9999,
-            "company_id": company_b.id,
-            "user_name": "Bravo2 Cached",
-        }
+        await manager.set_active_timer(
+            9999,
+            {
+                "user_id": 9999,
+                "company_id": company_b.id,
+                "user_name": "Bravo2 Cached",
+                "start_time": now_utc().isoformat(),
+            },
+        )
 
-        try:
-            await load_active_timers_from_db(company_id=company_a.id)
-            # Tenant B's pre-existing entry must remain untouched.
-            assert 9999 in manager.active_timers
-            assert (
-                manager.active_timers[9999]["company_id"] == company_b.id
-            )
-            # Tenant A's row must have been added.
-            assert user_a.id in manager.active_timers
-        finally:
-            manager.active_timers.clear()
+        await load_active_timers_from_db(company_id=company_a.id)
+
+        # Tenant B's pre-existing entry must remain untouched.
+        company_b_timers = await manager.get_active_timers(company_filter=company_b.id)
+        assert any(t["user_id"] == 9999 for t in company_b_timers)
+
+        # Tenant A's row must have been added in tenant A key.
+        company_a_timers = await manager.get_active_timers(company_filter=company_a.id)
+        assert any(t["user_id"] == user_a.id for t in company_a_timers)
