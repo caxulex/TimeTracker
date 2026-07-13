@@ -188,6 +188,8 @@ class Settings(BaseSettings):
     STRIPE_PRICE_PER_SEAT_MONTHLY_ID: str = ""
     STRIPE_PRICE_UNLIMITED_MONTHLY_ID: str = ""
     STRIPE_DEFAULT_TEST_PAYMENT_METHOD: str = ""
+    STRIPE_CHECKOUT_SUCCESS_URL: str = "https://timetracker.shaemarcus.com/billing"
+    STRIPE_CHECKOUT_CANCEL_URL: str = "https://timetracker.shaemarcus.com/billing"
     WEBHOOK_BASE_URL: str = "https://timetracker.shaemarcus.com"
 
     # AI Provider Settings

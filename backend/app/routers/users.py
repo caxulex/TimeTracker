@@ -235,6 +235,16 @@ async def create_user(
                             "message": "This subscription needs payment completed before adding more workers.",
                         },
                     )
+                if sync_result.status == SyncStatus.CHECKOUT_REQUIRED:
+                    raise HTTPException(
+                        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                        detail={
+                            "reason": "checkout_required",
+                            "checkout_url": sync_result.checkout_url,
+                            "message": sync_result.message
+                            or "Complete Stripe Checkout before adding more workers.",
+                        },
+                    )
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="Unexpected billing state; user not created.",

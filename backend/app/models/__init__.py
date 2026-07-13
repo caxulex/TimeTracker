@@ -1515,7 +1515,7 @@ class StripeWebhookEvent(Base):
 
     event_id: Mapped[str] = mapped_column(String(64), primary_key=True, index=True)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    processed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    processed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
     )
 
