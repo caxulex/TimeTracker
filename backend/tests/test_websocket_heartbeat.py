@@ -26,6 +26,7 @@ import os
 from datetime import timedelta
 from unittest.mock import AsyncMock
 
+import fakeredis
 import pytest
 from httpx import AsyncClient
 
@@ -281,9 +282,12 @@ class TestSnapshotPayload:
     expected shape.
     """
 
-    def test_snapshot_helpers_expose_current_state(self):
+    @pytest.mark.asyncio
+    async def test_snapshot_helpers_expose_current_state(self):
         mgr = ConnectionManager()
-        mgr.set_active_timer(
+        fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        mgr._redis = fake_redis
+        await mgr.set_active_timer(
             7,
             {
                 "user_id": 7,
@@ -294,8 +298,10 @@ class TestSnapshotPayload:
         )
         mgr.active_connections[7] = {AsyncMock()}
 
-        timers = mgr.get_active_timers(company_filter=None)
+        timers = await mgr.get_active_timers(company_filter=None)
         online = mgr.get_online_users()
 
         assert any(t["user_id"] == 7 for t in timers)
         assert 7 in online
+
+        await fake_redis.aclose()

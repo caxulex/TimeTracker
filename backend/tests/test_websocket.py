@@ -10,10 +10,14 @@ Some tests require a database connection and will be skipped locally.
 
 import pytest
 import os
+import fakeredis
+import pytest_asyncio
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 from httpx import AsyncClient
 
 from app.models import User
+from app.utils.timewindow import now_utc
 
 
 # Check if database is available
@@ -64,82 +68,144 @@ class TestWebSocketConnection:
 class TestWebSocketManager:
     """Test WebSocket manager functionality."""
 
-    def test_active_timers_cache_structure(self):
-        """Test that active timers cache has correct structure."""
+    @pytest_asyncio.fixture(autouse=True)
+    async def _patch_ws_presence_redis(self):
+        """Use isolated fakeredis instance for presence tests."""
         from app.routers.websocket import manager
-        
-        # Manager should have active_timers dict
-        assert hasattr(manager, 'active_timers')
-        assert isinstance(manager.active_timers, dict)
 
-    def test_set_active_timer(self):
-        """Test setting an active timer in cache."""
+        fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        manager._redis = fake_redis
+        manager.user_companies.clear()
+        yield
+        await fake_redis.flushdb()
+        await fake_redis.aclose()
+        manager._redis = None
+
+    def test_presence_manager_has_connection_helpers(self):
+        """Test that manager exposes expected presence helpers."""
         from app.routers.websocket import manager
-        
-        # Set a timer
+        assert hasattr(manager, "get_redis")
+        assert hasattr(manager, "set_active_timer")
+        assert hasattr(manager, "clear_active_timer")
+
+    @pytest.mark.asyncio
+    async def test_set_active_timer(self):
+        """Test setting an active timer in Redis presence."""
+        from app.routers.websocket import manager
+
         timer_info = {
-            "user_id": 1,
             "user_name": "Test User",
             "project_name": "Test Project",
-            "start_time": "2026-01-08T10:00:00Z",
+            "start_time": "2026-01-08T10:00:00+00:00",
             "company_id": None,
         }
-        manager.set_active_timer(1, timer_info)
-        
-        # Verify it's in cache
-        assert 1 in manager.active_timers
-        assert manager.active_timers[1]["user_name"] == "Test User"
-        
-        # Clean up
-        manager.clear_active_timer(1)
+        await manager.set_active_timer(1, timer_info)
 
-    def test_clear_active_timer(self):
-        """Test clearing an active timer from cache."""
+        timers = await manager.get_active_timers(company_filter=None)
+        user_timer = [t for t in timers if t.get("user_id") == 1]
+        assert len(user_timer) == 1
+        assert user_timer[0]["user_name"] == "Test User"
+
+    @pytest.mark.asyncio
+    async def test_clear_active_timer(self):
+        """Test clearing an active timer from Redis presence."""
         from app.routers.websocket import manager
-        
-        # Set then clear
-        timer_info = {"user_id": 2, "user_name": "Test"}
-        manager.set_active_timer(2, timer_info)
-        manager.clear_active_timer(2)
-        
-        assert 2 not in manager.active_timers
 
-    def test_get_active_timers_with_company_filter(self):
+        await manager.set_active_timer(2, {"user_name": "Test", "company_id": 2})
+        await manager.clear_active_timer(2, company_id=2)
+
+        timers = await manager.get_active_timers(company_filter=2)
+        assert timers == []
+
+    @pytest.mark.asyncio
+    async def test_get_active_timers_with_company_filter(self):
         """Test filtering active timers by company_filter."""
         from app.routers.websocket import manager
         from app.dependencies import FILTER_NULL_COMPANY
-        
-        # Clear any leftover state from other tests (singleton state leakage)
-        manager.active_timers.clear()
-        
+
         # Set up timers for different companies
-        manager.set_active_timer(10, {"user_id": 10, "company_id": 1, "user_name": "Company 1 User"})
-        manager.set_active_timer(11, {"user_id": 11, "company_id": 2, "user_name": "Company 2 User"})
-        manager.set_active_timer(12, {"user_id": 12, "company_id": 1, "user_name": "Company 1 User 2"})
-        manager.set_active_timer(13, {"user_id": 13, "company_id": None, "user_name": "Platform User"})
-        
+        await manager.set_active_timer(10, {"company_id": 1, "user_name": "Company 1 User"})
+        await manager.set_active_timer(11, {"company_id": 2, "user_name": "Company 2 User"})
+        await manager.set_active_timer(12, {"company_id": 1, "user_name": "Company 1 User 2"})
+        await manager.set_active_timer(13, {"company_id": None, "user_name": "Platform User"})
+
         # Filter by company 1
-        company1_timers = manager.get_active_timers(company_filter=1)
+        company1_timers = await manager.get_active_timers(company_filter=1)
         assert len(company1_timers) == 2
-        
+
         # Filter by company 2
-        company2_timers = manager.get_active_timers(company_filter=2)
+        company2_timers = await manager.get_active_timers(company_filter=2)
         assert len(company2_timers) == 1
-        
+
         # Filter by NULL company (platform users) using sentinel
-        null_company_timers = manager.get_active_timers(company_filter=FILTER_NULL_COMPANY)
+        null_company_timers = await manager.get_active_timers(company_filter=FILTER_NULL_COMPANY)
         assert len(null_company_timers) == 1
         assert null_company_timers[0]["company_id"] is None
-        
+
         # Super admin (company_filter=None) sees ALL timers
-        all_timers = manager.get_active_timers(company_filter=None)
+        all_timers = await manager.get_active_timers(company_filter=None)
         assert len(all_timers) == 4
-        
-        # Clean up
-        manager.clear_active_timer(10)
-        manager.clear_active_timer(11)
-        manager.clear_active_timer(12)
-        manager.clear_active_timer(13)
+
+    @pytest.mark.asyncio
+    async def test_stale_entry_filtered_and_deleted(self):
+        """Stale heartbeat entries are filtered from reads and lazily evicted."""
+        from app.routers.websocket import manager, PRESENCE_STALE_THRESHOLD_SEC
+
+        redis_client = await manager.get_redis()
+        stale_hb = (now_utc() - timedelta(seconds=PRESENCE_STALE_THRESHOLD_SEC + 5)).isoformat()
+        key = manager._presence_key(2)
+        await redis_client.hset(
+            key,
+            "501",
+            '{"user_id": 501, "company_id": 2, "user_name": "Stale", "heartbeat_at": "' + stale_hb + '"}'
+        )
+
+        timers = await manager.get_active_timers(company_filter=2)
+        assert timers == []
+        assert await redis_client.hget(key, "501") is None
+
+    @pytest.mark.asyncio
+    async def test_redis_down_failclosed(self, monkeypatch):
+        """Presence operations fail-closed (no raise) when Redis is unavailable."""
+        from app.routers.websocket import manager
+
+        async def _raise():
+            raise RuntimeError("redis down")
+
+        monkeypatch.setattr(manager, "get_redis", _raise)
+        await manager.set_active_timer(1, {"company_id": 2, "user_name": "X"})
+        await manager.clear_active_timer(1, company_id=2)
+        timers = await manager.get_active_timers(company_filter=2)
+        assert timers == []
+
+    @pytest.mark.asyncio
+    async def test_elapsed_update_path_uses_redis_presence(self):
+        """timer_update message mutates elapsed_seconds via Redis-backed presence."""
+        from app.routers.websocket import manager, handle_message
+
+        class _FakeWebSocket:
+            async def send_json(self, _message):
+                return None
+
+        class _FakeUser:
+            id = 77
+            name = "Timer User"
+            company_id = 3
+
+        await manager.set_active_timer(
+            77,
+            {
+                "company_id": 3,
+                "user_name": "Timer User",
+                "start_time": now_utc().isoformat(),
+                "elapsed_seconds": 5,
+            },
+        )
+
+        await handle_message(_FakeWebSocket(), _FakeUser(), {"type": "timer_update", "elapsed_seconds": 42})
+        timers = await manager.get_active_timers(company_filter=3)
+        assert len(timers) == 1
+        assert timers[0]["elapsed_seconds"] == 42
 
 
 class TestTimerBroadcast:
@@ -182,7 +248,7 @@ class TestTimerBroadcast:
                 
                 if start_response.status_code == 200:
                     # Check if timer is in cache
-                    timers = manager.get_active_timers()
+                    timers = await manager.get_active_timers()
                     user_timer = [t for t in timers if t.get("user_id") == test_user.id]
                     
                     # Stop timer to clean up

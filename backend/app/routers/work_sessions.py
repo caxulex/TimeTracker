@@ -119,7 +119,7 @@ async def _refresh_active_timer_cache(
     )
     row = (await db.execute(stmt)).first()
     if row is None:
-        ws_manager.clear_active_timer(user.id)
+        await ws_manager.clear_active_timer(user.id, company_id=user.company_id)
         return None
 
     entry, project, task = row
@@ -154,10 +154,10 @@ async def _refresh_active_timer_cache(
         "state_elapsed_seconds": state_elapsed,
         **activity_payload,
     }
-    ws_manager.set_active_timer(user.id, timer_entry)
+    await ws_manager.set_active_timer(user.id, timer_entry)
     await ws_manager.broadcast_timer_updated(
         company_id=user.company_id,
-        timer_entry=ws_manager.active_timers.get(user.id, timer_entry),
+        timer_entry=timer_entry,
     )
     return timer_entry
 

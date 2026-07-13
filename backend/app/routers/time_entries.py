@@ -653,7 +653,7 @@ async def start_timer(
     }, company_id=current_user.company_id)
 
     # Update the WebSocket manager's active timers cache
-    ws_manager.set_active_timer(current_user.id, {
+    await ws_manager.set_active_timer(current_user.id, {
         "user_name": current_user.name,
         "company_id": current_user.company_id,  # For multi-tenant filtering
         "project_id": entry.project_id,
@@ -760,7 +760,7 @@ async def stop_timer(
     }, company_id=current_user.company_id)
 
     # Clear the WebSocket manager's active timer cache for this user
-    ws_manager.clear_active_timer(current_user.id)
+    await ws_manager.clear_active_timer(current_user.id, company_id=current_user.company_id)
 
     # Also broadcast time entry completion for reports update (SAME COMPANY ONLY)
     await ws_manager.broadcast_to_company({
@@ -954,7 +954,7 @@ async def switch_task(
     }, company_id=current_user.company_id)
 
     # Update WebSocket active timer cache
-    ws_manager.set_active_timer(current_user.id, {
+    await ws_manager.set_active_timer(current_user.id, {
         "user_name": current_user.name,
         "company_id": current_user.company_id,
         "project_id": new_entry.project_id,

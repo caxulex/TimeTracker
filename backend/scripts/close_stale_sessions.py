@@ -52,7 +52,7 @@ async def close_stale_sessions():
     async with async_session() as db:
         try:
             # Import models here to avoid circular imports
-            from app.models import WorkSession, TimeEntry, SessionBreak, SessionMeeting
+            from app.models import WorkSession, TimeEntry, SessionBreak, SessionMeeting, User
             
             # 1. Find all stale sessions (running for too long)
             stale_sessions_result = await db.execute(
@@ -70,8 +70,10 @@ async def close_stale_sessions():
             entries_closed = 0
             breaks_closed = 0
             meetings_closed = 0
+            affected_users: dict[int, int | None] = {}
             
             for session in stale_sessions:
+                affected_users[session.user_id] = session.company_id
                 # Close all time entries for this session
                 entries_result = await db.execute(
                     select(TimeEntry).where(
@@ -147,6 +149,11 @@ async def close_stale_sessions():
             
             orphans_closed = 0
             for entry in orphan_entries:
+                if entry.user_id not in affected_users:
+                    user_company_result = await db.execute(
+                        select(User.company_id).where(User.id == entry.user_id)
+                    )
+                    affected_users[entry.user_id] = user_company_result.scalar_one_or_none()
                 entry.end_time = now
                 entry.is_running = False
                 entry.is_paused = False
@@ -156,6 +163,7 @@ async def close_stale_sessions():
                 orphans_closed += 1
             
             await db.commit()
+            await _clear_presence_for_affected_users(affected_users)
             
             print(f"  ✓ Closed {sessions_closed} stale sessions")
             print(f"  ✓ Closed {entries_closed} time entries (linked to sessions)")
@@ -177,6 +185,19 @@ async def close_stale_sessions():
             raise
         finally:
             await engine.dispose()
+
+
+async def _clear_presence_for_affected_users(affected_users: dict[int, int | None]) -> None:
+    """Best-effort presence cleanup in shared Redis cache."""
+    if not affected_users:
+        return
+    try:
+        from app.routers.websocket import manager as ws_manager
+
+        for user_id, company_id in affected_users.items():
+            await ws_manager.clear_active_timer(user_id, company_id=company_id)
+    except Exception as e:
+        print(f"  ! Presence clear warning: {e}")
 
 
 if __name__ == "__main__":
