@@ -165,29 +165,10 @@ async def _resolve_or_create_stripe_customer(
     customer_create_key: str,
     stripe_secret_key: str,
 ) -> str:
-    """Resolve or create the Stripe customer with optional default payment method."""
-
-    default_pm = getattr(settings, "STRIPE_DEFAULT_TEST_PAYMENT_METHOD", "").strip()
+    """Resolve or create the Stripe customer."""
 
     if existing_customer_id:
         customer_id = existing_customer_id
-        if default_pm:
-            try:
-                stripe.PaymentMethod.attach(
-                    default_pm,
-                    customer=customer_id,
-                    api_key=stripe_secret_key,
-                )
-            except stripe.error.InvalidRequestError as exc:
-                if "already attached" not in str(exc).lower():
-                    raise
-
-            stripe.Customer.modify(
-                customer_id,
-                invoice_settings={"default_payment_method": default_pm},
-                api_key=stripe_secret_key,
-            )
-
         return customer_id
 
     create_kwargs = dict(
@@ -197,9 +178,6 @@ async def _resolve_or_create_stripe_customer(
         idempotency_key=customer_create_key,
         api_key=stripe_secret_key,
     )
-    if default_pm:
-        create_kwargs["payment_method"] = default_pm
-        create_kwargs["invoice_settings"] = {"default_payment_method": default_pm}
 
     customer = stripe.Customer.create(**create_kwargs)
     return customer.id
