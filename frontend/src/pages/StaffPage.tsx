@@ -14,6 +14,7 @@ import { useStaffFormValidation } from '../hooks/useStaffFormValidation';
 import { useDebounce } from '../hooks/useDebounce';
 import { rateLimiter } from '../utils/security';
 import { isAdminUser } from '../utils/helpers';
+import { maybeRedirectToCheckout } from '../utils/checkoutRedirect';
 import type { User, UserCreate, Team, TeamMember, PayRate, TimeEntry, Project } from '../types';
 import type { PayRateCreate, RateType } from '../types/payroll';
 import axios from 'axios';
@@ -245,6 +246,7 @@ export function StaffPage() {
     },
     onError: (error: unknown) => {
       const err = error as { response?: { data?: { detail?: string | { message: string; errors: string[] } } }; message?: string };
+      if (maybeRedirectToCheckout(error)) return;
       let errorMessage = 'Failed to create staff';
       
       if (err?.response?.data?.detail) {
