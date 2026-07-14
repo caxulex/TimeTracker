@@ -9,6 +9,7 @@ import { companiesApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import { useNotifications } from '../hooks/useNotifications';
 import { isAdminUser } from '../utils/helpers';
+import { maybeRedirectToCheckout } from '../utils/checkoutRedirect';
 
 function planLabel(tier: 'free' | 'standard' | 'unlimited'): string {
   if (tier === 'free') return 'Free';
@@ -72,6 +73,7 @@ export function BillingPage() {
 
       let message = 'Could not switch to Unlimited. Please try again or contact support.';
       if (status === 402) {
+        if (maybeRedirectToCheckout(mutationError)) return;
         message = "This change needs a payment step we can't complete automatically yet. Please contact support to finish switching to Unlimited.";
       } else if (status === 503) {
         message = 'Billing is temporarily unavailable. Please try again in a moment.';

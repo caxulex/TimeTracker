@@ -90,6 +90,7 @@ class SwitchStatus(str, Enum):
     SWITCHED = "switched"
     DOWNGRADED_TO_FREE = "downgraded_to_free"
     SWITCHED_COMPED = "switched_comped"
+    CHECKOUT_REQUIRED = "checkout_required"
     REQUIRES_PAYMENT_ACTION = "requires_payment_action"
     RETRIABLE_ERROR = "retriable_error"
     CONFIG_ERROR = "config_error"
@@ -100,6 +101,7 @@ class SwitchResult:
     status: SwitchStatus
     company_id: int
     stripe_subscription_id: str | None = None
+    checkout_url: str | None = None
     message: str | None = None
 
 
@@ -241,6 +243,7 @@ def _create_checkout_session_for_standard_subscription(
     price_id: str,
     quantity: int,
     stripe_secret_key: str,
+    idempotency_key: str,
 ):
     checkout_success_url = (
         getattr(settings, "STRIPE_CHECKOUT_SUCCESS_URL", "").strip()
@@ -259,7 +262,7 @@ def _create_checkout_session_for_standard_subscription(
         subscription_data={"metadata": {"company_id": str(company_id)}},
         success_url=checkout_success_url,
         cancel_url=checkout_cancel_url,
-        idempotency_key=f"checkout-session-company-{company_id}",
+        idempotency_key=idempotency_key,
         api_key=stripe_secret_key,
     )
 
@@ -611,6 +614,7 @@ async def _sync_subscription_to_target(
                     price_id=stripe_price_per_seat_monthly_id,
                     quantity=target_quantity,
                     stripe_secret_key=stripe_secret_key,
+                    idempotency_key=f"checkout-session-company-{company_id}",
                 )
                 return SyncResult(
                     status=SyncStatus.CHECKOUT_REQUIRED,
@@ -945,6 +949,26 @@ async def switch_company_to_unlimited(
                 customer_create_key=customer_create_key,
                 stripe_secret_key=stripe_secret_key,
             )
+
+            has_chargeable_pm = _customer_has_chargeable_card_payment_method(
+                resolved_customer_id,
+                stripe_secret_key,
+            )
+            if not has_chargeable_pm:
+                checkout_session = _create_checkout_session_for_standard_subscription(
+                    company_id=company_id,
+                    resolved_customer_id=resolved_customer_id,
+                    price_id=stripe_price_unlimited_monthly_id,
+                    quantity=1,
+                    stripe_secret_key=stripe_secret_key,
+                    idempotency_key=f"checkout-session-unlimited-company-{company_id}",
+                )
+                return SwitchResult(
+                    status=SwitchStatus.CHECKOUT_REQUIRED,
+                    company_id=company_id,
+                    checkout_url=_stripe_field(checkout_session, "url"),
+                    message="Checkout required to collect a valid payment method.",
+                )
 
             subscription = stripe.Subscription.create(
                 customer=resolved_customer_id,

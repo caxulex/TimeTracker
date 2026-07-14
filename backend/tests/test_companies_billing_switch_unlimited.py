@@ -369,10 +369,19 @@ async def test_switch_endpoint_free_with_workers_creates_unlimited_subscription(
     )
 
     customer_create_mock = MagicMock(return_value=SimpleNamespace(id="cus_unlimited"))
+    customer_retrieve_mock = MagicMock(
+        return_value=stripe.util.convert_to_stripe_object(
+            {"id": "cus_unlimited", "invoice_settings": {"default_payment_method": {"id": "pm_card", "type": "card"}}},
+            api_key="sk_test_abc",
+        )
+    )
+    payment_method_list_mock = MagicMock(return_value={"data": []})
     subscription_create_mock = MagicMock(
         return_value=SimpleNamespace(id="sub_unlimited", status="active")
     )
     monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.retrieve", customer_retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.PaymentMethod.list", payment_method_list_mock)
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
 
     app.dependency_overrides[get_current_admin_user] = lambda: free_company_admin
@@ -386,6 +395,61 @@ async def test_switch_endpoint_free_with_workers_creates_unlimited_subscription(
     assert payload["status"] == "switched"
     assert payload["subscription_tier"] == "unlimited"
     assert payload["stripe_subscription_id"] == "sub_unlimited"
+
+
+@pytest.mark.asyncio
+async def test_switch_endpoint_free_with_workers_no_pm_returns_402_checkout_required(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    free_company: Company,
+    free_company_admin: User,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    await _add_workers(db_session, company_id=free_company.id, count=4)
+    await db_session.commit()
+
+    monkeypatch.setattr(
+        "app.services.billing_service.settings",
+        SimpleNamespace(
+            STRIPE_SECRET_KEY="sk_test_abc",
+            STRIPE_PRICE_PER_SEAT_MONTHLY_ID="price_standard",
+            STRIPE_PRICE_UNLIMITED_MONTHLY_ID="price_unlimited",
+            STRIPE_CHECKOUT_SUCCESS_URL="https://example.test/billing",
+            STRIPE_CHECKOUT_CANCEL_URL="https://example.test/billing",
+        ),
+    )
+    customer_create_mock = MagicMock(return_value=SimpleNamespace(id="cus_ep_checkout"))
+    customer_retrieve_mock = MagicMock(
+        return_value=stripe.util.convert_to_stripe_object(
+            {"id": "cus_ep_checkout", "invoice_settings": {"default_payment_method": None}},
+            api_key="sk_test_abc",
+        )
+    )
+    payment_method_list_mock = MagicMock(return_value={"data": []})
+    checkout_create_mock = MagicMock(
+        return_value=stripe.util.convert_to_stripe_object(
+            {"id": "cs_ep_1", "url": "https://checkout.stripe.test/session/cs_ep_1"},
+            api_key="sk_test_abc",
+        )
+    )
+    subscription_create_mock = MagicMock()
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.retrieve", customer_retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.PaymentMethod.list", payment_method_list_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.checkout.Session.create", checkout_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
+
+    app.dependency_overrides[get_current_admin_user] = lambda: free_company_admin
+    try:
+        response = await client.post("/api/companies/my-company/billing/switch-to-unlimited")
+    finally:
+        app.dependency_overrides.pop(get_current_admin_user, None)
+
+    assert response.status_code == 402, response.text
+    payload = response.json()
+    assert payload["detail"]["reason"] == "checkout_required"
+    assert payload["detail"]["checkout_url"] == "https://checkout.stripe.test/session/cs_ep_1"
+    subscription_create_mock.assert_not_called()
 
 
 @pytest.mark.asyncio

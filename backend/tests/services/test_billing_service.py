@@ -1922,10 +1922,24 @@ async def test_switch_company_to_unlimited_free_with_workers_creates_unlimited_s
     )
 
     customer_create_mock = MagicMock(return_value=_stripe_customer("cus_unlimited"))
+    customer_retrieve_mock = MagicMock(
+        return_value=stripe.util.convert_to_stripe_object(
+            {
+                "id": "cus_unlimited",
+                "invoice_settings": {
+                    "default_payment_method": {"id": "pm_card_present", "type": "card"}
+                },
+            },
+            api_key="sk_test_abc",
+        )
+    )
+    payment_method_list_mock = MagicMock(return_value={"data": []})
     subscription_create_mock = MagicMock(
         return_value=_stripe_subscription("sub_unlimited", "active")
     )
     monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.retrieve", customer_retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.PaymentMethod.list", payment_method_list_mock)
     monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
 
     result = await switch_company_to_unlimited(db_session, company.id)
@@ -1949,6 +1963,67 @@ async def test_switch_company_to_unlimited_free_with_workers_creates_unlimited_s
         idempotency_key=f"subscription-create-company-{company.id}",
         api_key="sk_test_abc",
     )
+
+
+@pytest.mark.asyncio
+async def test_switch_company_to_unlimited_free_with_workers_no_pm_returns_checkout_required(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    company = await _mk_company(db_session, "SwitchFreeCheckout")
+    await db_session.flush()
+    await _mk_workers(db_session, company_id=company.id, count=4)
+
+    _set_billing_settings(
+        monkeypatch,
+        stripe_secret_key="sk_test_abc",
+        stripe_price_per_seat_monthly_id="price_standard",
+        stripe_price_unlimited_monthly_id="price_unlimited",
+        stripe_checkout_success_url="https://example.test/billing?checkout=success",
+        stripe_checkout_cancel_url="https://example.test/billing?checkout=cancel",
+    )
+
+    customer_create_mock = MagicMock(return_value=_stripe_customer("cus_switch_checkout"))
+    customer_retrieve_mock = MagicMock(
+        return_value=stripe.util.convert_to_stripe_object(
+            {"id": "cus_switch_checkout", "invoice_settings": {"default_payment_method": None}},
+            api_key="sk_test_abc",
+        )
+    )
+    payment_method_list_mock = MagicMock(return_value={"data": []})
+    checkout_create_mock = MagicMock(
+        return_value=stripe.util.convert_to_stripe_object(
+            {"id": "cs_switch_1", "url": "https://checkout.stripe.test/session/cs_switch_1"},
+            api_key="sk_test_abc",
+        )
+    )
+    subscription_create_mock = MagicMock()
+
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Customer.retrieve", customer_retrieve_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.PaymentMethod.list", payment_method_list_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.checkout.Session.create", checkout_create_mock)
+    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
+
+    result = await switch_company_to_unlimited(db_session, company.id)
+    await db_session.refresh(company)
+
+    assert result.status == SwitchStatus.CHECKOUT_REQUIRED
+    assert result.checkout_url == "https://checkout.stripe.test/session/cs_switch_1"
+    subscription_create_mock.assert_not_called()
+    checkout_create_mock.assert_called_once_with(
+        mode="subscription",
+        customer="cus_switch_checkout",
+        line_items=[{"price": "price_unlimited", "quantity": 1}],
+        metadata={"company_id": str(company.id)},
+        subscription_data={"metadata": {"company_id": str(company.id)}},
+        success_url="https://example.test/billing?checkout=success",
+        cancel_url="https://example.test/billing?checkout=cancel",
+        idempotency_key=f"checkout-session-unlimited-company-{company.id}",
+        api_key="sk_test_abc",
+    )
+    assert company.stripe_subscription_id is None
+    assert company.subscription_tier == "free"
 
 
 @pytest.mark.asyncio
