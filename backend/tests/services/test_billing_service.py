@@ -146,7 +146,6 @@ def _set_billing_settings(
     stripe_secret_key: str,
     stripe_price_per_seat_monthly_id: str,
     stripe_price_unlimited_monthly_id: str = "",
-    stripe_default_test_payment_method: str = "",
     stripe_checkout_success_url: str = "https://timetracker.shaemarcus.com/billing",
     stripe_checkout_cancel_url: str = "https://timetracker.shaemarcus.com/billing",
 ) -> None:
@@ -156,7 +155,6 @@ def _set_billing_settings(
             STRIPE_SECRET_KEY=stripe_secret_key,
             STRIPE_PRICE_PER_SEAT_MONTHLY_ID=stripe_price_per_seat_monthly_id,
             STRIPE_PRICE_UNLIMITED_MONTHLY_ID=stripe_price_unlimited_monthly_id,
-            STRIPE_DEFAULT_TEST_PAYMENT_METHOD=stripe_default_test_payment_method,
             STRIPE_CHECKOUT_SUCCESS_URL=stripe_checkout_success_url,
             STRIPE_CHECKOUT_CANCEL_URL=stripe_checkout_cancel_url,
         ),
@@ -433,7 +431,6 @@ async def test_create_standard_subscription_empty_default_pm_keeps_customer_crea
         monkeypatch,
         stripe_secret_key="sk_test_abc",
         stripe_price_per_seat_monthly_id="price_standard",
-        stripe_default_test_payment_method="",
     )
 
     customer_create = MagicMock(return_value=_stripe_customer("cus_default_pm_empty"))
@@ -454,129 +451,6 @@ async def test_create_standard_subscription_empty_default_pm_keeps_customer_crea
     assert "invoice_settings" not in create_kwargs
     payment_method_attach.assert_not_called()
     customer_modify.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_create_standard_subscription_new_customer_with_default_pm_passed_to_customer_create(
-    db_session: AsyncSession,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    company = await _mk_company(db_session, "StripeDefaultPmNew")
-    await _mk_workers(db_session, company_id=company.id, count=4)
-
-    _set_billing_settings(
-        monkeypatch,
-        stripe_secret_key="sk_test_abc",
-        stripe_price_per_seat_monthly_id="price_standard",
-        stripe_default_test_payment_method="pm_card_visa",
-    )
-
-    customer_create = MagicMock(return_value=_stripe_customer("cus_default_pm_new"))
-    subscription_create = MagicMock(return_value=_stripe_subscription("sub_default_pm_new", "active"))
-    payment_method_attach = MagicMock()
-    customer_modify = MagicMock()
-    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create)
-    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create)
-    monkeypatch.setattr("app.services.billing_service.stripe.PaymentMethod.attach", payment_method_attach)
-    monkeypatch.setattr("app.services.billing_service.stripe.Customer.modify", customer_modify)
-
-    result = await create_standard_subscription(db_session, company.id)
-
-    assert result.status == CreateSubscriptionStatus.CREATED
-    customer_create.assert_called_once()
-    create_kwargs = customer_create.call_args.kwargs
-    assert create_kwargs["payment_method"] == "pm_card_visa"
-    assert create_kwargs["invoice_settings"] == {
-        "default_payment_method": "pm_card_visa",
-    }
-    payment_method_attach.assert_not_called()
-    customer_modify.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_create_standard_subscription_existing_customer_with_default_pm_attaches_and_sets_default(
-    db_session: AsyncSession,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    company = await _mk_company(db_session, "StripeDefaultPmExisting")
-    company.stripe_customer_id = "cus_existing_pm"
-    await db_session.flush()
-    await _mk_workers(db_session, company_id=company.id, count=4)
-
-    _set_billing_settings(
-        monkeypatch,
-        stripe_secret_key="sk_test_abc",
-        stripe_price_per_seat_monthly_id="price_standard",
-        stripe_default_test_payment_method="pm_card_visa",
-    )
-
-    customer_create = MagicMock()
-    subscription_create = MagicMock(return_value=_stripe_subscription("sub_default_pm_existing", "active"))
-    payment_method_attach = MagicMock()
-    customer_modify = MagicMock()
-    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create)
-    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create)
-    monkeypatch.setattr("app.services.billing_service.stripe.PaymentMethod.attach", payment_method_attach)
-    monkeypatch.setattr("app.services.billing_service.stripe.Customer.modify", customer_modify)
-
-    result = await create_standard_subscription(db_session, company.id)
-
-    assert result.status == CreateSubscriptionStatus.CREATED
-    assert result.stripe_customer_id == "cus_existing_pm"
-    customer_create.assert_not_called()
-    payment_method_attach.assert_called_once_with(
-        "pm_card_visa",
-        customer="cus_existing_pm",
-        api_key="sk_test_abc",
-    )
-    customer_modify.assert_called_once_with(
-        "cus_existing_pm",
-        invoice_settings={"default_payment_method": "pm_card_visa"},
-        api_key="sk_test_abc",
-    )
-
-
-@pytest.mark.asyncio
-async def test_resolve_or_create_stripe_customer_existing_customer_ignores_already_attached_error(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.setattr(
-        "app.services.billing_service.settings",
-        SimpleNamespace(STRIPE_DEFAULT_TEST_PAYMENT_METHOD="pm_card_visa"),
-    )
-
-    already_attached = stripe.error.InvalidRequestError(
-        message="Payment method is already attached to this customer.",
-        param="payment_method",
-    )
-    payment_method_attach = MagicMock(side_effect=already_attached)
-    customer_modify = MagicMock()
-    customer_create = MagicMock()
-    monkeypatch.setattr("app.services.billing_service.stripe.PaymentMethod.attach", payment_method_attach)
-    monkeypatch.setattr("app.services.billing_service.stripe.Customer.modify", customer_modify)
-    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create)
-
-    resolved_customer_id = await _resolve_or_create_stripe_customer(
-        company_id=123,
-        company_name="Example Co",
-        company_email="billing@example.com",
-        existing_customer_id="cus_existing_pm",
-        customer_create_key="customer-create-company-123",
-        stripe_secret_key="sk_test_abc",
-    )
-
-    assert resolved_customer_id == "cus_existing_pm"
-    customer_create.assert_not_called()
-    payment_method_attach.assert_called_once_with(
-        "pm_card_visa",
-        customer="cus_existing_pm",
-        api_key="sk_test_abc",
-    )
-    customer_modify.assert_called_once_with(
-        "cus_existing_pm",
-        invoice_settings={"default_payment_method": "pm_card_visa"},
-        api_key="sk_test_abc",
-    )
 
 
 @pytest.mark.asyncio
@@ -910,7 +784,6 @@ async def test_sync_subscription_create_branch_no_pm_returns_checkout_required(
         monkeypatch,
         stripe_secret_key="sk_test_abc",
         stripe_price_per_seat_monthly_id="price_standard",
-        stripe_default_test_payment_method="",  # Disable PR#159 crutch for this path.
         stripe_checkout_success_url="https://example.test/billing?checkout=success",
         stripe_checkout_cancel_url="https://example.test/billing?checkout=cancel",
     )
@@ -978,7 +851,6 @@ async def test_sync_subscription_create_branch_pm_lookup_failure_routes_to_check
         monkeypatch,
         stripe_secret_key="sk_test_abc",
         stripe_price_per_seat_monthly_id="price_standard",
-        stripe_default_test_payment_method="",
         stripe_checkout_success_url="https://example.test/billing?checkout=success",
         stripe_checkout_cancel_url="https://example.test/billing?checkout=cancel",
     )
@@ -1668,56 +1540,6 @@ async def test_sync_subscription_to_target_explicit_one_standard_no_subscription
         api_key="sk_test_abc",
     )
     assert company.stripe_subscription_id == "sub_helper_created"
-
-
-@pytest.mark.asyncio
-async def test_sync_subscription_to_target_add_path_with_default_pm_creates_subscription_and_persists(
-    db_session: AsyncSession,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    company = await _mk_company(db_session, "HelperCreateDefaultPm")
-    company.subscription_tier = "standard"
-    await db_session.flush()
-
-    _set_billing_settings(
-        monkeypatch,
-        stripe_secret_key="sk_test_abc",
-        stripe_price_per_seat_monthly_id="price_standard",
-        stripe_default_test_payment_method="pm_card_visa",
-    )
-
-    customer_create_mock = MagicMock(return_value=_stripe_customer("cus_helper_default_pm"))
-    subscription_create_mock = MagicMock(return_value=_stripe_subscription("sub_helper_default_pm", "active"))
-    payment_method_attach = MagicMock()
-    customer_modify = MagicMock()
-    customer_retrieve_mock = MagicMock(
-        return_value=stripe.util.convert_to_stripe_object(
-            {"id": "cus_helper_default_pm", "invoice_settings": {"default_payment_method": {"id": "pm_x", "type": "card"}}},
-            api_key="sk_test_abc",
-        )
-    )
-    monkeypatch.setattr("app.services.billing_service.stripe.Customer.create", customer_create_mock)
-    monkeypatch.setattr("app.services.billing_service.stripe.Customer.retrieve", customer_retrieve_mock)
-    monkeypatch.setattr("app.services.billing_service.stripe.Subscription.create", subscription_create_mock)
-    monkeypatch.setattr("app.services.billing_service.stripe.PaymentMethod.attach", payment_method_attach)
-    monkeypatch.setattr("app.services.billing_service.stripe.Customer.modify", customer_modify)
-
-    result = await _sync_subscription_to_target(db_session, company.id, 1)
-    await db_session.refresh(company)
-
-    assert result.status == SyncStatus.CREATED
-    assert result.target_quantity == 1
-    assert company.subscription_tier == "standard"
-    assert company.stripe_customer_id == "cus_helper_default_pm"
-    assert company.stripe_subscription_id == "sub_helper_default_pm"
-    customer_create_mock.assert_called_once()
-    create_kwargs = customer_create_mock.call_args.kwargs
-    assert create_kwargs["payment_method"] == "pm_card_visa"
-    assert create_kwargs["invoice_settings"] == {
-        "default_payment_method": "pm_card_visa",
-    }
-    payment_method_attach.assert_not_called()
-    customer_modify.assert_not_called()
 
 
 @pytest.mark.asyncio
