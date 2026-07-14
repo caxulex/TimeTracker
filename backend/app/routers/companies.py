@@ -654,6 +654,17 @@ async def switch_my_company_to_unlimited(
             message=result.message,
         )
 
+    if result.status == SwitchStatus.CHECKOUT_REQUIRED:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "reason": "checkout_required",
+                "checkout_url": result.checkout_url,
+                "message": result.message
+                or "Complete Stripe Checkout before switching to unlimited.",
+            },
+        )
+
     if result.status == SwitchStatus.REQUIRES_PAYMENT_ACTION:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
