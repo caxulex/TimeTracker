@@ -67,6 +67,8 @@ services:
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       STRIPE_PRICE_PER_SEAT_MONTHLY_ID: ${STRIPE_PRICE_PER_SEAT_MONTHLY_ID:-}
       STRIPE_PRICE_UNLIMITED_MONTHLY_ID: ${STRIPE_PRICE_UNLIMITED_MONTHLY_ID:-}
+      STRIPE_CHECKOUT_SUCCESS_URL: ${STRIPE_CHECKOUT_SUCCESS_URL:-https://timetracker.shaemarcus.com/billing}
+      STRIPE_CHECKOUT_CANCEL_URL: ${STRIPE_CHECKOUT_CANCEL_URL:-https://timetracker.shaemarcus.com/billing}
       WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-https://timetracker.shaemarcus.com}
       # Production domain for CORS + TrustedHostMiddleware
       # NOTE: backend reads ALLOWED_ORIGINS / ALLOWED_HOSTS from env (see backend/app/config.py).
@@ -208,6 +210,8 @@ services:
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       STRIPE_PRICE_PER_SEAT_MONTHLY_ID: ${STRIPE_PRICE_PER_SEAT_MONTHLY_ID:-}
       STRIPE_PRICE_UNLIMITED_MONTHLY_ID: ${STRIPE_PRICE_UNLIMITED_MONTHLY_ID:-}
+      STRIPE_CHECKOUT_SUCCESS_URL: ${STRIPE_CHECKOUT_SUCCESS_URL:-https://timetracker.shaemarcus.com/billing}
+      STRIPE_CHECKOUT_CANCEL_URL: ${STRIPE_CHECKOUT_CANCEL_URL:-https://timetracker.shaemarcus.com/billing}
       WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-https://timetracker.shaemarcus.com}
     entrypoint: ["/bin/sh", "-c"]
     command:
